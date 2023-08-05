@@ -1,0 +1,26 @@
+# FunkLoad doc Makefile
+# $Id: $
+# to build api documentation you need python docutils and epydoc
+#
+.PHONY: doc epydoc clean distrib
+
+TARGET := cvs.in.nuxeo.com:~/public_public_html/funkload
+HTML_DOCS := README.html INSTALL.html CHANGES.html
+CSS_FILE := ../funkload/data/funkload.css
+RST2HTML := rst2html.py -t --stylesheet-path=$(CSS_FILE) --embed-stylesheet
+
+doc: ${HTML_DOCS} epydoc
+
+%.html: ../%.txt  $(CSS_FILE)
+	${RST2HTML} $< $@
+
+epydoc:
+	epydoc --name FunkLoad -u ../../ --html --output ./api/  ../funkload/
+
+distrib: doc
+	scp -r ${HTML_DOCS} api $(TARGET)/
+
+
+clean:
+	-rm -rf ./api/* $(HTML_DOCS)
+	-@find . "(" -name "*~" -or  -name ".#*" -or  -name "#*#" -or -name "*.pyc" ")" -print0 | xargs -0 rm -f
