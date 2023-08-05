@@ -1,0 +1,148 @@
+Jython and the Java API
+=======================
+
+For WebStack to function properly, the underlying Java API classes must be
+available. Although this seems like an obvious prerequisite, some
+distributions of Jython, notably the jython package provided with Ubuntu
+Feisty (7.04), do provide a version of Jython that runs, but do not provide
+the underlying class libraries for the Java APIs such as the java.net package.
+Consequently, WebStack will fail when importing modules such as urllib.
+
+The solution to such problems is to choose packages which provide the Java API
+functionality such as the jython-gcj package for Ubuntu Feisty (7.04).
+Alternatives include installing a full Java runtime environment and persuading
+Jython to run on that environment, or even to install a completely separate
+Jython from a different source such as jython.org.
+
+See below for notes on Java runtimes and Apache Tomcat.
+
+Preparing the Application for Deployment
+----------------------------------------
+
+Use the webstack_java_build.py script (installed by setup.py but also found in
+the tools/JavaServlet directory) to create a Web application directory. Then,
+deploy the directory in the servlet container. For example:
+
+jython webstack_java_build.py examples/JavaServlet/SimpleApp.py \
+    --webstack . . /tmp/jython-cache web.xml examples/Common/Simple/ \
+    --libraries \
+    $CATALINA_HOME/common/lib/activation.jar \
+    $CATALINA_HOME/common/lib/mail.jar
+
+This identifies the handler (SimpleApp.py), the directory where the WebStack
+package is found (.), the directory where the WebStack tools are found (.),
+the directory to be used for caching imported classes (/tmp/jython-cache), and
+the name of the template for the deployment descriptor (web.xml); it also
+specifies the package directories for the application (Simple), and after the
+--libraries flag, the library files which must also be deployed with the
+application (activation.jar and mail.jar from the Tomcat libraries in this
+case); it produces a directory called SimpleApp in the current directory.
+
+Run the script without arguments to see a full help message with some example
+arguments.
+
+Important
+---------
+
+Note that the cache directory is a new setting from WebStack 1.2.6 which has
+been introduced to work with environments where the default class cache
+directory may, for some reason, be read-only.
+
+Using an Application with JSP Resources
+---------------------------------------
+
+Use the webstack_java_build.py script to create a Web application directory,
+specifying the jsp-web.xml descriptor file. For example:
+
+jython webstack_java_build.py examples/JavaServlet/JSPTest/JSPTestApp.py \
+    examples/JavaServlet/JSPTest/test.jsp \
+    --webstack . . /tmp/jython-cache jsp-web.xml \
+    examples/JavaServlet/JSPTest/Common/JSPTest \
+    --libraries \
+    $CATALINA_HOME/common/lib/activation.jar \
+    $CATALINA_HOME/common/lib/mail.jar
+
+Accessing Java Libraries
+------------------------
+
+Although the most important Java libraries are made available to WebStack
+applications, it may be necessary to declare usage of other libraries so that
+an application may access the Java classes within. Such declarations may be
+achieved by using the sys.add_package function in the application handler.
+For example:
+
+sys.add_package("uk.org.boddie.some.other.library")
+
+Deploying the Application
+-------------------------
+
+To deploy the Web application into a servlet container like Tomcat, a command
+like the following can be performed:
+
+mv SimpleApp/ $CATALINA_HOME/webapps/
+
+Upon starting or restarting the servlet container, an URL such as the following
+can be used to visit the application:
+
+http://localhost:8080/SimpleApp/
+
+Running Applications with Apache Tomcat (4.1.x)
+===============================================
+
+Before starting Tomcat, make sure the following environment variables are set:
+JAVA_HOME, CATALINA_HOME. On some systems, such as Ubuntu Feisty (7.04), even
+if Jython is installed (see above), there is no guarantee that a suitable Java
+development kit (JDK) will have been installed, yet Tomcat will require a JDK
+to function. It is therefore necessary to install the Sun JDK or a suitable
+package (eg. java-gcj-compat-dev). Then, the environment variables can be set
+up as in this example (but see the important note below):
+
+export JAVA_HOME=/usr/lib/jvm/java-1.4.2-gcj-4.1-1.4.2.0
+export CATALINA_HOME=/home/paulb/Software/Java/jakarta-tomcat-4.1.31
+
+Generally, the contents of the directory referenced by JAVA_HOME should
+contain bin and lib directories, with the bin directory containing javac and
+other tools.
+
+Important
+---------
+
+It would appear that, as far as Apache Tomcat is concerned, the use of a Sun
+Java runtime is preferable to that available in Ubuntu Feisty (7.04), and such
+a runtime can be enabled by setting JAVA_HOME appropriately. For example:
+
+export JAVA_HOME=/home/paulb/Software/Java/jdk1.5.0_03
+
+The Ubuntu version of Jython can still be used in this configuration - it is
+not necessary to install a separate Jython distribution when running Tomcat in
+this way.
+
+Authentication/Authorisation with Apache Tomcat
+===============================================
+
+In Apache Tomcat, it is not typically possible to use an authenticator with a
+WebStack resource without additional configuration being performed first:
+
+  * The web.xml template should be replaced with the protected-web.xml
+    template in the webstack_java_build.py command. This alternative template
+    produces a special deployment descriptor which introduces role-based
+    authentication for the application. Consequently, upon seeing that the
+    application requires a user with a given role, Tomcat will prompt for the
+    username/password details of a user with that role, and once such a user
+    has been authenticated, the resulting user identity is then made available
+    via the API to the application.
+
+  * The server.xml configuration file in Tomcat should declare the protected
+    application as a privileged context; for example:
+
+    <Context path="/AuthApp" docBase="AuthApp" privileged="true"/>
+
+  * The tomcat-users.xml configuration file should define suitable users and
+    roles; for example:
+
+    <role rolename="webstack"/>
+    <user username="badger" password="abc" roles="webstack"/>
+
+    Note that it is still possible for an authenticator to reject access to
+    users even if they have the role stated in the special deployment
+    descriptor.
