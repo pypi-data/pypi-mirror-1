@@ -1,0 +1,7 @@
+version = "0.9a7"
+author = "Kevin Dangoor"
+email = "dangoor+turbogears@gmail.com"
+copyright = "Copyright 2005 Kevin Dangoor and contributors"
+url = "http://www.turbogears.org"
+download_url = "http://www.turbogears.org/download/"
+license = "MIT"
