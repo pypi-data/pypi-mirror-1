@@ -1,0 +1,109 @@
+================
+Functional tests
+================
+
+Anonymous
+=========
+
+Try to subscribe as anonymous::
+
+  >>> portal_url = portal.absolute_url()
+  >>> browser.open(portal_url+'/subscribe.html?email=gael@ingeniweb.com')
+
+Failed::
+
+  >>> from iw.subscriber.interfaces import ISubscriberStorage
+  >>> 'gael@ingeniweb.com' in ISubscriberStorage(portal).get()
+  False
+
+Because we are redirect to email form::
+
+  >>> print browser.contents
+  <!DOCTYPE...
+  ...
+  <form action="http://nohost/plone/subscribe.html"
+  ...
+  ...<h1 class="documentFirstHeading">Subscribe Plone site</h1>
+  ...
+  ...<input ... id="form.email" ... value="gael@ingeniweb.com"  />...
+
+  >>> browser.getControl(name="form.email").value = 'gael@ingeniweb.com'
+  >>> browser.getControl(name="form.actions.save").click()
+
+  >>> 'gael@ingeniweb.com' in ISubscriberStorage(portal).get()
+  True
+
+Try to unsubscribe as anonymous::
+
+  >>> browser.open(portal_url+'/unsubscribe_form.html?v=Z2FlbEBpbmdlbml3ZWIuY29t%0A')
+  >>> print browser.contents
+  <!DOCTYPE ...
+  <form action="http://nohost/plone/unsubscribe_form.html"
+  ...
+  ...<input ... id="form.email" ... value="gael@ingeniweb.com"  />...
+
+  >>> browser.getControl(name="form.actions.save").click()
+
+  >>> 'gael@ingeniweb.com' in ISubscriberStorage(portal).get()
+  False
+
+Member with email
+=================
+
+Try to subscribe directly::
+
+  >>> from Products.Five.testbrowser import Browser
+  >>> browser = Browser()
+  >>> browser.handleErrors = False
+  >>> browser.addHeader('Authorization',
+  ...                   'Basic %s:%s' % ('member1', 'secret'))
+  >>> browser.open(portal_url+'/front-page/subscribe.html')
+
+We are redirect to the view::
+
+  >>> print browser.url
+  http://nohost/plone/front-page/
+  
+And user is in the subscribers list::
+
+  >>> 'member1@example.com' in ISubscriberStorage(portal).get()
+  False
+
+
+Member without email
+====================
+
+Try to subscribe directly::
+
+  >>> from Products.Five.testbrowser import Browser
+  >>> browser = Browser()
+  >>> browser.handleErrors = False
+  >>> browser.addHeader('Authorization',
+  ...                   'Basic %s:%s' % ('member2', 'secret'))
+  >>> browser.open(portal_url+'/front-page/subscribe.html')
+
+We are redirect to email form::
+
+  >>> print browser.contents
+  <!DOCTYPE...
+  ...
+  <form action="http://nohost/plone/front-page/subscribe.html"
+  ...
+  ...<input ... id="form.email" ... value=""  />...
+
+We can submit it::
+
+  >>> browser.getControl(name="form.email").value = 'member2@example.com'
+  >>> browser.getControl(name="form.actions.save").click()
+
+Then we are registered::
+
+  >>> 'member2@example.com' in ISubscriberStorage(portal['front-page']).get()
+  True
+
+And our email is filled in member data::
+
+  >>> member2 = portal.portal_membership.getMemberById('member2')
+  >>> print member2.getProperty('email')
+  member2@example.com
+
