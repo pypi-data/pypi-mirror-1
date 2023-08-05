@@ -1,0 +1,226 @@
+Using Nodes with Marker Interfaces
+==================================
+
+We want to create nodes by parsing an XML document, and then bind a
+marker interface to the node.  Let's verify that we can.  First,
+set up the marker interface::
+
+  >>> from zope.interface import Interface, directlyProvides
+  >>> class IFoo(Interface):
+  ...     pass
+
+Now, test that we can mark an elementtree node::
+
+  >>> from elementtree.ElementTree import XML
+  >>> node = XML('<node/>')
+  >>> IFoo.providedBy(node)
+  False
+  >>> directlyProvides(node, IFoo)
+  >>> IFoo.providedBy(node)
+  True
+
+Now test an lxml.etree node::
+
+  >>> from lxml.etree import XML
+  >>> node = XML('<node/>')
+  >>> IFoo.providedBy(node)
+  False
+  >>> directlyProvides(node, IFoo)
+  Traceback (most recent call last):
+  ...
+  AttributeError: 'etree._Element' object has no attribute '__provides__'
+
+OK, so we need to override the node class used by the parser::
+
+  >>> from lxml.etree import ElementBase
+  >>> from zope.interface import implements
+  >>> class MyNode(ElementBase):
+  ...     implements(IFoo)
+  >>> from lxml.etree import XMLParser, ElementDefaultClassLookup
+  >>> lookup = ElementDefaultClassLookup(element=MyNode)
+  >>> parser = XMLParser()
+  >>> parser.setElementClassLookup(lookup)
+  >>> node = XML('<node/>', parser)
+  >>> isinstance(node, MyNode)
+  True
+  >>> IFoo.providedBy(node)
+  True
+
+Before we stamp the node with a custom interface, its interfaces come
+from its class::
+
+  >>> node.__provides__
+  <implementedBy __builtin__.MyNode>
+  >>> before = node.__provides__
+  >>> list(before)
+  [<InterfaceClass __builtin__.IFoo>]
+
+Afterwards, they are stored on the instance::
+
+  >>> class IBar(Interface):
+  ...     pass
+  >>> IBar.providedBy(node)
+  False
+  >>> directlyProvides(node, IBar)
+  >>> IBar.providedBy(node)
+  True
+  >>> node.__provides__ # doctest: +ELLIPSIS
+  <zope.interface.Provides object at ...>
+  >>> after = node.__provides__
+  >>> list(after)
+  [<InterfaceClass __builtin__.IBar>, <InterfaceClass __builtin__.IFoo>]
+
+Now, let's try with lxml's objectify nodes::
+
+  >>> from lxml.objectify import XML
+  >>> from lxml.objectify import ObjectifiedElement
+  >>> node = XML('<node/>')
+  >>> IFoo.providedBy(node)
+  False
+
+In this case, we can *call* ``directlyProvides``, but it doesn't do what
+we want:  instead of binding the interface, it creates a child node!::
+
+  >>> directlyProvides(node, IFoo)
+  >>> type(node.__provides__)
+  <type 'objectify.StringElement'>
+
+Because objectify nodes override ``__setattr__`` and ``__dict__``, we
+**can't** stamp them direcly  (see below for failures).  Instead, let's try
+wrapping them in a proxy::
+
+  >>> from zope.interface import Provides
+  >>> from zope.interface.declarations import ObjectSpecificationDescriptor
+  >>> from zope.location import LocationProxy
+  >>> class MyProxy(LocationProxy):
+  ...     __slots__ = ('__name__', '__parent__', '__provides__')
+  ...     __providedBy__ = ObjectSpecificationDescriptor()
+  ...     def __init__(self, ob, container=None, name=None, *provides):
+  ...         super(MyProxy, self).__init__(ob, container, name)
+  ...         self.__provides__ = Provides(provides)
+  >>> container = object()
+  >>> wrapped = MyProxy(XML('<node/>'), container, 'name')
+  >>> wrapped.__parent__ is container
+  True
+  >>> wrapped.__name__
+  'name'
+  >>> before = wrapped.__provides__
+  >>> list(before)
+  []
+  >>> directlyProvides(wrapped, IBar)
+  >>> after = wrapped.__provides__
+  >>> list(after)
+  [<InterfaceClass __builtin__.IBar>]
+  >>> IBar.providedBy(wrapped)
+  True
+
+Note that being able to set ``__name__`` and ``__container__`` on the
+node are going to be crucial, anyway, so this wrapper is helping us out.
+  True
+
+Failing ``objectify`` Tests
+---------------------------
+
+N.B.  These tests are all commented out (``<<<`` instead of ``>>>``), because
+the approach of directly assining to the ``__provides__`` of an ``objectify``
+node can't possibly work.
+
+As with etree nodes we try overriding the node class used by the parser::
+
+  <<< from lxml.etree import XML # objectify version won't take a parser
+  <<< from lxml.objectify import ObjectifiedElement
+  <<< class MyTreeNode(ObjectifiedElement):
+  ...     implements(IFoo)
+  <<< from lxml.objectify import ObjectifyElementClassLookup
+  <<< lookup = ObjectifyElementClassLookup(tree_class=MyTreeNode)
+  <<< parser = XMLParser(remove_blank_text=True)
+  <<< parser.setElementClassLookup(lookup)
+  <<< node = XML('<node/>', parser)
+  <<< node.__provides__
+  <implementedBy __builtin__.MyTreeNode>
+  <<< IFoo.providedBy(node)
+  True
+
+However, we still can't assign correctly to ``__provides__``::
+
+  <<< class IBar(Interface):
+  ...     pass
+  <<< IBar.providedBy(node)
+  False
+  <<< before = node.__provides__
+  <<< list(before)
+  [<InterfaceClass __builtin__.IFoo>]
+  <<< directlyProvides(node, IBar)
+  <<< after = node.__provides__
+
+However, both these tests break::
+
+  <<< list(after)
+  [<InterfaceClass __builtin__.IBar>, <InterfaceClass __builtin__.IFoo>]
+  <<< IBar.providedBy(node)
+  True
+
+We might try using a node class which has a slot for ``__provides__``::
+
+  <<< class MySlottedTreeNode(ObjectifiedElement):
+  ...     implements(IFoo)
+  ...     __slots__ = ('__provides__',)
+  <<< lookup = ObjectifyElementClassLookup(tree_class=MySlottedTreeNode)
+  <<< parser = XMLParser(remove_blank_text=True)
+  <<< parser.setElementClassLookup(lookup)
+  <<< node = XML('<node/>', parser)
+  <<< node.__provides__
+  <implementedBy __builtin__.MyTreeNode>
+  <<< IFoo.providedBy(node)
+  True
+  <<< IBar.providedBy(node)
+  False
+  <<< before = node.__provides__
+  <<< list(before)
+  [<InterfaceClass __builtin__.IFoo>]
+  <<< directlyProvides(node, IBar)
+  <<< after = node.__provides__
+
+However, still no joy:  both these break::
+
+  <<< list(after)
+  [<InterfaceClass __builtin__.IBar>, <InterfaceClass __builtin__.IFoo>]
+  <<< IBar.providedBy(node)
+  True
+
+Instead, try using a node class which has a property for ``__provides__``::
+
+  <<< from zope.interface import Provides
+  <<< class MyPropertiedTreeElement(ObjectifiedElement):
+  ...     implements(IFoo)
+  ...     _WAAAAA = Provides(None)
+  ...     def _getProvides(self):
+  ...         return self._WAAAAA
+  ...     def _setProvides(self, value):
+  ...         import pdb; pdb.set_trace()
+  ...         self._WAAAAA = value
+  ...     __provides__ = property(_getProvides, _setProvides)
+  <<< lookup = ObjectifyElementClassLookup(tree_class=MyPropertiedTreeElement)
+  <<< parser = XMLParser(remove_blank_text=True)
+  <<< parser.setElementClassLookup(lookup)
+  <<< node = XML('<node/>', parser)
+  <<< isinstance(node, MyPropertiedTreeElement)
+  True
+  <<< node.__provides__
+  <implementedBy __builtin__.MyTreeNode>
+  <<< IFoo.providedBy(node)
+  True
+  <<< IBar.providedBy(node)
+  False
+  <<< before = node.__provides__
+  <<< list(before)
+  [<InterfaceClass __builtin__.IFoo>]
+  <<< directlyProvides(node, IBar)
+  <<< after = node.__provides__
+
+However, still no joy:  both these break::
+
+  <<< list(after)
+  [<InterfaceClass __builtin__.IBar>, <InterfaceClass __builtin__.IFoo>]
+  <<< IBar.providedBy(node)
+  True
