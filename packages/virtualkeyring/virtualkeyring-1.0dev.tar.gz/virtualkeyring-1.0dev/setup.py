@@ -1,0 +1,35 @@
+from setuptools import setup, find_packages
+import sys, os
+
+version = '1.0'
+
+setup(name='virtualkeyring',
+      version=version,
+      description="Strong domain-specific passwords generator",
+      long_description=file("README.txt").read(),
+      classifiers=[
+          'Development Status :: 5 - Production/Stable',
+          'Environment :: Console',
+          'Intended Audience :: Information Technology',
+          'License :: OSI Approved :: GNU General Public License (GPL)',
+          'Operating System :: OS Independent',
+          'Programming Language :: Python',
+          ],
+      keywords='hash sha1 password generator keyring master',
+      author='Olivier Grisel',
+      author_email='olivier.grisel@ensta.org',
+      url='http://oliviergrisel.org/virtualkeyring',
+      license='GPLv3',
+      packages=find_packages(exclude=['ez_setup', 'examples', 'tests']),
+      include_package_data=True,
+      zip_safe=True,
+      install_requires=[
+          # -*- Extra requirements: -*-
+      ],
+      entry_points={
+        'console_scripts': ['vkr = virtualkeyring:main'],
+        'setuptools.installation': [
+            'eggsecutable = virtualkeyring:main'],
+      },
+      test_suite="tests.test_suite",
+     )
