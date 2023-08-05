@@ -1,0 +1,121 @@
+Configuring Apache
+==================
+
+To configure applications without authenticators, use the
+webstack_apache_config.py script (installed with setup.py but also found in
+tools/Apache) to set up CGI applications. For example:
+
+python webstack_apache_config.py \
+    CGI \
+    /home/paulb/Software/Python/WebStack/examples/CGI/CookiesApp.py \
+    /etc/apache2/sites-available \
+    cookies \
+    /cgi/cookies
+
+This script can also be used to configure mod_python applications. Run the
+script without any arguments to see the documentation.
+
+With the above command, the "cookies" application should be visitable with a
+URL resembling this one:
+
+http://localhost/cgi/cookies
+
+The Manual Way
+--------------
+
+Declare the script in httpd.conf or equivalent Web server configuration file.
+For example:
+
+ScriptAlias /cgi/simple "/home/paulb/Software/Python/WebStack/examples/CGI/SimpleHandler.py"
+
+The WebStack package must reside on the PYTHONPATH, along with the package
+containing the application itself. Therefore, ensure that the handler uses the
+appropriate entries in sys.path.
+
+Ensure that the handler file for the application has the appropriate
+permissions:
+
+chmod u+x examples/CGI/SimpleHandler.py
+
+With the above configuration, the "cookies" application should be visitable
+with a URL resembling this one:
+
+http://localhost/cgi/simple
+
+Configuring AOLserver
+=====================
+
+NOTE: AOLserver does not seem to handle "URL encoded" character values
+NOTE: properly when such values appear in the path before the query string.
+
+To configure applications for AOLserver, edit the server's configuration file
+(eg. config.tcl) so that definitions similar to the following are present in
+the "CGI interface" section:
+
+ns_section "ns/server/${servername}/module/nscgi"
+ns_param   map "GET  /cgi/simple /home/paulb/Software/Python/WebStack/examples/CGI/SimpleHandler.py" ;# CGI script file (GET).
+ns_param   map "POST /cgi/simple /home/paulb/Software/Python/WebStack/examples/CGI/SimpleHandler.py" ;# CGI script file (POST).
+ns_param   interps CGIinterps
+
+ns_section "ns/interps/CGIinterps"
+ns_param   .py "/usr/bin/python"
+
+Search for the first line in the definitions above and add the following lines
+immediately after it in the file.
+
+Additionally, in the "Modules to load" section, starting with this line...
+
+ns_section "ns/server/${servername}/modules"
+
+...you must ensure that the nscgi.so module is enabled:
+
+    ns_param nscgi ${bindir}/nscgi.so
+
+In other words, it must not be commented out with a leading # character.
+
+With the above configuration, the example application should be visitable with
+a URL resembling one of these:
+
+http://192.168.1.100/cgi/simple
+http://192.168.1.100:8000/cgi/simple
+
+(Where 192.168.1.100 is the address that AOLserver is listening on - it does
+not seem to enjoy listening on localhost.)
+
+Configuring lighttpd
+====================
+
+To configure applications for lighttpd, edit the server's configuration file
+(eg. lighttpd.conf) so that definitions similar to the following are present:
+
+alias.url = ( "/cgi/" => "/home/paulb/Software/Python/WebStack/examples/CGI/" )
+cgi.assign = ( ".py" => "" )
+
+The latter line assumes that the permissions of the handler programs (eg.
+SimpleHandler.py) are set correctly and that the first line of the programs
+declares the Python runtime's whereabouts; for example:
+
+#!/usr/bin/env python
+
+To associate a specific Python runtime executable with the .py suffix, use a
+line like the following instead:
+
+cgi.assign = ( ".py" => "/usr/bin/python" )
+
+More advanced configuration of lighttpd to expose "cleaner" names for
+application resources is not covered here.
+
+Session Storage with CGI
+========================
+
+The very simple SessionStore class provided in WebStack.Helpers.Session, and
+used by the WebStack.CGI.Transaction class, requires that a directory be
+created in the directories of the CGI programs being run with the name
+"WebStack-sessions".  Here are some example commands for doing this:
+
+  cd examples/CGI
+  mkdir WebStack-sessions
+  chown username.groupname WebStack-sessions
+
+The given "username" and "groupname" correspond to the user and group the Web
+server assumes when running.

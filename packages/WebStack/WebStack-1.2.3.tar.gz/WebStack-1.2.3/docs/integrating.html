@@ -1,0 +1,127 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta content="text/html;charset=ISO-8859-1" http-equiv="Content-Type" />
+  <title>Integrating with Other Systems</title>
+  <meta name="generator"
+ content="amaya 8.1a, see http://www.w3.org/Amaya/" />
+  <link href="styles.css" rel="stylesheet" type="text/css" />
+</head>
+<body>
+<h1>Integrating with Other Systems</h1>
+<p>Most Web applications are not self-contained - instead of
+providing&nbsp;information which is&nbsp;written into the application
+code itself,&nbsp;they may often access data from other places or even
+communicate with other systems. Since applications may be very
+different&nbsp;in the way that they access external systems or the way
+in which they obtain external information, WebStack does not mandate
+rigid mechanisms for hooking into such systems or loading such
+information. Instead, it is recommended that applications import
+packages and modules which provide the functionality necessary to carry
+out such integration.</p>
+<h2>Examples of Packages</h2>
+<p>Examples of packages and modules that might be used for integration
+purposes include the following:</p>
+<ul>
+  <li>Database access packages, including object-relational mappers.</li>
+  <li>Communications libraries - for connecting to Web services or
+other remote services, for example.</li>
+  <li>Templating or reporting systems. (Note that templating systems
+are also very useful when generating <a href="responses.html">responses</a>.)</li>
+</ul>
+<h2> Using External Packages</h2>
+<p>In the simplest of cases, the use of external packages is as
+straightforward as importing a Python module (or package) and then
+using that module's contents. This can often be done in the <a
+ href="resources.html">resource</a> code; for example:</p>
+<pre>import urllib<br /><br />class MyResource:<br />    def respond(self, trans):<br />        [Examine the transaction, decide what the user wants to do.]<br /><br />        f = urllib.urlopen("http://www.boddie.org.uk/rss/feed.xml")<br /><br />        [Produce some kind of response which tells the user what happened.]</pre>
+<p>In the above example, here is what happens:</p>
+<table style="text-align: left; width: 80%;" align="center" border="1"
+ cellpadding="5" cellspacing="0">
+  <tbody>
+    <tr>
+      <th>What we do</th>
+      <th>Where it happens and how often</th>
+    </tr>
+    <tr>
+      <td align="undefined" valign="undefined"> Import <code>urllib</code>
+to gain access to functionality which we can then use to access a
+remote service.</td>
+      <td align="undefined" valign="undefined">This happens once - when
+the above code is itself imported into Python.</td>
+    </tr>
+    <tr>
+      <td align="undefined" valign="undefined">Use the&nbsp;<code>urlopen</code>
+function of <code>urllib</code> to actually access a remote service.</td>
+      <td align="undefined" valign="undefined">This happens in the
+resource code each time the resource decides to access the service.</td>
+    </tr>
+  </tbody>
+</table>
+<p>In this case, the functionality is relatively easy to acquire and
+does not require any initialisation. But what if we were connecting to
+a database? There might be a need to specially initialise the database
+module - only once, though - and then repeatedly use it. Consider this
+highly artificial example:</p>
+<pre>import mydb<br /><br />connection = mydb.connect("me", "myPassword")<br /><br />class MyResource:<br />    def respond(self, trans):<br />        [Examine the transaction, decide what the user wants to do.]<br /><br />        results = connection.query("feed", owner="boddie.org.uk")<br /><br />        [Produce some kind of response which tells the user what happened.]
+</pre>
+<p>In the above example, here is what happens:</p>
+<table style="text-align: left; width: 80%;" align="center" border="1"
+ cellpadding="5" cellspacing="0">
+  <tbody>
+    <tr>
+      <th>What we do</th>
+      <th>Where it happens and how often</th>
+    </tr>
+    <tr>
+      <td align="undefined" valign="undefined">Import the <code>mydb</code>
+module to gain access to database access functionality.</td>
+      <td align="undefined" valign="undefined">This happens once - when
+the above code is itself imported into Python.</td>
+    </tr>
+    <tr>
+      <td align="undefined" valign="undefined">Initialise a database
+connection using the <code>connect</code> function from the <code>mydb</code>
+module.</td>
+      <td align="undefined" valign="undefined">This also happens only
+once - when the above code is itself imported into Python.</td>
+    </tr>
+    <tr>
+      <td align="undefined" valign="undefined">Use the <code>query</code>
+method on the connection object to access a database.</td>
+      <td align="undefined" valign="undefined">This happens in the
+resource code each time the resource decides to access the database.</td>
+    </tr>
+  </tbody>
+</table>
+<p>The choice of initialising the connection may seem arbitrary - why
+not just obtain a connection in the resource? Usually, such decisions
+are made on the basis of efficiency and on constraints outside the
+control of the application - some database systems limit the number of
+connections, for example, and if a large number of resources suddenly
+became active, some of them would fail to obtain connections if the
+connection initialisation code were in the&nbsp;<code>respond</code>
+method of the resource.</p>
+<h2>Configuring Packages Globally</h2>
+<p>Of course, the above resource might not be the only resource to use
+database connections. It might then be tempting to initialise a
+connection for each module whose resource needs (or, since as normal
+Python classes we can put many resources in a single module, whose
+resources need) to access a database. But it would surely be&nbsp;more
+convenient to define a single, central place to hold such global
+resources.</p>
+<p>One approach is to define a module which can be accessed by all
+modules, and thus by all resources. Let us create such a module in the
+file <code>Properties.py</code> which will reside alongside <code>MyApplication.py</code>
+(or whatever the application module is called). Inside the&nbsp;<code>Properties</code>
+module we can write the following code:</p>
+<pre>import mydb<br /><br />connection = mydb.connect("me", "myPassword")</pre>
+<p>Now, in each module containing resources which need to access the
+database, all we need to do now is to import the <code>Properties</code>
+module and to use the connection as defined in that module:</p>
+<pre>import Properties<br /><br />class MyResource:<br />    def respond(self, trans):<br />        [Examine the transaction, decide what the user wants to do.]<br /><br />        results = Properties.connection.query("feed", owner="boddie.org.uk")<br /><br />        [Produce some kind of response which tells the user what happened.]</pre>
+<p>This is a very simple approach that is technically outclassed by the
+mechanisms available in some frameworks. Currently, WebStack does not
+provide access to those more sophisticated mechanisms, however.</p>
+</body>
+</html>
