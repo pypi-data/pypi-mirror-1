@@ -1,0 +1,188 @@
+#python
+
+files_dir = consts.FILES_DIR
+
+def exit(msg):
+	write(msg)
+	raise SystemExit
+
+entry_key = "<h4> %s </h4>\n<pre>\n%s\n</pre>"
+
+# BEGIN ---------------------------------------
+DATA = consts.DATA
+
+tokens = params.split("_")
+site = tokens[0]
+token = tokens[1]
+lib.prn("site", site)
+lib.prn("token", token)
+
+# check valid request
+
+i_queue = files_dir + os.sep + site + ".queues"
+queues = lib.get_dict(i_queue, "token")
+lib.prn("queues", queues)
+try:
+	i_dict = queues[token]
+except:
+	exit("Access Error: Access token not found.")
+else:
+	del queues[token]
+	lib.write_data(queues, i_queue)
+
+name = i_dict.setdefault("name", "none")
+password = i_dict.setdefault("password", "none")
+
+# check valid password
+lines = lib.get_lines(os.sep.join((DATA, "sites", site, "editor_passwords")))
+
+for line in lines:
+	if line.startswith(name) and (line.find(password) != -1):
+		break
+else:
+	exit("Access Error: password incorrect")
+
+# load queue file and get first entry, by date
+lib.set_files(["not.chosen"])
+queue = i_dict["queue"]
+pending = queue.find(".pending") != -1
+lib.prn("pending", pending)
+queue_f = files_dir + os.sep + queue
+queue_d = lib.get_dict(queue_f)
+lib.prn("queue", queue_d)
+
+keys = queue_d.keys()
+keys.sort()
+lib.prn("queue keys", keys)
+
+if not keys: exit("<h4>Queue Empty</h4>")
+
+entry = queue_d[keys[0]]
+lib.prn("entry", entry)
+
+# process action
+action = i_dict["action"]
+lib.prn("action", action)
+
+if action == "none":
+	lib.prn("entering queue")
+elif action == "remove":
+	# first entry to subsite."not chosen"
+	if not pending:
+		title = entry["title"]
+		date = time.ctime(float(entry["stamp"]))
+		line = date + ": " + title + "\n"
+		lib.prn("not chosen line", line)
+		try:
+			f = open(files_dir + os.sep + "not.chosen")
+			old = f.read()
+			f.close()
+		except:
+			old = ""
+		f = open(files_dir + os.sep + "not.chosen", "w")
+		f.write(line)
+		f.write(old)
+		f.close()
+	# remove first entry
+	del queue_d[keys[0]]
+	lib.prn("reduced queue", queue_d)
+	# write queue_d
+	lib.write_data(queue_d, queue_f)
+elif action == "request":
+	# remove first entry
+	del queue_d[keys[0]]
+	lib.prn("reduced queue", queue_d)
+	lib.prn("queue_f", queue_f)
+	# write queue_d
+	lib.write_data(queue_d, queue_f)
+	# first entry to subsite.pending
+	f = open(files_dir + os.sep + site + ".pending", "a")
+	if pending:
+		entry["stamp"] = `time.time()`
+	for key in entry.keys():
+		f.write(key + "|" + entry[key] + "\n")
+	f.write("---\n")
+	f.close()
+
+# read up queue
+queue_d = lib.get_dict(queue_f)
+lib.prn("queue", queue_d)
+keys = queue_d.keys()
+keys.sort()
+lib.prn("queue keys", keys)
+
+if not keys: exit("<h4>Queue Empty</h4>")
+
+entry = queue_d[keys[0]]
+lib.prn("form entry", entry)
+# first entry to form
+
+write('''
+<center>
+<table width="75%"><tr><td>
+
+<h4>Processing Queue Instructions</h4>
+
+For each entry in the queue you have three options:
+<dl>
+
+<dt>Request
+
+<dd>Write down the author\'s name, title and email. Yes, with a
+	pencil. Send them an email requesting their work.  You must do this
+	by hand.  Select Request. Then hit the Submit button, which writes
+	the entry\'s date, name, title, and email to the pending queue and
+	removes the entry from this queue.
+
+<dt>Remove
+
+<dd>Select Remove and hit the Submit button, which writes entry\'s
+	date and title to the site\'s "Not Chosen" file and removes the
+	entry from this queue.
+
+<dt>Quit
+
+<dd>Close the browser or use it to open another page.  Hit NEITHER
+	Request nor Remove.	 Queue unchanged.
+
+</dl>
+
+<hr>
+
+<h4>Queue Entry</h4>
+''')
+
+write(entry_key % ("Title", entry["title"]))
+write(entry_key % ("Text", entry["text"].strip()))
+write(entry_key % ("Submitter", entry["name"]))
+write(entry_key % ("Email", entry["email"]))
+
+write('''
+
+
+<hr>
+
+<h4>Action On This Entry</h4>
+
+<form action="ming.cgi" method=post>
+
+Select Request or Remove and then Submit.
+
+<p><input type="radio" name="action" value="request" checked> Request
+<p><input type="radio" name="action" value="remove"> Remove
+
+<input type="hidden" name="incoming" value="token">
+<input type="hidden" name="page" value="private/submissions/view/view">
+<input type="hidden" name="file" value="%(site)s.queues">
+<input type="hidden" name="params" value="%(site)s_%(token)s">
+<input type="hidden" name="token" value="%(token)s">
+<input type="hidden" name="name" value="%(name)s">
+<input type="hidden" name="password" value="%(pwd)s">
+<input type="hidden" name="queue" value="%(queue)s">
+
+<p><input type="submit" name="submit" value="Submit.">
+</form>
+
+</td></tr></table>
+''' % {'site': site, 'token': token,
+       'name': name, 'pwd': password, 'queue': queue} )
