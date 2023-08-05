@@ -1,0 +1,216 @@
+===========================
+ Overriding default policy
+===========================
+
+It is not useful to simply allow all operations on a database, nor is
+it useful to simply deny all operations.
+
+SchevoPolicy allows you to override default behavior by defining
+functions in the policy schema for the specific behaviors that you
+want to override.  Each function has a criteria that matches based on
+the operation requested and the context of the operation, and returns
+`True` if the operation is allowed or `False` if the operation is
+denied.
+
+
+Overriding for all operations
+=============================
+
+Let us create a Schevo database::
+
+  >>> from schevo.test import DocTest
+  >>> t = DocTest("""
+  ...
+  ...     class Foo(E.Entity):
+  ...
+  ...         name = f.unicode()
+  ...
+  ...         _key(name)
+  ...     """)
+
+To override the default policy for all operations, define a version of
+`allow`.
+
+Remembering that the context can be any object, let us define a policy
+that only allows operations if the context is equal to `5`::
+
+  >>> from schevopolicy.schema import policy_from_string
+  >>> policy = policy_from_string(t.db, """
+  ...     default = DENY
+  ...     
+  ...     @allow.when("context == 5")
+  ...     def allow(db, context):
+  ...         return True
+  ...         
+  ...     # XXX: Figure out why we have to explicitly define this.
+  ...     @allow_v.when("context == 5")
+  ...     def allow_v(db, context, entity, v_name):
+  ...         return True
+  ...     """)
+
+Let us now show how this works, first by using a context other than
+`5`::
+
+  >>> context = 4
+  >>> rdb = policy(context)
+  >>> tx = rdb.Foo.t.create()  #doctest: +ELLIPSIS
+  Traceback (most recent call last):
+    ...
+  Unauthorized: ...
+
+Now let us use the context `5`::
+
+  >>> context = 5
+  >>> rdb = policy(context)
+  >>> tx = rdb.Foo.t.create()
+  >>> tx.name = 'foo 1'
+  >>> foo1 = rdb.execute(tx)
+  >>> foo1.name
+  u'foo 1'
+
+
+Overriding for transactions
+===========================
+
+Let us define a policy that allows all operations, but disallows
+deletion of `Foo` entities if the context is equal to `5`::
+
+  >>> policy = policy_from_string(t.db, """
+  ...     default = ALLOW
+  ...     
+  ...     @allow_t.when(
+  ...         "context == 5 and "
+  ...         "entity in db.Foo and "
+  ...         "t_name == 'delete'"
+  ...         )
+  ...     def allow_t(db, context, extent, entity, t_name):
+  ...         return False
+  ...     """)
+
+Finding the existing entity we created above works just fine using a
+context equal to `5`::
+
+  >>> context = 5
+  >>> rdb = policy(context)
+  >>> foo1 = rdb.Foo.findone(name='foo 1')
+
+We can also update the entity::
+
+  >>> tx = foo1.t.update()
+  >>> tx.name = 'foo one'
+  >>> foo1 = rdb.execute(tx)
+  >>> foo1.name
+  u'foo one'
+
+However, we cannot delete the entity::
+
+  >>> tx = foo1.t.delete()  #doctest: +ELLIPSIS
+  Traceback (most recent call last):
+    ...
+  Unauthorized: ...
+
+This is also reflected when iterating over the available transaction
+methods of the entity::
+
+  >>> sorted(list(foo1.t))
+  ['update']
+
+If we use a context other than `5`, we are allowed to delete the
+entity::
+
+  >>> context = 4
+  >>> rdb = policy(context)
+  >>> foo1 = rdb.Foo.findone(name='foo one')
+  >>> tx = foo1.t.delete()
+  >>> len(rdb.Foo)
+  1
+  >>> rdb.execute(tx)
+  >>> len(rdb.Foo)
+  0
+
+This is reflected when iterating over the available transaction
+methods::
+
+  >>> sorted(list(foo1.t))
+  ['delete', 'update']
+
+
+Overriding for views
+====================
+
+Let us define a policy that disallows viewing of an entity's fields,
+and only allows viewing of the `default` view when the context is
+`5`::
+
+  >>> policy = policy_from_string(t.db, """
+  ...     default = ALLOW
+  ...
+  ...     @allow_v.when(
+  ...         "entity in db.Foo"
+  ...         )
+  ...     def allow_v(db, context, entity, v_name):
+  ...         return False
+  ...
+  ...     @allow_v.when(
+  ...         "entity in db.Foo and "
+  ...         "v_name == 'default' and "
+  ...         "context == 5"
+  ...         )
+  ...     def allow_v(db, context, entity, v_name):
+  ...         return True
+  ...     """)
+
+First, create a new `Foo` and capture its OID::
+
+  >>> context = None
+  >>> rdb = policy(context)
+  >>> foo = rdb.execute(rdb.Foo.t.create(name='FooFoo'))
+  >>> foo_oid = foo.sys.oid
+
+Within a context other than `5`, we cannot view the fields on the
+entity itself::
+
+  >>> foo.name  #doctest: +ELLIPSIS
+  Traceback (most recent call last):
+    ...
+  Unauthorized: ...
+
+We also cannot get the `default` view of the `Foo` instance::
+
+  >>> view = foo.v.default()  #doctest: +ELLIPSIS
+  Traceback (most recent call last):
+    ...
+  Unauthorized: ...
+
+This is reflected when iterating over the `v` namespace of the
+instance::
+
+  >>> sorted(list(foo.v))
+  []
+
+If we use the context `5`, we cannot view the fields on the entity
+itself::
+
+  >>> context = 5
+  >>> rdb = policy(context)
+  >>> foo = rdb.Foo[foo_oid]
+  >>> foo.name  #doctest: +ELLIPSIS
+  Traceback (most recent call last):
+    ...
+  Unauthorized: ...
+
+However, we can get the `default` view and view its fields::
+
+  >>> view = foo.v.default()
+  >>> view.name
+  u'FooFoo'
+
+This is reflected when iterating over the `v` namespace of the
+instance::
+
+  >>> sorted(list(foo.v))
+  ['default']
+
+Delete the `Foo` entity::
+
+  >>> rdb.execute(foo.t.delete())

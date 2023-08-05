@@ -1,0 +1,60 @@
+=========================
+ Restricted transactions
+=========================
+
+To prevent accidental use of standard database transactions, all
+transactions available to a restricted database are in
+`RestrictedTransaction` objects.
+
+
+Non-restricted transactions are denied
+--------------------------------------
+
+When you attempt to execute a transaction you got from the database,
+or a different policy/context combination, the `ContextMismatch`
+exception is raised.
+
+Let us create a Schevo database::
+
+  >>> from schevo.test import DocTest
+  >>> t = DocTest("""
+  ...
+  ...     class Foo(E.Entity):
+  ...
+  ...         name = f.unicode()
+  ...
+  ...         _key(name)
+  ...     """)
+
+Let us create a new policy that allows all operations, and a
+restricted database to attempt execution against::
+
+  >>> from schevopolicy.schema import policy_from_string
+  >>> policy = policy_from_string(t.db, 'default=ALLOW')
+  >>> rdb = policy()
+
+When we use a transaction created via `rdb`, it succeeds::
+
+  >>> tx = rdb.Foo.t.create(name=u'Foo 1')
+  >>> foo1 = rdb.execute(tx)
+  >>> foo1.name
+  u'Foo 1'
+
+If we use a transaction created via `db`, it fails::
+
+  >>> tx = t.db.Foo.t.create(name=u'Foo 2')
+  >>> foo2 = rdb.execute(tx)  #doctest: +ELLIPSIS
+  Traceback (most recent call last):
+    ...
+  ContextMismatch: ...
+
+If we use a transaction created via `rdb`, but we try to execute it
+against `rdb2` which uses a different context, it fails::
+
+  >>> rdb2 = policy(context=5)
+  >>> tx = rdb2.Foo.t.create(name=u'Foo 2')
+  >>> rdb.execute(tx)  #doctest: +ELLIPSIS
+  Traceback (most recent call last):
+    ...
+  ContextMismatch: ...
+
