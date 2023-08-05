@@ -1,0 +1,27 @@
+### -*- coding: utf-8 -*- #############################################
+#######################################################################
+"""Interfaces for the Zope 3 based ng.app.remotefs package
+
+$Id: interfaces.py 49604 2008-01-21 12:17:52Z cray $
+"""
+__author__  = "Andrey Orlov, 2007"
+__license__ = "GPL"
+__version__ = "$Revision: 49604 $"
+
+from zope.interface import Interface
+from zope.schema import TextLine, Choice
+
+                
+class IRemoteFactoryItem(Interface) :
+
+    regexp = TextLine(title = u'File match',
+        description = u'Regular Expression to match File Format',
+        default = '^.*$',
+        required = True,
+        readonly = False)
+
+    factory = Choice(
+        title=u'Factory',
+        description=u'Name class for factory',
+        vocabulary='MapperInterfaceName',
+        required=True)
