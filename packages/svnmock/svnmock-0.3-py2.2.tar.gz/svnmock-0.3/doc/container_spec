@@ -1,0 +1,43 @@
+Terms:
++ State - anything that can be contained in a MockSession (currently: Command, Error, Seq, AnyOrder)
++ Container - anything that can be wrapped around a number of States (currently: Seq, AnyOrder, MockSession)
+
+All Containers are States, but not all States are Containers.
+
+#############################################################################
+
+I. States will support the following methods: next(), reset() and clone(). Each of these takes a sole parameter, the invocant.
+
+I.A. All of these methods on non-Container States default to no-op implementations.
+
+I.B. Invoking a State's next() method will advance it to the next API call-matching state. If next() is invoked and the State cannot advance to the next state (for whatever reason), a RuntimeError will be raised.
+
+I.C. Invoking a State's reset() method will undo all changes made to the State since it was created. For single-use States like Command and Error, reset() will be a no-op, since there is no internal state to unwind. For Seq, however, reset() will move its internal pointer back to the first state.
+
+I.C.1. All possible care should be taken to implement State class such that the unwinding required for reset() is possible. If it is not, however, reset() should raise a NotImplementedError.
+
+I.C.2 Containers will invoke reset() on all their contained States.
+
+I.D. Calling a State's clone() method will return a deep-copy of that State. Containers should generally implement this by calling clone() on their contents.
+
+
+II. States will support the following special methods: __call__, __len__
+
+II.A. States will support a __call__ method. This will take the following parameters: (self, container, api_func, args) where 'self' is the method's invocant, 'container' is the State's parent container, 'api_func' is the API function that was called (this will be of type types.FunctionType), and 'args' is a tuple of the arguments passed to the function in the 'api_func' parameter.
+
+II.A.1. It is intended that the __call__ method will be used to validate the API call.
+
+II.A.2. If the API call does not match that expected by the State, the State should raise a MockError exception.
+
+II.B. States will support a __len__ method. This will return the number of API calls this State can match. For example, the __len__ method for single-shot States like Command and Error will always return 1. For Containers, the __len__ method should sum the __len__'s of the invocant's contents and return that number.
+
+
+III. States will invoke their Container's next() method only when they have exhausted their ability to match API calls.
+
+III.A. For Containers, "exhausted their ability ..." means that the parent Container's next() method will be invoked only when all contained States have been used, where "used" is defined on a per-Container-class basis.
+
+III.A.1. If a Container or one of its contained States raises an exception, the Container will invoke its parent Container's next() method only if this exception would preclude it from matching further API calls.
+
+III.A.2. In general, no distinction is made between a Container raising an exception and one of that Container's contained States raising an exception.
+
+III.B. For single-use non-Container States (such as Command and Error), the parent Container's next() method will be invoked regardless of whether the States raises an exception. In general, "exhausted their ability ..." is defined on a per-State-class basis.
