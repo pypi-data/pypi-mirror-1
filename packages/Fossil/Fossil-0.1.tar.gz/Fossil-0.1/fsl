@@ -1,0 +1,100 @@
+#!/usr/bin/env python
+import sys, os
+from fossil import *
+
+if len(sys.argv) < 2:
+	error("No command given. Use 'fsl help' for a command list.")
+
+cmd  = sys.argv[1]
+args = []
+if len(sys.argv) > 2:
+	args = sys.argv[2:]
+
+if cmd == 'help':
+	print """Fossil. Written 2007 by David KOENIG <karhu@u.washington.edu>.
+		Public domain. No warranty of any kind.
+
+		Usage:
+
+		fsl add <files>
+		 Marks <files> as managed.
+		fsl del <files>
+		 Marks <files> as unmanaged.
+		fsl commit
+		 Prompts for a commit message and then commits it.
+		fsl disp <item>
+		 head: Shows the current head of the tree.
+		 log: Shows all commits.
+		 managed: Shows all currently managed files.
+		 commit <id>: Shows info about the given commit or 'head'.
+		 tree <id>: Lists all of the files in that tree and their hashes.
+		 blob <id>: Shows the corresponding blob.
+		fsl extract commit|tree <id>
+		 Extracts that commit or tree into a subdirectory.
+	""".replace('\t', '')
+elif cmd == 'add':
+	m = Middle()
+	for file in args:
+		m.add_file(file)
+elif cmd == 'del':
+	m = Middle()
+	for file in args:
+		m.del_file(file)
+elif cmd == 'commit':
+	print "Enter commit message followed by ^D:"
+	message = sys.stdin.read()
+	Middle().commit(message)
+elif cmd == 'disp':
+	target = args[0]
+	m = Middle()
+	if target == 'head':
+		print m.be.get_property('head')
+	elif target == 'log':
+		for commit in m.be.list_commits():
+			cmt = m.be.get_commit(commit)
+			print commit
+			for line in cmt[2].split('\n'):
+				print '\t', line
+	elif target == 'managed':
+		for i in m.list_files(): print i
+	elif target == 'commit':
+		cmt = args[1]
+		if cmt == 'head': cmt = m.be.get_property('head')
+		commit = m.be.get_commit(cmt)
+		print 'commit', cmt
+		print 'tree', commit[0]
+		print 'parent', commit[1]
+		for line in commit[2].split('\n'):
+			print '\t', line
+	elif target == 'tree':
+		tree = (m.be.get_commit(m.be.get_property('head')))[0]
+		if len(args) > 0 and args[1] != 'head':
+			tree = args[1]
+		contents = m.be.get_tree(tree)
+		for item in contents.keys():
+			file, cont = item, contents[item]
+			print file, '\t', cont
+	elif target == 'blob':
+		print m.be.get_blob(args[1])
+elif cmd == 'extract':
+	m = Middle()
+	by = args[0]
+	if by == 'commit':
+		cmt_id = args[1] == 'head' and m.be.get_property('head') or args[1]
+		cmt = m.be.get_commit(cmt_id)
+		tree = cmt[0]
+		m.extract_tree(tree)
+	elif by == 'tree':
+		m.extract_tree(args[1])
+elif cmd == 'diff':
+	import tempfile
+	m = Middle()
+	a = m.be.get_blob(args[0])
+	b = m.be.get_blob(args[1])
+	fd1, name1 = tempfile.mkstemp('w')
+	fd2, name2 = tempfile.mkstemp('w')
+	fd1.write(a)
+	fd2.write(b)
+	print os.popen('diff -u -C 3 %s %s' % (name1, name2)).read()
+else:
+	error("Invalid command. Type 'fsl help' for valid commands.")
