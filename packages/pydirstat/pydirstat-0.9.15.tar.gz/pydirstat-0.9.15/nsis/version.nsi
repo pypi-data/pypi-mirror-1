@@ -1,0 +1,2 @@
+!define PRODUCT_VERSION "0.9.15"
+!define PYTHON_VERSION "2.4"
