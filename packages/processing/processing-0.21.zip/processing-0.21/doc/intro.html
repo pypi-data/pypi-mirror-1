@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils 0.4: http://docutils.sourceforge.net/" />
+<title>Introduction</title>
+<link rel="stylesheet" href="html4css1.css" type="text/css" />
+</head>
+<body>
+<div class="header">
+<a class="reference" href="index.html">Prev</a> &nbsp; &nbsp; &nbsp; &nbsp; <a class="reference" href="index.html">Up</a> &nbsp; &nbsp; &nbsp; &nbsp; <a class="reference" href="processing-ref.html">Next</a>
+<hr class="header"/>
+</div>
+<div class="document" id="introduction">
+<h1 class="title">Introduction</h1>
+<div class="section">
+<h1><a id="threads-processes-and-the-gil" name="threads-processes-and-the-gil">Threads, processes and the GIL</a></h1>
+<p>To run more than one piece of code at the same time on the same
+computer one has the choice of either using multiple processes or
+multiple threads.</p>
+<p>Although a program can be made up of multiple processes, these
+processes are in effect completely independent of one another:
+different processes are not able to cooperate with one another unless
+one sets up some means of communication between them (such as by using
+sockets).  If a lot of data must be transferred between processes then
+this can be inefficient.</p>
+<p>On the other hand, multiple threads within a single process are
+intimately connected: they share their data but often can interfere
+badly with one another.</p>
+<p>CPython has a <em>Global Interpreter Lock</em> (GIL) which in many ways makes
+threading easier than it is in most languages by making sure that only
+one thread can manipulate the interpreter's Python objects at a time.
+As a result, it is often safe to let multiple threads access data
+without using any locking as one would need to in a language such as
+C.</p>
+<p>One downside of the GIL is that on multi-processor (or multi-core)
+systems a Python program can only make use of one processor at a time,
+leaving the other(s) idle.  This is a problem that can be overcome by
+using multiple processes.</p>
+<p>Python gives little direct support for writing programs using multiple
+process.  This package allows one to write multi-process programs
+using much the same API that one uses for writing threaded programs.</p>
+</div>
+<div class="section">
+<h1><a id="forking-and-spawning" name="forking-and-spawning">Forking and spawning</a></h1>
+<p>There are two ways of creating a new process in Python:</p>
+<ul>
+<li><p class="first">The current process can <em>fork</em> a new child process by using the
+<tt class="docutils literal"><span class="pre">os.fork()</span></tt> function.  This effectively creates an identical copy
+of the current process which is now able to go off and perform some
+task set by the parent process.  This means that the child process
+inherits <em>copies</em> of all variables that the parent process had.</p>
+<p>However, <tt class="docutils literal"><span class="pre">os.fork()</span></tt> is not available on every platform: in
+particular Windows does not support it.</p>
+</li>
+<li><p class="first">Alternatively, the current process can spawn a completely new Python
+interpreter by using <tt class="docutils literal"><span class="pre">os.spawnv()</span></tt> or some similar function.</p>
+<p>Getting this new interpreter in to a fit state to perform the task
+set for it by its parent process is, however, a bit of a challenge.</p>
+</li>
+</ul>
+<p>The <tt class="docutils literal"><span class="pre">processing</span></tt> package uses <tt class="docutils literal"><span class="pre">os.fork()</span></tt> if it is available since
+it makes life a lot simpler.  Forking the process is also more
+efficient in terms of memory usage and the time needed to create the
+new process.</p>
+</div>
+<div class="section">
+<h1><a id="example" name="example">Example</a></h1>
+<p>To demonstrate how similar writing multi-threaded and multi-process
+programs can be we give a simple program using the <tt class="docutils literal"><span class="pre">threading</span></tt>
+module, followed by what it looks like after being converted to using
+the <tt class="docutils literal"><span class="pre">processing</span></tt> package.</p>
+<p><em>Using threads</em>:</p>
+<pre class="literal-block">
+from threading import Thread                         # !
+from Queue import Queue                              # -
+
+def f(q):
+    for i in range(10):
+        q.put(i*i)
+    q.put('STOP')
+
+if __name__ == '__main__':
+    queue = Queue(maxsize=3)                         # !
+
+    t = Thread(target=f, args=[queue])
+    t.start()
+
+    result = None
+    while result != 'STOP':
+        result = queue.get()
+        print result
+
+    t.join()
+</pre>
+<p><em>Using processes</em>:</p>
+<pre class="literal-block">
+from processing import Process as Thread, Manager    # !
+
+def f(q):
+    for i in range(10):
+        q.put(i*i)
+    q.put('STOP')
+
+if __name__ == '__main__':
+    manager = Manager()                              # +
+    queue = manager.Queue(maxsize=3)                 # !
+
+    t = Thread(target=f, args=[queue])
+    t.start()
+
+    result = None
+    while result != 'STOP':
+        result = queue.get()
+        print result
+
+    t.join()
+</pre>
+<p>Not every threaded program can be converted to use processes so
+trivially.  See <a class="reference" href="programming-guidelines.html">Programming guidelines</a> for details of the restrictions and
+the idioms to follow.</p>
+<p>More examples can be seen in <a class="reference" href="../test/test_processing.py">test_processing.py</a>.</p>
+<div class="admonition-switching-between-processes-and-threads admonition">
+<p class="first admonition-title">Switching between processes and threads</p>
+<p>If a program is written using <tt class="docutils literal"><span class="pre">processing</span></tt> then it can be made to
+use threads instead of processes by using <tt class="docutils literal"><span class="pre">processing.dummy</span></tt> in
+place of <tt class="docutils literal"><span class="pre">processing</span></tt>.  So one would, for instance, change the
+import line</p>
+<pre class="literal-block">
+from processing import ...
+</pre>
+<p>to</p>
+<pre class="last literal-block">
+from processing.dummy import ...
+</pre>
+</div>
+</div>
+<div class="section">
+<h1><a id="speed-of-communication" name="speed-of-communication">Speed of communication</a></h1>
+<p>As one would expect, communication between processes using sockets is
+slower than communication between threads using shared data.  Using
+the C extensions in the <tt class="docutils literal"><span class="pre">connection</span></tt> package, Windows (using named
+pipes) and Linux (using Unix domain sockets) are roughly equal in
+speed.</p>
+<p>For example (on a Pentium 4, 2.5 Ghz laptop) a value can be retrieved
+from a shared dictionary 18,000-20,000 times/sec compared to around 5
+million times/sec for a normal dictionary.</p>
+<p>With one process sending objects to another process using a shared
+Queue I get around 7,500 times/sec.  Doing the same using a
+normal Queue and threads I get 18,000-50,000 times/sec.  (For some
+reason on Linux it is usually around 18,000 but sometimes around
+45,000, whereas on windows it is consistently 40,000-50,000.)</p>
+<p>For communication between two processes one can use <tt class="docutils literal"><span class="pre">Listener</span></tt> and
+<tt class="docutils literal"><span class="pre">Client</span></tt> from the <a class="reference" href="connection-ref.html">connection</a> sub-package for
+a much faster and simpler alternative to a Queue.</p>
+</div>
+</div>
+<div class="footer">
+<hr class="footer" />
+<a class="reference" href="index.html">Prev</a> &nbsp; &nbsp; &nbsp; &nbsp; <a class="reference" href="index.html">Up</a> &nbsp; &nbsp; &nbsp; &nbsp; <a class="reference" href="processing-ref.html">Next</a>
+</div>
+</body>
+</html>

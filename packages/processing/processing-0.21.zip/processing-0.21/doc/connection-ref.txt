@@ -1,0 +1,249 @@
+.. include:: header.txt
+
+==============================
+ Connection package reference
+==============================
+
+The `connection` sub-package allows the sending of picklable objects
+between processes using sockets or (on Windows) *named pipes*.  It
+also has support for *digest authetication* (using the `hmac` module
+from the standard library).
+
+The sub-package contains C extensions `socket_connection` and
+`pipe_connection`.  Without these extensions `connection` will
+still work, but will be slower and will not support the use of named
+pipes.
+
+
+Classes and functions
+=====================
+
+The module exports the following classes:
+
+   **class** `Listener(address=None, family=None, backlog=1, authkey=None)` 
+       A wrapper for a bound socket or Windows named pipe which is
+       'listening' for connections.
+
+   **exception** `AuthenticationError`
+       Exception raised when there is an authentication error.
+
+The module exports one function:
+
+    `Client(address, family=None, authkey=None)`
+        Attempts to set up a connection to the listener which is using
+        address `address`.  
+
+        The type of the connection is determined by `family`
+        argument, but this can generally be omitted since it can
+        usually be inferred from the format of `address`.
+
+        If `authkey` is not `None` then a *handshake* is preformed
+        with the other end of the connection using `authkey` as an
+        authentication key.  If this fails then `AuthenticationError`
+        is raised.
+
+        A `Connection` object is returned.  (See `Connection
+        objects`_.)
+
+..
+    `deliver_challenge(connection, authkey)`
+        Sends a randomly generated message to the other end of the
+        connection and waits for a reply.
+
+        If the reply matches the digest of the message using `authkey`
+        as the key then a welcome message is sent to the other end of
+        the connection.  Otherwise `AuthenticationError` is raised.
+
+    `answer_challenge(connection, authkey)`
+        Receives a message, calculates the digest of the message using
+        `authkey` as the key, and then sends the digest back.
+
+        If a welcome message is not received then
+        `AuthenticationError` is raised.
+
+
+
+Listener objects
+================
+
+Instances of `Listener` have the following methods:
+
+    `__init__(address=None, family=None, backlog=1, authkey=None)`
+        `address`
+           The address to be used by the bound socket
+           or named pipe of the listener object.
+
+        `family`
+           The type of the socket (or named pipe) to use.
+
+           This can be one of the strings `'AF_INET'` (for a TCP
+           socket), `'AF_UNIX'` (for a Unix domain socket) or
+           `'AF_PIPE'` (for a Windows named pipe).  Of these only
+           the first is guaranteed to be available.
+
+           If `family` is `None` than the family is inferred from the
+           format of `address`.  If `address` is also `None` then a
+           default is chosen.  This default is the family which is
+           assumed to be the fastest available.  See `Address
+           formats`_.
+        
+        `backlog`
+           If the listener object uses a socket then `backlog` is
+           passed to the `listen()` method of the socket once it has
+           been bound.
+
+        `authkey`
+           If not `None` then when `accept()` is called the other end
+           of the resulting connection is required to prove that it
+           knows the value of `authkey`.  See `Authentication keys`_.
+
+    `accept()`
+        Accept a connection on the bound socket or named pipe of 
+        the listener object.
+
+        Returns a `Connection` object.  See `Connection objects`_.
+
+        If `authkey` is not `None` then a *handshake* is preformed
+        with the other end of the connection using `authkey` as an
+        authentication key.  If this fails then `AuthenticationError`
+        is raised.
+
+    `close()`
+        Close the bound socket or named pipe of the listener object.
+
+        This is called automatically when the listener is garbage
+        collected.
+
+
+Listener objects have the following read-only properties:
+
+    **property** `address`
+        The address which is being used by the listener object.
+
+    **property** `last_accepted`
+        The address from which the last accepted connection came.
+
+        If this is unavailable then `None` is returned.
+
+
+Connection objects
+==================
+
+Connections objects have the following methods:
+
+    `recv()` 
+        Return an object sent from the other end of the connection
+        using `send()`.
+
+    `send(obj)`
+        Send an object to the other end of the connection which should
+        be read using `recv()`.
+
+        The object must be picklable.
+
+    `recv_string()`
+        Return a string sent from the other end of the connection
+        using `send_string()`.
+
+    `send_string(obj)`
+        Send a string to the other end of the connection which should
+        be read using `recv_string()`.
+
+    `close()`
+        Close the connection.
+
+        This is called automatically when the connection is garbage
+        collected.
+
+.. warning::
+    
+    The `recv()` method automatically unpickles the data it receives
+    which can be a security risk.  Therefore if you are using the
+    `recv()` and `send()` methods you should be using some form of
+    authentication.  See `Authentication keys`_.
+
+
+
+Address formats
+===============
+
+* An `'AF_INET'` address is a tuple of the form `(hostname, port)`
+  where `hostname` is a string and `port` is an integer
+
+* An `'AF_UNIX'` address is a string representing a filename on the
+  filesystem.
+
+* An `'AF_PIPE'` address is a string of the form
+  `r'\\\\.\\pipe\\PipeName'`.
+  
+  To use `Client` to connect to a named pipe on a remote computer
+  called `ServerName` one should use an address of the form
+  `r'\\\\ServerName\\pipe\\PipeName'` instead.
+
+Note that any string beginning with two backslashes is assumed by
+default to be an `'AF_PIPE'` address rather than an `'AF_UNIX'`
+address.
+
+
+Authentication keys
+===================
+
+When one uses the `recv()` method of a connection object, the data
+received is automatically unpickled.  Unfortunately unpickling data
+from an untrusted source is a security risk.  Therefore `Listener` and
+`Client` use the `hmac` module to provide digest authentication.
+
+An authentication key is a string which can be thought of as a
+password: once a connection is established both ends will demand proof
+that the other knows the authentication key.  (Demonstrating that both
+ends are using the same key does *not* involve sending the key over
+the connection.)
+
+As an authentication key one can use the return value of
+`currentProcess().getAuthKey()` (see `Process objects
+<process-objects.html>`_).  This value will automatically inherited by
+any `Process` object that the current process creates.  This means
+that (by default) all processes of a multi-process program will share
+a single authentication key which can be used when setting up
+connections between the themselves.
+
+Suitable authentication keys can be generated by `os.urandom()`.
+
+
+Example
+=======
+
+The following server code creates a listener which uses `'secret
+password'` as an authentication key.  It then waits for a connection,
+receives an object and then sends it back boxed inside a list::
+
+    from processing.connection import Listener
+
+    address = ('localhost', 6000)     # family is deduced to be 'AF_INET'
+    listener = Listener(address, authkey='secret password')
+
+    conn = listener.accept()
+    print 'connection accepted from', listener.last_accepted
+
+    obj = conn.recv()
+    boxed_obj = [obj]
+    conn.send(boxed_obj)
+
+The following code connects to the server, sends it the number 42, and
+then prints the reply from the server::
+
+    from processing.connection import Client
+
+    address = ('localhost', 6000)
+    conn = Client(address, authkey='secret password')
+
+    obj = 42
+    print 'sending:', obj
+    conn.send(obj)
+    print 'recieved:', conn.recv()    # prints 'received: [42]'
+
+
+.. _Prev: proxy-objects.html
+.. _Up: processing-ref.html
+.. _Next: programming-guidelines.html
+
