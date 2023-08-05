@@ -1,0 +1,10 @@
+##########################################################################
+# zopyx.convert - XSL-FO related functionalities
+#
+# (C) 2007, ZOPYX Ltd & Co. KG, Tuebingen, Germany
+##########################################################################
+
+
+import logging
+
+LOG = logging.getLogger()
