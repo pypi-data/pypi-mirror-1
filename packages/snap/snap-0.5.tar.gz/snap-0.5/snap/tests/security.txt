@@ -1,0 +1,218 @@
+Zope Security Policy
+====================
+
+For now we will be using the Zope Security Policy. We provide an
+adapter for IPrincipalRoleMap that reads the local roles from our
+marshalled XML representation. Other than that, everything else should
+work as expected.
+
+Create a stub object that works just like the ones we will be using in
+the application, by providing a interface and a attribute named
+'local_roles'::
+
+  >>> from snap.interface import ILocalRoles
+  >>> from zope.interface import implements
+
+  >>> class Content:
+  ...   implements(ILocalRoles)
+  ...   def __init__(self, lr):
+  ...       self.local_roles = lr
+
+  >>> ob = Content({'bob':('R1G',), 'jim':('R2G',),
+  ...               'group_Managers': ('R2G',)})
+
+We use objects to represent principals.  These objects implement an
+interface named `IPrincipal`, but the security policy only uses the `id`
+and `groups` attributes:
+
+  >>> class Principal:
+  ...     def __init__(self, id):
+  ...         self.id = id
+  ...         self.groups = []
+
+  >>> bob = Principal('bob')
+  >>> bob_group = Principal('bob')
+  >>> bob_group.groups.append('Managers')
+  >>> jim = Principal('jim')
+
+Roles and permissions are also represented by objects, however, for
+the purposes of the security policy, only string `ids` are used.
+
+The security policy provides a factory for creating interactions:
+
+  >>> import zope.app.securitypolicy.zopepolicy
+  >>> interaction = zope.app.securitypolicy.zopepolicy.ZopeSecurityPolicy()
+
+An interaction represents a specific interaction between some
+principals (normally users) and the system.  Normally, we are only
+concerned with the interaction of one principal with the system, although
+we can have interactions of multiple principals.  Multiple-principal
+interactions normally occur when untrusted users store code on a
+system for later execution.  When untrusted code is executing, the
+authors of the code participate in the interaction.  An
+interaction has a permission on an object only if all of the
+principals participating in the interaction have access to the object.
+
+The `checkPermission` method on interactions is used to test whether
+an interaction has a permission for an object.  An interaction without
+participants always has every permission:
+
+  >>> interaction.checkPermission('P1', ob)
+  True
+
+In this example, 'P1' is a permission id.
+
+Normally, interactions have participants:
+
+  >>> class Participation:
+  ...     interaction = None
+  >>> participation = Participation()
+  >>> participation.principal = bob
+  >>> interaction.add(participation)
+
+If we have participants, then we don't have a permission unless there
+are grants:
+
+  >>> interaction.checkPermission('P1', ob)
+  False
+
+Note, however, that we always have the CheckerPublic permission:
+
+  >>> from zope.security.checker import CheckerPublic
+  >>> interaction.checkPermission(CheckerPublic, ob)
+  True
+
+First, we'll set our security policy as the default:
+
+  >>> import zope.security.management
+  >>> oldpolicy = zope.security.management.setSecurityPolicy(
+  ...      zope.app.securitypolicy.zopepolicy.ZopeSecurityPolicy)
+
+and then we'll create a new interaction:
+
+  >>> participation = Participation()
+  >>> participation.principal = bob
+  >>> zope.security.management.newInteraction(participation)
+  >>> interaction = zope.security.management.getInteraction()
+
+Grants made to an object are said to be "local".  We can make
+global grants and then check for the local roles:
+
+  >>> from zope.app.securitypolicy.rolepermission \
+  ...     import rolePermissionManager as roleperG
+  >>> from zope.app.securitypolicy.principalpermission \
+  ...     import principalPermissionManager as prinperG
+  >>> from zope.app.securitypolicy.principalrole \
+  ...     import principalRoleManager as prinroleG
+
+In these tests, we aren't bothering to define any roles, permissions,
+or principals, so we pass an extra argument that tells the granting
+routines not to check the validity of the values::
+
+  >>> roleperG.grantPermissionToRole('P1G', 'R1G', False)
+  >>> roleperG.grantPermissionToRole('P2G', 'R2G', False)
+
+User 'bob' has a local role 'R1G' in the context of the object and
+he's part of the interaction, so the permission should be available to
+him::
+
+  >>> interaction.checkPermission('P1G', ob)
+  True
+
+Permission 'P2G' is only granted to role 'R2G', which 'bob' does not
+have, so not allowed here::
+
+  >>> interaction.checkPermission('P2G', ob)
+  False
+
+Let's make a new interaction with user 'jim' now::
+
+  >>> participation = Participation()
+  >>> participation.principal = jim
+  >>> zope.security.management.endInteraction()
+  >>> zope.security.management.newInteraction(participation)
+  >>> interaction = zope.security.management.getInteraction()
+
+User 'jim' has a local role 'R2G' in the context of the object and
+he's part of the interaction, so the permission 'P1G' should not be
+available to him::
+
+  >>> interaction.checkPermission('P1G', ob)
+  False
+
+Permission 'P2G' is only granted to role 'R2G', which 'jim' does
+have, so he is allowed here::
+
+  >>> interaction.checkPermission('P2G', ob)
+  True
+
+Groups
+------
+
+Principals may have groups.  Groups are also principals (and, thus,
+may have groups).
+
+If a principal has groups, the groups are available as group ids in
+the principal's `groups` attribute.  The interaction has to convert
+these group ids to group objects, so that it can tell whether the
+groups have groups.  It does this by calling the `getPrincipal` method
+on the principal authentication service, which is responsible for,
+among other things, converting a principal id to a principal.
+For our examples here, we'll create and register a stub principal
+authentication service:
+
+  >>> from zope.app.security.interfaces import IAuthentication
+  >>> class FauxPrincipals(dict):
+  ...     zope.interface.implements(IAuthentication)
+  ...     def getPrincipal(self, id):
+  ...         return self[id]
+
+  >>> auth = FauxPrincipals()
+
+  >>> from zope.app.testing import ztapi
+  >>> ztapi.provideUtility(IAuthentication, auth)
+  >>> from zope.app import zapi
+
+Let's define a group:
+
+  >>> auth['Managers'] = Principal('Managers')
+
+The principal 'bob_group' is already part of this group::
+
+  >>> bob_group.groups
+  ['Managers']
+
+The 'Managers' group has a local role assigned in our content object::
+
+  >>> ob.local_roles['Managers']
+  ('R2G',)
+
+Let's make a new interaction with the principal 'bob_group'::
+
+  >>> participation = Participation()
+  >>> participation.principal = bob_group
+  >>> zope.security.management.endInteraction()
+  >>> zope.security.management.newInteraction(participation)
+  >>> interaction = zope.security.management.getInteraction()
+
+Now, 'bob_group' will be granted the permission 'P1G' because the
+principal 'bob' has a local role of 'R1G' in the content object and
+'P1G' is assigned to 'R1G' globally::
+
+  >>> interaction.checkPermission('P1G', ob)
+  True
+
+And he should also have permission 'P2G' which he didn't had before,
+because he is part of the 'Managers' group, which has a local role of
+'R2G' in the content object::
+
+  >>> interaction.checkPermission('P2G', ob)
+  True
+
+Cleanup
+-------
+
+We clean up the changes we made in these examples:
+
+  >>> zope.security.management.endInteraction()
+  >>> ignore = zope.security.management.setSecurityPolicy(oldpolicy)
