@@ -1,0 +1,48 @@
+Documentation
+=============
+
+The recommended way of importing ZestyParser is `from ZestyParser import *`. This imports the objects `ZestyParser`, `NotMatched`, `EOF`, `ReturnRaw`, `Token`, and `CompositeToken`; you're likely to use the objects `NotMatched`, `EOF`, and `ReturnRaw` quite a bit, as well as accessing the various token classes frequently while setting up your grammar. This shouldn't clutter your namespace much. Of course, if you prefer, you can always simply do `import ZestyParser`.
+
+Parsing
+-------
+
+As you may expect, the fundamental interaction with ZestyParser takes place through the `ZestyParser` class. The only state maintained by instances is the text being parsed and the current location in it (hereafter known as the cursor); therefore, you cannot use a single instance to parse multiple strings at once. Meanwhile, it does not keep a master list of tokens; you'll maintain them as objects independently of the parser, and pass them to it as needed. So if you do need to create multiple parsers at once, you won't have to waste memory making new copies of the token descriptions every time.
+
+`ZestyParser`'s initializer takes one optional parameter: `data`, which can contain the string to process. You can always replace this with the `useData` method.
+
+`ZestyParser`'s `scan` method is the part that does most of the work. It scans for one token at the current location of the cursor. It takes one required parameter, `tokens`. This is a list of tokens that are allowed at this point, and which can be scanned and returned. The method returns a 2-tuple containing the matching token instance (as given in the `tokens` parameter), followed by the value returned by the token instance. (It is this second value that we mean when we refer to tokens' return values later in this documentation.) The method returns `None` instead of the tuple if there was no match.
+
+Tokens, as given in the `tokens` parameter, may be either the actual token objects or the tokens' string names (or a mix). Named tokens are useful for when recursive definitions come up. You must add a token to a `ZestyParser` object with the `addTokens` method for it to recognize it as a named token, but you can pass any token object directly to a parser at any time.
+
+Types of Tokens
+---------------
+
+Tokens are constructed as callables of any type. They receive the `ZestyParser` instance and the parser's current cursor as parameters. Several types of tokens are predefined to simplify typical parsing tasks.
+
+The most common token type you'll use is the `Token` class. It matches a Python regular expression, and optionally processes it with a callback. Its initializer takes three parameters:
+
+* `tokenName` (required), which names it so __repr__ can give helpful output during debugging
+* `regex` (required), the regex to match; either a string (which will be compiled) or an already-compiled regex object. The latter case is useful if, say, you want to pass flags to the `re.compile`. (Technically, it can be any object with a `match` method, as long as it behaves exactly as in Python's `re` module.)
+* `callback` (optional), a function. If included, this will be called whenever this token is matched, and will be passed the calling parser instance, the regex match object, and the parser's cursor before it was matched. This can do any additional processing necessary. Return an object to be given to whoever called the `scan()` call that invoked this in the first place. Raise the `NotMatched` exception if you want the parser to consider this token not matched, despite the initial regex having matched. If you do this, the parser's cursor will be rewound to wherever it was before it matched this token's regex, so any additional `scan()` calls you make in your callback are perfectly safe (and are, in fact, an important part of much of the serious parsing that can be done with ZestyParser).
+
+Matching `Token` instances return the regex match object, or, if it has a callback, whatever object the callback returned.
+
+Another useful type of token available is `CompositeToken`. This is a convenience that allows you to create one token object that matches any of a given set of other ones, and optionally passes the result to a callback (which takes two parameters, the `ZestyParser` instance and the current cursor, and can raise `NotMatched` the same way `Token` callbacks can). Its initializer takes a `tokenName` string parameter, a `tokens` list, and an optional `callback`. When matched, the return value is itself the 2-tuple returned by the `scan()` method.
+
+There is also `TokenSequence`, which matches a sequence of other tokens, and, of course, optionally processes the results with a callback before returning. Its initializer takes a `tokenName`, a `tokenGroups` list (each of whose items should be a list of valid tokens, treated the same way as the input of `scan()`), and an optional `callback`. It only matches if each member of `tokenGroups` matches, and in sequence. It returns a list of the tuples returned by `scan()` for each token. If you provide a callback, it will call it before returning, passing the `ZestyParser` instance, the list of returned tuples, and the original cursor, and will then return that callback's return value instead. As usual, the callback may raise `NotMatched`.
+
+Since tokens are simply expected to be callables with certain semantics, you can also use a function or method directly as a token. It is expected to take the parser and current cursor as parameters. It is solely responsible for reporting whether it matched or not (via `NotMatched`), and, if so, returning a value to be passed back to the caller in the returned tuple.
+
+Finally, there is a token called `EOF`. Use this to see if the parser has reached the end of the string. If it matches, it returns `None`.
+
+Utilities
+---------
+
+`ZestyParser` instances the following utility methods: 
+
+* `useData()`, taking a string, which resets the cursor and sets the subject string to the parameter. Use this if, after processing a string, you want to reuse the instance on another.
+* `scanMultiple()`, a convenience method that wraps `TokenSequence`. It takes a variable number of arguments, creates a `TokenSequence` using those arguments as the sequence, and scans for it once. It then returns the result list (that is, the second item of the returned tuple), or `None`.
+* `take()`, taking an integer, which simply returns that many characters from the string starting at the cursor, and advances the cursor likewise.
+* `iter()`, taking a list with the same semantics as `scan()`, which returns an iterator object. The iterator's `next()` method calls `scan()` on the parser with the list originally passed, and ends when the parser returns `None`.
+
+There is also a function called `ReturnRaw()` with the semantics of a `Token` callback; pass this in a `Token`'s callback parameter to have the second item in the return tuple simply be the matched text instead of the whole regex match object.
