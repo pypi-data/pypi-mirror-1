@@ -1,0 +1,1 @@
+from wc.sequencewidget.widget import DynamicSequenceWidget
