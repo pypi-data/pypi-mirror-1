@@ -1,0 +1,508 @@
+=================
+Building evolvers
+=================
+
+:Author: Olivier Grisel <olivier.grisel@ensta.org>
+:Description: How to build simple to complex evolver components with EvoGrid
+
+An evolver is a component that drives the evolution of a pool of replicators.
+Evolvers implement the ``IEvolver`` interface::
+
+  >>> from zope.interface.verify import verifyClass
+  >>> from evogrid.interfaces import IEvolver
+
+.. sectnum::    :depth: 2
+.. contents::   :depth: 2
+
+
+A first generic evolver
+=======================
+
+The ``evogrid.common.evolvers`` module provides utility classes to easily build
+``IEvolver`` implementations such as the ``GenericEvolver`` class::
+
+  >>> from evogrid.common.evolvers import GenericEvolver
+  >>> verifyClass(IEvolver, GenericEvolver)
+  True
+
+
+Representation dependent components
+-----------------------------------
+
+The ``GenericEvolver`` class requires at least two representation
+dependent components: a variator and an evaluator. Let us build some
+dummy ones for the sake of illustration. In order to do so, we will
+reuse the numerical components of the ``evogrid.numeric`` package.
+
+First the search space is defined by a 2D hypercube with values ranging
+from ``-30`` to ``30`` on each axis::
+
+  >>> from evogrid.numeric.domains import(
+  ...     HyperCubeDomain, ResolutionDowngraderDomain)
+  >>> dom = HyperCubeDomain([-30., -30.], [30., 30])
+
+The resolution is downgraded to 1000 steps on each axis to make the
+documentation easier to read. The total size of the search space is then
+``Omega = 1e3 * 1e3 = 1e6``::
+
+  >>> dom = ResolutionDowngraderDomain(dom, resolution=3)
+
+The goal of the evolvers will be to minimize the Rosenbrock function::
+
+  >>> from evogrid.numeric.dejong import DeJongEvaluator
+  >>> ev = DeJongEvaluator(4)
+
+The original population will be randomly generated uniformly over the
+search space::
+
+  >>> from evogrid.numeric.providers import UniformReplicatorGenerator
+  >>> gen = UniformReplicatorGenerator(dom=dom)
+
+The breeding engine will rely upon the combination of three variators two
+of those are purely darwinian (a mutator and a crossover). The third is
+a lamarckian optimizer made aware of the goal of the problem by providing
+it the evaluator component::
+
+  >>> from evogrid.numeric.variators import (
+  ...     DomainAwareGaussianMutator, BlendingCrossover, CgVariator)
+  >>> dagm = DomainAwareGaussianMutator()
+  >>> blx = BlendingCrossover()
+  >>> cgv = CgVariator(ev, maxiter=3)
+
+Since this is a minimization problem, we will also need a comparator
+instance that prefers small evaluation values to big once::
+
+  >>> from evogrid.common.comparators import SimpleComparator
+  >>> cmp_ = SimpleComparator(minimize=True)
+
+
+Building a GenericEvolver instance
+----------------------------------
+
+We can now build the evolver instance that combines all those components
+together. We additionally use an OrderedPool instance to make the tests
+reproducible since the default pool instance is based on python on the
+python ``set`` type which can yield different results according to the
+memory state::
+
+  >>> from evogrid.common.evolvers import GenericEvolver
+  >>> from evogrid.common.pools import OrderedPool
+  >>> ge = GenericEvolver((dagm, blx, cgv), ev, comparator=cmp_,
+  ...                     pool=OrderedPool())
+
+``IEvolver`` implementations provide at least three public attributes:
+``pool``, ``archive``, and ``provider``. By default the first two are
+empty and the third one set to None::
+
+  >>> sorted(ge.pool)
+  []
+  >>> sorted(ge.archive)
+  []
+  >>> ge.provider is None
+  True
+
+
+Pool initialization
+-------------------
+
+We can then initialize the pool with our previously built generator::
+
+  >>> import random; random.seed(0)
+  >>> import numpy.random; numpy.random.seed(0)
+
+  >>> ge.initialize_pool(gen, size=50)
+
+  >>> len(ge.pool)
+  50
+
+  >>> sum(r.evaluation for r in ge.pool) / len(ge.pool)
+  16609988.80...
+
+  >>> sorted(ge.archive)
+  [VectorReplicator(cs=array([-2.64,  4.08]), ev=848.22...)]
+
+
+Making the pool evolve
+----------------------
+
+We can now run the evolution engine step by step and see the average
+quality of both the pool and the elite archive slowly improving. Each
+time we run the ``step`` method, the builtin checkpointer tell us whether
+the evolution should go on to reach its goal::
+
+  >>> ge.step()
+  True
+
+  >>> len(ge.pool)
+  50
+
+  >>> sum(r.evaluation for r in ge.pool) / len(ge.pool)
+  16609081.228...
+
+  >>> sorted(ge.archive)
+  [VectorReplicator(cs=array([ 0.3 ,  0.12]), ev=0.5799...)]
+
+  >>> ge.step()
+  True
+
+  >>> len(ge.pool)
+  50
+
+  >>> sum(r.evaluation for r in ge.pool) / len(ge.pool)
+  16598026.619...
+
+  >>> sorted(ge.archive)
+  [VectorReplicator(cs=array([ 0.3 ,  0.12]), ev=0.5799...)]
+
+On the second replacement step the elite archive content has not changed
+since the replaced replicator was not better than the one in the archive.
+However the global pool quality was still improved.
+
+Instead of running the ``step`` method manually, we can directly call the
+``run`` method once for all and rely upon the builtin checkpointer to guess
+when to stop. The default checkpointer will run at maximum 1000 consecutive
+replacements or stop before if 150 of them occur with no quality improvement of
+the elite archive::
+
+  >>> ge.run()
+
+  >>> sum(r.evaluation for r in ge.pool) / len(ge.pool)
+  2892359.202...
+
+  >>> sorted(ge.archive)
+  [VectorReplicator(cs=array([ 1.02,  1.02]), ev=0.0420...)]
+
+Which is the best solution for the Rosenbrock function with our domain
+resolution.
+
+
+Plugging a external provider
+----------------------------
+
+The ``GenericEvolver`` constructor takes a wide variety of optional arguments
+to adjust the way replicators are evolved (selection, replacements, ...). Among
+those, the ``provider`` parameter allows the evolver to use an external source
+of replicators from time to time instead of selecting one already in its pool.
+The proportion of external vs internal selection is determined by the
+``external_prob`` optional parameter which is set to ``0.1`` by default.
+
+Let us build a new evolver that uses the generator as an external source of
+replicators 20% of the time::
+
+  >>> ge2 = GenericEvolver((dagm, blx, cgv), ev, comparator=cmp_,
+  ...                      pool=OrderedPool(), provider=gen, external_prob=0.2)
+  >>> ge2.provider is gen
+  True
+
+To use ``ge2`` we first need to initialize its pool has previously::
+
+  >>> ge2.initialize_pool(gen, size=20)
+
+By running it find the same solution as with ``ge`` but using some fresh blood
+along the run::
+
+  >>> ge2.run()
+  >>> sorted(ge2.archive)
+  [VectorReplicator(cs=array([ 1.02,  1.02]), ev=0.0420...)]
+
+It is possible to dynamically plug and unplug the external provider as follows
+thanks to the ``provider`` attribute which automatically trigger the
+reconstruction of the internal provider chain thanks to the property feature of
+the new style python classes::
+
+  >>> import random; random.seed(0)
+  >>> import numpy.random; numpy.random.seed(0)
+
+  >>> ge2.provider = None
+  >>> ge2.archive.clear()
+  >>> sorted(ge2.archive)
+  []
+
+  >>> ge2.initialize_pool(gen, size=50)
+  >>> ge2.run()
+  >>> sorted(ge2.archive)
+  [VectorReplicator(cs=array([ 1.02,  1.02]), ev=0.0420...)]
+
+One can also build a generic evolver without any variator and relying totally on
+an external random generator thus implementing the `Monte Carlo method`_::
+
+  >>> import random; random.seed(0)
+  >>> import numpy.random; numpy.random.seed(0)
+
+  >>> ge3 = GenericEvolver((), ev, comparator=cmp_, pool=OrderedPool(),
+  ...                      provider=gen, external_prob=1)
+
+  >>> sorted(ge3.archive)
+  []
+
+The internal pool is theoretically useless however we need at least one
+replicators inside to make the builtin ``TournamentReplacer`` not crash::
+
+  >>> ge3.initialize_pool(gen, size=1)
+  >>> sorted(ge3.archive)
+  [VectorReplicator(cs=array([  2.94,  12.9 ]), ev=1815.4...)]
+
+  >>> ge3.run()
+  >>> sorted(ge3.archive)
+  [VectorReplicator(cs=array([ 2.16,  5.4 ]), ev=55.279...)]
+
+This shows that such a dumb evolver is far from being a method as efficient as
+the previously tested evolvers for this optimization problem.
+
+.. _`Monte Carlo method`: http://en.wikipedia.org/wiki/Monte_Carlo_method
+
+The external provider feature is also interesting to make sub evolvers exchange
+replicators when they are part of a nested evolvers structure as we will see in
+the following sections.
+
+
+Nesting evolvers and parallel evolution
+=======================================
+
+The following sections introduce three way to combine several ``IEvolver``
+components together to perform island-based parallel evolution. The first way is
+only a simulated parallel evolution because each evolutionary step is performed
+once at a time whereas the two other can run several steps in parallel on
+several CPU thanks to python threads and network based communication respectively.
+
+
+Sequentially simulated parallel evolution
+-----------------------------------------
+
+Let us combine a bunch of ``GenericEvolver`` instances with the
+``SequentialEvolver`` class::
+
+  >>> import random; random.seed(0)
+  >>> import numpy.random; numpy.random.seed(0)
+
+  >>> e1 = GenericEvolver((dagm, blx), ev, comparator=cmp_, pool=OrderedPool())
+  >>> e2 = GenericEvolver((dagm, cgv), ev, comparator=cmp_, pool=OrderedPool())
+  >>> e3 = GenericEvolver((blx, cgv), ev, comparator=cmp_, pool=OrderedPool())
+
+  >>> from evogrid.common.evolvers import SequentialEvolver
+  >>> se = SequentialEvolver((e1, e2, e3))
+
+The pool of ``se`` is an aggregated pool of the sub evolvers. The same holds for
+the archives::
+
+  >>> se.pool
+  UnionPool([OrderedPool([]), OrderedPool([]), OrderedPool([])])
+
+  >>> se.archive
+  UnionPool([EliteArchive([]), EliteArchive([]), EliteArchive([])])
+
+TODO: make se.archive actually be a true archive
+
+We thus need to initialize the pool as previously::
+
+  >>> se.initialize_pool(gen, size=8)
+  >>> len(se.pool)
+  8
+  >>> [len(e.pool) for e in (e1, e2, e3)]
+  [3, 3, 2]
+
+All those replicators are of course evaluated::
+
+  >>> [[int(r.evaluation) for r in e.pool] for e in (e1, e2, e3)]
+  [[1815, 125997, 14511], [9395, 61166508, 9315611], [7954, 47242637]]
+
+  >>> [[int(r.evaluation) for r in e.archive] for e in (e1, e2, e3)]
+  [[1815], [9395], [7954]]
+
+We can then run one step of evolution on the global evolver::
+
+  >>> se.step()
+  True
+
+This call as indeed triggered three ``step`` calls, one for each subevolver
+which results in each of them having evolved::
+
+  >>> [[int(r.evaluation) for r in e.pool] for e in (e1, e2, e3)]
+  [[1815, 14511, 5959], [61166508, 9315611, 469], [47242637, 16]]
+
+  >>> [[int(r.evaluation) for r in e.archive] for e in (e1, e2, e3)]
+  [[1815], [469], [16]]
+
+Note that for the moment each embedded sub evolver has no external provider
+plugged in::
+
+  >>> [e.provider for e in (e1, e2, e3)]
+  [None, None, None]
+
+Parallelization is mostly interesting when replicators are able to migrate from
+one evolver (island or cell) to the other. One way to do that is to connect an
+external provider that tournament-selects copies of replicators from the global
+union pool::
+
+  >>> from evogrid.interfaces import ICopierSelector
+  >>> from evogrid.common.selectors import (
+  ...     TournamentSelector, ProviderFromSelectorAndPool)
+  >>> cts = ICopierSelector(TournamentSelector(cmp_))
+  >>> provider = ProviderFromSelectorAndPool(cts, se.pool)
+
+By plugging it to the global ``SequentialEvolver`` instance, all sub evolvers
+get it automatically::
+
+  >>> se.provider = provider
+  >>> [e.provider is provider for e in (e1, e2, e3)]
+  [True, True, True]
+
+  >>> int(se.provider.next().evaluation)
+  9315611
+
+  >>> int(se.provider.next().evaluation)
+  5959
+
+This causes the evolvers to trigger migration 10% of the time they want to
+select a replicators to make it evolve. Let us now run the evolver till its
+end, which means till all of the subevolvers have converged::
+
+  >>> se.run()
+
+  >>> [e.step() for e in (e1, e2, e3)]
+  [False, False, False]
+
+  >>> [[int(r.evaluation) for r in e.pool] for e in (e1, e2, e3)]
+  [[0, 0, 0], [0, 0, 0], [0, 0]]
+
+  >>> [[int(r.evaluation) for r in e.archive] for e in (e1, e2, e3)]
+  [[0], [0], [0]]
+
+By reseting the global evolver, we automatically reset all sub evolvers::
+
+  >>> se.reset()
+  >>> [e.step() for e in (e1, e2, e3)]
+  [True, True, True]
+
+The pool and archive are still not cleared to be able to find the best evolvers of
+several consecutive runs::
+
+  >>> [[int(r.evaluation) for r in e.pool] for e in (e1, e2, e3)]
+  [[0, 0, 0], [0, 0, 0], [0, 0]]
+
+  >>> [[int(r.evaluation) for r in e.archive] for e in (e1, e2, e3)]
+  [[0], [0], [0]]
+
+However it is still possible to clear them manually::
+
+  >>> se.pool.clear()
+  >>> [[int(r.evaluation) for r in e.pool] for e in (e1, e2, e3)]
+  [[], [], []]
+
+  >>> se.archive.clear()
+  >>> [[int(r.evaluation) for r in e.archive] for e in (e1, e2, e3)]
+  [[], [], []]
+
+
+Thread based parallel evolution
+-------------------------------
+
+Let us now focus on implementing truly parallel evolution on a multi-processor
+box by using threads. The ``ThreadingEvolver`` is very similar to the
+``SequentialEvolver`` except that the ``step`` and ``run`` subcalls are run in
+several threads (on for each sub evolver)::
+
+  >>> import random; random.seed(0)
+  >>> import numpy.random; numpy.random.seed(0)
+
+  >>> from evogrid.common.evolvers import ThreadingEvolver
+
+The ``ThreadingEvolver`` takes exactly the same arguments as
+``SequentialEvolver`` for its constructor and thus we need a sequence of
+subevolvers. Let us reuse ``se`` along with other new ``GenericEvolver``
+instances::
+
+  >>> e4 = GenericEvolver((dagm, blx), ev, comparator=cmp_, pool=OrderedPool())
+  >>> e5 = GenericEvolver((dagm, cgv), ev, comparator=cmp_, pool=OrderedPool())
+  >>> e6 = GenericEvolver((blx, cgv), ev, comparator=cmp_, pool=OrderedPool())
+
+  >>> te = ThreadingEvolver((se, e4, e5, e6))
+
+The top levels pools are now nested pools::
+
+  >>> te.pool
+  UnionPool([UnionPool([OrderedPool([]), OrderedPool([]), OrderedPool([])]),
+             OrderedPool([]), OrderedPool([]), OrderedPool([])])
+
+  >>> te.archive
+  UnionPool([UnionPool([EliteArchive([]), EliteArchive([]), EliteArchive([])]),
+             EliteArchive([]), EliteArchive([]), EliteArchive([])])
+
+Let us initialize them to reach a total size of 30 replicators::
+
+  >>> te.initialize_pool(gen, size=30)
+
+  >>> len(te.pool)
+  30
+
+  >>> [len(e.pool) for e in (se, e4, e5, e6)]
+  [8, 8, 7, 7]
+
+Note that the replicators are equally reparted even in the sub pools::
+
+  >>> [len(e.pool) for e in (e1, e2, e3)]
+  [3, 3, 2]
+
+As previously the new evolvers do not have any external provider plugged in by
+default::
+
+  >>> [e.provider for e in (e4, e5, e6)]
+  [None, None, None]
+
+However the former provider is still plugged in ``se`` and its sub evolvers::
+
+  >>> [e.provider is provider for e in (se, e1, e2, e3)]
+  [True, True, True, True]
+
+Let us build a new provider to connect all of them together::
+
+  >>> cts2 = ICopierSelector(TournamentSelector(cmp_))
+  >>> provider2 = ProviderFromSelectorAndPool(cts2, te.pool)
+  >>> te.provider = provider2
+
+  >>> [e.provider is provider2 for e in (te, se, e1, e2, e3, e4, e5, e6)]
+  [True, True, True, True, True, True, True, True]
+
+Before running the evolution, let us plot the current evaluations of the
+best replicators for further reference::
+
+  >>> ref = [int(list(e.archive)[0].evaluation) for e in (e1, e2, e3, e4, e5, e6)]
+  >>> ref
+  [1815, 9395, 7954, 4681, 848, 38118]
+
+Let us now run one step of evolution: this will run the ``step`` method of
+``(se, e4, e5, e6)`` in parallel and thus also run ``(e1, e2, e3)`` in
+sequentially in the first thread::
+
+  >>> te.step()
+  True
+
+Because of the unpredictable nature of thread scheduling, we cannot assert
+reproducable evolution results on this run. However we can check that it
+resulted in a improvement for each evolver::
+
+  >>> [int(list(e.archive)[0].evaluation) <= r
+  ...                       for e, r in zip((e1, e2, e3, e4, e5, e6), ref)]
+  [True, True, True, True, True, True]
+
+Some evolvers did see an improvement whereas others did not thanks to the
+none-deterministic nature of the selection and breeding operators.
+
+We can now call the run the ``te.run`` run method which we will in turn call
+each of the four sub evolvers' ``run`` method in a seperate thread and wait for
+the last evolver to reach it's checkpointer agreement to stop::
+
+  >>> te.run()
+
+  >>> [e.step() for e in (se, e4, e5, e6)]
+  [False, False, False, False]
+
+  >>> te.reset()
+  >>> [e.step() for e in (se, e4, e5, e6)]
+  [True, True, True, True]
+
+
+Networked parallel evolution
+----------------------------
+
+TODO

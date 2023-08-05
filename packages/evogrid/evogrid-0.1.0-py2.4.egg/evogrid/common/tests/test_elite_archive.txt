@@ -1,0 +1,267 @@
+==========================
+Elitism and elite archives
+==========================
+
+:Author: Olivier Grisel <olivier.grisel@ensta.org>
+:Description: Elitist strategies in evogrid
+
+.. sectnum::    :depth: 2
+.. contents::   :depth: 2
+
+Definitions
+===========
+
+In evolutionary computing, elitism comes in two flavours: strong and weak
+elitism:
+
+ - strong elitism implies that the best replicators are always kept in the
+   pool of evolving replicators.
+
+ - weak elitism make best replicators 'tend to' probabilistically remain in
+   the evolving pool but this is not 100% guaranteed.
+
+Weak elitism is a way to prevent premature convergence of the evolving pool to
+a local optimum by relaxing the selective pressure.
+
+
+Implementation
+==============
+
+Strong elitism is easily implemented by using elitist selectors and replacers
+in the evolutionary loop.
+
+On the opposite, weak elitism is implemented by using probabilistic
+selectors and replacers. However, we don't want to loose the best replicators
+along the way thus the use of elite archives that only stores the best
+replicators in a pool kept seperated from the main evolving pool(s).
+
+In ``evogrid``, this can be achieved with the use of a special implementation of
+the IPool interface named ``EliteArchive``::
+
+  >>> from zope.interface.verify import verifyClass
+  >>> from evogrid.interfaces import IPool
+  >>> from evogrid.common.pools import EliteArchive
+  >>> verifyClass(IPool, EliteArchive)
+  True
+
+Archives are built by adapting an existing pool instance (empty or not), thus
+we first need build a pool of evaluated replicators::
+
+  >>> from evogrid.common.pools import OrderedPool
+  >>> from evogrid.common.replicators import Replicator
+
+  >>> class EvaluatedReplicator(Replicator):
+  ...
+  ...     def __init__(self, cs=None, ev=None):
+  ...         self.candidate_solution = cs
+  ...         self.evaluation = ev
+  ...
+  ...     def __repr__(self):
+  ...         return 'EvaluatedReplicator(cs=%s, ev=%s)' % (
+  ...              self.candidate_solution, self.evaluation)
+  ...
+
+  >>> original_pool = OrderedPool(EvaluatedReplicator(ev=i) for i in xrange(5))
+  >>> original_pool
+  OrderedPool([EvaluatedReplicator(cs=None, ev=0),
+   EvaluatedReplicator(cs=None, ev=1),
+   EvaluatedReplicator(cs=None, ev=2),
+   EvaluatedReplicator(cs=None, ev=3),
+   EvaluatedReplicator(cs=None, ev=4)])
+
+We can then adapt that pool to turn it into an ``EliteArchive``, to keep only the
+bests::
+
+  >>> archive = EliteArchive(original_pool)
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=None, ev=4)])
+
+Be ware that the original pool has been affected by the operation::
+
+  >>> original_pool
+  OrderedPool([EvaluatedReplicator(cs=None, ev=4)])
+
+In fact the original pool is used as a storage backend for the archive::
+
+  >>> archive._storage is original_pool
+  True
+
+Keeping only the bests
+======================
+
+An elite archive differs from a normal pool in several matters. First it keeps
+only the bests::
+
+  >>> rep_3_3 = EvaluatedReplicator(cs=3, ev=3)
+  >>> archive.add(rep_3_3)
+  >>> rep_3_3 in archive
+  False
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=None, ev=4)])
+
+If the value of the added replicators is equivalent to those already in the
+archive but the differ in nature of candidate solution, they are all kept in
+the archive::
+
+  >>> rep_1_4 =  EvaluatedReplicator(cs=1, ev=4)
+  >>> rep_3_4 =  EvaluatedReplicator(cs=3, ev=4)
+  >>> archive.add(rep_1_4); archive.add(rep_3_4)
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=None, ev=4),
+   EvaluatedReplicator(cs=1, ev=4),
+   EvaluatedReplicator(cs=3, ev=4)])
+
+Avoiding redundancy
+===================
+
+If the added replicator is similar to one of the replicators already in the
+archive, it is not added to avoid redundancy::
+
+  >>> rep_3_4bis =  EvaluatedReplicator(cs=3, ev=4)
+  >>> rep_3_4bis in archive
+  False
+  >>> archive.add(rep_3_4bis)
+  >>> rep_3_4bis in archive
+  False
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=None, ev=4),
+   EvaluatedReplicator(cs=1, ev=4),
+   EvaluatedReplicator(cs=3, ev=4)])
+
+
+Increasing quality
+==================
+
+If the value of the added replicator is better than those already in the
+archive, the archive is cleared to host only the bests::
+
+  >>> rep_2_5 = EvaluatedReplicator(cs=2, ev=5)
+  >>> archive.add(rep_2_5)
+  >>> rep_2_5 in archive
+  True
+  >>> len(archive)
+  1
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=2, ev=5)])
+
+The archive logics then still holds to keep gathering a non redundant sample of
+the bests replicator it came to meet::
+
+  >>> rep_2_5bis = EvaluatedReplicator(cs=2, ev=5)
+  >>> archive.add(rep_2_5)
+  >>> rep_2_5bis in archive
+  False
+  >>> rep_5_5 = EvaluatedReplicator(cs=5, ev=5)
+  >>> archive.add(rep_5_5)
+  >>> rep_5_5 in archive
+  True
+
+
+Pool compatibility
+==================
+
+An archive implements the ``IPool`` API by delegating the remaining methods to
+its storage backend::
+
+  >>> for rep in archive:
+  ...    print rep
+  ...
+  EvaluatedReplicator(cs=2, ev=5)
+  EvaluatedReplicator(cs=5, ev=5)
+
+  >>> archive.pop() is rep_5_5
+  True
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=2, ev=5)])
+  >>> archive.remove(rep_2_5)
+  >>> archive
+  EliteArchive([])
+
+Note that the ``pool`` argument of the ``EliteArchive`` class can be omitted::
+
+  >>> archive = EliteArchive()
+  >>> archive
+  EliteArchive([])
+
+Or can just be a sequence of replicators::
+
+  >>> archive = EliteArchive([rep_2_5])
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=2, ev=5)])
+  >>> archive.clear()
+  >>> archive
+  EliteArchive([])
+
+
+Provider integration
+====================
+
+Our previously built archive can then made part of a provider chain through the
+use of the ``ProviderFromEliteArchive`` adapter::
+
+  >>> from evogrid.common.pools import ProviderFromEliteArchive
+  >>> from evogrid.interfaces import IProvider
+  >>> verifyClass(IProvider, ProviderFromEliteArchive)
+  True
+
+Let us first build a sample infinite random provider as our primary source of
+replicators::
+
+  >>> import random; random.seed(0) # reproducible tests
+  >>> from itertools import cycle, islice
+  >>> provider = (EvaluatedReplicator(cs=random.randint(0, 5),
+  ...                                 ev=random.randint(0, 10))
+  ...             for _ in cycle([_]))        # infinite cycle
+
+  >>> list(islice(provider, 3))
+  [EvaluatedReplicator(cs=5, ev=8),
+   EvaluatedReplicator(cs=2, ev=2),
+   EvaluatedReplicator(cs=3, ev=4)]
+
+We can now adapt the archive to the provider and watch the archive collecting
+the best replicators when pulling replicators out of the provider::
+
+  >>> archive = EliteArchive(OrderedPool())
+  >>> archiver_provider = ProviderFromEliteArchive(archive, provider)
+  >>> archive
+  EliteArchive([])
+
+  >>> archiver_provider.next()
+  EvaluatedReplicator(cs=4, ev=3)
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=4, ev=3)])
+
+  >>> archiver_provider.next()
+  EvaluatedReplicator(cs=2, ev=6)
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=2, ev=6)])
+
+  >>> archiver_provider.next()
+  EvaluatedReplicator(cs=5, ev=5)
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=2, ev=6)])
+
+  >>> archiver_provider.next()
+  EvaluatedReplicator(cs=1, ev=8)
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=1, ev=8)])
+
+By going on that way, the archive will finally start to collect the maximally
+rated replicators (with and evaluation of 10) and then start to collect all the
+possible candidate_solution without redundancy::
+
+  >>> def pull(number): list(islice(archiver_provider, number))
+  >>> pull(20)
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=5, ev=10),
+                EvaluatedReplicator(cs=1, ev=10)])
+
+  >>> pull(50)
+  >>> archive
+  EliteArchive([EvaluatedReplicator(cs=5, ev=10),
+   EvaluatedReplicator(cs=1, ev=10),
+   EvaluatedReplicator(cs=3, ev=10),
+   EvaluatedReplicator(cs=2, ev=10),
+   EvaluatedReplicator(cs=4, ev=10),
+   EvaluatedReplicator(cs=0, ev=10)])
+

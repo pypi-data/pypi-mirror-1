@@ -1,0 +1,480 @@
+======================
+Checkpointing scenarii
+======================
+
+:Author: Olivier Grisel <olivier.grisel@ensta.org>
+:Description: Checkpointing strategies in evogrid: how to stop the evolution
+
+A checkpointer is a component that tells whether an evolutionary process should
+stop or not. Checkpointers implement the ``ICheckpointer`` interface::
+
+  >>> from zope.interface.verify import verifyClass, verifyObject
+  >>> from evogrid.interfaces import IProvider, ICheckpointer, ICounter
+
+.. sectnum::    :depth: 2
+.. contents::   :depth: 2
+
+
+Time based checkpointing
+========================
+
+Checkpointer implementation that tells to stop after some delay expired::
+
+  >>> from evogrid.common.checkpointers import TimedCheckpointer
+  >>> verifyClass(ICheckpointer, TimedCheckpointer)
+  True
+  >>> time_checkpointer = TimedCheckpointer(0)
+  >>> time_checkpointer.should_stop()
+  True
+  >>> import time
+  >>> time_checkpointer2 = TimedCheckpointer(.1)
+  >>> time_checkpointer2.should_stop()
+  False
+  >>> time.sleep(.05)
+  >>> time_checkpointer2.should_stop()
+  False
+  >>> time.sleep(.1)
+  >>> time_checkpointer2.should_stop()
+  True
+
+Reseting the checkpointer set the reference time to now thus allowing to reuse
+the same checkpointer instance::
+
+  >>> time_checkpointer2.reset()
+  >>> time_checkpointer2.should_stop()
+  False
+
+
+Counter based checkpointing
+===========================
+
+
+Checkpoint counts
+-----------------
+
+Checkpointer implementation that tells to stop when it's counter reaches a
+predefined threshold::
+
+  >>> from evogrid.common.checkpointers import CounterCheckpointer
+  >>> verifyClass(ICheckpointer, CounterCheckpointer)
+  True
+  >>> verifyClass(ICounter, CounterCheckpointer)
+  True
+
+By default, CounterCheckpointer instances increment their internal counter
+automatically each time the ``should_stop`` method is called::
+
+  >>> counter_checkpointer = CounterCheckpointer(3)
+  >>> counter_checkpointer.count
+  0
+  >>> counter_checkpointer.should_stop()
+  False
+  >>> counter_checkpointer.count
+  1
+  >>> counter_checkpointer.should_stop()
+  False
+  >>> counter_checkpointer.should_stop()
+  True
+  >>> counter_checkpointer.count
+  3
+  >>> counter_checkpointer.should_stop()
+  True
+
+Resting set back the counter to 0::
+
+  >>> counter_checkpointer.reset()
+  >>> counter_checkpointer.should_stop()
+  False
+  >>> counter_checkpointer.count
+  1
+
+
+Evaluation counts
+-----------------
+
+The CounterCheckpointer instances can also get incremented externally::
+
+  >>> counter_checkpointer = CounterCheckpointer(3, autoincrement=False)
+  >>> counter_checkpointer.count
+  0
+  >>> counter_checkpointer.should_stop()
+  False
+  >>> counter_checkpointer.increment()
+  >>> counter_checkpointer.count
+  1
+  >>> counter_checkpointer.should_stop()
+  False
+  >>> counter_checkpointer.increment()
+  >>> counter_checkpointer.increment()
+  >>> counter_checkpointer.count
+  3
+  >>> counter_checkpointer.should_stop()
+  True
+  >>> counter_checkpointer.increment()
+  >>> counter_checkpointer.should_stop()
+  True
+
+This checkpointer is primarly meant to be used in conjunction with a counter
+aware evaluator implementation::
+
+   >>> class DummyEvaluator(object):
+   ...     def compute_fitness(self, cs):
+   ...         return 0
+   >>> evaluator = DummyEvaluator()
+
+Make that evaluator counter aware, a plug it with a new checkpointer instance::
+
+  >>> from evogrid.common.checkpointers import CountingEvaluator
+  >>> ccheckpointer = CounterCheckpointer(2, autoincrement=False)
+  >>> counting_evaluator = CountingEvaluator(ccheckpointer, evaluator)
+  >>> ccheckpointer.should_stop()
+  False
+  >>> ccheckpointer.count
+  0
+
+Using this evaluator will keep the checkpointer up to date::
+
+  >>> from evogrid.common.replicators import Replicator
+  >>> counting_evaluator.compute_fitness(Replicator())
+  0
+  >>> ccheckpointer.count
+  1
+  >>> ccheckpointer.should_stop()
+  False
+  >>> counting_evaluator.evaluate(Replicator())
+  >>> ccheckpointer.count
+  2
+  >>> ccheckpointer.should_stop()
+  True
+
+
+Provider counts
+---------------
+
+Similar external counting can be done against a provider::
+
+  >>> from evogrid.common.replicators import Replicator
+  >>> dummy_provider = (Replicator(cs=cs) for cs in xrange(100))
+
+As previously we build a ``CounterCheckpointer`` instance that does not increment
+it's counter by itself but by relying on an external adapted provider::
+
+  >>> ccheckpointer = CounterCheckpointer(2, autoincrement=False)
+  >>> from evogrid.common.checkpointers import CountingProvider
+  >>> counting_provider = CountingProvider(ccheckpointer, dummy_provider)
+
+We can then checkpoint as usual::
+
+  >>> for rep in counting_provider:
+  ...    print rep
+  ...    if ccheckpointer.should_stop():
+  ...        break
+  Replicator(cs=0)
+  Replicator(cs=1)
+
+
+Quality based checkpointing
+===========================
+
+
+Absolute quality checkpointing
+------------------------------
+
+The ``PoolQualityCheckpointer`` class provides a checkpointer implementation
+that watches the quality of the pool of replicators by comparing it's best
+element to a reference.
+
+To build such a checkpointer we first need a provider. The following provider
+can generate 100 replicators of increasing quality::
+
+  >>> class FakeReplicator:
+  ...     def __init__(self, ev=None):
+  ...         self.evaluation = ev
+  >>> provider = (FakeReplicator(ev) for ev in xrange(100))
+
+We then build an archive to collect the best replicators generated by the
+provider and then adapt that archive to the previous provider::
+
+  >>> from evogrid.common.pools import EliteArchive, ProviderFromEliteArchive
+  >>> archive = EliteArchive()
+  >>> archiver_provider = ProviderFromEliteArchive(archive, provider)
+
+We can then adapt the archive to a quality checking checkpointer that will keep
+watching it's content as we pull replicators out of the adapted provider::
+
+  >>> from evogrid.common.checkpointers import PoolQualityCheckpointer
+  >>> verifyClass(ICheckpointer, PoolQualityCheckpointer)
+  True
+  >>> qcheckpointer = PoolQualityCheckpointer(archive, evaluation=10)
+  >>> qcheckpointer.should_stop()
+  False
+
+We can then pull replicators out of the provider till the quality is good
+enough accroding to the checkpointer::
+
+  >>> for rep in archiver_provider:
+  ...     if qcheckpointer.should_stop():
+  ...         break
+  ...
+  >>> rep.evaluation
+  10
+  >>> rep in archive
+  True
+  >>> len(archive)
+  1
+
+We could also have directly provided a reference replicators instead of a
+reference evaluation::
+
+  >>> from itertools import islice
+  >>> qcheckpointer = PoolQualityCheckpointer(archive, rep=FakeReplicator(20))
+  >>> qcheckpointer.should_stop()
+  False
+  >>> [r.evaluation for r in islice(archiver_provider, 5)]
+  [11, 12, 13, 14, 15]
+  >>> qcheckpointer.should_stop()
+  False
+  >>> [r.evaluation for r in islice(archiver_provider, 5)]
+  [16, 17, 18, 19, 20]
+  >>> qcheckpointer.should_stop()
+  True
+
+The reseting operation on ``PoolQualityCheckpointer`` does not do anything::
+
+  >>> qcheckpointer.reset()
+  >>> qcheckpointer.should_stop()
+  True
+
+If we don't provide any reference, the checkpointer cannot work::
+
+  >>> qcheckpointer = PoolQualityCheckpointer(provider) #doctest: +ELLIPSIS
+  Traceback (most recent call last):
+  ...
+  ValueError: ...at least a reference replicator or a reference evaluation
+
+
+Quality Evolution Checkpointing
+-------------------------------
+
+The ``PoolEvolutionCheckpointer`` provides a similar implementation of the
+ICheckpointer interface, but instead of watching a pools absolute quality,
+it counts for how long its quality has not improved::
+
+  >>> from evogrid.common.checkpointers import PoolEvolutionCheckpointer
+  >>> verifyClass(ICheckpointer, PoolEvolutionCheckpointer)
+  True
+
+`PoolEvolutionCheckpointer` can works with elite archives as previously but can
+alos work with regular pools::
+
+  >>> from evogrid.common.pools import Pool
+  >>> pool = Pool()
+  >>> evo_checkpointer = PoolEvolutionCheckpointer(pool, maxcount=2)
+  >>> evo_checkpointer.should_stop()
+  False
+  >>> evo_checkpointer.should_stop()
+  False
+  >>> evo_checkpointer.should_stop()
+  True
+
+By adding a new element to the pool (that is better than nothing), the internal
+counter is reset::
+
+  >>> pool.add(FakeReplicator(2))
+  >>> evo_checkpointer.should_stop()
+  False
+
+If we add evaluators not better than the elements already in the pool, the
+counter is increased at each call till it reaches the limit::
+
+  >>> pool.add(FakeReplicator(1))
+  >>> evo_checkpointer.should_stop()
+  False
+  >>> pool.add(FakeReplicator(2))
+  >>> evo_checkpointer.should_stop()
+  True
+
+By adding better replicators again the checkpointer restart a new count down::
+
+  >>> pool.add(FakeReplicator(3))
+  >>> evo_checkpointer.should_stop()
+  False
+  >>> evo_checkpointer.should_stop()
+  False
+  >>> evo_checkpointer.should_stop()
+  True
+
+The internal state can also get reinitialised explicitly with the reset call::
+
+  >>> evo_checkpointer.reset()
+  >>> evo_checkpointer.should_stop()
+  False
+  >>> evo_checkpointer.should_stop()
+  False
+  >>> evo_checkpointer.should_stop()
+  True
+
+Note that the ``PoolEvolutionCheckpointer`` can get initialized with non empty
+pools as well::
+
+  >>> pool2 = Pool([FakeReplicator(3)])
+  >>> evo_checkpointer2 = PoolEvolutionCheckpointer(pool2, maxcount=1)
+  >>> evo_checkpointer2.should_stop()
+  False
+  >>> pool2.add(FakeReplicator(1))
+  >>> evo_checkpointer2.should_stop()
+  True
+
+
+Combining checkpointers
+=======================
+
+evogrid makes it possible to combine an arbitrary number of checkpointers with
+logical And and Or operations. For instance let us say we want to stops if the
+quality is enough or we have reached a maximum number of counts::
+
+  >>> elites = EliteArchive()
+  >>> provider = (FakeReplicator(ev) for ev in xrange(100))
+  >>> provider_archiver = ProviderFromEliteArchive(elites, provider)
+  >>> qcheckpointer = PoolQualityCheckpointer(elites, evaluation=10)
+  >>> ccheckpointer = CounterCheckpointer(5)
+
+
+OrCompoundCheckpointer
+----------------------
+
+We can combine the two previous checkpointers into a third compound
+checkpointers that computes the logical "Or"::
+
+  >>> from evogrid.common.checkpointers import OrCompoundCheckpointer
+  >>> or_checkpointer = OrCompoundCheckpointer(ccheckpointer, qcheckpointer)
+  >>> verifyObject(ICheckpointer, or_checkpointer)
+  True
+  >>> results = []
+  >>> for rep in provider_archiver:
+  ...    results.append(rep.evaluation)
+  ...    if or_checkpointer.should_stop():
+  ...        break
+  >>> results
+  [0, 1, 2, 3, 4]
+  >>> ccheckpointer.should_stop()
+  True
+  >>> qcheckpointer.should_stop()
+  False
+  >>> elites.pop().evaluation
+  4
+
+By reseting a compound checkpointer, all sub-checkpointers are reseted::
+
+  >>> or_checkpointer.reset()
+  >>> or_checkpointer.should_stop()
+  False
+  >>> ccheckpointer.should_stop()
+  False
+  >>> qcheckpointer.should_stop()
+  False
+
+
+AndCompoundCheckpointer
+-----------------------
+
+We can also compute a logical "And" in a similar way::
+
+  >>> from evogrid.common.checkpointers import AndCompoundCheckpointer
+  >>> and_checkpointer = AndCompoundCheckpointer(ccheckpointer, qcheckpointer)
+  >>> verifyObject(ICheckpointer, and_checkpointer)
+  True
+  >>> results = []
+  >>> for rep in provider_archiver:
+  ...    results.append(rep.evaluation)
+  ...    if and_checkpointer.should_stop():
+  ...        break
+  >>> results
+  [5, 6, 7, 8, 9, 10]
+  >>> ccheckpointer.should_stop()
+  True
+  >>> qcheckpointer.should_stop()
+  True
+  >>> elites.pop().evaluation
+  10
+
+By reseting a compound checkpointer, all sub-checkpointers are reseted::
+
+  >>> and_checkpointer.reset()
+  >>> and_checkpointer.should_stop()
+  False
+  >>> ccheckpointer.should_stop()
+  False
+  >>> qcheckpointer.should_stop()
+  False
+
+
+Generic compound checkpointing
+------------------------------
+
+In order to make it simpler to build compound checkpointers, ``evogrid`` also
+provides the ``GenericProviderCheckpointer`` component that both implements
+`IProvider` and ``ICheckpointer``::
+
+  >>> from evogrid.common.checkpointers import GenericProviderCheckpointer
+  >>> verifyClass(ICheckpointer, GenericProviderCheckpointer)
+  True
+
+The ``GenericProviderCheckpointer`` component is n ``IProvider`` adapter designed to
+work as part of a provider chain::
+
+  >>> upstream_provider = (FakeReplicator(ev) for ev in xrange(100))
+
+The semantics of this component is defined at init time by the arguments given
+to it's constructor. The first argument is the provider to adapt. All other
+arguments are optional. For each possible subset of arguments
+`GenericProviderCheckpointer` will internally build a matching list of
+checkpointers that are combined by an ``OrCompoundCheckpointer`` instance by
+default::
+
+  >>> gpc = GenericProviderCheckpointer(
+  ...     upstream_provider, maxtime=10, maxcount=200, maxsteadyness=20,
+  ...     reference=4)
+  >>> verifyObject(IProvider, gpc)
+  True
+  >>> while not gpc.should_stop():
+  ...     print gpc.next().evaluation
+  0
+  1
+  2
+  3
+  4
+  >>> gpc.archive.pop().evaluation
+  4
+
+In this case the embedded ``PoolQualityCheckpointer`` was the first element to
+tell the global ``gpc`` to stop. Let us build a new sample where the original
+provider has a stationery phase::
+
+  >>> from itertools import chain
+  >>> p1 = (FakeReplicator(ev) for ev in xrange(10))
+  >>> p2 = (FakeReplicator(3) for ev in xrange(20))
+  >>> p3 = (FakeReplicator(ev+4) for ev in xrange(100))
+  >>> provider = chain(p1, p2, p3)
+
+Build a GPC that won't be patient enough to wait till the end of the stationery
+phase::
+
+  >>> gpc = GenericProviderCheckpointer(provider, maxsteadyness=10, reference=50)
+  >>> for rep in gpc:
+  ...     if gpc.should_stop():
+  ...         break
+  >>> rep.evaluation
+  3
+  >>> gpc.archive.pop().evaluation
+  9
+  >>> gpc.next().evaluation
+  3
+
+The expected absolute quality of ``50`` was never reached.
+
+As any checkpointer, the ``GPC`` also implements the ``reset`` method::
+
+  >>> gpc.reset()
+  >>> gpc.should_stop()
+  False
