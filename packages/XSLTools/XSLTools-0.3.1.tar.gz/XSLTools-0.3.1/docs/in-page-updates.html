@@ -1,0 +1,225 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><head>
+  <meta content="text/html;charset=ISO-8859-1" http-equiv="Content-Type" />
+  
+  <title>Creating Applications: In-Page Updates</title><meta name="generator" content="amaya 8.1a, see http://www.w3.org/Amaya/" />
+  <link href="styles.css" rel="stylesheet" type="text/css" /></head>
+<body>
+<h1>Creating Applications: In-Page Updates</h1>
+<p>One fashionable avenue in Web application design has been that of
+updating Web pages in applications without having to refresh the entire
+page every time an action is performed. Together with some JavaScript
+support in the browser, XSLForms also provides some functionality for
+such "in-page" or "live" updates.</p>
+<p>Consider the addition of a comment field to our application. Here is
+how the HTML code might look:</p>
+<pre>&lt;div template:element="item"&gt;<br />  &lt;p&gt;<br />    Some item: &lt;input template:attribute-field="value" name="..." type="text" value="..." /&gt;<br />    &lt;input name="..." template:selector-field="remove" type="submit" value="Remove" /&gt;<br />  &lt;/p&gt;<br />  &lt;p&gt;<br />    Item type:<br />    &lt;select template:multiple-choice-list-field="type,type-enum,value" name="..." multiple="multiple"&gt;<br />      &lt;option template:multiple-choice-list-value="type-enum,value,selected" value="..." /&gt;<br />    &lt;/select&gt;<br />  &lt;/p&gt;<br />  <span style="font-weight: bold;">&lt;p template:element="options"&gt;</span><br style="font-weight: bold;" /><span style="font-weight: bold;">    &lt;span </span><span style="font-weight: bold;">template:element="comment"&gt;</span><span style="font-weight: bold;">Comment:</span><br style="font-weight: bold;" /><span style="font-weight: bold;">      &lt;textarea template:attribute-area="value,insert" name="..." cols="40" rows="3"&gt;</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        Some comment</span><br style="font-weight: bold;" /><span style="font-weight: bold;">      &lt;/textarea&gt;<br />    &lt;/span&gt;<br style="font-weight: bold;" /></span><span style="font-weight: bold;">  &lt;/p&gt;</span><br />  &lt;p&gt;<br />    Itself containing more items:<br />  &lt;/p&gt;<br />  &lt;p template:element="subitem"&gt;<br />    Sub-item: &lt;input template:attribute-field="subvalue" name="..." type="text" value="..." /&gt;<br />    &lt;input name="..." template:selector-field="remove2" type="submit" value="Remove" /&gt;<br />  &lt;/p&gt;<br />  &lt;p&gt;<br />    &lt;input name="..." template:selector-field="add2,subitem" type="submit" value="Add subitem" /&gt;<br />  &lt;/p&gt;<br />&lt;/div&gt;</pre>
+<p>Here, a&nbsp;<code>textarea</code> element has been added with a special&nbsp;<code>template:attribute-area</code> annotation being used to state that the contents of the element are to be mapped to the <code>value</code>&nbsp;attribute, and that the attribute contents are to be inserted inside the&nbsp;<code>textarea</code> element (replacing the <code>Some Comment</code> text).</p><p>The newly-added&nbsp;<code>textarea</code> field might actually&nbsp;be
+presented in the application in its current state, despite the&nbsp;lack of any <code>options</code> or <code>comment</code>
+elements
+manipulated by the
+application, due to the document initialisation mechanism employed by
+the application. However, what would be more interesting is the
+possibility of only showing the comment field if something else in the
+document had a certain value or state.</p>
+<p>Let us imagine that if the type of an item was set to "Personal",
+the comment field would appear and permit the recording of some text
+for that item. One approach that would make this possible&nbsp;is to
+add a transformation which checks the type values set for each of the
+items and removes the <code>options</code> and <code>comment</code> elements for items which do not qualify. In the Web resource, we&nbsp;make the following
+changes:</p>
+<pre>    transform_resources = {<br />        "comments" : ["structure_comments.xsl"]<br />        }</pre>
+<p>What this does is to state that when we carry out the <code>comments</code>
+transformation, the specified stylesheet is employed, filtering out the
+comments for non-qualifying items and preserving them for qualifying
+items.</p><p>Further down in the code, we add a transformation:</p><pre>        # After the document initialisation...<br /><br />        # Add the comments.<br /><br />        comments_xsl_list = self.prepare_transform("comments")<br />        structure = self.get_result(comments_xsl_list, structure)</pre>
+<p>This new stylesheet works according to the following principles:</p>
+<ol>
+  <li>Descend into the form data structure, copying all elements,
+attributes and text that the stylesheet is not programmed to recognise.</li>
+  <li>When encountering an&nbsp;<code>item</code> element (which the
+stylesheet is programmed to recognise), do the following:<br />
+    <ol>
+      <li>Copy the&nbsp;element "skeleton" and its attributes so that
+the&nbsp;<code>value</code> attribute is retained.</li>
+      <li>Produce a new <code>options</code> element and process it.</li>
+    </ol>
+  </li>
+  <li>When processing a new <code>options</code> element, do the
+following:<br />
+    <ol>
+      <li>Inside this new <code>options</code> element, investigate
+the values associated with the&nbsp;<code>type</code> element.</li>
+      <li>If any of the selected type values represents the "Personal" category, make a new <code>comment</code>
+element, then&nbsp;add&nbsp;any attributes that may be found on
+existing <code>comment</code> elements within the current <code>type</code>
+element.</li>
+    </ol>
+  </li>
+</ol>
+<p>Since this stylesheet is used after the document initialisation,
+we may (and even must) take advantage of the results of that activity, including noting that selected values on <code>type-enum</code>
+elements are marked with the <code>value-is-set</code> attribute.</p>
+<p>The stylesheet source code can be found in&nbsp;<code>examples/Common/VerySimple/Resources/structure_comments.xsl</code>.</p>
+<h2>Limitations and Enhancements</h2>
+<p>Whilst the above modifications adds a comment field for each item
+with a type of "Personal", and whilst the comment field will appear and
+disappear for items as their type changes, such updates only take place
+when items and subitems are added and removed. We could add an update
+button to the page which performs an explicit refresh of the page
+without adding or removing anything, and for the sake of usability, we
+probably should add such a button (just below the&nbsp;<code>Add item</code>
+button):</p>
+<pre>&lt;p&gt;<br />  &lt;input name="update" type="submit" value="Update" /&gt;<br />&lt;/p&gt;</pre>
+<p>However, we could also add an in-page update to make each comments
+field appear and disappear as soon as we have changed the type of an
+item.</p>
+<h3>Template Changes</h3>
+<p>We must first define a region of the template where a comment fields
+can be added and removed, regardless of whether such a field existed
+there before. The above template code needs modifying slightly to
+permit this:</p>
+<pre>  <span style="font-weight: bold;">&lt;p template:element="options" template:id="comment-node" id="{template:this-element()}"&gt;</span><br style="font-weight: bold;" /><span style="font-weight: bold;">    &lt;span template:element="comment"&gt;</span>Comment:<br />      &lt;textarea template:attribute-area="value,insert" name="..." cols="40" rows="3"&gt;<br />        Some comment<br />      &lt;/textarea&gt;<br />    <span style="font-weight: bold;">&lt;/span&gt;</span><br />  &lt;/p&gt;</pre>
+<p>Here, we have added this region definition to the paragraph
+surrounding the comment field, annotating the paragraph with the
+following attributes:</p>
+<ul>
+  <li>The&nbsp;<code>template:id</code> attribute is used to define a
+template fragment used only to prepare the updated part of the Web
+page. Here we define the fragment or region as being just this
+paragraph.</li>
+  <li>The standard HTML&nbsp;<code>id</code> attribute is used to
+define which part of the active Web page will be replaced when
+performing an in-page update. This attribute needs to have a unique
+value, but the easiest basis for such a value is a selector-style
+reference to the <code>options</code> element within which the&nbsp;<code>comment</code>
+element resides.</li>
+</ul>
+<p>Another change has been to put the&nbsp;<code>template:element</code>
+annotation inside the above fragment or region annotations. Had we not
+done this, the lack of a&nbsp;<code>comment</code> element in the form
+data could have prevented the&nbsp;<code>id</code> attribute from
+appearing in the Web page, this preventing any hope of an in-page
+update since there would be no way of knowing where such an update
+should be applied.</p>
+<h3>Adding JavaScript</h3>
+<p>Since we rely on JavaScript support in the browser, the following
+references to scripts must also be added to the template, as shown in
+the following excerpt:</p>
+<pre>&lt;head&gt;<br />  &lt;title&gt;Example&lt;/title&gt;<br />  <span style="font-weight: bold;">&lt;script type="text/javascript" src="scripts/sarissa.js"&gt; &lt;/script&gt;</span><br style="font-weight: bold;" /><span style="font-weight: bold;">  &lt;script type="text/javascript" src="scripts/XSLForms.js"&gt; &lt;/script&gt;</span><br />&lt;/head&gt;</pre>
+<p>These special script files can be found in&nbsp;<code>examples/Common/VerySimple/Resources/scripts</code>.</p>
+<p>Now we can concentrate on adding the event which triggers an in-page
+update. Since it is the type values that cause each comment field to be
+added or removed, we add an event attribute on the form field
+responsible for displaying the type values:</p>
+<pre>  &lt;p&gt;<br />    Item type:<br />    &lt;select template:multiple-choice-list-field="type,type-enum,value" name="..." multiple="multiple"<br />      <span style="font-weight: bold;">onchange="requestUpdate(</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        'comments',</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        '{template:list-attribute('type-enum', 'value')}',</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        '{template:other-elements(../options)}',</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        '{template:child-attribute('value', template:child-element('comment', 1, template:other-elements(../options)))}',</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        '/structure/item/options')"</span>&gt;<br />      &lt;option template:multiple-choice-list-value="type-enum,value,selected" value="..." /&gt;<br />    &lt;/select&gt;<br />  &lt;/p&gt;</pre>
+<p>This complicated string calls a special update request JavaScript
+function which triggers the in-page update, and it specifies the
+following things:</p>
+<dl>
+  <dt><span style="font-weight: bold;">'comments'</span></dt>
+  <dd>The URL which will serve the in-page update requested by this
+field. Since the value stated is a relative reference to a resource, it
+will produce something like the following:<br />
+    <pre>http://localhost:8080/comments</pre>
+So the request for an in-page update will be sent to this
+generated URL.</dd>
+  <dt><span style="font-weight: bold;">'{template:list-attribute('type-enum',
+'value')}'</span></dt>
+  <dd>The fields which are going to be used in the processing of the
+update. Since the presence of the comment field depends on a
+specific&nbsp;<code>type</code> element and its&nbsp;<code>type-enum</code>
+elements'&nbsp;<code>value</code> attributes, we specify the names of
+the fields which yield these values.</dd>
+  <dt><span style="font-weight: bold;">'{template:other-elements(../options)}'</span></dt>
+  <dd>The region which is to be updated. Here, we recall that we
+defined the region using a special reference to the <code>options</code>
+element holding&nbsp;<code>comment</code> element. Thus, we use a
+special value which also refers to that element from the context of
+the&nbsp;<code>type</code> element.</dd>
+  <dt><span style="font-weight: bold;">'{template:child-attribute('value',
+template:child-element('comment', 1,
+template:other-elements(../options)))}'</span></dt>
+  <dd>Even when the types are changed, it may be the case that an
+exposed comment field does not disappear (for example, if we already
+have "Personal" selected but select "Important" in addition), and so we
+need to provide the details of the field which holds the value of the
+comment text. We find such details by referencing the <code>options</code>
+element from the <code>type</code> element and stating that we want
+the <code>value</code> attribute on any <code>comment</code>
+element that may exist. Note that we cannot reference the <code>comment</code>
+element directly since it may not exist at first, but then come into
+being after an update, but not be referenced here in this parameter;
+therefore, we need to make up the final part of the reference using the
+special <code>template:child-attribute</code>
+and <code>template:child-element</code> functions.</dd>
+  <dt><span style="font-weight: bold;">'/structure/item/options'</span></dt>
+  <dd>Finally, we need to provide some context to the application to
+tell it something about where in the complete form data structure the
+updated information resides.</dd>
+</dl>
+<p>Of course, all this is pretty complicated and at some point in the
+future, a simplified way of triggering in-page updates will be
+introduced.</p>
+<h3>Updating the Web Application</h3>
+<p>To support both normal requests for Web pages and the special
+in-page requests, we must make some modifications to the Web
+application. First, we must introduce some infrastructure to handle the
+requests for the JavaScript files separately from the requests for
+pages from our application. Some standard WebStack resources can be
+used to help with this, and we add some imports at the top of our
+source file:</p>
+<pre>#!/usr/bin/env python<br /><br />"A very simple example application."<br /><br />import WebStack.Generic<br />import XSLForms.Resources.WebResources<br />import XSLForms.Utils<br />import os<br /><br /><span style="font-weight: bold;"># Site map imports.</span><br style="font-weight: bold;" /><br style="font-weight: bold;" /><span style="font-weight: bold;">from WebStack.Resources.ResourceMap import MapResource</span><br style="font-weight: bold;" /><span style="font-weight: bold;">from WebStack.Resources.Static import DirectoryResource</span></pre>
+<p>Then, we define the resource class as <a href="Web-resource.html">before</a>,
+but with an additional attribute:</p>
+<pre># Resource classes.<br /><br />class VerySimpleResource(XSLForms.Resources.WebResources.XSLFormsResource):<br /><br />    "A very simple resource providing a hierarchy of editable fields."<br /><br />    resource_dir = os.path.join(os.path.split(__file__)[0], "Resources")<br />    encoding = "utf-8"<br />    template_resources = {<br />        "structure" : ("structure_multivalue_template.xhtml", "structure_output.xsl")<br />        }<br />    init_resources = {<br />        "structure" : ("structure_multivalue_template.xhtml", "structure_input.xsl")<br />        }<br />    transform_resources = {<br />        "comments" : ["structure_comments.xsl"]<br />        }<br />    document_resources = {<br />        "types" : "structure_types.xml"<br />        }<br /><span style="font-weight: bold;">    in_page_resources = {</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        "comments" : ("structure_output_comments.xsl", "comment-node")</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        }</span></pre>
+<p>This new attribute provides information about the in-page request to
+retrieve comment regions of the Web form, and it consists of the
+stylesheet filename that will be generated to produce the page
+fragments for such comment regions, along with the region marker that
+we defined above.</p>
+<p>The&nbsp;<code>respond_to_form</code> method now also includes some
+additional code:</p>
+<pre>    def respond_to_form(self, trans, form):<br /><br />        """<br />        Respond to a request having the given transaction 'trans' and the given<br />        'form' information.<br />        """<br /><br />        <span style="font-weight: bold;">in_page_resource = self.get_in_page_resource(trans)</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        parameters = form.get_parameters()</span><br />        documents = form.get_documents()<br /></pre>
+<p>Here, we find out whether an in-page update is requested, along with
+the raw parameters of the request, some of which will be used later on
+in the method.</p>
+<p>The discovery of the form data structure and the addition and
+removal of elements happens as before, as does the merging of type
+values and the comment field, if applicable:</p>
+<pre>        # Ensure the presence of a document.<br /><br />        if documents.has_key("structure"):<br />            structure = documents["structure"]<br />        else:<br />            structure = form.new_instance("structure")<br /><br />        # Add and remove elements according to the selectors found.<br /><br />        selectors = form.get_selectors()<br />        XSLForms.Utils.remove_elements(selectors.get("remove2"))<br />        XSLForms.Utils.add_elements(selectors.get("add2"), "subitem")<br />        XSLForms.Utils.remove_elements(selectors.get("remove"))<br />        XSLForms.Utils.add_elements(selectors.get("add"), "item")<br /><br />        # Initialise the document, adding enumerations/ranges.<br /><br />        structure_xsl = self.prepare_initialiser("structure")<br />        types_xml = self.prepare_document("types")<br />        structure = self.get_result([structure_xsl], structure, references={"type" : types_xml})<br /><br />        # Add the comments.<br /><br />        comments_xsl_list = self.prepare_transform("comments")<br />        structure = self.get_result(comments_xsl_list, structure)<br /></pre>
+<p>The significant changes begin when presenting the result of the
+request processing:</p>
+<pre>        # Start the response.<br /><br />        trans.set_content_type(WebStack.Generic.ContentType("application/xhtml+xml", self.encoding))<br /><br /><span style="font-weight: bold;"></span><span style="font-weight: bold;">        # Ensure that an output stylesheet exists.</span><br style="font-weight: bold;" /><br style="font-weight: bold;" /><span style="font-weight: bold;">        if in_page_resource in self.in_page_resources.keys():</span><br style="font-weight: bold;" /><span style="font-weight: bold;">            trans_xsl = self.prepare_fragment("structure", in_page_resource)</span><span style="font-weight: bold;"></span><br style="font-weight: bold;" /><span style="font-weight: bold;">            stylesheet_parameters = self.prepare_parameters(parameters)</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        else:</span><br style="font-weight: bold;" /><span style="font-weight: bold;">            trans_xsl = self.prepare_output("structure")<br /></span>    <span style="font-weight: bold;"></span><span style="font-weight: bold;">        stylesheet_parameters = {}</span></pre>
+<p>Instead of just obtaining a stylesheet for the&nbsp;<code>structure</code>
+document, we instead check to see if an in-page update is being
+requested and, if so, prepare the stylesheet representing the fragment
+of the Web form to be presented. Additionally, we obtain special
+stylesheet parameters using the raw request parameters; this introduces
+information that will be used to control the
+stylesheet when making the final Web page output.</p>
+<p>Finally, we send the output to the user but employing the additional
+stylesheet parameters to configure the result:</p>
+<pre><span style="font-weight: bold;">        # Complete the response.<br /><br />        self.send_output(trans, [trans_xsl], structure<span style="font-weight: bold;">, stylesheet_parameters</span>)</span></pre>
+<p>In order to introduce the infrastructure mentioned above which
+separates requests for Web pages from requests for JavaScript files, we
+need to provide a more sophisticated implementation of the&nbsp;<code>get_site</code>
+function:</p>
+<pre><span style="font-weight: bold;"># Site map initialisation.</span><br style="font-weight: bold;" /><br style="font-weight: bold;" /><span style="font-weight: bold;">def get_site():</span><br style="font-weight: bold;" /><br style="font-weight: bold;" /><span style="font-weight: bold;">    "Return a simple Web site resource."</span><br style="font-weight: bold;" /><br style="font-weight: bold;" /><span style="font-weight: bold;">    # Get the main resource and the directory used by the application.</span><br style="font-weight: bold;" /><br style="font-weight: bold;" /><span style="font-weight: bold;">    very_simple_resource = VerySimpleResource()</span><br style="font-weight: bold;" /><span style="font-weight: bold;">    directory = very_simple_resource.resource_dir</span><br style="font-weight: bold;" /><br style="font-weight: bold;" /><span style="font-weight: bold;">    # Make a simple Web site.</span><br style="font-weight: bold;" /><br style="font-weight: bold;" /><span style="font-weight: bold;">    resource = MapResource({</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        # Static resources:</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        "scripts" : DirectoryResource(os.path.join(directory, "scripts"), {"js" : "text/javascript"}),</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        # Main page and in-page resources:</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        None : very_simple_resource</span><br style="font-weight: bold;" /><span style="font-weight: bold;">        })</span><br style="font-weight: bold;" /><br style="font-weight: bold;" /><span style="font-weight: bold;">    return resource</span></pre>
+<p>What this does is to create a resource for the application, as
+before, but then to place the resource into a special WebStack resource
+which examines the path or URL on the incoming requests and directs
+such requests according to the following scheme:</p>
+<ul>
+  <li>If the request mentions something under&nbsp;<code>scripts</code>
+in its URL, we employ the WebStack <code>DirectoryResource</code> to
+send the file from the&nbsp;<code>scripts</code> subdirectory of the
+application's <code>Resources</code> directory.</li>
+  <li>Otherwise, we pass the request on to our application resource in
+order to produce a Web page for the user.</li>
+</ul>
+<p>Thus, when the user's browser asks for a script file, it gets a
+script file; otherwise it gets a Web page showing either all of the
+form (if a normal request is received), or a part of the form (if an
+in-page request is received).</p>
+</body></html>
