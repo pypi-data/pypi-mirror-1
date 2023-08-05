@@ -1,0 +1,1 @@
+Nothing really special.  Lets you use use Python string Templates with software that supports python.templating.engines plugins (TurboGears, Buffet, etc).
