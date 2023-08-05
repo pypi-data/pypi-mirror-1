@@ -1,0 +1,198 @@
+MP3 (MPEG-1 Audio Layer 3)
+==========================
+
+The ``p4a.audio.mp3`` package provides an abstraction layer for sync'ing
+content that contains ID3-based metadata -- specifically for the
+MPEG-1 Audio Layer 3 type.
+
+Audio Image (Album Art)
+-----------------------
+
+ID3 can contain audio images which are normally associated with album art.
+
+    >>> from p4a.audio.mp3 import _audiodata
+    >>> from OFS import Image as ofsimage
+    >>> from p4a.common import pkgutils
+    >>> from p4a.audio.mp3.thirdparty import eyeD3
+    >>> import os
+    >>> import shutil
+    >>> import tempfile
+
+    >>> mp3s = {}
+    >>> samplesdir = pkgutils.find_dir('p4a.audio', 'samples')
+    >>> tmpdir = tempfile.mkdtemp()
+    >>> for x in os.listdir(samplesdir):
+    ...     if x.endswith('.mp3'):
+    ...         mp3s[x] = os.path.join(samplesdir, x)
+    ...         shutil.copy(mp3s[x], tmpdir)
+    ...         mp3s[x] = os.path.join(tmpdir, x)
+
+Of course trying to update image data on an mp3 with no image data
+should add the append the image as a new frame.
+
+    >>> filename = 'test-no-images.mp3'
+    >>> fin = open(mp3s[filename], 'rb')
+    >>> image = ofsimage.Image(filename, filename, fin)
+
+    >>> id3tags = eyeD3.Tag()
+    >>> ignored = id3tags.link(mp3s[filename])
+    >>> fin.close()
+    >>> id3tags.getImages()
+    []
+
+    >>> _audiodata.update_audio_image(id3tags, image)
+    '...test-no-images.mp3'
+
+    >>> id3tags.getImages()
+    [<p4a.audio.mp3.thirdparty.eyeD3.frames.ImageFrame ...>]
+    >>> id3tags.getImages()[0].pictureType
+    3
+
+Make sure accessing an mp3 file with audio images in the ID3 info
+works by replacing the first frame that is an image with the new image
+we've provided.
+
+    >>> filename = 'test-full.mp3'
+    >>> fin = open(mp3s['test-full.mp3'], 'rb')
+    >>> image = ofsimage.Image(filename, filename, fin)
+
+    >>> id3tags = eyeD3.Tag()
+    >>> ignored = id3tags.link(mp3s[filename])
+    >>> fin.close()
+    >>> id3tags.getImages()
+    [<p4a.audio.mp3.thirdparty.eyeD3.frames.ImageFrame ...>]
+
+    >>> _audiodata.update_audio_image(id3tags, image)
+    '...test-full.mp3'
+
+    >>> id3tags.getImages()
+    [<p4a.audio.mp3.thirdparty.eyeD3.frames.ImageFrame ...>]
+    >>> id3tags.getImages()[0].pictureType
+    3
+
+Data Accessor
+-------------
+
+The primary component of the mp3 audio support is that it must provide a
+``IAudioDataAccessor`` adapter.
+
+    >>> accessor = _audiodata.MP3AudioDataAccessor(None)
+
+Make sure the type is returned properly.
+
+    >>> accessor.audio_type
+    u'MPEG-1 Audio Layer 3'
+
+The audio information should be working as well.
+
+    >>> from zope import interface
+    >>> from p4a.audio import interfaces
+    >>> from zope.app.annotation.interfaces import IAnnotations
+    >>> from p4a.audio import audioanno
+    >>> class MockFile(audioanno.AnnotationAudio):
+    ...     interface.implements(IAnnotations)
+    ...     def __init__(self):
+    ...         self.annotations = {}
+    ...         self.annotations[self.ANNO_KEY] = {}
+    ...     def get(self, key, default=None):
+    ...         return self.annotations.get(key, default)
+
+    >>> accessor = _audiodata.MP3AudioDataAccessor(MockFile())
+    >>> hasattr(accessor, '_cached_audio')
+    False
+    >>> accessor._audio
+    <MockFile object ...>
+
+Now that the ``_audio`` attribute has been requested for the first
+time, the cached var should be setup.
+
+    >>> hasattr(accessor, '_cached_audio')
+    True
+    >>> accessor._cached_audio is accessor._audio
+    True
+
+Accessing the audio data as annotations is simple enough.
+
+    >>> accessor._audio_data
+    {}
+
+Loading the mp3 information should populate the audio implementation.  But
+first, if we give it an invalid filename, we should get invalid data setup.
+
+    >>> accessor.load(None)
+
+    >>> accessor._audio_data['title']
+    'ERROR'
+
+And now with a real file.
+
+    >>> accessor.load(mp3s['test-full.mp3'])
+
+    >>> accessor._audio_data['title']
+    u'Test of the Emercy Broadcast System'
+    >>> accessor._audio_data['artist']
+    u'Rocky Burt'
+    >>> accessor._audio_data['album']
+    u'Emergencies All Around Us'
+    >>> accessor._audio_data['year']
+    '2006'
+    >>> accessor._audio_data['idtrack']
+    '1'
+    >>> accessor._audio_data['genre']
+    28
+
+And with a messed up genre the genre should get set to None.
+
+    >>> accessor._audio_data['genre'] = None
+    >>> accessor.load(mp3s['test-full-bad-genre.mp3'])
+    >>> accessor._audio_data['genre'] is None
+    True
+
+    >>> accessor._audio_data['title'] = None
+    >>> accessor.load(mp3s['test-full-bad-genre-no-title.mp3'])
+    >>> accessor._audio_data['genre'] is None
+    True
+
+And now storing the info back to the file.
+
+    >>> mockfile = MockFile()
+    >>> accessor = _audiodata.MP3AudioDataAccessor(mockfile)
+
+We tweak some of the properties.
+
+    >>> mockfile.title = u'title1'
+    >>> mockfile.artist = u'artist1'
+    >>> mockfile.album = u'album1'
+    >>> mockfile.year = 1981
+    >>> mockfile.idtrack = u'idtrack1'
+    >>> mockfile.comment = u'hello world'
+    >>> mockfile.audio_image = image
+    >>> filename = 'test-full.mp3'
+    >>> accessor.store(mp3s[filename])
+
+And make sure they saved properly.
+
+    >>> id3tags = eyeD3.Tag()
+    >>> ignored = id3tags.link(mp3s[filename])
+    >>> id3tags.getTitle()
+    u'title1'
+    >>> id3tags.getArtist()
+    u'artist1'
+    >>> id3tags.getAlbum()
+    u'album1'
+    >>> id3tags.getYear()
+    '1981'
+    >>> id3tags.getComment()
+    u'hello world'
+    >>> id3tags.getImages()
+    [<p4a.audio.mp3.thirdparty.eyeD3.frames.ImageFrame ...>]
+
+
+Clean Up
+--------
+
+Clean up temp dirs and files.
+
+    >>> for x in os.listdir(tmpdir):
+    ...     os.remove(os.path.join(tmpdir, x))
+    >>> os.rmdir(tmpdir)
