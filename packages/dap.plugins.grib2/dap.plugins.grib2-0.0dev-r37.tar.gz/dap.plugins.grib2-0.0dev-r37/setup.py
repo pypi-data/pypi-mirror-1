@@ -1,0 +1,46 @@
+# If true, then the svn revision won't be used to calculate the
+# revision (set to True for real releases)
+RELEASE = False
+
+from setuptools import setup, find_packages
+import sys, os
+
+classifiers = """\
+Environment :: Console
+Intended Audience :: Developers
+Intended Audience :: Science/Research
+Operating System :: OS Independent
+Programming Language :: Python
+Topic :: Internet
+Topic :: Scientific/Engineering
+Topic :: Software Development :: Libraries :: Python Modules
+"""
+
+version = '0.0'
+
+setup(name='dap.plugins.grib2',
+      version=version,
+      description="A plugin for pydap server",
+      long_description="""\
+""",
+      classifiers=filter(None, classifiers.split("\n")),
+      keywords='dap opendap dods data',
+      author='',
+      author_email='',
+      url='',
+      license='',
+      packages=find_packages(exclude=['ez_setup', 'examples', 'tests']),
+      namespace_packages=['dap.plugins'],
+      include_package_data=True,
+      zip_safe=True,
+      install_requires=[
+          # -*- Extra requirements: -*-
+          'dap[server]>=2.2.4',
+      ],
+      entry_points="""
+      # -*- Entry points: -*-
+      [dap.plugin]
+      main = dap.plugins.grib2
+      """,
+      )
+      
