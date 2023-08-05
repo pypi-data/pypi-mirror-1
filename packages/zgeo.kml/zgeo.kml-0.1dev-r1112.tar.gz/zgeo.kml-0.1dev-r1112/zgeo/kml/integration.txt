@@ -1,0 +1,114 @@
+
+Integration tests of the views
+==============================
+
+Let's create geometry and placemark mocks:
+    
+    >>> from zope.interface import implements
+    >>> from zgeo.geographer.interfaces import IGeoreferenced
+    >>> from zope.dublincore.interfaces import ICMFDublinCore
+    >>> from zope.traversing.browser.interfaces import IAbsoluteURL
+    >>> from zope.traversing.adapters import DefaultTraversable
+    >>> from zope.traversing.interfaces import ITraversable
+    >>> from zope.publisher.interfaces.browser import IBrowserRequest
+    >>> from zope.component import provideAdapter
+    >>> from zope.interface import implements, Interface
+
+We need a view to provide IAbsoluteURL from the mocks and a marker interface
+
+    >>> class IMarker(Interface):
+    ...     pass
+    >>> class AbsoluteURL(object):
+    ...     def __init__(self, context, request):
+    ...         self.context = context
+    ...     def __call__(self):
+    ...         return self.context.absolute_url()
+    >>> provideAdapter(AbsoluteURL, adapts=(IMarker, IBrowserRequest), provides=IAbsoluteURL)
+
+    >>> class Mock(object):
+    ...     implements((IMarker, IGeoreferenced, ICMFDublinCore))
+    ...     def __init__(self, id, summary, long, lat):
+    ...         self.id = id
+    ...         self.summary = summary
+    ...         self.type = 'Point'
+    ...         self.coordinates = (long, lat)
+    ...     def absolute_url(self):
+    ...         return 'http://example.com/%s' % self.id
+    ...     def Title(self):
+    ...         return self.id.capitalize()
+    ...     def Description(self):
+    ...         return self.summary
+    ...     def CreationDate(self):
+    ...         return '2007-12-07 12:00:00'
+    ...     def ModificationDate(self):
+    ...         return '2007-12-07 12:01:00'
+
+Create a placemark instance
+
+    >>> placemark = Mock('a', "Place marked 'A'", -105.08, 40.59)
+
+Test rendering of the KML document view
+
+    >>> class Collection(dict):
+    ...     implements((IMarker, ICMFDublinCore))
+    ...     def absolute_url(self):
+    ...         return 'http://example.com/collection'
+    ...     def Creator(self):
+    ...         return 'Homer J. Simpson'
+    ...     def Title(self):
+    ...         return 'Test Collection'
+    ...     def ModificationDate(self):
+    ...         return '2007-12-07 12:01:00'
+    ...     def __call__(self):
+    ...         return 'http://example.com/collection'
+
+    >>> collection = Collection()
+    >>> collection['a'] = placemark
+
+    >>> provideAdapter(DefaultTraversable, (Interface,), ITraversable)
+    >>> from zope.publisher.browser import TestRequest
+    >>> request = TestRequest()
+    >>> from zope.component import getMultiAdapter
+    >>> view = getMultiAdapter((collection, request), name=u'kml-document')
+    >>> view
+    <Products.Five.metaclass.Document object at ...>
+
+    >>> print view()
+    <?xml version="1.0" encoding="utf-8"?>
+    <kml xmlns="http://earth.google.com/kml/2.2">
+    <BLANKLINE>
+      <Document>
+        <Style id="defaultStyle">
+          <LineStyle>
+            <color>ffff0000</color>
+            <width>2</width>
+          </LineStyle>
+          <PolyStyle>
+            <color>33ff0000</color>
+          </PolyStyle>
+        </Style>
+        <name>Test Collection</name>
+        <visibility>0</visibility>
+        <open>0</open>
+        <Placemark>
+          <name>A</name>
+          <description>
+            <![CDATA[
+              <div>
+                <p>Place marked 'A'</p>
+                <p>URL: 
+                  <a href="http://example.com/a">http://example.com/a</a>
+                </p>
+              </div>
+            ]]>
+          </description>
+          <styleUrl>#defaultStyle</styleUrl>
+          <Point>
+            <coordinates>-105.080000,40.590000,0.0</coordinates>
+          </Point>
+    <BLANKLINE>
+    <BLANKLINE>
+        </Placemark>
+      </Document>
+    </kml>
+    <BLANKLINE>
