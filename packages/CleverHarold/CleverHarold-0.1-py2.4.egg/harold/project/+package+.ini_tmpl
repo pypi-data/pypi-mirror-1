@@ -1,0 +1,351 @@
+#import os
+#import harold
+#set global harold_base = $os.path.join(os.path.abspath(os.path.dirname(harold.__file__)))
+#set global package_base = $os.path.join(os.path.abspath($project), $package)
+#set global project_base  = $os.path.abspath($project)
+#
+# This is your project configuration file.  It defines the settings
+# for your application, its URLs, and settings for the harold package.
+# You're free to add your own sections and entries.
+#
+
+#
+# Default Section - values for entire config file
+#
+
+[DEFAULT]
+server_type_dev = egg:Paste#http
+server_port_dev = 8080
+
+# Change the server type to egg:flup#fcgi, egg:flup#scgi or similar
+# for a true production setup.
+server_type_prod = egg:Paste#http
+server_port_prod = 8000
+
+# This is a sequence of directories for publishing python modules.
+# Add your own on the line following this.
+code_dirs = #echo os.path.join($package_base, 'controllers/')
+
+# This is a sequence of directories for publishing your Kid Templates.
+# As with all directory sequences in Clever Harold, order is important
+# as the publishers stop on the first match they find.  You can add to
+# this list or replace any entry, but be sure you've matched up your
+# layout and default directories if you do.
+view_dirs = #echo os.path.join($package_base, 'views/')
+            #echo ' ' * 12 + os.path.join($harold_base, 'views/site/')
+
+
+# This is the name of the layout module.  All of your views will be
+# extended with this module automatically as they're rendered.  You
+# can remove this completely, or you can specify a file name or module
+# name.  As of 0.1, only Kid Templates are supported for this.
+view_layout = #echo $package + '.layouts.type_c'
+
+# This is a sequence of Kid Templates (module names or file names)
+# that are used to extend each of your views.  In them you provide
+# default implementations of named template functions.  You can add or
+# modify this list, but be sure to provide the named template
+# functions you reference in your views and layout.
+view_defaults = #echo $package + '.defaults.functions'
+                harold.views.defaults.internal
+
+# This value points to the location of static files to serve from
+# '/static'.  You can remove this if you want, or change it to reflect
+# a different location on disk.  If you remove it, be sure to remove
+# the references to it below.
+static_directory = #echo $os.path.join($package_base, 'static/')
+
+# These are the default data source names for dev and prod.  The
+# syntax here is specific to SQLAlchemy and SQLite.  Clever Harold
+# supports mutliple data models in the same application, but these
+# values are here to get you up and going quickly.  Refer to the docs
+# and to the examples near the end of this file for more information.
+dsn_dev = sqlite:///#echo os.path.join($project_base, 'dev.db')
+dsn_prod = sqlite:///#echo os.path.join($project_base, 'prod.db')
+
+
+#
+# DEVELOPMENT Server and Application
+#
+# These sections are referenced when no --server-name parameter is given
+# the command line.
+#
+
+[server:main]
+use = %(server_type_dev)s
+port = %(server_port_dev)s
+
+[composite:main]
+use = egg:Paste#urlmap
+/static = static_files
+/ = pipeline_dev
+
+# This pipeline includes the Paste evalerror, the request timer and
+# the environment echo filters.  They're useful for development, but
+# not suitable for production applications.  You can add references to
+# other sections as you see fit, but beware that order is important.
+# And also beware that you'll need to reflect any appropriate changes
+# into the pipeline_prod section below.
+[pipeline:pipeline_dev]
+pipeline = eval_error
+           request_logger
+           request_timer
+           session_provider
+	   cache_provider
+           debug_info
+#	   data_provider_dev
+           views_dev
+           code_dev
+           default_app
+
+
+#
+# PRODUCTION Server and application
+#
+# These sections are referenced when 'paster serve' is referenced with
+# --server-name=prod and/or --app-name=prod on the command line.
+#
+
+[server:prod]
+use = %(server_type_prod)s
+port = %(server_port_prod)s
+
+[composite:prod]
+use = egg:Paste#urlmap
+/static = static_files
+/ = pipeline_prod
+
+# This pipeline does not include any development filter middleware,
+# but does include the caching middleware.  By default, the caching
+# middleware is configured to match nothing, so if you want the cache
+# to work properly you'll have to update its configuration below.
+[pipeline:pipeline_prod]
+pipeline = session_provider
+	   cache_provider
+#           data_provider_prod
+           views_prod
+           code_prod
+           default_app
+
+
+#
+# Individual application and filter configuration
+#
+# Each of the applications and filters referenced above is configured
+# in its own section below.  Again, you can add your own sections and
+# entries as needed.  There are lots of examples -- have fun!
+#
+
+
+# The super-nifty ajaxy paste traceback thru-the-web thingie.
+# Don't use in production!
+[filter:eval_error]
+use = egg:Paste#evalerror
+
+
+# Filter that writes the WSGI environment into the HTML stream.
+# Don't use in production!
+[filter:debug_info]
+use = egg:CleverHarold#debug_info
+
+
+# Filter that times the request processing and writes the value to
+# the end of the HTML stream.
+# Don't use in production!
+[filter:request_timer]
+use = egg:CleverHarold#request_timer
+
+
+# Filter that caches requests by url.  Refer to the cache middleware
+# documentation for the syntax.  The default mapping value will not 
+# match anything, so nothing will be cached.
+# Don't use in development (unless you like frustration)!
+[filter:cache_provider]
+use = egg:CleverHarold#echo '#cache'
+mapping = python:[]
+
+# This is an example mapping; don't simply copy and paste it.
+# mapping = python:[dict(pattern='/.*', ttl=60), 
+#                   dict(pattern='/private/*.', keys='HTTP_USER', ttl=5)]
+
+
+# Filter that adds request logging.
+[filter:request_logger]
+use = egg:CleverHarold#request_log
+
+
+# Filter that adds session support to applications.  The first
+# available provider is selected automatically, but it can be set
+# explicitly with the session_class parameter.
+[filter:session_provider]
+use = egg:CleverHarold#session
+#session_class = FlupSession
+
+
+# Filters that publish your Kid Template views.  Each of the
+# parameters is set in the default section, but you can hard-code them
+# (I can't imagine why you'd want to do that).
+[filter:views_dev]
+use = egg:CleverHarold#kid_publisher
+dirs = %(view_dirs)s
+layout = %(view_layout)s
+defaults = %(view_defaults)s
+debug = True
+
+[filter:views_prod]
+use = egg:CleverHarold#kid_publisher
+dirs = %(view_dirs)s
+layout = %(view_layout)s
+defaults = %(view_defaults)s
+debug = False
+
+
+# Filter that publishes your Python modules.  Again, each value is set
+# from the defaults section.
+[filter:code_dev]
+use = egg:CleverHarold#code_publisher
+dirs =  %(code_dirs)s
+layout = %(view_layout)s
+defaults = %(view_defaults)s
+debug = True
+
+[filter:code_prod]
+use = egg:CleverHarold#code_publisher
+dirs =  %(code_dirs)s
+layout = %(view_layout)s
+defaults = %(view_defaults)s
+debug = False
+
+
+# Filters that automatically connect, save, and disconnect your data
+# models.  These filters use SQLAlchemy, but you can use ActiveMapper,
+# SQLObject, or plain DBAPI.  Refer to the examples below for the
+# syntax of those providers.
+#[filter:data_provider_dev]
+#use = egg:CleverHarold#sqlalchemy_provider
+#dsn = %(dsn_dev)s
+#debug = True
+#models = #echo $package + '.models.sqlalchemy_example_one'
+#         #echo '         ' + $package + '.models.sqlalchemy_example_two'
+
+
+# This is the production version of the data provider.  Note the
+# distinct dsn.
+#[filter:data_provider_prod]
+#use = egg:CleverHarold#sqlalchemy_provider
+#dsn = %(dsn_prod)s
+#debug = False
+#models = #echo $package + '.models.sqlalchemy_example_one'
+#         #echo '         ' + $package + '.models.sqlalchemy_example_two'
+
+
+# Application that publishes your static images, stylesheets, and
+# ecmascript files.
+[app:static_files]
+use = egg:CleverHarold#static
+root = %(static_directory)s
+
+
+# Default application called when no request matches a handler.
+[app:default_app]
+use = egg:CleverHarold#not_found
+
+
+#
+# ActiveMapper data provider example
+#
+[filter:activemapper_example]
+use = egg:CleverHarold#activemapper_provider
+dsn = sqlite:////#echo $package_base + '-actmap.db'
+models = #echo $package + '.models.activemapper_example'
+debug = True
+
+
+#
+# DBAPI data provider examples
+#
+# [filter:dbapi_example]
+# use = egg:CleverHarold#dbapi_provider
+# dsn = #echo $package_base + '-dbapi.db'
+# module = pysqlite2.dbapi2
+# models = #echo $package + '.models.dbapi_example'
+
+
+# [filter:data_provider_dev]
+# use = egg:CleverHarold#dbapi_provider
+# dsn = dbname=mydatabase user=myuser host=localhost password=swordfish
+# module = psycopg2
+# models = #echo $package + '.models.dbapi_example'
+
+# [filter:data_provider_dev]
+# use = egg:CleverHarold#dbapi_provider
+# dsn = python:dict(host='localhost', user='myuser', passwd='swordfish', db='test')
+# module = MySQLdb
+# models = #echo $package + '.models.dbapi_example'
+
+#
+# SQLObject data provider example
+#
+
+# [filter:sqlobject_example]
+# use = egg:CleverHarold#sqlobject_provider
+# dsn = sqlite:////#echo $package_base + '-sqlobj.db'
+# models = #echo $package + '.models.sqlobject_example'
+# debug = True
+
+# From the SQLObject docs, here are some example connection strings.
+# Copy and paste is good sometimes, no?
+#
+# mysql://user:password@host/database
+# mysql://host/database?debug=1
+# postgres://user@host/database?debug=&cache=
+# postgres://host:5432/database
+# sqlite:///full/path/to/database
+# sqlite:/C|/full/path/to/database
+# sqlite:/:memory:
+
+
+# Clever Harold and your application logging can be controlled via
+# sections like those below.  Uncomment the following sections for an
+# simple setup, and then refer to `Python Library Reference section
+# 6.29.10.2 "Configuration file format"`__ for an explaination.
+#
+# Note that the logging package is sensitive to extra whitespace
+# around these values.  Also note that each section requires a
+# specific set of values (at a miniumum) to work correctly.
+#
+# .. __: http://docs.python.org/lib/logging-config-fileformat.html
+
+
+# [formatter_error_format]
+# format=F1 %(asctime)s %(levelname)s %(message)s
+# datefmt=
+
+# [handler_error_handler]
+# formatter=error_format
+# level=ERROR
+# class=StreamHandler
+# args=(sys.stdout,)
+
+# [formatters]
+# keys=error_format
+
+# [handlers]
+# keys=error_handler
+
+# [loggers]
+# keys=root,publisher,codepub
+
+# [logger_root]
+# level=WARN
+# handlers=
+
+# [logger_publisher]
+# level=ERROR
+# handlers=error_handler
+# qualname=harold.publishers.common.Publisher
+
+# [logger_codepub]
+# level=ERROR
+# handlers=error_handler
+# qualname=harold.publishers.pythonmodule.CodeTemplate
