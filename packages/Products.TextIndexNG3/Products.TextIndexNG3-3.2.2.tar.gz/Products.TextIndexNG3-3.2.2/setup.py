@@ -1,0 +1,40 @@
+##########################################################################
+# TextIndexNG3
+# (C) 2007, ZOPYX Ltd & Co. KG, Tuebingen, Germany
+##########################################################################
+
+import os
+from setuptools import setup, find_packages
+
+
+CLASSIFIERS = [
+    'Programming Language :: Python',
+]
+
+version_file = os.path.join('Products', 'TextIndexNG3', 'version.txt')
+version = open(version_file).read().strip()
+
+readme_file= os.path.join('Products', 'TextIndexNG3', 'doc', 'README.txt')
+desc = open(readme_file).read().strip()
+
+long_description = desc 
+
+
+setup(name='Products.TextIndexNG3',
+      version=version,
+      license='ZPL (see LICENSE.txt)',
+      author='Andreas Jung',
+      author_email='info@zopyx.com',
+      maintainer='Andreas Jung',
+      maintainer_email='info@zopyx.com',
+      classifiers=CLASSIFIERS,
+      url='http://opensource.zopyx.com/software/TextIndexNG3',
+      description='Pluggable fulltext indexing solution for Zope 2 and Zope 3',
+      long_description=long_description,
+      packages=['Products', 'Products.TextIndexNG3'],
+      include_package_data = True,
+      zip_safe=False,
+      install_requires=['setuptools', 'zopyx.textindexng3'],
+      namespace_packages=['Products'],
+
+      )
