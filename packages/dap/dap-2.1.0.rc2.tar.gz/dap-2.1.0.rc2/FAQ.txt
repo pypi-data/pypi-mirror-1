@@ -1,0 +1,271 @@
+1. How do I install PyDAP?
+==========================
+
+You need three simple steps:
+
+    wget http://???/ez_setup.py
+    sudo ./ez_setup.py
+    sudo easy_install dap
+
+This will install setuptools, the latest version of the dap module
+and fpconst (a module that implements constants and functions for
+working with IEEE754 double-precision special values). You'll also
+need a module implementing arrays, like Numeric, numarray or Scipy
+Core; these have to be installed manually for now.
+
+
+2. How do I run a server?
+=========================
+
+PyDAP comes with a standalone server that runs from the script
+dap-server.py. This server can be run from command line:
+
+    dap-server.py [-p port] [-d pidfile] [-l logfile] [-v debug-level] [/path/to/data]
+
+If the data directory is ommited, the server will serve files from
+the current directory (and subdirectories). The default behaviour
+is to run on port 8888, logging error messages to stderr. The debug
+level can be DEBUG, INFO, WARN[ING], ERROR and CRITICAL (or FATAL).
+
+This standalone servers uses the WSGI server from the module
+WSGIUtils, which must be installed:
+
+    sudo easy_install http://groovy???
+
+You can also run a server from a CGI. Just copy the file dap-server.cgi
+to your cgi-bin directory, and edit the DATADIR variable to point
+to the directory holding your data.
+
+A better approach for running a server is using Paste Deploy. Install
+the modules:
+
+    sudo easy_install Paste
+    sudo easy_install PasteDeploy
+    sudo easy_install PasteScript
+
+And create a configuration file:
+
+    [server:main]
+    use = egg:PasteScript#wsgiutils
+    host = 0.0.0.0
+    port = 80
+
+    [app:main]
+    use = egg:dap
+    root = /path/to/data
+    name = Data Server
+
+Now you can run a server using the PasterScript:
+
+    sudo paster serve <config>
+
+Why use PasterScript? Because it makes it easy to configure your
+server and use additional WSGI middleware. For example, if you want
+to compress the server responses, you can use the Gzip middleware
+from Paste. The config file would look like this:
+
+    [server:main]
+    ...
+
+    [pipeline:main]
+    pipeline = gzip dap
+
+    [app:dap]
+    use = egg:dap
+    root = /path/to/data
+    name = Data Server
+
+    [filter:gzip]
+    use = egg:Paste#gzip
+
+PyDAP comes with middleware to generate a THREDDS catalog describing
+the available datasets, and also a logger. Here's how to use them
+both:
+
+    [pipeline:main]
+    pipeline = logger catalog dap
+
+    [app:dap]
+    ...
+
+    [filter:logger]
+    use = egg:dap#logger
+    filename = /var/log/dapserver.log
+    level = WARNING
+
+    [filter:catalog]
+    use = egg:dap#catalog
+
+
+3. Which files are supported by the server?
+===========================================
+
+PyDAP uses a plugin architecture to handle different file formats.
+It comes with a plugin for netCDF, Matlab and CSV (comma separated
+values) files. There's also a plugin for SQL RDBMS, based on the
+Python DB API 2.0 specification.
+
+All files can be compressed with gzip or bzip2. A special plugin 
+will uncompress the data to a temporary directory and call the 
+appropriate plugin to handle the new file, which is deleted
+after the request.
+
+
+4. How do I serve data from a RDBMS like PostgreSQL?
+====================================================
+
+Create a file with the extension 'sql' and the following content:
+
+    [database]
+    dsn: pgsql://user:password@host:port/dbname
+    name: cruise
+    arbitrary-attribute: 42
+    another-attribute: foo
+
+Now create additional sections for each column you want to retrieve
+data from. Suppose we have salinity and temperature data, stored
+in the table 'casts' as 'temp' and 'salt', respectively.
+
+    [salinity]
+    column: casts.salt
+    units: psu
+
+    [temperature]
+    column: casts.temp
+    units: deg C
+
+If the columns are located in different tables, you need to specify
+an id to join the values together. For example:
+
+    [salinity]
+    column: salt.salt
+    id: salt_id
+
+    [temperature]
+    column: temp.temp
+    id: temp_id
+
+In this case, the server will join the values of temperature and
+salinity where temp_id == salt_id, so if we have:
+
+    temp.temp   temp.temp_id
+    24          1
+    25          2
+    26          3
+
+And:
+
+    salt.salt   salt.salt_id
+    35          0
+    34          1
+    33          2
+
+We would get the following ASCII response from the server:
+
+    Dataset {
+	    Sequence {
+	        Int32 temperature;
+            Int32 salinity;
+	    } cruise;
+    } test.sql;
+    ---------------------------------------------
+    cruise.temperature, crise.salinity
+    24, 34
+    25, 33
+
+
+5. How do I write plugins for new data formats?
+===============================================
+
+As Mark Pilgrim would've said, "a lot of effort went into making
+this effortless" (or something like that). If you want to write a
+plugin for a new data format you don't need to know anything about
+the binary encoding the DAP uses (called XDR), how to generate
+different responses (DDS, DAS, ASCII, etc.) or how to parse a
+constraint expression (like "sst.sst[0:1:10][0:2:7]" or
+"seq.cast&seq.lat>-30&seq.lon<300").
+
+A plugin is a Python module. It should have at least two things:
+
+  a) a variable called 'extensions' specifying a regular expression
+  that matches the files handled by that plugin; and
+  
+  b) a class 'Handler' with the following methods:
+
+    from dap.server import BaseHandler
+
+    class Handler(BaseHandler):
+        def __init__(self, filepath, environ):
+            self.environ = environ
+            ...
+
+        def _parseconstraints(self, constraints=None):
+            ...
+
+        def close(self):
+            ...
+
+The variable 'filepath' is the full path (on disk) to the file being
+requested and that should be handled by the plugin. The method
+_parseconstraints should parse the constraint expression and return
+a dataset object built with types from dap.dtypes. (Take a look at
+the Matlab module and things will get clearer.)
+
+The close method is optional, and is called when the plugin is no
+longer necessary. It's often used to close open files or to remove
+temporary data.
+
+If you don't want to parse the constraint expression, just build
+the whole dataset and use the trim() function available from
+dap.helper:
+
+	def _parseconstraints(self, constraints=None):
+	    # Build the dataset.
+        dataset = dtypes.DatasetType(name=...)
+	    ...
+        dataset[var] = dtypes.BaseType(name=var, data=...)
+	    ...
+
+	    return trim(dataset, constraints)
+
+And that should do it. An example will make things easier: suppose
+we want to serve single integers. Not very useful, but that's ok.
+We create a file called '42.int' with the number 42 in it, and put
+it somewhere in our PyDAP server root. This is how our plugin would
+look like (untested):
+
+    import os.path
+
+    from dap import dtypes
+    from dap.server import BaseHandler
+    from dap.helper import trim
+
+    extensions = r"""^.*\.int"""  # file ending in '.int'
+
+    class Handler(BaseHandler):
+        def __init__(self, filepath, environ):
+            self.environ = environ
+
+            dir, self.filename = os.path.split(filepath)
+
+            self.integer = open(filepath).read()
+            self.integer = int(self.integer)
+
+        def _parseconstraints(self, constraints=None):
+            # Build the dataset.
+            dataset = dtypes.DatasetType(name=self.filename)
+
+            # Add a variable.
+            dataset['integer'] = dtypes.BaseType(name='integer', data=self.integer)
+            dataset['integer'].attributes['long_name'] = 'This is the number %d.' % self.integer
+
+            return trim(dataset, constraints)
+
+It's better to do the parsing of the constraint expression yourself,
+though, to avoid the overhead of building the whole dataset just
+to strip it down later. Also, the trim() function does not work
+flawlessly because it relies on copy.deepcopy() to duplicate the
+dataset.
+
+You can also hire me to write new plugins. Send an email to
+<rob@pydap.org> if you're interested.
