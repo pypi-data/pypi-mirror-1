@@ -1,0 +1,110 @@
+#!/bin/sh
+#
+# Manage apache webdav
+#	- after mounting: add the new webdav share
+#	- before umounting: disable and remove the webdav share
+#
+# This script assumes, that you added the apache2_dav.conf file
+# (/usr/share/doc/cryptobox/conf-examples/) to your apache configuration directory
+# (e.g. /etc/apache2/conf.d)
+#
+#
+# Params:	$event $device $volume_name $volume_type $mount_dir
+#
+#	event:	premount | postmount | preumount | postumount
+#	device:	name of the device
+#	volume_name:	name of the volume
+#	volume_type:	plain | luks
+#	mount_dir:	mount directory
+#
+
+set -eu
+
+# ------------=-=-=- some settings -=-=-=-----------------
+# adapt this part of the file to your setup
+
+APACHE_SCRIPT=/etc/init.d/apache2
+APACHE_CONF_DIR=/var/cache/cryptobox/settings/misc/apache2_dav.conf.d
+
+# this apache config snippet is used for every published volume
+# _VOLUME_NAME_ and _SHARE_DIR_ are replaced by their actual values
+APACHE_SHARE_TEMPLATE=$(cat - <<-"EOF"
+	# this file is part of the CryptoBox
+	Alias	"/cryptobox/_VOLUME_NAME_" "_SHARE_DIR_"
+	<Location "/cryptobox/_VOLUME_NAME_">
+		Dav filesystem
+	</Location>
+EOF
+)
+
+# -----=-=-=- check arguments and the environment -=-=-=----
+
+# exit if apache2 is not installed
+if test -x "$APACHE_SCRIPT"
+  then	true
+  else	echo "apache2 is not installed ('$APACHE_SCRIPT' not found)" >&2
+	exit 1
+ fi
+
+# create include-file directory
+mkdir -p "$APACHE_CONF_DIR"
+
+# check event argument
+if test "$#" -eq 0
+  then	echo "Syntax: $(basename $0) EVENT [EVENT_INFORMATION]" >&2
+	exit 1
+ fi
+
+event=$1
+
+# ------------=-=-=- some functions -=-=-=-----------------
+
+# remove invalid config files
+update_include_conf_dir()
+{
+	find "$APACHE_CONF_DIR" -type f -name "*.conf" | while read fname
+	  do	mdir=$(head -1 "$fname" | cut -f 4 -d '"')
+	  		test ! -d "$mdir" && rm "$fname"
+	 done
+}
+
+empty_conf_dir()
+{
+	find "$APACHE_CONF_DIR" -type f -name "*.conf" -print0 | xargs -0 rm
+}
+
+send_reload_command()
+{
+	# reload config files
+	"$APACHE_SCRIPT" reload
+}
+
+# -----------------=-=-=- main -=-=-=----------------------
+
+case "$event" in
+	premount|postumount )
+		;;
+	postmount )
+		vol_name=$3
+		mount_dir=$5
+		echo "$APACHE_SHARE_TEMPLATE" | sed "s#_SHARE_DIR_#$mount_dir#g; s#_VOLUME_NAME_#$vol_name#g" >"$APACHE_CONF_DIR/${vol_name}.conf"
+		update_include_conf_dir
+		send_reload_command
+		;;
+	preumount )
+		vol_name=$3
+		rm "$APACHE_CONF_DIR/${vol_name}.conf" || true
+		update_include_conf_dir
+		send_reload_command
+		;;
+	shutdown | bootup )
+		empty_conf_dir
+		;;
+	* )
+		# ignore all events that we do not support
+		exit 0
+		;;
+  esac
+
+exit 0
+

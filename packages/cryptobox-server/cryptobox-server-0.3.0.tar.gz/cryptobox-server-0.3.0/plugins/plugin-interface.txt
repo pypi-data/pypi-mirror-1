@@ -1,0 +1,84 @@
+The following directory structure is required:
+	- python code: plugins/PLUGINNAME/PLUGINNAME.py (all lower case is recommended)
+	- language file: plugins/PLUGINNAME/language.hdf
+	- clearsilver templates: plugins/PLUGINNAME/*.cs
+	- icon (128x128px recommended): plugins/PLUGINNAME/plugin_icon.png
+	- css stylesheets (optional): plugins/PLUGINNAME/PLUGINNAME.css
+
+
+Python code interface:
+	- create a class with the same name as the plugin - it must inherit CryptoBoxPlugin
+	- method "do_action":
+		- this function will get called whenever this plugins is involved in a request
+		- all arguments should be optional (e.g. for displaying a form without previous input values)
+		- if the processing failed for some reason (invalid input, ...), it should manually set
+		  "Data.Warning" or "Data.Success") to a value of your choice (preferably
+		  you may want to use messages of the namespace of your plugin
+		  (e.g. "Plugins.PLUGINNAME.InvalidInput"))
+		- the return value should be the name of the template that should be displayed after processing
+		  (a template file in the plugin directory takes precedence over global template files)
+			- the return value may also be a dictionary with the following elements:
+				* template: the name of the template file (mandatory)
+				* generator: a generator object ("yield") - its content will replace every
+				  occurrence of "<!-- CONTENT_DUMMY -->" in the template (useful for pages that
+				  are displayed step by step (as for formatting of filesystems))
+			- the return value may also be a dictionary with the following elements:
+				* plugin: the name of a plugin
+				* values: a dictionary of variables that should be defined for this plugin
+			- an empty (e.g. None) return value can be used to go to the default page ("disks"
+			  or "volume_mount" (for volume plugins))
+	- access the plugin's state as self.prefs
+	- store user supplied values in the dictionary self.prefs with indices starting with "_" (e.g.: self.prefs["_automount_uuids"])
+	- system wide readonly plugin settings can be specified in the main cryptobox.conf -
+	  these settings are available as self.defaults["..."]
+	- method "get_status":
+		- returns a string, that describes a state connected to this plugin (e.g. the current date and
+		  time (for the "date" plugin))
+	- method "handle_event(event, event_info)":
+		- may be overridden to specify event handling (e.g. "bootup", "shutdown")
+		- see src/cryptobox/plugins/base.py for details
+	- the class variable "plugin_capabilities" must be an array of strings (supported: "system" and
+	  "volume")
+	- method "is_useful(self, device)": defaults to "True" - overwrite it, if there could be circumstances, which could make the plugin useless - e.g. "automount" is not useful for encrypted containers
+	- method "get_warnings(self)": return a tuple of (Priority, WarningName) or None if
+	  no problems exist
+		- "WarningName" should be something like "Plugins.PLUGINNAME.NoSSL"
+	- the class variable "plugin_visibility" may contain one or more of the following items:
+	  menu/preferences/volume. This should fit to the 'plugin_capabilities' variable.
+	  An empty list is interpreted as an invisible plugin.
+	- the class variable "request_auth" is boolean and defines, if admin authentication is necessary
+	  for this plugin
+	- the class variable "rank" is an integer in the range of 0..100 - it determines the order
+	  of plugins in listings (lower value -> higher priority)
+	- the class variable "root_action" is None or the module as sourced out of "root_actions.py"
+	  in the directory of the plugin - this allows to access constant settings in this file
+	- volume plugins contain the attribute "device" (you may trust this value - a volume plugin will
+	  never get called with an invalid device)
+	- the python module which contains the plugin's class should also contain a class called
+	  'unittests' - it should inherit WebInterfaceTestClass.WebInterfaceTestClass
+	- method "download" is exposed as "downloads/PLUGINNAME"
+
+
+Language file structure:
+	- the content of the language file will be added to the hdf dataset below "Lang.Plugins.PLUGINNAME"
+	  (this avoids namespace conflicts)
+	- the following top level settings _must_ be defined:
+		Name (a short description)
+		Link (the visible text for links to this plugin)
+	- only system plugins: "Title" is necessary, too
+	- all warnings, hints and success messages as well as environment warnings should
+	  be stored below WarningMessage/AdviceMessage/SuccessMessage/EnvironmentWarning
+
+
+Clearsilver template:
+	- volume plugins do not have a title
+	- system plugins should contain '<?cs call:show_plugin_title() ?>' at the
+	  top of the template
+	- the title should be followd by '<?cs call:handle_messages() ?>'
+	  this will display important messages
+	- usually you should supply some helpful information afterwards (only displayed
+	  if the user enabled inline-help before):
+	  	"<?cs call:show_help(Lang.Plugins.PLUGINNAME.Help.Text) ?>"
+	- links to the plugin (e.g. in form headers) could look like the following:
+		<?cs call:link("PLUGINNAME",'','','','') ?>
+

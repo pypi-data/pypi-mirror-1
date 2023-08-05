@@ -1,0 +1,116 @@
+Encrypting the http traffic to the CryptoBox webserver with SSL
+
+This file describes how to encrypt your connection to the CryptoBox webserver.
+This is highly recommended as the encryption password for your data could be
+exposed to intruders in your local network otherwise.
+
+Below you will find detailed descriptions on how to set up an encrypted 
+connection to the webinterface:
+	- use the plugin "encrypted_webinterface"
+	- run the CryptoBox webserver behind an ssl-enabled webserver 
+	- use stunnel or stunnel4 to provide an SSL socket
+	- use the a proxy server (e.g. pound)
+	- ...
+
+At the end of this document you will find some information on how to turn off
+SSL detection of the CryptoBox. You should read it, if there is no solution
+for your specific setup available or if you are _very_ sure, that you do not
+need encrypted http connections.
+
+-------------------------------------------------------------------
+
+1) using the plugin 'encrypted_webinterface'
+	This plugin is disabled by default. You can enable it in your
+	cryptobox.conf file by removing it from the 'DisabledPlugins' setting.
+
+	The plugin does the following during startup of the CryptoBox:
+		- create a self-signed X.509 certificate if necessary
+		- run stunnel4 from port 80 to 443 (https) with this certificate
+	
+	Of course, this will not work, if the port 443 is already in use by
+	another program - in this case, you should better choose one of the
+	solutions described below.
+
+	Now, you need to point your browser to the URL of the CryptoBox with
+	'https' instead of 'http'. Or just follow the "Use encrypted
+	connection" link that appears, if you use plain http.
+
+	For a finer tuned certifacte follow the steps under "CryptoBox
+	behind stunnel".
+
+
+-------------------------------------------------------------------
+
+2) CryptoBox behind an ssl-enabled webserver
+	Read the documentation of your favourite webserver to learn how to enable
+	ssl encryption.
+
+	The CryptoBox webserver cannot detect whether the connection is encrypted
+	or not  since it is behind the proxy webserver and does not share its
+	environment. Thus you have to tell the CryptoBox in the request header
+	whether the connection is encrypted or not.
+
+	for apache2:
+		1) enable the 'headers' module (for debian: "a2enmod headers")
+		2) add this line to your ssl-enabled virtualhost:
+			RequestHeader set X-SSL-Request 1
+		3) restart your webserver
+	
+	for lighthttpd:
+		TODO
+
+
+-------------------------------------------------------------------
+
+3) CryptoBox behind stunnel (configured manually)
+	You may want to tunnel the traffic between the cryptobox-server
+	and your browser. "stunnel" or "stunnel4" are excellent candidates for this job.
+
+	If you do not have an ssl certificate yet, then you should create
+	one first. On Debian: "apt-get install ssl-cert" and run the following
+	command (the supplied example openssl.conf file resides in the doc
+	directory of the cryptobox-server package):
+
+		make-ssl-cert conf-examples/openssl.conf <CERT_FILE_NAME>
+
+	In case, that you already have a certificate just run this command:
+
+		stunnel -p <CERT_FILE_NAME> -r localhost:80 -d 443
+	
+	And maybe you want to add the last command to your bootup scripts.
+
+
+-------------------------------------------------------------------
+
+4) CryptoBox behind a proxy server
+	As there are many proxy servers around, we cannot describe all of them. As
+	an example, we will explain the setup of the load-balancing proxy 'pound'
+	(http://www.apsis.ch/pound/).
+
+	Just add the following lines to you /etc/pound/pound.cfg:
+		# Remove the X-SSL-Request header from incoming
+		# connections to prevent hackers from spoofing it
+		HeadRemove "X-SSL-Request"
+
+		# Add an extra header to tell the CryptoBox that 
+		# the external connection is secure
+		HTTPSHeaders 0 "X-SSL-Request: 1"
+	
+	This example is taken from:
+		http://jamesthornton.com/writing/openacs-pound.html
+
+
+-------------------------------------------------------------------
+
+5) Problems with SSL detection?
+	If the CryptoBox continues to complain about the unencrypted connection, even
+	if it runs behind an ssl-enabled webserver or behind stunnel, then you can do
+	one of the following things:
+		- disable the plugin 'encypted_webinterface' in the cryptobox.conf file
+		  if you do not need it
+		- set the request header value "X-SSL-Request" to "1" (the digit 'one')
+		- set the environment setting "HTTPS" to a non-empty value during the
+		  startup of the CryptoBox webserver. Maybe
+		  /etc/default/cryptobox-server would be the right place for this.
+		- let the CryptoBox webserver listen to port 443
+

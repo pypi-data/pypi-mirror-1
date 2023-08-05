@@ -1,0 +1,385 @@
+#!/usr/bin/env python
+#
+# The daemon script to run the CryptoBox webserver.
+#
+# run the script with "--help" to see all possible paramters
+#
+#
+# Copyright 2006 sense.lab e.V.
+# 
+# This file is part of the CryptoBox.
+#
+# The CryptoBox is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# The CryptoBox is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with the CryptoBox; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+__revision__ = "$Id"
+
+REMOVE_ENV_SETTINGS = [ "LANG", "LC", "LC_ALL", "LC_COLLATE", "LC_CTYPE",
+		"LC_MESSAGES", "LC_NUMERIC", "BASH_ENV", "SHELLOPTS" ]
+
+import os, sys
+import signal, atexit
+import cryptobox.web.sites
+from cryptobox.core.exceptions import *
+from optparse import OptionParser
+
+## check python version
+(ver_major, ver_minor, ver_sub, ver_desc, ver_subsub) = sys.version_info
+if (ver_major < 2) or ((ver_major == 2) and (ver_minor < 4)):
+	sys.stderr.write("You need a python version >= 2.4\n")
+	sys.stderr.write("Current version is: %s\n" % sys.version)
+	sys.exit(1)
+
+## check cherrypy dependency
+try:
+	import cherrypy
+except: 
+	sys.stderr.write("Could not import the cherrypy module!\n")
+	sys.stderr.write("Try 'apt-get install python-cherrypy'.\n")
+	sys.exit(1)
+
+## check clearsilver dependency
+try:
+	import neo_cgi, neo_util
+except: 
+	sys.stderr.write("Could not import the clearsilver module!\n")
+	sys.stderr.write("Try 'apt-get install python-clearsilver'.\n")
+	sys.exit(1)
+
+## check configobj dependency
+try:
+	import configobj, validate
+except: 
+	sys.stderr.write("Could not import the configobj or validate module!\n")
+	sys.stderr.write("Try 'apt-get install python-configobj'.\n")
+	sys.exit(1)
+
+
+SERVER_ENVIRONMENT = "production"
+
+class CryptoBoxWebserver:
+	'''this class starts the cherrypy webserver and serves the single sites'''
+
+	def __init__(self, opts):
+		"""Configure cherrypy and check the location of the configuration file
+		"""
+		self.opts = opts
+		## check conffile
+		if not os.access(opts.conffile, os.R_OK) or not os.path.isfile(opts.conffile):
+			sys.stderr.write("Error: could not read configuration file (%s)\n" % opts.conffile)
+			sys.exit(1)
+		## store the absolute path as we will chdir later (for daemons)
+		self.conffile = os.path.realpath(opts.conffile)
+		## expose static content and set options
+		## beware: 
+		cherrypy.config.update({
+			"global": {
+				"server.socket_port" : int(opts.port),
+				"server.socket_host" : opts.host,
+				"server.log_to_screen" : not opts.background and opts.verbose,
+				"server.log_tracebacks" : opts.verbose,
+				"server.log_request_headers": opts.verbose,
+				"server.environment": SERVER_ENVIRONMENT,
+				"server.log_file" : opts.logfile },
+			"/cryptobox-misc": { 
+					"staticFilter.on" : True, 
+					"staticFilter.dir": os.path.realpath(opts.datadir)},
+			"/favicon.ico": { 
+					"staticFilter.on" : True, 
+					"staticFilter.file": os.path.realpath(os.path.join(opts.datadir, 'favicon.ico'))}
+			})
+	
+
+	def bootup_cryptobox(self):
+		## initialize site class
+		try:
+			cherrypy.root = cryptobox.web.sites.WebInterfaceSites(self.conffile)
+			self.website = cherrypy.root
+		except (CBConfigError,CBEnvironmentError), err_msg:
+			sys.stderr.write("Error: the CryptoBox is misconfigured - please fix it!\n")
+			raise
+
+
+	def get_user_info(self):
+		"""Retrieve the uid, gid and additional groups of the given user
+		"""
+		import pwd, grp
+		user_entry = pwd.getpwuid(self.opts.user)
+		## get the new uid and gid
+		pw_name, pw_uid, pw_gid = user_entry[0], user_entry[2], user_entry[3]
+		## change the owner of the webserver log file
+		try:
+			os.chown(self.opts.logfile, pw_uid, pw_gid)
+		except OSError:
+			## fail silently
+			pass
+		## calculate additional groups of the given user
+		additional_groups = [ entry[2]
+				for entry in grp.getgrall()
+				if pw_name in entry[3] ] + [ pw_gid ]
+		return (pw_uid, pw_gid, additional_groups)
+
+
+	def change_groups(self):
+		"""Change the groups of the current process to the ones of the given user
+
+		we have to do this before we call cherrypy.server.start(), as it somehow
+		remembers the current setting for any thread it will create later
+		"""
+		if self.opts.user is None:
+			return
+		(pw_uid, pw_gid, additional_groups) = self.get_user_info()
+		try:
+			os.setgroups(additional_groups)
+		except OSError, err_msg:
+			sys.stderr.write("Failed to change the groups: %s\n" % err_msg)
+
+
+	def drop_privileges_permanently(self):
+		"""Drop all privileges of the current process and acquire the privileges of the
+		given user instead.
+		"""
+		if self.opts.user is None:
+			return
+		(pw_uid, pw_gid, additional_groups) = self.get_user_info()
+		try:
+			## setgroups happened before (see 'change_groups')
+			os.setregid(pw_gid, pw_gid)
+			os.setreuid(pw_uid, pw_uid)
+		except OSError, err_msg:
+			sys.stderr.write("Failed to drop privileges permanently: %s\n" % err_msg)
+
+
+
+	def start(self):
+		try:
+			## first: change the groups (cherrypy.server.start stores the
+			## current setting for creating new threads later)
+			self.change_groups()
+			cherrypy.server.start(initOnly=True)
+			self.drop_privileges_permanently()
+			## this must be done with dropped privileges - otherwise there is
+			## at least a problem with 'blkid' - see bug #139
+			self.bootup_cryptobox()
+			cherrypy.server.wait_for_http_ready()
+		except cherrypy._cperror.NotReady, err_msg:
+			sys.stderr.write("Failed to start CryptoBox: %s\n" % err_msg)
+			sys.exit(1)
+		except Exception, err_msg:
+			if err_msg == "(98, 'Address already in use')":
+				sys.stderr.write("Failed to start CryptoBox: %s\n" % err_msg)
+				sys.exit(1)
+			else:
+				raise
+	
+
+
+def fork_to_background():
+	## this is just copy'n'pasted from http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/278731
+	## check the original for exhaustive comments
+	try:
+		pid = os.fork()
+	except OSError, err_msg:
+		sys.stderr.write("Error: failed to fork cryptobox daemon process!\n")
+		sys.stderr.write("%s\n" % err_msg)
+		sys.exit(1)
+	if pid == 0:	# the first child
+		os.setsid()
+		try:
+			pid = os.fork()
+		except OSError, err_msg:
+			sys.stderr.write("Error: failed to fork second cryptobox daemon process!\n")
+			sys.stderr.write("%s\n" % err_msg)
+			sys.exit(1)
+		if pid == 0:	# the second child
+			## we do not change the directory - otherwise there seems to be a race condition with the python interpreter loading this script file
+			#os.chdir(os.path.sep)
+			os.umask(0)
+		else:
+			os._exit(0)
+	else:
+		os._exit(0)
+
+
+def close_open_files():
+	"""this is only necessary if we want to go into background
+	we will only close stdin, stdout and stderr
+	"""
+	import resource		# Resource usage information.
+	## use the following lines to close all open files (including the log file)
+	# maxfd = resource.getrlimit(resource.RLIMIT_NOFILE)[1]
+	# if (maxfd == resource.RLIM_INFINITY):
+	# 	maxfd = 1024
+	maxfd = 2
+	for fd in range(0, maxfd):
+		try:
+			## close all except for stderr - we will redirect it later
+			if fd != 2:
+				os.close(fd)
+		except OSError:		# ERROR, fd wasn't open to begin with (ignored)
+			pass
+	os.open(os.devnull, os.O_RDWR)		# standard input (0)
+	os.dup2(0, 1)			# standard output (1)
+
+
+def write_pid_file(pid_file):
+	if os.path.exists(pid_file):
+		sys.stderr.write(
+			"Warning: pid file (%s) already exists - overwriting ...\n" % pid_file)
+	try:
+		pidf = open(pid_file,"w")
+		pidf.write(str(os.getpid()))
+		pidf.close()
+	except (IOError, OSError), err_msg:
+		sys.stderr.write(
+			"Warning: failed to write pid file (%s): %s\n" % (pid_file, err_msg))
+		## it is just a warning - no need to break
+
+
+def parseOptions():
+	import cryptobox
+	import pwd
+	version = "%prog" + cryptobox.__version__
+	parser = OptionParser(version=version)
+	parser.set_defaults(conffile="/etc/cryptobox-server/cryptobox.conf",
+		pidfile="/var/run/cryptobox-server/webserver.pid",
+		background=False,
+		datadir="/usr/share/cryptobox-server/www-data",
+		logfile="/var/log/cryptobox-server/webserver.log",
+		port="8080",
+		host="",
+		verbose=True,
+		profile_file=False,
+		user=None)
+	parser.add_option("-c", "--config", dest="conffile",
+		help="read configuration from FILE", metavar="FILE")
+	parser.add_option("","--pidfile", dest="pidfile",
+		help="write process id to FILE", metavar="FILE")
+	parser.add_option("-B","", dest="background", action="store_true",
+		help="run webserver in background (as daemon)")
+	parser.add_option("-q","", dest="verbose", action="store_false",
+		help="output only errors")
+	parser.add_option("","--datadir", dest="datadir", metavar="DIR",
+		help="set data directory to DIR")
+	parser.add_option("-p","--port", dest="port", metavar="PORT",
+		help="listen on PORT")
+	parser.add_option("-l","--logfile", dest="logfile", metavar="FILE",
+		help="write webserver log to FILE")
+	parser.add_option("","--host", dest="host", metavar="HOST",
+		help="attach to HOST")
+	parser.add_option("-u","--user", dest="user", metavar="USER",
+		help="change to USER after starting the webserver")
+	parser.add_option("","--profile", dest="profile_file", metavar="PROFILE_FILE",
+		help="enable profiling and store results in PROFILE_FILE")
+	(options, args) = parser.parse_args()
+	## we do not expect any remaining arguments
+	if len(args) != 0:
+		parser.error("unknown argument: %s" % str(args[0]))
+	if not ((not os.path.exists(options.logfile) \
+			and os.access(os.path.dirname(options.logfile), os.W_OK)) \
+			or os.access(options.logfile, os.W_OK)):
+		parser.error("could not write to logfile (%s)" % options.logfile)
+	if not os.path.isdir(options.datadir) or not os.access(options.datadir,os.X_OK):
+		parser.error("could not access the data directory (%s)" % options.datadir)
+	try:
+		if (int(options.port) < 0) or (int(options.port) > 65535):
+			parser.error("invalid port number: %s" % str(options.port))
+	except ValueError:
+		parser.error("invalid port specified (%s) - it must be a number" % (options.port))
+	if options.user:
+		try:
+			try:
+				## check for the user given as uid
+				uid = pwd.getpwuid(int(options.user))[2]
+			except ValueError:
+				## check for the user given as name
+				uid = pwd.getpwnam(options.user)[2]
+		except KeyError:
+			## invalid user specified
+			parser.error("invalid user specified (%s)" % options.user)
+		## we will use the uid
+		options.user = uid
+	if options.profile_file:
+		options.profile_file = os.path.abspath(options.profile_file)
+		try:
+			import profile
+		except ImportError:
+			parser.error("profiling requires the python module 'profile' - debian users should run 'apt-get install python-profiler'")
+	return options
+
+
+def clean_environment(settings_list):
+	"""Remove some environment settings with side effects (e.g. LANG)
+	
+	Useful, as some plugins depend on the output of other commands - localized
+	output would be quite ugly for them ...
+	"""
+	for one_setting in settings_list:
+		os.unsetenv(one_setting)
+
+
+if __name__ == "__main__":
+	## process arguments
+	options = parseOptions()
+	## set umask to 022 (aka 755) - octal value
+	os.umask(022)
+	## initialize the webserver class
+	cbw = CryptoBoxWebserver(options)
+	## remove some environment settings
+	clean_environment(REMOVE_ENV_SETTINGS)
+	## fork to background before cbw.start() - otherwise we lose the socket
+	if options.background:
+		fork_to_background()
+	## define the default exit handler
+	def exit_handler(signum, sigframe):
+		if hasattr(cbw, "website"):
+			## are we already up?
+			cbw.website.cbox.log.info("Shutting down ...")
+			cbw.website.cleanup()
+		cherrypy.server.stop()
+		try:
+			os.remove(options.pidfile)
+		except OSError:
+			pass
+		os._exit(0)
+	## the signal handler gets called by a kill signal (usually in background mode)
+	signal.signal(signal.SIGTERM, exit_handler)
+	## this exit handler gets called by KeyboardInterrupt and similar ones (foreground)
+	atexit.register(exit_handler, None, None)
+	## start the webserver
+	try:
+		if options.profile_file:
+			import profile
+			profile.run('cbw.start()', options.profile_file)
+		else:
+			cbw.start()
+	except CBError, err_msg:
+		sys.stderr.write("Failed to start the CryptoBox webserver!\n")
+		sys.stderr.write("%s\n" % str(err_msg))
+		sys.stderr.write("Check the log file for details.\n")
+		cherrypy.server.stop()
+		sys.exit(1)
+	## redirect stderr to the webserver's logfile
+	if options.background:
+		## replace stdin and stdout by /dev/null
+		close_open_files()
+		## replace stderr by the webserver logfile
+		os.close(2)
+		os.open(options.logfile, os.O_APPEND)
+	## startup went fine - fork is done - now we may write the pid file
+	write_pid_file(options.pidfile)
+	## this will never exit - one of the above exit handlers will get triggered
+	cherrypy.server.block()
+
