@@ -1,0 +1,79 @@
+    >>> from hexagonit.decorators.browser import json, nocache
+
+Test that the json decorator works for class methods.
+
+    >>> class DummyJson(object):
+    ...     @json
+    ...     def testmethod(self, foo, bar, *args, **kwargs):
+    ...         return foo, bar, args, kwargs
+    ...     
+    >>> dummy = DummyJson()
+    >>> dummy.testmethod('foo', 'bar', 'foobar', start=123)
+    '["foo", "bar", ["foobar"], {"start": 123}]'
+
+    >>> class DummyJsonWithArgs(object):
+    ...     @json(sort_keys=True, ensure_ascii=False)
+    ...     def testmethod(self, foo, bar, *args, **kwargs):
+    ...         return foo, bar, args, kwargs
+    ...     
+    >>> dummy = DummyJsonWithArgs()
+    >>> dummy.testmethod('foo', 'bar', 'foobar', start=123)
+    u'["foo", "bar", ["foobar"], {"start": 123}]'
+
+Test that the json decorator works for functions.
+
+    >>> @json
+    ... def testfunction(foo, bar, *args, **kwargs):
+    ...     return foo, bar, args, kwargs
+    >>> testfunction('foo','bar','foobar',start=123)
+    '["foo", "bar", ["foobar"], {"start": 123}]'
+
+Test that we can use both the nocache and json decorator on the same method.
+
+
+    >>> class Dummy(object):pass
+    >>> class BrowserView(object):
+    ...     """Dummy view class that fakes the ``request`` object."""
+    ...     def __init__(self):
+    ...         self.request = Dummy()
+    ...         self.request.response = Dummy()
+    ...         self.headers = []
+    ...         self.request.response.setHeader = lambda header,value: self.headers.append('%s: %s' % (header, value))
+    ...         
+    ...     @json    
+    ...     @nocache
+    ...     def test_json_first(self, foo=None, bar=None, *args, **kwargs):
+    ...         print '\n'.join(self.headers)
+    ...         self.headers = []
+    ...         return foo, bar, args, kwargs
+    ...     
+    ...     @nocache
+    ...     @json
+    ...     def test_nocache_first(self, foo, bar, *args, **kwargs):
+    ...         print '\n'.join(self.headers)
+    ...         self.headers = []
+    ...         return foo, bar, args, kwargs
+    ...     
+
+    >>> view = BrowserView()
+    >>> view.test_json_first('foo','bar','foobar',start=123)
+    Pragma: no-cache
+    Expires: Sat, 1 Jan 2000 00:00:00 GMT
+    Cache-Control: no-cache, must-revalidate
+    '["foo", "bar", ["foobar"], {"start": 123}]'
+
+    >>> view.test_nocache_first('foo','bar','foobar',start=123)
+    Pragma: no-cache
+    Expires: Sat, 1 Jan 2000 00:00:00 GMT
+    Cache-Control: no-cache, must-revalidate
+    '["foo", "bar", ["foobar"], {"start": 123}]'
+    
+Make sure that query params are mapped back into kwargs.
+
+    >>> view.request.form = { 'foo' : 'foo', 'bar' : 'bar' }
+    >>> view.test_json_first(start=123)
+    Pragma: no-cache
+    Expires: Sat, 1 Jan 2000 00:00:00 GMT
+    Cache-Control: no-cache, must-revalidate
+    '["foo", "bar", [], {"start": 123}]'
+
