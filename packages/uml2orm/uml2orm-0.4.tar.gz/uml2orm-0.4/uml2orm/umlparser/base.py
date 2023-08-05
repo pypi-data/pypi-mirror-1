@@ -1,0 +1,114 @@
+# Copyright (c) 2007, Guilherme Polo.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without 
+# modification, are permitted provided that the following conditions are met:
+#
+#   1. Redistributions of source code must retain the above copyright notice, 
+#      this list of conditions and the following disclaimer.
+#
+#   2. Redistributions in binary form must reproduce the above copyright 
+#      notice, this list of conditions and the following disclaimer in the 
+#      documentation and/or other materials provided with the distribution.
+#
+#   3. The name of the author may not be used to endorse or promote products 
+#      derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER 
+# OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+# LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+# NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+class BadUML(Exception):
+    """Raised in case UML design is incorrect."""
+
+class BadReference(BadUML):
+    """
+    Raised in case UML object Reference references non-existant operation 
+    in other UML Class.
+    """
+    def __init__(self, tname, oper):
+        self.tname = tname
+        self.oper = oper
+
+    def __str__(self):
+        return ("UML Class '%s' has no operation '%s' to use as reference. " 
+                "You must define valid roles for both end "
+                "points." % (self.tname, self.oper))
+
+class BadOperation(BadUML):
+    """Raised when a operation is placed at a wrong place."""
+
+class IncompleteReference(BadUML):
+    """
+    Raised in case UML object Reference is not connected to both end points.
+    """
+    def __init__(self, connected):
+        self.connected = connected
+
+    def __str__(self):
+        return ("One end point of an UML Reference is disconnected, "
+                "and the other end is connected to the UML Class "
+                "'%s'." % self.connected)
+
+class ReferenceDuplicate(BadUML):
+    """Raised when finding the same reference between same UML Class."""
+    def __init__(self, dtable, dcolumn):
+        self.dtable = dtable
+        self.dcolumn = dcolumn
+
+    def __str__(self):
+        return ("Found a reference duplicate at UML Class '%s' involving "
+                "attribute '%s'." % (self.dtable, self.dcolumn))
+
+class CyclicReference(BadUML):
+    """Raise when finding a cyclic reference in an UML Class."""
+    def __init__(self, ctable, ccolumn):
+        self.ctable = ctable
+        self.ccolumn = ccolumn
+
+    def __str__(self):
+        return ("Found a cyclic reference at UML Class '%s' involving "
+                "attribute '%s'." % (self.ctable, self.ccolumn))
+
+class NoColumnType(Warning):
+    """Raise when a attribute has no type defined."""
+
+class DisconnectedObject(Warning):
+    """Raised when both end points of an UML object are disconnected."""
+
+class BaseParser(object):
+    """
+    UML parsers should inherit from this class and override methods 
+    not implemented.
+    """
+
+    def __init__(self, uml_class, uml_inheritance, uml_association, 
+                 uml_root, nstracker):
+        self.dbname = None
+        self.uml_layer = None
+
+        self.root = uml_root
+        self.nstracker = nstracker
+        self.uml_read = {uml_class: self.parse_table_from_uml_class,
+                         uml_inheritance: self.parse_table_inheritance,
+                         uml_association: self.parse_table_association}
+
+    def parse_uml(self, *args, **kwargs):
+        raise NotImplementedError
+    
+    def parse_table_from_uml_class(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def parse_table_inheritance(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def parse_table_association(self, *args, **kwargs):
+        raise NotImplementedError
