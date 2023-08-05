@@ -1,0 +1,54 @@
+Relevant Concepts:
+  NamedTarget:
+    - a target for an install.  something like "webapp_container" or "apache_directory"
+    - has an InstallBehavior that is built against a config
+  InstallBehavior:
+    - install behaviors can do things like extract archives, move files, copy files, etc
+    - install behaviors are instantiated by a NamedTarget based on the environment against which it is running
+  Project:
+    - a project that can be built and installed.  think "oasis"
+    - has a collection of NamedTargets
+  Environment:
+    - a meta-project grouping of applications and resources.  think "prod", "dev", "qa", etc.
+  ReleaseManager:
+    - a server aware of a set of NamedTargets, Projects, BuildHosts, and ReleaseDaemons
+  BuildHost:
+    - a host able to build a certain set of Projects
+    - can register itself with multiple ReleaseManager instances, advertising Projects
+  ReleaseDaemon:
+    - a worker process that has been started against a particular environment, able to install to a subset of NamedTargets
+    - can register itself with multiple ReleaseManager instances, advertising NamedTargets
+
+
+Use:
+  Connect to ReleaseManager (with authentication using SimpleAuth)
+  Request an Action for a Project (build, install, verify)
+
+Action for Build:
+  params: Project, branch/revision/url/tag
+  ReleaseManager (hereafter, RM) shouldlook for a suitable BuildHost
+      Fail if none, else round-robin the build requests to available BuildHost's for project
+      Note: BuildHost instances should .register([RM]'s, available_projects) themselves on init
+    RM passes build request to BH
+    BH builds and creates a single archive of all build output
+    BH returns archive to RM with an index file of Target-to-file-in-archive map
+  RM returns archive to requester
+
+Action for Install:
+  params: Project, Environment, branch/revision/url/tag
+  RM gathers list of Targets for project, matching these to Env
+  RM determines if ReleaseDaemons exist for Project Targets for the Environment
+  RM contacts All RD's to make certain they're available
+      Fail if no RD's available for any Target
+  RM runs all actions for Build as above, treating itself as the requester
+  RM extracts archive to components
+    Interrogates index file
+    Maps NamedTarget to All ReleaseDaemon instances advertising this Environment, sends data
+    RD's defer to the NamedTarget's InstallBehavior for the installation, responding back success or failure and message
+  RM monitors all ReleaseDaemon responses.  Responds back to Requester with target/status/message.
+
+Action for Verify:
+  params: Project, Environment
+  The InstallBehavior's of NamedTargets should always create a .releasemanager_version file that has the
+  branch/revision/url from which the project was checked out.
+  RM will query the RD for NamedTarget's version string.  This will be returned by the RM to the requester.
