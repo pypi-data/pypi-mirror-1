@@ -1,0 +1,20 @@
+import fixture
+from migrate.versioning.repository import *
+import os
+
+class PathTests(fixture.Base):
+    def test_templates(self):
+        """We can find the path to all repository templates"""
+        path = str(template)
+        self.assert_(os.path.exists(path))
+    def test_repository(self):
+        """We can find the path to the default repository"""
+        path = template.default_repository() 
+        self.assert_(os.path.exists(path))
+    def test_script(self):
+        """We can find the path to the default migration script"""
+        path = template.default_script() 
+        self.assert_(os.path.exists(path))
+
+if __name__=='__main__':
+    fixture.main()

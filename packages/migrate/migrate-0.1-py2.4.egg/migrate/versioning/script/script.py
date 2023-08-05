@@ -1,0 +1,63 @@
+from migrate.versioning.base import *
+from migrate.versioning.pathed import * 
+import os
+import sys
+
+def import_path(fullpath):
+    """ Import a file with full path specification. Allows one to
+        import from anywhere, something __import__ does not do. 
+    """
+     # http://zephyrfalcon.org/weblog/arch_d7_2002_08_31.html
+    path, filename = os.path.split(fullpath)
+    filename, ext = os.path.splitext(filename)
+    sys.path.append(path)
+    module = __import__(filename)
+    reload(module) # Might be out of date during tests
+    del sys.path[-1]
+    return module
+
+class ScriptError(Exception):
+    pass
+class InvalidScriptError(ScriptError):
+    pass
+
+class ScriptFile(Pathed):
+    """Base class for other types of scripts
+    All scripts have the following properties:
+    - source (script.source())
+        The source code of the script
+    - version (script.version())
+        The version number of the script
+    - operations (script.operations())
+        The operations defined by the script: upgrade(), downgrade() or both.
+        Returns a tuple of operations.
+        Can also check for an operation with ex. script.operation(Script.ops.up)
+    """
+    def __init__(self,path):
+        log.info('Loading script %s...'%path)
+        self.verify(path)
+        super(ScriptFile,self).__init__(path)
+        log.info('Script %s loaded successfully'%path)
+    
+    @classmethod
+    def verify(cls,path):
+        """Ensure this is a valid script, or raise InvalidScriptError
+        Child classes might add to this by extending _verify
+        """
+        try:
+            cls.require_found(path)
+        except:
+            raise InvalidScriptError(path)
+
+    def version(self):
+        raise NotImplementedError   #TODO
+    def source(self):
+        fd=open(self.path)
+        ret=fd.read()
+        fd.close()
+        return ret
+    def operations(self):
+        # Must be defined in child class
+        raise NotImplementedError
+    def operation(self,op):
+        return op in self.operations()
