@@ -1,0 +1,1 @@
+The tnef demo files are from the gpl'd tnef sourceforge project
