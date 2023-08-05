@@ -1,0 +1,98 @@
+
+Internals
+=========
+
+
+
+Web
+---
+
+This is a Pylons application.  The template engine is Mako.
+
+
+
+Database
+--------
+
+The object relational mapper is SQL Alchemy and most database engines
+should work though most testing was done with SQLite.
+
+
+
+Navigation
+----------
+
+There are three levels of navigation.  Level 1 is for user operations:
+login, messages, profiles, and the like.  Level 2 is site wide
+navigation: home, wiki, and who knows want other section there might
+be.  Level 3 is in-section actions, for wiki that would be: edit,
+history, diff, and stuff like that.  Levels 1 and 2 and rendered the
+same all over the plate by `base.mako`, level 3 must be included
+manually by the templates needing it.  Actions can be added by the
+controller through `c.navX_actions` with `X` in {1, 2, 3}.  This is
+just a list of `(label, controller, action)` tuples.  The url and
+active tab highlighting is computed by Routes.
+
+Beware, the Routes semantic holds: a leading slash in the controller
+name is used to cancel the Routes memory.
+
+
+
+Flashed Messages
+----------------
+
+Messages are flashed all over the place to confirm success of actions
+or to warn the user of critical conditions.  There are two queues with
+two levels each.  Levels are `info` and `warn`.  The first queue is
+for messages to be displayed on the page being rendered.  The second
+queue for messages to be displayed on the next page visited; this
+queue is typically used before a redirect, say after a successful
+login or form processing.  The second queue uses sessions and will
+silently fail if the user refuses cookies.  To append a message, use
+`h.m_info()`, `h.m_warn()`, `h.q_info()`, or `h.q_warn()`.
+
+
+
+Wiki Storage
+------------
+
+The wiki engine is inspired by distributed revision control systems,
+mostly Git and Mercurial.  The storage is a directed acyclic graph
+(DAG) of page revisions.  The idea is that we make a better job at
+merging concurrent edits if we track where they come from without
+forcing the page history into a linear successions of edits.  A page
+can be forked and each branch can be saved into several intermediate
+states before a merge.
+
+See how it's done in 
+http://eagain.net/articles/git-for-computer-scientists/[Git internals] 
+and
+http://www.selenic.com/mercurial/wiki/index.cgi/UnderstandingMercurial[Mercurial internals]
+for more info on the storage.  
+We do basically the same thing using a database instead of the file
+system.
+
+A *rev* or *RevNode* is the content of a revision.  It is not tied to
+a page.  Pages are pointer to specific nodes in the revision DAG.
+When concurrent edits are detected, we find the most recent common
+parent revision and we do a 3-way merge.  The code to find the
+ancestor is taken verbatim from Mercurial and merge is done with GNU
+`diff3`.  There is a Python implementation of 3-way merge in Mercurial
+that we could also use.
+
+What Mercurial refers to as the *tip* is the node that had the Page
+pointer before a commit.  This is always `rev.parents[-1]`.
+
+
+
+Wiki Markup
+-----------
+
+Not much to say.  Markup cannot be nested so we use regexps to strip
+the wiki specific markup from the page, we render the presentation
+with the page renderer, then insert the rendered markup back into
+place.  
+
+The default renderer is Markdown but the user can change that with a
+macro.  It's easy to make a plugin for another renderer, see the
+`gazest_extra_macros` package for examples.
