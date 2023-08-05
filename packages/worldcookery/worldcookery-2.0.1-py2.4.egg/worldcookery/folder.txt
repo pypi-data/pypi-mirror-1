@@ -1,0 +1,94 @@
+=============
+Recipe folder
+=============
+
+We instantiate our recipe folder:
+
+  >>> from worldcookery.folder import RecipeFolder
+  >>> folder = RecipeFolder()
+
+
+Contraints and preconditions
+----------------------------
+
+The ``checkObject`` function can now check constraints.  As we expect,
+an error is raised trying to check an object that does not provide
+``IRecipe``:
+
+>>> from zope.app.container.constraints import checkObject
+>>> tortillas = object()
+>>> checkObject(folder, u'tortillas', tortillas)
+Traceback (most recent call last):
+  ...
+InvalidItemType: ...
+
+Taking an object that *does* provide ``IRecipe`` will make
+``checkObject`` execute without any error:
+
+>>> from zope.interface import implements
+>>> from worldcookery.interfaces import IRecipe
+>>> class Recipe(object):
+...     implements(IRecipe)
+... 
+>>> sangria = Recipe()
+>>> checkObject(folder, u'sangria', sangria)
+>>> 
+
+However, a container that is not a recipe container will not be
+acceptable:
+
+>>> from zope.app.container.sample import SampleContainer
+>>> container = SampleContainer()
+>>> checkObject(container, u'sangria', sangria)
+Traceback (most recent call last):
+  ...
+InvalidContainerType: ...
+
+
+Names of contained objects
+--------------------------
+
+To keep things simple we instantiate the ``INameChooser`` adapter
+manually.  This way we do not have to load site configuration:
+
+  >>> from worldcookery.folder import RecipeFolder, RecipeNameChooser
+  >>> chooser = RecipeNameChooser(folder)
+
+A blank recipe object has an empty name (this is the class default),
+which is not acceptable for a container name:
+
+  >>> from worldcookery.recipe import Recipe
+  >>> tapas = Recipe()
+  >>> tapas.name
+  u''
+  >>> chooser.chooseName(u'', tapas)
+  Traceback (most recent call last):
+  ...
+  UserError: An empty name was provided. Names cannot be empty.
+
+When we now provide a name that is acceptable for container names (the
+restrictions for container namese are minimal), we see that the name
+chooser adapter chooses a name for us (the recipe's name).  When
+checking a name, it expectedly accepts the recipe's name while
+rejecting anything else with a user error:
+
+  >>> tapas.name = u"Tapas"
+  >>> chooser.chooseName(u'', tapas)
+  u'Tapas'
+  >>> chooser.checkName(tapas.name, tapas)
+  True
+  >>> chooser.checkName(u'Tasty tapas', tapas)
+  Traceback (most recent call last):
+  ...
+  UserError: Given name and recipe name do not match!
+
+As mentioned, the restrictions on container names are minimal.  An
+important one is that it may not be empty.  Apart from that,
+characters critical to traversal ('+' '@', and '/') may not occur
+either:
+
+  >>> tapas.name = u'Tapas with/without olives'
+  >>> chooser.checkName(tapas.name, tapas)
+  Traceback (most recent call last):
+  ...
+  UserError: Names cannot begin with '+' or '@' or contain '/'

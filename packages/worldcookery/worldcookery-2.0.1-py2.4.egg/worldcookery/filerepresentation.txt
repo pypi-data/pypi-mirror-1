@@ -1,0 +1,60 @@
+========================================
+File representation adapters for recipes
+========================================
+
+Let us first create a recipe object through a file factory.  In order
+to acquire the factory, we need a folder object since we registered
+the factory as an adapter for folders.  We can throw the folder away
+afterwards.  Even though the factory is an adapter, we cannot look it
+up by calling the interface anymore because that will not take the
+adapter name into account.  We need to use ``getAdapter`` from
+``zope.component`` now:
+
+  >>> from worldcookery.folder import RecipeFolder
+  >>> from zope.filerepresentation.interfaces import \
+  ...     IReadFile, IWriteFile, IFileFactory
+  >>> from zope.component import getAdapter
+  >>> folder = RecipeFolder()
+  >>> factory = IFileFactory(folder)
+
+Now we can call the factory with some made-up data.  We expect to get
+a recipe object back, of course, and that the recipe's description
+equals to the data we passed to the factory.
+
+  >>> data = "Add spices to the water and bring it to boil. " \
+  ...        "Then add the couscous."
+  >>> couscous = factory("couscous", "text/plain", data)
+  >>> couscous # doctest: +ELLIPSIS
+  <worldcookery.recipe.Recipe object at ...>
+  >>> couscous.name
+  'Couscous'
+  >>> couscous.description
+  u'Add spices to the water and bring it to boil. Then add the couscous.'
+
+Now we can get a file representation for the recipe again and read its
+data.  Note that the file representation returns a string object, not
+a Unicode object, since only the former can be written to a file stream.
+
+  >>> readfile = IReadFile(couscous)
+  >>> readfile.size()
+  68
+  >>> readfile.read()
+  'Add spices to the water and bring it to boil. Then add the couscous.'
+
+Finally, we can adapt the recipe object to a writeable file and store
+new data on it.  The recipe will be changed accordingly, of course:
+
+  >>> writefile = IWriteFile(couscous)
+  >>> writefile.write("Couscous consists of grains made from semolina.")
+  >>> couscous.description
+  u'Couscous consists of grains made from semolina.'
+
+Note that it is not possible to create subfolders in a recipe folder.
+Doing so raises a ``UserError``:
+
+  >>> from zope.filerepresentation.interfaces import IDirectoryFactory
+  >>> factory = IDirectoryFactory(folder)
+  >>> factory(u"subfolder")
+  Traceback (most recent call last):
+  ...
+  UserError: Cannot create subfolders in recipe folders.
