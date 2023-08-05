@@ -1,0 +1,198 @@
+============
+tg_bootstrap
+============
+
+.. contents::
+
+Status and License
+------------------
+
+``tg_bootstrap`` is simple glue code between `virtualenv
+<http://pypi.python.org/pypi/virtualenv/>`_ and `TurboGears
+<http://www.TurboGears.org>`_.
+
+It is written by Arlo Belshee.  It is licensed under an
+`MIT-style permissive license
+<http://svn.arlim.org/tg_bootstrap/trunk/docs/license.txt>`_.
+
+You can install it with ``easy_install tg_bootstrap``, or from the
+`subversion repository
+<http://svn.arlim.org/tg_bootstrap/trunk#egg=tg_bootstrap-dev>`_ with
+``easy_install tg_bootstrap==dev``.
+
+What It Does
+------------
+
+``tg_bootstrap`` is a tool to create a TurboGears application in an
+isolated Python environment with a minimal number of system dependencies.
+
+``tg_bootstrap`` achieves the following:
+
+* Create a one-click development config script.
+* Create a one-click release deployment script.
+* Remove your TurboGears-built ``setup.py``'s dependency on TurboGears.
+
+These install scripts will set up your app on any machine (Linux, Mac, or Windows). The
+machine need only have a bare Python install (you will also need command-line svn
+on the path for your development machine). Your app will be completely
+isolated from any other Python install on your development machine. It will not
+share any packages either from or to your global system Python or any other Python
+install.
+
+Both scripts will upgrade a previous version of your app if you install over the top of it.
+The release script installs your app as an egg. The development script checks out
+the source and install from there.
+
+TurboGears generates a ``setup.py`` for your app when you create it. Unfortunately, this
+``setup.py`` imports a module (``finddata.py``) from TurboGears itself. Thus, even though
+your ``setup.py`` script indicates that TurboGears is a dependency, it cannot be used
+to install TurboGears on a machine that doesn't already have TurboGears.
+
+To get around this problem, I have packaged TurboGears' ``finddata.py`` in this bootstrapper.
+This way, you need only have ``tg_bootstrap`` installed to run your ``setup.py``. All the real
+dependencies - the ones that version frequently - can be controlled by each app's ``setup.py``.
+
+I will occasionally update the ``finddata.py`` that I include with ``tg_bootstrap``. However, it
+doesn't need to support everything that the main TurboGears ``finddata.py`` supports. After all,
+you just use this ``finddata.py`` for long enough to install TurboGears on a new development machine.
+After that, including during egg-based release installs, your ``setup.py`` uses TurboGears'
+then-current ``finddata.py``.
+
+Usage
+-----
+
+Generating Scripts
+~~~~~~~~~~~~~~~~~~
+
+Assume you were a company with two different TurboGears applications. Here is a script
+which will generate 4 scripts: release and development install scripts for each product::
+
+  from tg_bootstrap import bootstrap
+  
+  bootstrap.create_scripts(
+    src_repository='http://svn.example.com/app1/trunk',
+    proj='someapp',
+    release_version='2.3.1b3')
+
+  bootstrap.create_scripts(
+    src_repository='http://svn.example.com/otherapp/trunk',
+    proj='otherapp',
+    release_version='0.2.1')
+
+Creating a New Project
+~~~~~~~~~~~~~~~~~~~~~~
+
+To create a brand-new TurboGears project without mucking up your system Python (by, say,
+installing TurboGears into it), do the following:
+
+1. If necessary, create a subversion repository for your project(s).
+2. Add an empty directory for your new project's source.
+3. Create a temporary virtualenv to work in. To do this by hand,
+
+   * Download `virtualenv.py <http://svn.colorstudy.com/virtualenv/trunk/virtualenv.py>`_.
+   * Using your system python, run ``python virtualenv.py /tmp/sandbox/for/now``
+   * Activate that virtualenv. See the
+     `virtualenv documentation <http://pypi.python.org/pypi/virtualenv/>`_ for
+     platform-specific instructions.
+   * In the virtualenv, run ``easy_install tg_bootstrap`` and ``easy_install TurboGears``.
+   * Note to Vista users: easy_install is not yet aware of the Vista security model. Thus,
+     it creates an easy_install.exe application that doesn't work on Vista! As a workaround,
+     you can use easy_install-script.py, run via virtualenv's python. Take care, as Python's
+     installer has associated .py files with your system python install. So if you have
+     activated a virtualenv, then ``easy_install-script.py foo`` will install foo to your
+     system Python, while ``python easy_install-script.py foo`` will install it to your
+     virtualenv.
+
+4. In the active temporary virtualenv, check out your project's empty directory.
+5. Use tg-admin in the virtualenv to create your project as normal.
+6. Update your project's setup.py to use ``tg_bootstrap``'s ``finddata.py`` (see below).
+7. Commit your project.
+8. If you haven't already, add another directory to your repository to contain your bootstrapping scripts.
+9. Extend your installer script generator to contain the command for your new app. Generate
+   and commit your install scripts.
+10. From any Python (system or virtualenv), run your development install script:
+    ``python projname-develop.py /sandbox/for/development/of/new/app``.
+11. Delete the temporary bootstrapping virtualenv, and begin working as normal in your development
+    sandbox.
+
+Installing From Generated Scripts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To A Development System
++++++++++++++++++++++++
+
+To start developing an existing project on a new machine, you need only:
+
+1. Make sure Python is installed on your machine.
+2. Make sure command-line svn is installed and on your path.
+3. Run ``python someproj-develop.py /sandbox/path/for/app``
+
+The script will create a virtualenv at ``/sandbox/path/for/app``. Inside the virtualenv,
+it will check out your project's source to ``/sandbox/path/for/app/src``. It will then
+perform a development install of your project, including all dependencies, into that
+virtualenv.
+
+If your project adds dependencies or you which to freshen your dependencies to
+the latest version, just run your app's ``setup.py`` script from within the
+virtualenv::
+
+  python setup.py develop
+
+To A Release System
++++++++++++++++++++
+
+To package and deploy a project release, you need only:
+
+1. Package your application as an egg.
+2. Either upload your egg to pypi or copy it to your deployment / test server.
+3. Update the release number in your script generation script and regenerate your scripts.
+4. Make sure Python is installed on your target server.
+5. Run ``python someproj-release.py /deployment/path/for/app``
+
+The release script will create a virtualenv at ``/sandbox/path/for/app``. It will install
+your egg, and all its dependencies, into that virtualenv. At that point, you need only
+do whatever your system requires to make your app live.
+
+The `virtualenv documentation <http://pypi.python.org/pypi/virtualenv/>`_ describes how
+to configure common systems to run an app from a virtualenv. It includes descriptions
+of shared persistent server mechanisms such as mod_python.
+
+*Note:* ``virtualenv.py`` supports the ``--no-site-packages`` option. It defaults to
+including your system Python's site packages in your virtualenv. However, keeping dependencies
+clean makes upgrades easier. Thus, install scripts generated with ``tg_bootstrap``
+have the reverse default, and a ``--with-global-site-packages`` override option.
+If you use ``tg_bootstrap`` and don't provide a command-line option, then your virtualenv
+will start clean and blank; it will not have access to your machine's system python libraries.
+
+The generated scripts accept all of ``virtualenv.py``'s other options, unchanged.
+
+Reducing Dependencies
+~~~~~~~~~~~~~~~~~~~~~
+
+To use this, simply change the line of your ``setup.py`` which reads::
+
+  from turbogears.finddata import find_package_data
+
+to read::
+
+  try:
+	 from turbogears.finddata import find_package_data
+  except ImportError:
+	 from tg_bootstrap.finddata import find_package_data
+
+The rest of ``setup.py`` is unchanged.
+
+Changes & News
+--------------
+
+svn trunk
+~~~~~~~~~
+
+Nothing yet
+
+0.4
+~~~
+
+* Documentation
+* Initial version. Supports creating new projects without system dependencies.
+
