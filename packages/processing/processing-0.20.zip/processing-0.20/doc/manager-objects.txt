@@ -1,0 +1,170 @@
+.. include:: header.txt
+
+Manager objects
+===============
+
+The manager classes are defined in the `processing.managers` module.
+
+BaseManager
+-----------
+
+`BaseManager` is the base class for all manager classes and does not
+have any methods which create shared objects.  The only public method
+the class has is
+
+    `shutdown()`
+        Stop the process used by the manager.  
+
+        This can be called multiple times.
+
+In addition `BaseManager` supports the *context manager protocol*
+and has a `__del__` method to ensure that `shutdown()` does
+eventually get called.
+
+The creation of managers which support arbitrary types is discussed in
+`Customized managers`_.
+
+
+SyncManager
+-----------
+
+`SyncManager` is a subclass of `BaseManager` which can be used for
+the synchronization of processes.  Objects of this type are returned
+by `processing.Manager()`.
+
+`SyncManager` supports a number of additional methods for creating
+shared objects, each of which creates a proxy object:
+
+    `BoundedSemaphore(value=1)`
+        Creates a shared `threading.BoundedSemaphore` object and
+        returns a proxy for it.
+ 
+    `Condition(lock=None)`
+        Creates a shared `threading.Condition` object and returns a
+        proxy for it.  
+
+        If `lock` is supplied then it should be a proxy for a
+        `threading.Lock` or `threading.RLock` object.
+
+    `Event()`
+        Creates a shared `threading.Event` object and returns a proxy
+        for it.
+ 
+    `Lock()`
+        Creates a shared `threading.Lock` object and returns a proxy
+        for it.
+ 
+    `Namespace()`
+        Creates a shared `processing.managers.Namespace` object and returns a
+        proxy for it.
+
+        See `Namespace objects`_.
+
+    `Queue(maxsize=0)`
+        Creates a shared `Queue.Queue` object and returns a proxy for
+        it.
+ 
+    `RLock()`
+        Creates a shared `threading.RLock` object and returns a proxy
+        for it.
+ 
+    `Semaphore(value=1)`
+        Creates a shared `threading.Semaphore` object and returns a
+        proxy for it.
+ 
+    `dict()`, `dict(mapping)`, `dict(sequence)`
+        Creates a shared `dict` object and returns a proxy for it.
+ 
+    `list()`, `list(sequence)`
+        Creates a shared `list` object and returns a proxy for it.
+
+
+.. admonition:: _`Namespace objects`
+
+    A namespace object has no public methods but does have writable
+    attributes.  Its representation shows the values of its public
+    attributes (i.e. those attributes whose names do not begin with '_').
+
+    However, when using a proxy for a namespace object, attributes
+    beginning with '_' will be stored on the proxy object and not on
+    the target::
+
+        >>> manager = processing.Manager()
+        >>> Global = manager.Namespace()
+        >>> Global.x = 10
+        >>> Global.y = 'hello'
+        >>> Global._z = 12.3    # this is an attribute of the proxy
+        >>> print Global
+        Namespace(x=10, y='hello')
+
+
+Customized managers
+-------------------
+
+To create one's own manager one creates a subclass `BaseManager`.
+
+To enable the subclass to create new types of shared objects one adds
+instance methods to the subclass using the following function:
+
+    `CreatorMethod(callable, proxytype=None, exposed=None)`
+        Returns a function with signature `func(self, *args,
+        **kwds)` which will create a shared object using the manager
+        `self` and return a proxy for it.  The shared objects will
+        be created by evaluating `callable(*args, **kwds)` in the
+        manager process.
+
+        The arguments are:
+
+        `callable`
+            The callable used to create a shared object.
+
+        `proxytype`
+            The type of the proxy which will be returned by the
+            returned method.
+
+            If `proxytype` is `None` then a new proxy type is
+            automatically created (or a cached one is reused).  
+
+            The methods of the shared object which will be exposed via
+            the proxy are determined by the `exposed` argument, see
+            below.
+            
+        `exposed`
+            The list of names of the methods of the objects returned
+            by `callable` which should be exposed via the proxy if
+            `proxytype` is `None`.
+
+            If `exposed` and `proxytype` are both `None` then
+            all public methods [#]_ of objects returned by
+            `callable` will be exposed via their proxies.
+
+For example::
+
+    from processing.managers import BaseManager, CreatorMethod
+
+    class FooClass(object):
+        def bar(self):
+            print 'BAR'
+        def baz(self):
+            print 'BAZ'
+
+    class NewManager(BaseManager):
+        Foo = CreatorMethod(FooClass)
+
+    if __name__ == '__main__':
+        manager = NewManager()
+        foo = manager.Foo()
+        foo.bar()               # prints 'BAR'
+        foo.baz()               # prints 'BAZ'
+        manager.shutdown()
+
+
+See `test_newtype.py <../test/test_newtype.py>`_ for more examples.
+
+.. [#] A public method is one whose name does not begin with '_'.
+
+
+.. _Prev: process-objects.html
+.. _Up: processing-ref.html
+.. _Next: proxy-objects.html
+
