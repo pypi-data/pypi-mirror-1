@@ -1,0 +1,91 @@
+#!/usr/bin/env python
+"""
+Module DEFS -- Common GUI Definitions
+Sub-Package GUI of Package PLIB -- Python GUI Framework
+Copyright (C) 2008 by Peter A. Donis
+
+Defines common constants and functions used by various GUI modules.
+"""
+
+# general constants
+default_font_size = 10
+
+# constants for referring to GUI toolkits
+GUI_QT = 1
+GUI_GTK = 2
+GUI_WX = 3
+GUI_KDE = 4
+
+# message box types
+MBOX_INFO = 0
+MBOX_WARN = 1
+MBOX_ERROR = 2
+MBOX_QUERY = 3
+
+# constants for message box responses
+answerNone = 0
+answerYes = 1
+answerNo = 2
+answerCancel = 3
+answerOK = 4
+
+# constants for alignment
+ALIGN_LEFT = 1
+ALIGN_CENTER = 2
+ALIGN_RIGHT = 3
+ALIGN_TOP = 4
+ALIGN_BOTTOM = 5
+ALIGN_JUST = 9
+
+# Layout constants
+LAYOUT_NONE = 0
+LAYOUT_HORIZONTAL = 1
+LAYOUT_VERTICAL = 2
+
+# Panel style constants
+PANEL_NONE = 0
+PANEL_BOX = 1
+PANEL_RAISED = 2
+PANEL_SUNKEN = 3
+
+# constants for signals
+SIGNAL_ACTIVATED = 10
+SIGNAL_CLICKED = 101
+SIGNAL_TOGGLED = 102
+SIGNAL_LISTVIEWCHANGED = 201
+SIGNAL_TABLECHANGED = 301
+SIGNAL_TEXTCHANGED = 401
+SIGNAL_ENTER = 490
+SIGNAL_WIDGETCHANGED = 901
+SIGNAL_QUERYCLOSE = 991
+SIGNAL_HIDDEN = 995
+SIGNAL_BEFOREQUIT = 999
+
+# constants for action flags, used as keys
+ACTION_FILENEW = 1
+ACTION_FILEOPEN = 2
+ACTION_FILESAVE = 4
+ACTION_FILESAVEAS = 8
+ACTION_FILECLOSE = 16
+ACTION_EDIT = 256
+ACTION_REFRESH = 512
+ACTION_ADD = 1024
+ACTION_REMOVE = 2048
+ACTION_OK = 16384
+ACTION_CANCEL = 32768
+ACTION_ABOUT = 49152
+ACTION_EXIT = 65536
+
+# useful combinations of the above
+ACTIONS_FILE = [ACTION_FILENEW, ACTION_FILEOPEN, ACTION_FILESAVE, ACTION_FILESAVEAS, ACTION_FILECLOSE]
+ACTIONS_ACTION = [ACTION_EDIT, ACTION_REFRESH, ACTION_ADD, ACTION_REMOVE, ACTION_OK, ACTION_CANCEL]
+ACTIONS_OTHER = [ACTION_ABOUT, ACTION_EXIT]
+ACTIONS_ALL = ACTIONS_FILE + ACTIONS_ACTION + ACTIONS_OTHER
+
+# color constants
+COLOR_BLACK = 'BLACK'
+COLOR_RED = 'RED'
+COLOR_BLUE = 'BLUE'
+COLOR_GREEN = 'GREEN'
+COLOR_YELLOW = 'YELLOW'
+COLOR_WHITE = 'WHITE'
