@@ -1,0 +1,43 @@
+"""
+testcases for cssutils.css.CSSCharsetRule
+"""
+__all__ = ['CSSutilsImportTestCase']
+__author__ = '$LastChangedBy: doerwalter $'
+__date__ = '$LastChangedDate: 2007-08-02 22:58:23 +0200 (Do, 02 Aug 2007) $'
+__version__ = '0.9.2a1, $LastChangedRevision: 160 $'
+
+before = len(locals()) # to check is only exp amount is imported
+from cssutils import *
+after = len(locals()) # to check is only exp amount is imported
+
+import unittest
+
+
+class CSSutilsImportTestCase(unittest.TestCase):
+
+    def test_import_all(self):
+        "from cssutils import *"
+        import cssutils
+
+        act = globals()
+        exp = {
+            'CSSParser': CSSParser,
+            'CSSSerializer': CSSSerializer,
+            'css': cssutils.css,
+            'stylesheets': cssutils.stylesheets,
+        }
+        exptotal = before + len(exp) + 1
+        # imports before + * + "after"
+        self.assert_(after == exptotal, 'too many imported')
+
+        found = 0
+        for e in exp:
+            self.assert_(e in act, '%s not found' %e)
+            self.assert_(act[e] == exp[e], '%s not the same' %e)
+            found += 1
+        self.assert_(found == len(exp))
+
+
+if __name__ == '__main__':
+    import unittest
+    unittest.main()
