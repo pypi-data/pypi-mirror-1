@@ -1,0 +1,523 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils 0.4: http://docutils.sourceforge.net/" />
+<title>APIs specific to lxml</title>
+<link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+<body>
+<div class="document" id="apis-specific-to-lxml">
+<h1 class="title">APIs specific to lxml</h1>
+<p>lxml tries to follow established APIs wherever possible.  Sometimes, however,
+the need to expose a feature in an easy way led to the invention of a new API.</p>
+<div class="section">
+<h1><a id="lxml-etree" name="lxml-etree">lxml.etree</a></h1>
+<p>lxml.etree tries to follow the <a class="reference" href="http://effbot.org/zone/element-index.htm">ElementTree API</a> wherever it can.  There are
+however some incompatibilities (see <a class="reference" href="compatibility.html">compatibility</a>).  The extensions are
+documented here.</p>
+<p>If you need to know which version of lxml is installed, you can access the
+<tt class="docutils literal"><span class="pre">lxml.etree.LXML_VERSION</span></tt> attribute to retrieve a version tuple.  Note,
+however, that it did not exist before version 1.0, so you will get an
+AttributeError in older versions.  The versions of libxml2 and libxslt are
+available through the attributes <tt class="docutils literal"><span class="pre">LIBXML_VERSION</span></tt> and <tt class="docutils literal"><span class="pre">LIBXSLT_VERSION</span></tt>.</p>
+<p>The following examples usually assume this to be executed first:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; from lxml import etree
+&gt;&gt;&gt; from StringIO import StringIO
+</pre>
+</div>
+<div class="section">
+<h1><a id="parsers" name="parsers">Parsers</a></h1>
+<p>One of the differences is the parser.  There is support for both XML and
+(broken) HTML.  Both are based on libxml2 and therefore only support options
+that are backed by the library.  Parsers take a number of keyword arguments.
+The following is an example for namespace cleanup during parsing, first with
+the default parser, then with a parametrized one:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; xml = '&lt;a xmlns=&quot;test&quot;&gt;&lt;b xmlns=&quot;test&quot;/&gt;&lt;/a&gt;'
+
+&gt;&gt;&gt; et     = etree.parse(StringIO(xml))
+&gt;&gt;&gt; print etree.tostring(et.getroot())
+&lt;a xmlns=&quot;test&quot;&gt;&lt;b xmlns=&quot;test&quot;/&gt;&lt;/a&gt;
+
+&gt;&gt;&gt; parser = etree.XMLParser(ns_clean=True)
+&gt;&gt;&gt; et     = etree.parse(StringIO(xml), parser)
+&gt;&gt;&gt; print etree.tostring(et.getroot())
+&lt;a xmlns=&quot;test&quot;&gt;&lt;b/&gt;&lt;/a&gt;
+</pre>
+<p>HTML parsing is similarly simple.  The parsers have a <tt class="docutils literal"><span class="pre">recover</span></tt> keyword
+argument that the HTMLParser sets by default.  It lets libxml2 try its best to
+return something usable without raising an exception.  Note that this
+functionality depends entirely on libxml2.  You should use libxml2 version
+2.6.21 or newer to take advantage of this feature:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; broken_html = &quot;&lt;html&gt;&lt;head&gt;&lt;title&gt;test&lt;body&gt;&lt;h1&gt;page title&lt;/h3&gt;&quot;
+
+&gt;&gt;&gt; parser = etree.HTMLParser()
+&gt;&gt;&gt; et     = etree.parse(StringIO(broken_html), parser)
+
+&gt;&gt;&gt; print etree.tostring(et.getroot())
+&lt;html&gt;&lt;head&gt;&lt;title&gt;test&lt;/title&gt;&lt;/head&gt;&lt;body&gt;&lt;h1&gt;page title&lt;/h1&gt;&lt;/body&gt;&lt;/html&gt;
+</pre>
+<p>Lxml has an HTML function, similar to the XML shortcut known from
+ElementTree:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; html = etree.HTML(broken_html)
+&gt;&gt;&gt; print etree.tostring(html)
+&lt;html&gt;&lt;head&gt;&lt;title&gt;test&lt;/title&gt;&lt;/head&gt;&lt;body&gt;&lt;h1&gt;page title&lt;/h1&gt;&lt;/body&gt;&lt;/html&gt;
+</pre>
+<p>The use of the libxml2 parsers makes some additional information available at
+the API level.  Currently, ElementTree objects can access the DOCTYPE
+information provided by a parsed document, as well as the XML version and the
+original encoding:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; pub_id  = &quot;-//W3C//DTD XHTML 1.0 Transitional//EN&quot;
+&gt;&gt;&gt; sys_url = &quot;http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd&quot;
+&gt;&gt;&gt; doctype_string = '&lt;!DOCTYPE html PUBLIC &quot;%s&quot; &quot;%s&quot;&gt;' % (pub_id, sys_url)
+&gt;&gt;&gt; xml_header = '&lt;?xml version=&quot;1.0&quot; encoding=&quot;ascii&quot;?&gt;'
+&gt;&gt;&gt; xhtml = xml_header + doctype_string + '&lt;html&gt;&lt;body&gt;&lt;/body&gt;&lt;/html&gt;'
+
+&gt;&gt;&gt; et = etree.parse(StringIO(xhtml))
+&gt;&gt;&gt; docinfo = et.docinfo
+&gt;&gt;&gt; print docinfo.public_id
+-//W3C//DTD XHTML 1.0 Transitional//EN
+&gt;&gt;&gt; print docinfo.system_url
+http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd
+&gt;&gt;&gt; docinfo.doctype == doctype_string
+True
+
+&gt;&gt;&gt; print docinfo.xml_version
+1.0
+&gt;&gt;&gt; print docinfo.encoding
+ascii
+</pre>
+</div>
+<div class="section">
+<h1><a id="error-handling-on-exceptions" name="error-handling-on-exceptions">Error handling on exceptions</a></h1>
+<p>Libxml2 provides error messages for failures, be it during parsing, XPath
+evaluation or schema validation.  Whenever an exception is raised, you can
+retrieve the errors that occured and &quot;might have&quot; lead to the problem:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; etree.clearErrorLog()
+&gt;&gt;&gt; broken_xml = '&lt;a&gt;'
+&gt;&gt;&gt; try:
+...   etree.parse(StringIO(broken_xml))
+... except etree.XMLSyntaxError, e:
+...   pass # just put the exception into e
+&gt;&gt;&gt; log = e.error_log.filter_levels(etree.ErrorLevels.FATAL)
+&gt;&gt;&gt; print log
+&lt;string&gt;:1:FATAL:PARSER:ERR_TAG_NOT_FINISHED: Premature end of data in tag a line 1
+</pre>
+<p>This might look a little cryptic at first, but it is the information that
+libxml2 gives you.  At least the message at the end should give you a hint
+what went wrong and you can see that the fatal error (FATAL) happened during
+parsing (PARSER) line 1 of a string (&lt;string&gt;, or filename if available).
+Here, PARSER is the so-called error domain, see lxml.etree.ErrorDomains for
+that.  You can get it from a log entry like this:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; entry = log[0]
+&gt;&gt;&gt; print entry.domain_name, entry.type_name, entry.filename
+PARSER ERR_TAG_NOT_FINISHED &lt;string&gt;
+</pre>
+</div>
+<div class="section">
+<h1><a id="python-unicode-strings" name="python-unicode-strings">Python unicode strings</a></h1>
+<p>lxml.etree has broader support for Python unicode strings than the ElementTree
+library.  First of all, where ElementTree would raise an exception, the
+parsers in lxml.etree can handle unicode strings straight away:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; uxml = u'&lt;test&gt; \uf8d1 + \uf8d2 &lt;/test&gt;'
+&gt;&gt;&gt; uxml
+u'&lt;test&gt; \uf8d1 + \uf8d2 &lt;/test&gt;'
+&gt;&gt;&gt; root = etree.XML(uxml)
+</pre>
+<p>This requires, however, that unicode strings do not specify a conflicting
+encoding themselves and thus lie about their real encoding:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; try:
+...   broken = etree.XML(u'&lt;?xml encoding=&quot;ASCII&quot;?&gt;\n' + uxml)
+... except etree.XMLSyntaxError:
+...   print &quot;This is not well-formed XML!&quot;
+This is not well-formed XML!
+</pre>
+<p>To serialize the result, you would normally use the <tt class="docutils literal"><span class="pre">tostring</span></tt> module
+function, which serializes to plain ASCII by default or a number of other
+encodings if asked for:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; etree.tostring(root)
+'&lt;test&gt; &amp;#63697; + &amp;#63698; &lt;/test&gt;'
+
+&gt;&gt;&gt; etree.tostring(root, 'UTF-8', xml_declaration=False)
+'&lt;test&gt; \xef\xa3\x91 + \xef\xa3\x92 &lt;/test&gt;'
+</pre>
+<p>As an extension, lxml.etree has a new <tt class="docutils literal"><span class="pre">lxml.etree.tounicode()</span></tt> function that
+you can call on XML tree objects to retrieve a Python unicode representation:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; etree.tounicode(root)
+u'&lt;test&gt; \uf8d1 + \uf8d2 &lt;/test&gt;'
+
+&gt;&gt;&gt; el = etree.Element(&quot;test&quot;)
+&gt;&gt;&gt; etree.tounicode(el)
+u'&lt;test/&gt;'
+
+&gt;&gt;&gt; subel = etree.SubElement(el, &quot;subtest&quot;)
+&gt;&gt;&gt; etree.tounicode(el)
+u'&lt;test&gt;&lt;subtest/&gt;&lt;/test&gt;'
+
+&gt;&gt;&gt; et = etree.ElementTree(el)
+&gt;&gt;&gt; etree.tounicode(et)
+u'&lt;test&gt;&lt;subtest/&gt;&lt;/test&gt;'
+</pre>
+<p>If you want to save the result to a file or pass it over the network, you
+should use <tt class="docutils literal"><span class="pre">write()</span></tt> or <tt class="docutils literal"><span class="pre">tostring()</span></tt> with an encoding argument (typically
+UTF-8) to serialize the XML.  The main reason is that unicode strings returned
+by <tt class="docutils literal"><span class="pre">tounicode()</span></tt> never have an XML declaration and therefore do not specify
+an encoding.  In contrast, the <tt class="docutils literal"><span class="pre">tostring()</span></tt> function automatically adds a
+declaration as needed that reflects the encoding of the returned string.  This
+makes it possible for other parsers to correctly parse the XML byte stream.
+Note that using <tt class="docutils literal"><span class="pre">tostring()</span></tt> with UTF-8 is also typically faster.</p>
+</div>
+<div class="section">
+<h1><a id="xpath-method-on-elementtree-element" name="xpath-method-on-elementtree-element">xpath method on ElementTree, Element</a></h1>
+<p>lxml.etree extends the ElementTree and Element interfaces with an xpath
+method.  For ElementTree, the xpath method performs a global xpath query
+against the document.  When xpath is used on an element, the xpath expression
+is performed taking the element as the xpath context node.</p>
+<p>You call the xpath() method with the XPath expression to use.  Optionally, you
+can provide a second argument, which should be a dictionary mapping the
+namespace prefixes used in the XPath expression to namespace URIs.</p>
+<p>The return values of xpath vary, depending on the XPath expression used:</p>
+<ul class="simple">
+<li>True or False, when the XPath expression has a boolean result</li>
+<li>a float, when the XPath expression has a numeric result (integer or float)</li>
+<li>a (unicode) string, when the XPath expression has a string result.</li>
+<li>a list of items, when the XPath expression has a list as result. The
+items may include element nodes, strings. When the nodeset would
+contain text nodes or attributes, the node result is also a string
+(the text node content or attribute value). When the nodeset would
+contain a comment, the result contains a string as well, inside
+<tt class="docutils literal"><span class="pre">&lt;!--</span></tt> and <tt class="docutils literal"><span class="pre">--&gt;</span></tt> markers.</li>
+</ul>
+<p>Example:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('&lt;foo&gt;&lt;bar&gt;&lt;/bar&gt;&lt;/foo&gt;')
+&gt;&gt;&gt; doc = etree.parse(f)
+&gt;&gt;&gt; r = doc.xpath('/foo/bar')
+&gt;&gt;&gt; len(r)
+1
+&gt;&gt;&gt; r[0].tag
+'bar'
+</pre>
+<p>Example of using namespace prefixes:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('''\
+... &lt;a:foo xmlns:a=&quot;http://codespeak.net/ns/test1&quot;
+...       xmlns:b=&quot;http://codespeak.net/ns/test2&quot;&gt;
+...    &lt;b:bar&gt;Text&lt;/b:bar&gt;
+... &lt;/a:foo&gt;
+... ''')
+&gt;&gt;&gt; doc = etree.parse(f)
+&gt;&gt;&gt; r = doc.xpath('/t:foo/b:bar', {'t': 'http://codespeak.net/ns/test1',
+...                                'b': 'http://codespeak.net/ns/test2'})
+&gt;&gt;&gt; len(r)
+1
+&gt;&gt;&gt; r[0].tag
+'{http://codespeak.net/ns/test2}bar'
+&gt;&gt;&gt; r[0].text
+'Text'
+</pre>
+</div>
+<div class="section">
+<h1><a id="xslt" name="xslt">XSLT</a></h1>
+<p>lxml.etree introduces a new class, lxml.etree.XSLT. The class can be
+given an ElementTree object to construct an XSLT transformer:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('''\
+... &lt;xsl:stylesheet version=&quot;1.0&quot;
+...     xmlns:xsl=&quot;http://www.w3.org/1999/XSL/Transform&quot;&gt;
+...     &lt;xsl:template match=&quot;/&quot;&gt;
+...         &lt;foo&gt;&lt;xsl:value-of select=&quot;/a/b/text()&quot; /&gt;&lt;/foo&gt;
+...     &lt;/xsl:template&gt;
+... &lt;/xsl:stylesheet&gt;''')
+&gt;&gt;&gt; xslt_doc = etree.parse(f)
+&gt;&gt;&gt; transform = etree.XSLT(xslt_doc)
+</pre>
+<p>You can then run the transformation on an ElementTree document by simply
+calling it, and this results in another ElementTree object:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('&lt;a&gt;&lt;b&gt;Text&lt;/b&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc = etree.parse(f)
+&gt;&gt;&gt; result = transform(doc)
+</pre>
+<p>The result object can be accessed like a normal ElementTree document:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; result.getroot().text
+'Text'
+</pre>
+<p>but, as opposed to normal ElementTree objects, can also be turned into an (XML
+or text) string by applying the str() function:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; str(result)
+'&lt;?xml version=&quot;1.0&quot;?&gt;\n&lt;foo&gt;Text&lt;/foo&gt;\n'
+</pre>
+<p>The result is always a plain string, encoded as requested by the
+<tt class="docutils literal"><span class="pre">xsl:output</span></tt> element in the stylesheet.  If you want a Python unicode string
+instead, you should set this encoding to <tt class="docutils literal"><span class="pre">UTF-8</span></tt> (unless the <cite>ASCII</cite> default
+is sufficient).  This allows you to call the builtin <tt class="docutils literal"><span class="pre">unicode()</span></tt> function on
+the result:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; unicode(result)
+u'&lt;?xml version=&quot;1.0&quot;?&gt;\n&lt;foo&gt;Text&lt;/foo&gt;\n'
+</pre>
+<p>You can use other encodings at the cost of multiple recoding.  Encodings that
+are not supported by Python will result in an error:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; xslt_tree = etree.XML('''\
+... &lt;xsl:stylesheet version=&quot;1.0&quot;
+...     xmlns:xsl=&quot;http://www.w3.org/1999/XSL/Transform&quot;&gt;
+...     &lt;xsl:output encoding=&quot;UCS4&quot;/&gt;
+...     &lt;xsl:template match=&quot;/&quot;&gt;
+...         &lt;foo&gt;&lt;xsl:value-of select=&quot;/a/b/text()&quot; /&gt;&lt;/foo&gt;
+...     &lt;/xsl:template&gt;
+... &lt;/xsl:stylesheet&gt;''')
+&gt;&gt;&gt; transform = etree.XSLT(xslt_tree)
+
+&gt;&gt;&gt; result = transform(doc)
+&gt;&gt;&gt; unicode(result)
+Traceback (most recent call last):
+  [...]
+LookupError: unknown encoding: UCS4
+</pre>
+<p>It is possible to pass parameters, in the form of XPath expressions, to the
+XSLT template:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; xslt_tree = etree.XML('''\
+... &lt;xsl:stylesheet version=&quot;1.0&quot;
+...     xmlns:xsl=&quot;http://www.w3.org/1999/XSL/Transform&quot;&gt;
+...     &lt;xsl:template match=&quot;/&quot;&gt;
+...         &lt;foo&gt;&lt;xsl:value-of select=&quot;$a&quot; /&gt;&lt;/foo&gt;
+...     &lt;/xsl:template&gt;
+... &lt;/xsl:stylesheet&gt;''')
+&gt;&gt;&gt; transform = etree.XSLT(xslt_tree)
+&gt;&gt;&gt; f = StringIO('&lt;a&gt;&lt;b&gt;Text&lt;/b&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc = etree.parse(f)
+</pre>
+<p>The parameters are passed as keyword parameters to the transform call. First
+let's try passing in a simple string expression:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; result = transform(doc, a=&quot;'A'&quot;)
+&gt;&gt;&gt; str(result)
+'&lt;?xml version=&quot;1.0&quot;?&gt;\n&lt;foo&gt;A&lt;/foo&gt;\n'
+</pre>
+<p>Let's try a non-string XPath expression now:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; result = transform(doc, a=&quot;/a/b/text()&quot;)
+&gt;&gt;&gt; str(result)
+'&lt;?xml version=&quot;1.0&quot;?&gt;\n&lt;foo&gt;Text&lt;/foo&gt;\n'
+</pre>
+<p>There's also a convenience method on the tree object for doing XSL
+transformations.  This is less efficient if you want to apply the same XSL
+transformation to multiple documents, but is shorter to write for one-shot
+operations, as you do not have to instantiate a stylesheet yourself:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; result = doc.xslt(xslt_tree, a=&quot;'A'&quot;)
+&gt;&gt;&gt; str(result)
+'&lt;?xml version=&quot;1.0&quot;?&gt;\n&lt;foo&gt;A&lt;/foo&gt;\n'
+</pre>
+<p>By default, XSLT supports all extension functions from libxslt and libexslt as
+well as Python regular expressions through EXSLT.  Note that some extensions
+enable style sheets to read and write files on the local file system.  See the
+<a class="reference" href="resolvers.html">document loader documentation</a> on how to deal with this.</p>
+</div>
+<div class="section">
+<h1><a id="relaxng" name="relaxng">RelaxNG</a></h1>
+<p>lxml.etree introduces a new class, lxml.etree.RelaxNG. The class can
+be given an ElementTree object to construct a Relax NG validator:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('''\
+... &lt;element name=&quot;a&quot; xmlns=&quot;http://relaxng.org/ns/structure/1.0&quot;&gt;
+...  &lt;zeroOrMore&gt;
+...     &lt;element name=&quot;b&quot;&gt;
+...       &lt;text /&gt;
+...     &lt;/element&gt;
+...  &lt;/zeroOrMore&gt;
+... &lt;/element&gt;
+... ''')
+&gt;&gt;&gt; relaxng_doc = etree.parse(f)
+&gt;&gt;&gt; relaxng = etree.RelaxNG(relaxng_doc)
+</pre>
+<p>You can then validate some ElementTree document against the schema. You'll get
+back True if the document is valid against the Relax NG schema, and False if
+not:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; valid = StringIO('&lt;a&gt;&lt;b&gt;&lt;/b&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc = etree.parse(valid)
+&gt;&gt;&gt; relaxng.validate(doc)
+1
+
+&gt;&gt;&gt; invalid = StringIO('&lt;a&gt;&lt;c&gt;&lt;/c&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc2 = etree.parse(invalid)
+&gt;&gt;&gt; relaxng.validate(doc2)
+0
+</pre>
+<p>Calling the schema object has the same effect as calling its validate
+method. This is sometimes used in conditional statements:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; invalid = StringIO('&lt;a&gt;&lt;c&gt;&lt;/c&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc2 = etree.parse(invalid)
+&gt;&gt;&gt; if not relaxng(doc2):
+...     print &quot;invalid!&quot;
+invalid!
+</pre>
+<p>If you prefer getting an exception when validating, you can use the
+<tt class="docutils literal"><span class="pre">assert_</span></tt> or <tt class="docutils literal"><span class="pre">assertValid</span></tt> methods:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; relaxng.assertValid(doc2)
+Traceback (most recent call last):
+  [...]
+DocumentInvalid: Document does not comply with schema
+
+&gt;&gt;&gt; relaxng.assert_(doc2)
+Traceback (most recent call last):
+  [...]
+AssertionError: Document does not comply with schema
+</pre>
+<p>Starting with version 0.9, lxml now has a simple API to report the errors
+generated by libxml2. If you want to find out why the validation failed in the
+second case, you can look up the error log of the validation process and check
+it for relevant messages:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; log = relaxng.error_log
+&gt;&gt;&gt; print log.filter_from_errors()
+&lt;string&gt;:1:ERROR:RELAXNGV:ERR_LT_IN_ATTRIBUTE: Did not expect element c there
+</pre>
+<p>You can see that the error (ERROR) happened during RelaxNG validation
+(RELAXNGV).  The message then tells you what went wrong.  Note that this error
+is local to the RelaxNG object.  It will only contain log entries that
+appeares during the validation.  The DocumentInvalid exception raised by the
+<tt class="docutils literal"><span class="pre">assertValid</span></tt> method above provides access to the global error log (like all
+other lxml exceptions).</p>
+<p>Similar to XSLT, there's also a less efficient but easier shortcut method to
+do one-shot RelaxNG validation:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; doc.relaxng(relaxng_doc)
+1
+&gt;&gt;&gt; doc2.relaxng(relaxng_doc)
+0
+</pre>
+</div>
+<div class="section">
+<h1><a id="xmlschema" name="xmlschema">XMLSchema</a></h1>
+<p>lxml.etree also has a XML Schema (XSD) support, using the class
+lxml.etree.XMLSchema. This support is very similar to the Relax NG
+support. The class can be given an ElementTree object to construct a
+XMLSchema validator:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('''\
+... &lt;xsd:schema xmlns:xsd=&quot;http://www.w3.org/2001/XMLSchema&quot;&gt;
+... &lt;xsd:element name=&quot;a&quot; type=&quot;AType&quot;/&gt;
+... &lt;xsd:complexType name=&quot;AType&quot;&gt;
+...   &lt;xsd:sequence&gt;
+...     &lt;xsd:element name=&quot;b&quot; type=&quot;xsd:string&quot; /&gt;
+...   &lt;/xsd:sequence&gt;
+... &lt;/xsd:complexType&gt;
+... &lt;/xsd:schema&gt;
+... ''')
+&gt;&gt;&gt; xmlschema_doc = etree.parse(f)
+&gt;&gt;&gt; xmlschema = etree.XMLSchema(xmlschema_doc)
+</pre>
+<p>You can then validate some ElementTree document with this. Like with
+RelaxNG, you'll get back true if the document is valid against the XML
+schema, and false if not:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; valid = StringIO('&lt;a&gt;&lt;b&gt;&lt;/b&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc = etree.parse(valid)
+&gt;&gt;&gt; xmlschema.validate(doc)
+1
+
+&gt;&gt;&gt; invalid = StringIO('&lt;a&gt;&lt;c&gt;&lt;/c&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc2 = etree.parse(invalid)
+&gt;&gt;&gt; xmlschema.validate(doc2)
+0
+</pre>
+<p>Calling the schema object has the same effect as calling its validate
+method. This is sometimes used in conditional statements:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; invalid = StringIO('&lt;a&gt;&lt;c&gt;&lt;/c&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc2 = etree.parse(invalid)
+&gt;&gt;&gt; if not xmlschema(doc2):
+...     print &quot;invalid!&quot;
+invalid!
+</pre>
+<p>If you prefer getting an exception when validating, you can use the
+<tt class="docutils literal"><span class="pre">assert_</span></tt> or <tt class="docutils literal"><span class="pre">assertValid</span></tt> methods:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; xmlschema.assertValid(doc2)
+Traceback (most recent call last):
+  [...]
+DocumentInvalid: Document does not comply with schema
+
+&gt;&gt;&gt; xmlschema.assert_(doc2)
+Traceback (most recent call last):
+  [...]
+AssertionError: Document does not comply with schema
+</pre>
+<p>Error reporting works like for the RelaxNG class:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; log = xmlschema.error_log
+&gt;&gt;&gt; errors = log.filter_from_errors()
+&gt;&gt;&gt; print errors[0].domain_name
+SCHEMASV
+&gt;&gt;&gt; print errors[0].type_name
+SCHEMAV_ELEMENT_CONTENT
+</pre>
+<p>If you were to print this log entry, you would get something like the following:</p>
+<pre class="literal-block">
+&lt;string&gt;:1:ERROR::SCHEMAV_ELEMENT_CONTENT: Element 'c': This element is not expected. Expected is ( b ).
+</pre>
+<p>Similar to XSLT and RelaxNG, there's also a less efficient but easier shortcut
+method to do XML Schema validation:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; doc.xmlschema(xmlschema_doc)
+1
+&gt;&gt;&gt; doc2.xmlschema(xmlschema_doc)
+0
+</pre>
+</div>
+<div class="section">
+<h1><a id="xinclude" name="xinclude">xinclude</a></h1>
+<p>Simple XInclude support exists. You can make xinclude statements in a
+document be processed by calling the xinclude() method on a tree:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; data = StringIO('''\
+... &lt;doc xmlns:xi=&quot;http://www.w3.org/2001/XInclude&quot;&gt;
+... &lt;foo/&gt;
+... &lt;xi:include href=&quot;doc/test.xml&quot; /&gt;
+... &lt;/doc&gt;''')
+
+&gt;&gt;&gt; tree = etree.parse(data)
+&gt;&gt;&gt; tree.xinclude()
+&gt;&gt;&gt; etree.tostring(tree.getroot())
+'&lt;doc xmlns:xi=&quot;http://www.w3.org/2001/XInclude&quot;&gt;\n&lt;foo/&gt;\n&lt;a xml:base=&quot;doc/test.xml&quot;/&gt;\n&lt;/doc&gt;'
+</pre>
+</div>
+<div class="section">
+<h1><a id="write-c14n-on-elementtree" name="write-c14n-on-elementtree">write_c14n on ElementTree</a></h1>
+<p>The lxml.etree.ElementTree class has a method write_c14n, which takes
+one argument: a file object. This file object will receive an UTF-8
+representation of the canonicalized form of the XML, following the W3C
+C14N recommendation. For example:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('&lt;a&gt;&lt;b/&gt;&lt;/a&gt;')
+&gt;&gt;&gt; tree = etree.parse(f)
+&gt;&gt;&gt; f2 = StringIO()
+&gt;&gt;&gt; tree.write_c14n(f2)
+&gt;&gt;&gt; f2.getvalue()
+'&lt;a&gt;&lt;b&gt;&lt;/b&gt;&lt;/a&gt;'
+</pre>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils 0.4: http://docutils.sourceforge.net/" />
+<title>Implementing namespaces with the Namespace class</title>
+<link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+<body>
+<div class="document" id="implementing-namespaces-with-the-namespace-class">
+<h1 class="title">Implementing namespaces with the Namespace class</h1>
+<p>Also see <a class="reference" href="extensions.html">extensions</a>.</p>
+<p>Imagine, you have a namespace called '<a class="reference" href="http://hui.de/honk">http://hui.de/honk</a>' and have to
+treat all of its elements in a specific way, say, to find out if they
+are really honking.  You could provide a function called 'is_honking'
+that handles that:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; def is_honking(honk_element):
+...    return honk_element.get('honking') == 'true'
+</pre>
+<p>Then you can use it:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; from lxml.etree import XML
+&gt;&gt;&gt; honk_element = XML('&lt;honk xmlns=&quot;http://hui.de/honk&quot; honking=&quot;true&quot;/&gt;')
+&gt;&gt;&gt; print is_honking(honk_element)
+True
+</pre>
+<p>Not too bad, right?  Now, imagine, you only want to do that to certain
+elements from that namespace and prevent others from being passed to
+is_honking.  You can add a check to is_honking to test the tag name
+before doing anything else.</p>
+<p>After a while, however, you remember what you heard at school about
+object oriented programming.  You start wondering if there isn't a
+nicer way to do that.  -- And there is!</p>
+<div class="section">
+<h1><a id="the-namespace-class" name="the-namespace-class">The Namespace class</a></h1>
+<p>lxml allows you to implement namespaces, in a rather literal
+sense. You can do the above like this:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; from lxml.etree import Namespace, ElementBase
+&gt;&gt;&gt; class HonkElement(ElementBase):
+...    def honking(self):
+...       return self.get('honking') == 'true'
+...    honking = property(honking)
+</pre>
+<p>Now you can build the new namespace by calling the Namespace class:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; namespace = Namespace('http://hui.de/honk')
+</pre>
+<p>and then register the new element type with that namespace:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; namespace['honk'] = HonkElement
+</pre>
+<p>After this, you create and use your XML elements:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; honk_element = XML('&lt;honk xmlns=&quot;http://hui.de/honk&quot; honking=&quot;true&quot;/&gt;')
+&gt;&gt;&gt; print honk_element.honking
+True
+</pre>
+<p>The same works when creating elements by hand:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; from lxml.etree import Element
+&gt;&gt;&gt; honk_element = Element('{http://hui.de/honk}honk', honking='true')
+&gt;&gt;&gt; print honk_element.honking
+True
+</pre>
+<p>Essentially, what this allows you to do, is giving elements a specific
+API based on their namespace and element name.</p>
+<div class="section">
+<h2><a id="element-initialization" name="element-initialization">Element initialization</a></h2>
+<p>There is one thing to remember. Element classes <em>must not</em> have a
+constructor, neither must there be any internal state (except for
+their XML representation).  Element instances are created and garbage
+collected at need, so there is no way to predict when and how often a
+constructor would be called.  Even worse, when the <tt class="docutils literal"><span class="pre">__init__</span></tt> method
+is called, the object may not even be initialized yet to represent the
+XML tag, so there is not much use in providing an <tt class="docutils literal"><span class="pre">__init__</span></tt> method
+in subclasses.</p>
+<p>However, there is one possible way to do things on element
+initialization. Element classes have an <tt class="docutils literal"><span class="pre">_init()</span></tt> method that can be
+overridden.  It can be used to modify the XML tree, e.g. to construct
+special children or verify and update attributes.</p>
+<p>The semantics of <tt class="docutils literal"><span class="pre">_init()</span></tt> are as follows:</p>
+<ul class="simple">
+<li>It is called at least once on element instantiation time.  That is,
+when a Python representation of the element is created.  At that
+time, the element object is completely initialized to represent a
+specific XML element within the tree.</li>
+<li>The method has complete access to the XML structure.  Modifications
+can be done in exactly the same way as anywhere else in the program.</li>
+<li>It may be called multiple times.  The _init() code provided by
+subclasses must take special care by itself that multiple executions
+either are harmless or that they are prevented by some kind of flag
+in the XML tree.  The latter can be achieved by modifying an
+attribute value or by removing or adding a specific child node and
+then verifying this before running through the init process.</li>
+</ul>
+</div>
+<div class="section">
+<h2><a id="default-implementations" name="default-implementations">Default implementations</a></h2>
+<p>There is a slight difference between the Namespace example and the
+simple 'is_honking' method above.  We associated the HonkElement class
+only with the 'honk' element.  If you have other elements in the same
+namespace, they do not pick up the same implementation.</p>
+<p>Example:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; honk_element = XML('&lt;honk xmlns=&quot;http://hui.de/honk&quot; honking=&quot;true&quot;&gt;&lt;bla/&gt;&lt;/honk&gt;')
+&gt;&gt;&gt; print honk_element.honking
+True
+&gt;&gt;&gt; print honk_element[0].honking
+Traceback (most recent call last):
+...
+AttributeError: 'etree._Element' object has no attribute 'honking'
+</pre>
+<p>You can therefore provide one implementation per element name in each
+namespace and have lxml select the right one on the fly.  If you want
+one element implementation per namespace (ignoring the element name)
+or prefer having a common class for most elements except a few, you
+can specify a default implementation for an entire namespace by
+registering that class with the empty element name (None).</p>
+<p>You may consider following an object oriented approach.  If you build
+a class hierarchy of element classes, you can also implement a base
+class for a namespace, that is used if no specific element class is
+provided.  Again, you only have to pass None as an element name:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; class HonkNSElement(ElementBase):
+...    def honk(self):
+...       return &quot;HONK&quot;
+&gt;&gt;&gt; namespace[None] = HonkNSElement
+
+&gt;&gt;&gt; class HonkElement(HonkNSElement):
+...    def honking(self):
+...       return self.get('honking') == 'true'
+...    honking = property(honking)
+&gt;&gt;&gt; namespace['honk'] = HonkElement
+</pre>
+<p>Now you can use your new namespace:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; honk_element = XML('&lt;honk xmlns=&quot;http://hui.de/honk&quot; honking=&quot;true&quot;&gt;&lt;bla/&gt;&lt;/honk&gt;')
+&gt;&gt;&gt; print honk_element.honking
+True
+&gt;&gt;&gt; print honk_element.honk()
+HONK
+&gt;&gt;&gt; print honk_element[0].honk()
+HONK
+&gt;&gt;&gt; print honk_element[0].honking
+Traceback (most recent call last):
+...
+AttributeError: 'HonkNSElement' object has no attribute 'honking'
+</pre>
+</div>
+</div>
+</div>
+</body>
+</html>
