@@ -1,0 +1,200 @@
+var PaginatedAjaxGrid = Class.create(); 
+
+PaginatedAjaxGrid.prototype = {};
+
+PaginatedAjaxGrid.prototype.initialize = 
+function(table, options) { 
+    this.options = options;
+    this.table = $(table);
+    this.table.ajax = this;
+    this.current_page = 1;
+    if (!this.options.no_init) {
+        grid = this;
+        Event.observe(window, 'load', function() {grid.show_page(1);});
+    }
+}
+
+PaginatedAjaxGrid.prototype.show_page =
+function(page_no) {
+    search_params = $H(this.options.search_params)
+    search_params['tg_paginate_' + this.options.var_name + '_no'] = page_no;
+    search_params = search_params.toQueryString();
+    
+    this_ = this;
+    onSuccess = function(e) {this_.update_grid_from_request(e)};
+    onFailure = function(e) {this_.bad_request(e)};
+    onComplete = function(e) {$(this_.table.id + '_spinner').hide();};
+    
+    request_options = {method: 'post', parameters: search_params,
+                       onSuccess: onSuccess, onFailure: onFailure,
+                       onComplete: onComplete};
+    
+    $(this_.table.id + '_spinner').show();
+    var request = new Ajax.Request(this.options.url, request_options);
+}
+
+PaginatedAjaxGrid.prototype.update_grid_from_request =
+function(request) {
+    eval('results = ' + request.responseText);
+    
+    this.current_page = 
+        Number(request.getResponseHeader(
+               'tg_paginate_' + this.options.var_name + '_current_page'));
+    
+    this.last_page_count = 
+        Number(request.getResponseHeader('tg_paginate_' +
+                                         this.options.var_name +
+                                         '_page_count'));
+    
+    this.nav_links = 
+        request.getResponseHeader('tg_paginate_' + this.options.var_name +
+                                  '_nav_links');
+        
+    // update the navigation links
+    this.update_nav_links();
+    
+    // update grid data
+    this.update_grid(results[this.options.var_name])
+}
+
+// updates the navigation links
+PaginatedAjaxGrid.prototype.update_nav_links =
+function() {
+    old_nav_links = $(this.table.id + '_nav_links');
+    new_nav_links = document.createElement('div');
+    new_nav_links.setAttribute('id', this.table.id + '_nav_links');
+    new_nav_links.className = 'nav_links';
+    
+    this_ = this
+    function create_link_to(page_no, text) {
+        a = document.createElement('a');
+        a.setAttribute('onclick',
+                       '$("' + this_.table.id + '").' +
+                       'ajax.show_page(' + page_no + ');');
+        a.appendChild(document.createTextNode(text));
+        return a
+    }
+    
+    // first
+    new_nav_links.appendChild(create_link_to(1, '<<'));
+    
+    // previous
+    a = document.createElement('a');
+    a.setAttribute('onclick', 
+                   '$("' + this.table.id + '").ajax.previous_page();');
+    a.appendChild(document.createTextNode('<'));
+    new_nav_links.appendChild(a);
+    
+    $A(this.nav_links.split(',')).each(
+        function (page_no) {
+            if (page_no == this_.current_page) {
+                span = document.createElement('span')
+                span.className = 'current_page';
+                span.appendChild(document.createTextNode('[' + page_no + ']'));
+                new_nav_links.appendChild(span);
+            } else {
+                new_nav_links.appendChild(create_link_to(page_no, page_no));
+            }
+        }
+    );
+    
+    // next
+    a = document.createElement('a');
+    a.setAttribute('onclick', '$("' + this.table.id + '").ajax.next_page();');
+    a.appendChild(document.createTextNode('>'));
+    new_nav_links.appendChild(a);
+    
+    // last
+    new_nav_links.appendChild(create_link_to(this.last_page_count, '>>'));
+    
+    // replace the nav links with the new ones
+    old_nav_links.parentNode.replaceChild(new_nav_links, old_nav_links);
+    
+    // update the page info
+    $(this.table.id + '_page_info').innerHTML = this.current_page + ' / ' +
+                                                this.last_page_count;
+}
+
+PaginatedAjaxGrid.prototype.bad_request =
+function(request) {
+    alert('There was a problem updating the grid (code: ' + 
+          request.status + ')');
+}
+
+// builds table body from data
+PaginatedAjaxGrid.prototype.update_grid =
+function(data) {
+    // create a new tbody
+    tbody = document.createElement('TBODY');
+    
+    this_ = this;
+    var counter = 1;
+    $A(data).each(
+        function(row) {
+            var tr = document.createElement('TR');
+            counter++ % 2 ? tr.className = 'odd' : tr.className = 'even';
+            
+            if (!row[0]) {
+                // the results are a list of associative arrays
+                this_.options.columns.each(
+                    function (col) {
+                        td = document.createElement('TD');
+                        if (typeof(row[col]) != 'undefined') {
+                            td.appendChild(document.createTextNode(row[col]));
+                        }
+                        tr.appendChild(td);
+                    }
+                )
+            } else {
+                // the results are a list of lists
+                row.each(
+                    function (col) {
+                        td = document.createElement('TD');
+                        td.appendChild(document.createTextNode(col));
+                        tr.appendChild(td);
+                    }
+                )
+            }
+            if (this_.options.row_selector) {
+                Event.observe(tr, 'click', 
+                    function() {
+                        if (this_.options.selector_id) {
+                            this_.options.row_selector(
+                                row[this_.options.selector_id]);
+                        } else {
+                            // if a selector id wasn't specified, we just pass
+                            // the first value
+                            this_.options.row_selector(row[0]);
+                        }
+                    }
+                );
+                tr.style.cursor = 'pointer';
+            }
+            tbody.appendChild(tr);
+        }
+    );
+    
+    // replace the table's body
+    old_tbody = this.table.getElementsByTagName('TBODY')[0];
+    old_tbody.parentNode.replaceChild(tbody, old_tbody);
+}
+
+// shows the next page
+PaginatedAjaxGrid.prototype.next_page =
+function() {
+    if (this.last_page_count <= (this.current_page)) {
+        return false;
+    }
+    
+    this.show_page(this.current_page + 1);
+}
+
+// shows the previous page
+PaginatedAjaxGrid.prototype.previous_page =
+function() {
+    if (this.current_page <= 1) {
+        return false;
+    }
+    this.show_page(this.current_page - 1);
+}
+
