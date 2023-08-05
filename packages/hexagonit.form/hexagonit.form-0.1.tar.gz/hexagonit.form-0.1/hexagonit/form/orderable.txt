@@ -1,0 +1,183 @@
+========================
+Orderable formlib fields
+========================
+
+Start by creating a dummy schema from which the formfields are
+generated.
+
+  >>> from zope.interface import Interface
+  >>> from zope.schema import TextLine, Bool, Int
+
+  >>> class ISomeSchema(Interface):
+  ...     text = TextLine(title=u"text field")
+  ...     boolean = Bool(title=u"boolean field")
+  ...     integer = Int(title=u"integer field")
+  
+Create the form fields based on the schema. This is done the same way
+as with zope.formlib.form.Fields by only substituting Fields with
+OrderableFields.
+
+  >>> from hexagonit.form.orderable import OrderableFields
+  >>> form_fields = OrderableFields(ISomeSchema)
+
+OrderableFields instances provide the IOrderableFormFields interface
+which extends IFormFields.
+
+  >>> from zope.formlib.interfaces import IFormFields
+  >>> from hexagonit.form.interfaces import IOrderableFormFields
+
+  >>> IFormFields.providedBy(form_fields)
+  True
+  
+  >>> IOrderableFormFields.providedBy(form_fields)
+  True
+
+The fields are ordered initially in by the order they appear in the
+schema.
+
+  >>> [field.__name__ for field in form_fields]
+  ['text', 'boolean', 'integer']
+
+
+Ordering form fields by direction
+---------------------------------
+
+The ``direction`` parameter accepts ``up`` or ``down`` as valid
+values, which move the given field one step up or down, respectively,
+
+  >>> form_fields.moveField("boolean", direction="up")
+  >>> [field.__name__ for field in form_fields]
+  ['boolean', 'text', 'integer']
+  >>> form_fields.moveField("text", direction="down")
+  >>> [field.__name__ for field in form_fields]
+  ['boolean', 'integer', 'text']
+
+Moving the first item up or the last item down maintains the field
+ordering.
+
+  >>> form_fields.moveField("boolean", direction="up")
+  >>> form_fields.moveField("text", direction="down")
+  >>> [field.__name__ for field in form_fields]
+  ['boolean', 'integer', 'text']
+
+
+Moving fields to specific positions
+-----------------------------------
+
+Fields can be moved to specific positions by providing the
+``position`` parameter. The ``position`` must either be a valid index
+number (0 <= position < len(fields)) or ``first`` or ``last`` (``top``
+and ``bottom`` work as synonyms for ``first`` and ``last``
+respectively.) 
+
+  >>> form_fields.moveField("boolean", position=2)
+  >>> [field.__name__ for field in form_fields]
+  ['integer', 'text', 'boolean']
+  
+Out of range positions raise ValueError.
+
+  >>> form_fields.moveField("text", position=-3)
+  Traceback (most recent call last):
+  ...
+  ValueError: Invalid position: -3
+  
+  >>> form_fields.moveField("text", position=99)
+  Traceback (most recent call last):
+  ...
+  ValueError: Invalid position: 99
+
+Moving a field to its current position will not change the order.
+
+  >>> form_fields.moveField("integer", position=0)
+  >>> [field.__name__ for field in form_fields]
+  ['integer', 'text', 'boolean']
+
+It is possible to sort the fields according to an arbitrary order.
+
+  >>> external_ordering = ['text', 'integer', 'boolean']
+  >>> for position, fieldname in enumerate(external_ordering):
+  ...     form_fields.moveField(fieldname, position=position)
+  ...
+  >>> external_ordering == [field.__name__ for field in form_fields]
+  True
+
+The ``position`` parameter supports also using the values ``top`` and
+``first`` to make the field the first one, and ``bottom`` and ``last``
+to make it the last one.
+
+  >>> form_fields.moveField("integer", position="last")
+  >>> [field.__name__ for field in form_fields]
+  ['text', 'boolean', 'integer']
+  
+  >>> form_fields.moveField("integer", position="first")
+  >>> [field.__name__ for field in form_fields]
+  ['integer', 'text', 'boolean']
+  
+  >>> form_fields.moveField("text", position="bottom")
+  >>> [field.__name__ for field in form_fields]
+  ['integer', 'boolean', 'text']
+  
+  >>> form_fields.moveField("text", position="top")
+  >>> [field.__name__ for field in form_fields]
+  ['text', 'integer', 'boolean']
+
+Moving the first field to ``first`` or ``top`` will not change the
+order.
+
+  >>> form_fields.moveField("text", position="top")
+  >>> [field.__name__ for field in form_fields]
+  ['text', 'integer', 'boolean']
+  
+  >>> form_fields.moveField("text", position="first")
+  >>> [field.__name__ for field in form_fields]
+  ['text', 'integer', 'boolean']
+  
+Moving the last field to ``last`` or ``bottom`` will not change the
+order.
+
+  >>> form_fields.moveField("boolean", position="last")
+  >>> [field.__name__ for field in form_fields]
+  ['text', 'integer', 'boolean']
+  
+  >>> form_fields.moveField("boolean", position="bottom")
+  >>> [field.__name__ for field in form_fields]
+  ['text', 'integer', 'boolean']
+
+
+Moving fields to positions relative to other fields
+---------------------------------------------------
+
+Fields can be moved to positions relative to each other by using the
+``before`` and ``after`` parameters.
+
+  >>> form_fields.moveField("text", after="integer")
+  >>> [field.__name__ for field in form_fields]
+  ['integer', 'text', 'boolean']
+  
+  >>> form_fields.moveField("integer", after="boolean")
+  >>> [field.__name__ for field in form_fields]
+  ['text', 'boolean', 'integer']
+  
+  >>> form_fields.moveField("boolean", before="text")
+  >>> [field.__name__ for field in form_fields]
+  ['boolean', 'text', 'integer']
+
+Field cannot be moved after or before itself.
+
+  >>> form_fields.moveField("text", after="text")
+  Traceback (most recent call last):
+  ...
+  ValueError: Can not move field 'text' after itself.
+  
+  >>> form_fields.moveField("boolean", before="boolean")
+  Traceback (most recent call last):
+  ...
+  ValueError: Can not move field 'boolean' before itself.
+
+Trying to move an unknown field will throw an exception.
+
+  >>> form_fields.moveField("unknown", direction="up")
+  Traceback (most recent call last):
+  ...
+  ValueError: Field 'unknown' does not exist.
+
