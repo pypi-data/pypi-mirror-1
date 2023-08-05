@@ -1,0 +1,476 @@
+Manual
+++++++
+
+The FormBuild architecture is fairly straightforward. There are four types of components:
+
+* Forms
+* Builders
+* Modifiers
+* Creators
+
+To use FormBuild you create a *form* which has a number of attributes. Each of these attributes is in fact a *builder* object. Builder objects have methods which build part of a form. Then there are *modifiers* which intercept builder method calls and return other values. Finally *creators* take some sort of input and create a form.
+
+
+Forms
+=====
+
+Using Fields
+------------
+
+At its simplest you can generate fields using FormBuild by creating a form and calling its field methods as follows::
+
+    >>> from formbuild import Form
+    >>> form = Form()
+    >>> print form.field.text('hello')
+    <input name="hello" type="text" />
+
+The ``form`` object takes the an argument ``defaults`` which is a dictionary of name:value pairs used as follows::
+
+    >>> from formbuild import Form
+    >>> form = Form(defaults={'hello':'Hello World!'})
+    >>> print form.field.text('hello')
+    <input name="hello" type="text" value="Hello World!" />
+
+You can override the default value of a field as follows::
+
+    >>> from formbuild import Form
+    >>> form = Form(defaults={'hello':'Hello World!'})
+    >>> print form.field.text('hello', value="Goodbye!")
+    <input name="hello" type="text" value="Goodbye!" />
+    
+and also it also takes an argument ``errors`` which is a dictionary of name:error_msg pairs used as follows::
+
+    >>> from formbuild import Form
+    >>> form = Form(
+    ...     defaults={'hello':'Goodbye!'}, 
+    ...     errors={'hello':"Not a very friendly greeting!"}
+    ... )
+    ... 
+    >>> print form.field.text('hello'), form.get_error('hello')
+    <input name="hello" type="text" value="Goodbye!" /> Not a very friendly greeting!
+
+Both the ``defaults`` and ``errors`` arguments can also be lists of dictionaries. If this is the case the field name matched in the first dictionary in the list is used. In a real world application the defaults might be obtained from a database or request arguments.
+
+You might also want to create a field with attributes other than ``name`` and ``value``. You do this in the same way::
+
+    >>> print form.field.text('hello', style="visibility: hidden;", value="Go>")
+    <input name="hello" style="visibility: hidden;" type="text" value="Go&gt;" />
+
+Also note that in this example the value contained the character ``>`` which is an invalid HTML character. This was automatically converted to the correct character HTML entity ``&gt;``.
+
+Using the ``form`` and ``form.field`` objects you can now easily generate a form::
+
+    >>> from formbuild import Form
+    >>> form = Form()
+    >>> output = form.start(name="test", action="/script.py", method="get") + '\n'
+    >>> output += form.field.text('hello') + '\n'
+    >>> output += form.field.submit(name="go", value="Go") + '\n'
+    >>> output += form.end()
+    >>> print output
+    <form action="/script.py" name="test" method="get" >
+    <input name="hello" type="text" />
+    <input name="go" type="submit" value="Go" />
+    </form>
+    
+Fields available in the default form include ``dropdown()``, ``text()``, ``hidden()``, ``file()``, ``password()``, ``text_area()``, ``check_box()``, ``radio_button()`` and ``submit()`` but the whole point of formbuild is that it is easy to add your own types too.
+
+Using Layouts
+-------------
+
+In the real world forms like the ones described above aren't too useful. In real life we might want to label the fields, show error messages when the field value isn't valid, split the form into sections or show a description.
+
+A simple way of generating a form is to mix and match Python template code and HTML::
+
+    >>> from formbuild import Form
+    >>> name_form = Form()
+    >>> o = '<form name="test" action="/script.py" method="get">\n'
+    >>> o += '<table border="0">\n'
+    >>> o += '<tr>\n'
+    >>> o += '    <td>Name:</td>\n'
+    >>> o += '    <td>' + name_form.field.text(name="name") + '</td>\n'
+    >>> o += '    <td>' + name_form.get_error("name") + '</td>\n'
+    >>> o += '</tr>\n'
+    >>> o += '<tr>\n'
+    >>> o += '    <td></td>\n'
+    >>> o += '    <td><input type="submit" name="go" value="Submit" /></td>\n'
+    >>> o += '    <td></td>\n'
+    >>> o += '</tr>\n'
+    >>> o += '</table>\n'
+    >>> o += '</form>\n'
+
+You can do the same thing with the ``form`` object's ``layout`` attribute::
+
+    >>> from formbuild import Form
+    >>> name_form = Form()
+    >>> o += name_form.start(name="test", action="/script.py", method="get") + '\n'
+    >>> o += name_form.layout.simple_start() + '\n'
+    >>> o += name_form.layout.entry(
+    ...     content=name_form.field.text(name="name"),
+    ...     name='Name',
+    ...     error=name_form.get_error("name")
+    ... ) + '\n'
+    ... 
+    >>> o += name_form.layout.entry(content=form.field.submit(name="go", value="Submit")) + '\n'
+    >>> o += name_form.layout.simple_end() + '\n'
+    >>> o += name_form.end() + '\n'
+    
+You might prefer to use FormBuild layouts in your template instead. Below is the same example using `Myghty <http://www.myghy.org>`_ where anything between ``<%`` and ``%>`` brackets is executed and the result printed to the browser. Of course, you can use any templating langaue you like such as `Cheetah <http://www.cheetahtemplate.org>`_ or `Kid <http://kid.lesscode.org>`_::
+    
+    <% name_form.start(name="test", action="/script.py", method="get") %>
+    <% name_form.layout.simple_start() %>
+    <% name_form.layout.entry(
+        content=name_form.field.text(name="name"),
+        name='Name',
+        error=name_form.get_error("name") ) %>
+    <% name_form.layout.entry(content=form.field.submit(name="go", value="Submit")) %>
+    <% name_form.layout.simple_end() %>
+    <% name_form.end() %>
+    
+All methods produce the following::
+
+    <form name="test" action="/script.py" method="get">
+    <table border="0">
+    <tr>
+        <td>Name:</td>
+        <td><input name="name" type="text" /></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td></td>
+        <td><input type="submit" name="go" value="Submit" /></td>
+        <td></td>
+    </tr>
+    </table>
+    </form>
+
+Creating Your Own Form Types
+----------------------------
+
+All forms are in fact derived from ``FormBase``. The definition of ``Form`` used at the start of the ``Getting Started Guide <manual.html>`_ is itself derived from ``FormBase`` and looks like this::
+
+    >>> from formbuild.form import FormBase
+    >>> from formbuild.builder.field.basic import HtmlFields
+    >>> from formbuild.builder.layout.basic import HtmlLayout
+    >>>
+    >>> class Form(FormBase):
+    ...     field = HtmlFields()
+    ...     layout = HtmlLayout()
+    ...
+        
+To create a form object from this form definition we do this::
+
+    >>> form = Form()
+    
+Becuase our ``Form`` definition specified the attributes ``field`` and ``layout``, our ``form`` object created from it will also have the attributes ``.field`` and ``.layout``.
+
+``HtmlFields`` and ``HtmlLayout`` are builder objects and so each have a number of methods to build fields and layouts respectively. You can add your own functionality to a form definition by attactching a different builder objects to other attributes.
+
+Typically the generation of the form demonstrated above would be done some sort of template. 
+
+Imagine you have just finished writing all the forms on a website and your client phones and says he or she wants them to be built in CSS not HTML tables. This would ordinarily be a lot of work as you would have to re-write every form but if you have use FormBuild you can simply alter your form definition::
+
+    >>> from formbuild.builder.field.basic import HtmlFields
+    >>> from formbuild.builder.layout.basic import CssLayout
+    >>>
+    >>> class Form(FormBase):
+    ...     field = HtmlFields()
+    ...     layout = CssLayout()
+    ...
+
+All the forms on your site will now be generated in CSS. If you run the example from the last section again it will now generate this CSS code::
+
+    <form name="test" action="/script.py" method="get">
+        <div class="form-helper-layout-css-entry-name">
+            Name:
+        </div>
+        <div class="form-helper-layout-css-entry-field">
+            <input type="text" name="name" value="" />
+        </div>
+        <div class="form-helper-layout-css-entry-error">
+            &nbsp;
+        </div>
+    <br class="form-helper-css-clear" />
+        <div class="form-helper-layout-css-entry-name">
+            &nbsp;
+        </div>
+        <div class="form-helper-layout-css-entry-field">
+            <input type="submit" name="go" value="Submit" />
+        </div>
+        <div class="form-helper-layout-css-entry-error">
+            &nbsp;
+        </div>
+    <br class="form-helper-css-clear" />
+    </form>
+
+If the CSS code isn't to your liking you can create your own builder object by deriving a class from an existing one and using that instead.
+
+Of course you would need to make sure that the appropriate CSS stylesheet was placed in the HTML document generated. The CSS is available from the attribute ``name_form.layout.css``.
+
+What if you already have a CSS class named ``form-helper-layout-css-entry-field``? Well you would need to specify a unique string to prepend to all FormBuild CSS classes so that the name didn't confilct::
+
+    >>> class NameForm(Form):
+    ...     layouts = CssLayout(css_prepend='unique_name')
+    ...
+    >>> name_form = NameForm()
+
+and now all the classes would start with ``unique_name``, for example ``unique-name-form-helper-layout-css-entry-field``.
+
+
+Choosing a layout template
+--------------------------
+
+It is very nice being able to change how a layout is implemented but what about if you want to use a more sophisticated layout altogether? For example, we might want our form in pages, sections, questions and sub-questions, not just as a long list. In this case we use a different layout template.
+
+In the last example we used the simple CSS layout imported from ``formbuild.layout.simple``. This time we might want to use the HTML layout from ``formbuild.layout.pages``::
+
+    >>> from formbuild import Form
+    >>> from formbuild.builder.layout.pages import HtmlLayout
+    ...     layouts = HtmlLayout()
+    ...
+    >>> form = NameForm()
+
+This time we can create our form in pages. A simple page might look like this::
+    
+    <% form.start(name="page1", action="1", method="POST") %>
+    <% form.layout.page_start(title="Research Project Details", description=project_details) %>
+        <% form.layout.section_start(title="Project Details") %>
+            <% form.layout.sub_question(form.field.text(name='project_id'), title="Project ID") %>
+            <% form.layout.sub_question(
+                form.field.text_area(name='project_title', cols=40, rows="5"), 
+                title="Project Title") %>
+            <% form.layout.sub_question(form.field.text(name='start_date'), title="Start Date") %>
+            <% form.layout.sub_question(form.field.text(name='end _date'), title="End Date") %>
+            <% form.layout.sub_question(form.field.text(name='sponsor'), title="Research Sponsor") %>
+        <% form.layout.section_end() %>
+    <% form.layout.page_end() %>
+    <% form.field.submit(name='go', value="Next Page >") %>
+    <% form.end() %>
+
+As you can see, the HTML pages layout has different methods such as start_page() which the simple layout template doesn't have.
+
+Combining Layouts
+-----------------
+
+It is possible that you might want to combine layouts. In this case jsut specify more that one layout when you define your class::
+
+    >>> from formbuild import Form
+    >>> from formbuild.builder.layout import pages
+    >>> from formbuild.builder.layout import basic
+    ...     layouts = pages.HtmlLayout(), basic.CssLayout()
+    ...
+    >>> form = NameForm()
+
+The new ``form`` object will have both ``basic.CssLayout`` methods and ``pages.HtmlLayout`` methods but where there is a method defined by both classes, the first one will be kept. In this case methods in ``pages.HtmlLayout`` would override those in ``basic.CssLayout``.
+
+
+Extra Fields
+------------
+
+As well as the basic fields described above, FormBuild allows you to create forms with other sets of fields by defining your own class. For example to use ``check_box_group()`` fields you would need to use the ``formbuild.field.compound.CompoundHTML`` fields class in your form. You can do this as follows::
+
+    >>> from formbuild import Form
+    >>> from formbuild.builder.field import basic 
+    >>> from formbuild.builder.field import compound
+    >>> class MyForm(Form):
+    ...     field = basic.HtmlFields(), compound.HtmlFields()
+    ...
+    >>> form = MyForm()
+    >>> print form.field.text(name="hello")
+    <input name="hello" type="text" />
+    >>> print form.field.check_box_group(
+    ...     name="test", 
+    ...     options=[['0','Holly'],['1','Ivy']], 
+    ...     values=['1']
+    ... )
+    ...
+    <input type="checkbox" name="test" value="0" />Holly
+    <input type="checkbox" name="test" value="1" checked />Ivy
+
+or by specifying ``align=vert`` you could arrange a checkbox group into a table vertically::
+
+    >>> print form.field.check_box_group(
+    ...     name="test", 
+    ...     options=[[0,'Holly'],['1','Ivy']], 
+    ...     values=1,
+    ...     align='vert',
+    ... )
+    ...
+    <input type="checkbox" name="test" value="0" /> Holly<br />
+    <input type="checkbox" name="test" value="1" checked /> Ivy<br />
+
+Notice how option values are and values don't have to be strings since everything is converted to a string automatically. For completeness here is a radio group formatted in a table::
+ 
+    >>> print form.field.radio_group(
+    ...     name="test", 
+    ...     options=[['0','Holly'],['1','Ivy']], 
+    ...     value=1,
+    ...     align='table'
+    ... )
+    ...
+    <table border="0" width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td><input type="radio" name="test" value="0" /> Holly</td>
+      <td>&nbsp;&nbsp;&nbsp;&nbsp;</td>
+      <td><input type="radio" name="test" value="1" checked /> Ivy</td>
+      <td>&nbsp;&nbsp;&nbsp;&nbsp;</td>
+      <td></td>
+      <td>&nbsp;&nbsp;&nbsp;&nbsp;</td>
+      <td></td>
+      <td>&nbsp;&nbsp;&nbsp;&nbsp;</td>
+    </tr>
+    </table>
+
+Combining builders
+------------------
+
+What if you had two layout builders that you wanted to use for your form. Say you want multi-section, multi-page layout for your form but wanted a basic layout as part of one of the sections? You would need to combine your builders. You can do this as follows::
+
+    
+    >>> from formbuild.builder.field.basic import HtmlFields
+    >>> from formbuild.builder.layout import basic
+    >>> from formbuild.builder.layout import pages
+    >>>
+    >>> class Form(FormBase):
+    ...     field = HtmlFields()
+    ...     layout = pages.HtmlLayout(), basic.HtmlLayout()
+    ...
+
+This time, when you create your form object from the form definition above, the ``.layout`` attribute will have all the methods of ``pages.HtmlLayout`` *and* ``basic.HtmlLayout``. 
+
+When combining builders in this way, if two builders have the same method name, the first in the list is used in preference to the others.
+
+Behind the scenes, the builders are combined with the ``formbuild.modifier.Combine`` modifier.
+
+Builders
+========
+
+All builders are derived from ``BuilderBase``. FormBuild comes with two groups of builders by default, these are field builders and layout builders found in ``formbuild.builder.field`` and ``formbuild.builder.layout`` respectively.
+
+All field builders are derived from ``FieldBuilderBase`` and all layout builders are derived from ``LayoutBuilderBase``. These classes behave slightly differently and so therefore do all their sublasses.
+
+Each class of builder might have multiple templates. For example, their are layout templates for basic layouts and page layouts. These are in ``formbuild.builder.layout.basic`` and ``formbuild.builder.layout.pages`` respectivly. Within each module there might be many implementations of the builder template. For example, ``layout.basic`` has two classes: ``HtmlLayout`` and ``CssLayout``.
+
+If you created a new class of builders to be attached to a form attribute in a form definition you would place them as a sub-directory of ``formbuild/builder/`` in the source tree.
+
+All builder class definitions have a ``.type`` attribute which contains the full module path to the class. For example. The basic.CssLayout has a ``.type`` attribute which contains the string ``"formbuild.builder.layout.basic.CssLayout"``.
+
+Field Builders
+--------------
+
+There are two field builder templates: ``basic`` and ``compound``. Basic field builders have methods to generate all the standard HTML fields like input, select, hidden, textarea etc. Compound field builders have methods for checkbox and radio groups combining basic fields. 
+
+All fields which accept a single value must have a ``value`` argument in the method that builds them, all field types which accept multiple values must have a ``values`` arguent.
+
+Layout Builders
+---------------
+
+Layout builders are fairly similar to field builders but with one twist. When implementing a layout builder you simply implement the ``_start()`` and ``_end()`` methods and the combined method then already exists. As a result you need to specify any parameters that are used in both the ``_start()`` and ``_end()`` methods.
+
+
+As you can see from the examples below the ``colour`` argument needs to be in ``my_layout_end()`` even though it isn't used. Lets see an example::
+
+    >>> from formbuild.builder.layout import LayoutBuilder
+    >>> class MyLayout(LayoutBuilder):
+    ...
+    ...    def my_layout_start(self, colour='#eee'):
+    ...         return '<div style="background: %s">'%colour
+    ... 
+    ...    def my_layout_end(self, colour='#eee'):
+    ...         return '</div>'
+    ... 
+    >>> class MyForm(Form):
+    ...     layout = MyLayout()
+    ...
+    >>> form = MyForm()
+    >>>
+    >>> # This:
+    >>> print form.layout.my_layout(
+    ...     form.field.text(name='address'),
+    ...     colour='#ccc',
+    ... )
+    <div style="background: #ccc"><input name="address" type="text" /></div>
+    >>>
+    >>> # Produces the same as this:
+    >>> a = form.layout.my_layout_start(colour='#ccc')
+    >>> b = form.field.text(name='address')
+    >>> c = form.layout.my_layout_end()
+    >>> print a + b + c
+    <div style="background: #ccc"><input name="address" type="text" /></div>
+
+
+Modifiers
+=========
+
+Modifiers are used to change how the methods of the builders work by intercepting the method call between when the method is got from the class and when it is actually called. This is useful in case you want to do something clever to all fields. 
+
+Here is an which intercepts the values of fields and displays them in HTML in the places they would have been in the orginal form. This is useful for showning users a summary once they have submitted data::
+
+    >>> from formbuild import Form
+    >>> from formbuild.modifier import Frozen
+    >>> from formbuild.builder.field.basic import HtmlFields
+    >>>
+    >>> class NormalForm(Form):
+    ...     field = HtmlFields()
+    ...
+    >>> class FrozenForm(Form):
+    ...     field = Frozen(HtmlFields())
+    ... 
+    >>> normal_form = NormalForm(defaults={'one':'1'})
+    >>> print normal_form.field.text(name="one")
+    <input name="one" type="text" value="1" />
+    >>>
+    >>> frozen_form = FrozenForm(defaults={'one':'1'})
+    >>> print frozen_form.field.text(name="one")
+    1
+
+As you can see normal form produces the input HTML as expected (the value ``1`` is from the default values we specified when we created the form) but with the frozen version, the call is intercepted and only the value is returned.
+    
+This is useful when you want to display the values the user chose without having to recode your form or its layout.
+
+Other modifiers that can be used include ``Capture`` which captures all the options specified in the builder method and addes it to the ``.captured`` attribute of the attribute associated with whichever builder you captured.
+
+Continuing the example above::
+
+    >>> from formbuild.modifier import Capture
+    >>> 
+    >>> class CaptureForm(Form):
+    ...     field = Capture(HtmlFields())
+    ...
+    >>> capture_form = CaptureForm(defaults={'one':'1'})
+    >>> print capture_form.field.text(name="one")
+    None
+    >>> capture_form.field.captured
+    [['formbuild.builder.field.basic.HtmlFields.text', {'name': 'one'}]]
+    
+As you can see, this time no output is produced but the output is captured so that an external program could do something useful with it, perhaps use it as part of a CRUD system. The information captured combines all keyword attributes, parameters and defaults so that calling the builder method of a normal form with the parameters will produce the orginal output::
+
+    >>> captured_params = capture_form.field.captured[0][1]
+    >>> print normal_form.field.text(**captured_params)
+    <input name="one" type="text" value="1" />
+
+We mentioned earlier that when you combine builder objects by specifying a list of them next to the attributes, you are actually using a ``Combine`` modifier. This modifier combines all the other fields but acts itself like a builder. In this way you can chain modifers together::
+
+    >>> from formbuild.modifier import Capture, Combine
+    >>>
+    >>> class CaptureForm(Form):
+    ...     field = Capture(Combine(basic.HtmlLayout(), pages.HtmlLayout()))
+    ...
+
+Creators    
+========
+
+Creators create forms from some sort of input. The idea is that people can write creators to take input from another source such as a database or XML schema and automatically produces a form from it. 
+
+At the moment the only creator written takes the parameters captured by the ``Capture`` modifier and applies it to the form object you want to use the data to be built with::
+
+    >>> from formbuild.creator import CaptureDataRecreator
+    >>> creator = CaptureDataRecreator(Form())
+    >>> r = creator.create([['formbuild.builder.field.basic.HtmlFields.text', {'name': 'one'}]])
+    >>> print '\n'.join(r)
+    <input name="one" type="text" />
+
+The ``CaptureDataRecreator`` also have a second parameter which is a dictionary where the keys are the combined module and class names of the builders and the values are the parameters to be passed to their ``__init__()`` methods.
+
+For example, to set the ``basic.CssLayout`` parameters, pass ``{'formbuild.builder.layout.basic.CssLayout':{css_prepend:'prepend'},}`` as the ``init_params`` argument.
+
+Creators could be used for things like generating a Python representation of the form to be executed.

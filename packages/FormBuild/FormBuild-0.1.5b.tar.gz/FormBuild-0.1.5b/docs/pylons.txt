@@ -1,0 +1,336 @@
+Using FormBuild in Pylons
++++++++++++++++++++++++++
+
+:author: James Gardner
+:date: 2006-08-24
+
+The basic principle of FormBuild is that all forms should be built using form
+generating classes rather than directly in HTML so that after defining your
+forms you have complete programatic control over how your forms look and behave
+without having to manually make changes to the form definitions. 
+
+You can have multiple types of forms by defining multiple form classes. Forms
+can have a very simple layout with a description, HTML field and error message
+or have a complex layout with fields in different sections over multiple pages
+with added notes or messages. Each layout can have multiple HTML
+implementations, for example using tables or CSS.
+
+Although form generation in FormBuild is performed through an API it doesn't
+mean that API itself can't use templates to generate specific components, this
+is in fact the recommended way to define your own form layouts as it gives you
+the flexibility to be able to modify the HTML used to produce your forms.
+
+.. Note:: Be sure to have read the 
+    `FormBuild manual <http://formbuild.org/manual.html>`_ before
+    continuing so you have an idea of what FormBuild actually does and why
+    the abstraction of form generation into a set of carefully structured classes
+    is useful. 
+
+If you simply need to generate one form with a few fields the use of FormBuild
+may be overkill and you may wish to consider coding your form directly using
+Pylons' web helpers as described in the Pylons form handling documentation. 
+
+
+Getting Started
+===============
+
+Having read the manual you should now understand the different role of
+builders, modifiers, creators and forms. This guide will only explain how to
+use forms classes and builders to create form definitions but will also cover
+how to use the handler to automate the process of validating user input, and
+re-displaying forms for error correction.
+
+First `install Pylons <http://pylonshq.com/install/>`_ and follow the `Getting
+Started Guide <http://pylonshq.com/docs/current/getting_started.html>`_ so that
+you have a running ``HelloWorld`` application with a ``hello`` controller
+available at http://localhost:5000/hello served using paster with the
+``--reload`` option.
+
+Next setup your project so that all your FormBuild code is nicely structured.
+Create a new directory in your project's ``models`` directory named ``forms``
+and within it create empty files named ``__init__.py``, ``schema.py``,
+``values.py``, ``validators.py`` and ``build.py``.
+
+Edit ``build.py`` so that it looks like this. If you don't understand this code
+read the `FormBuild manual <http://formbuild.org/manual.html>`_::
+
+    import formbuild
+
+    class StandardForm(formbuild.Form):
+        pass
+
+Edit ``schema.py`` so that it looks like this. If you don't understand this
+code read the Pylons form handling documentation and then look at the
+`FormEncode documentation <http://formencode.org/>`_ for the full details::
+    
+    import formencode
+
+    class EmailFormSchema(formencode.Schema):
+        allow_extra_fields = True
+        filter_extra_fields = True
+        email = formencode.validators.Email(not_empty=True)
+        age = formencode.validators.Int(not_empty=True)
+
+Edit ``__init__.py`` so that it looks like this::
+
+    import schema
+    import build
+    # import validators
+    # import values
+
+Add the following to  ``models/__init__.py`` so that we can access our form
+code as ``model.form`` in our controllers::
+
+    import forms
+
+Finally we need to add FormBuild and FormEncode to the ``install_requires``
+line of our project's ``setup.py`` file so that it looks like this::
+
+    install_requires = ["Pylons>=0.9", "FormBuild>=0.1.5b,<0.2", "FormEncode>=0.4"],
+
+.. Note:: In this example we don't have any values to be added to ``dropdown``
+    boxes or any custom validators in our schema so ``values.py`` and
+    ``validators.py`` remain empty. # XXX Look at the common fields setup examples
+    once it is written. 
+
+We can now run ``python setup.py develop`` to install FormBuild and FormEncode
+if we haven't already done so and we will need to restart the server.
+
+
+Writing the Controller The Full Way
+===================================
+
+We now have a project that is properly setup for us with a FormBuild form
+available in our controllers as ``model.forms.build.StandardForm`` and a
+FormEncode schema available as ``model.forms.schema.EmailFormSchema``. We will
+write a form defintion in ``templates/email_form.myt`` in the next section but
+for the moment lets look at what the controller has to do.
+
+Add a new action to the ``controllers/hello.py`` file that looks like this::
+
+    def email_form(self):
+        if len(request.params):
+            try:
+                results = model.forms.schema.EmailFormSchema.to_python(
+                    dict(request.params), 
+                    state=c
+                )
+            except formencode.Invalid, e:
+                c.form = model.forms.build.StandardForm(
+                    dict(request.params), 
+                    e.error_dict or {}
+                )
+                return render_response('/email_form.myt')
+            else:
+                return Response(
+                    'You are %s years old and have the following email: %s'%(
+                        results['age'],
+                        results['email'],
+                    )
+                )
+        else:
+            c.form = model.forms.build.StandardForm()
+            return render_response('/email_form.myt')
+
+You will also need to import formencode the top of the file::
+    
+    import formencode
+
+If a form has been not been submitted ``request.params`` will not contain
+any values so the variable ``c.form`` is setup to hold an instance of our
+model.forms.build.StandardForm class with no defaults and no errors. This is
+then used in the template ``email_form.myt`` to generate the form.
+
+If we wanted to populate the form with some initial values we could do so by
+changing the second to last line to this::
+
+    c.form = model.forms.build.StandardForm(
+        defaults={'email':'mail@example.com'}
+    )
+
+.. Note:: The ``defaults`` parameter can also take a list of dictionaries of form
+    values to be searched and will always take the first value for a field it finds
+    whilst looking through the list of dictionaries from the start.
+
+Once a form is submitted it is validated using the ``to_python()`` method of
+the FormEncode schema we defined with a dictionary containing the values to be
+validated as the first parameter. FormEncode also allows a second ``state``
+parameter to be passed to the validators and in Python it is recommended the
+``c`` variable be passed as the state.
+
+If there are any validation errors the form is re-displayed with the errors for
+each field obtained from ``e.error_dict``. 
+
+Finally if the validation succeeded the results are available as the
+``results`` dictionary and are used to display a simple message.
+
+.. Note:: FormEncode does more than simply validate the variables, it also
+    converts them to the correct Python type. In this case ``results['age']`` is
+    actually an integer.
+
+Writing the Definition
+======================
+
+Create a new template ``templates/email_form.myt`` which looks like this::
+
+    <% c.form.start(name="form", action=h.url_for(action='email_form'), method="GET") %>
+    <% c.form.layout.simple_start() %>
+
+    <% c.form.layout.entry(
+        c.form.field.text('email'),
+        name='Email',
+        error=c.form.get_error('email') 
+    ) %>
+
+    <% c.form.layout.entry(
+        c.form.field.text('age'),
+        name='Age',
+        error=c.form.get_error('age') 
+    ) %>
+
+    <% c.form.layout.entry(
+        c.form.field.submit('submit', value="Submit")
+    ) %>
+   
+    <% c.form.layout.simple_end() %>
+    <% c.form.end() %>
+
+You can see how we are using the form ``c.form`` created in the controller to
+build a form definition. 
+
+The first and last lines create the appropriate ``<form>`` and ``</form>``
+tags, the ``c.form.layout.simple_start()`` and ``c.form.layout.simple_end()``
+lines create the HTML necessary to house the ``c.form.layout.entry()`` calls.
+The middle lines creates the fields with the necessary HTML to display a
+caption and error message. 
+
+Since the defaults and error dictionaries were passed in as parameters to
+``c.form`` we don't need any if or else statements testing for the existance of
+error messages, they are all handled automatically.
+
+You can now visit http://localhost:5000/hello/email_form to give the
+application a try.
+
+You will notice that you can still enter large or negative numbers for the age
+so you might want to write your own custom validator as described in the
+FormEncode documentation.
+
+Using FormBuild handle()
+========================
+
+``formbuild.handle`` is a special function specifically for Pylons which takes
+a FormEncode ``Schema``, a template to render and the FormBuild ``Form`` as
+arguments and returns a dictionary ``results`` containing results coerced to
+Python objects for all fields it could validate, a dictionary ``errors``
+containing the error messages associated with each field which could not be
+validated and ``response``, a value that is ``None`` if the form was valid or
+otherwise a pre-rendered response of the template with all error messages and
+values included so that you can just return it to ask the user to correct the
+mistakes.
+
+You use the method like this::
+
+    def email_form(self):
+        results, errors, response = formbuild.handle(
+            schema=model.forms.schema.EmailFormSchema(), 
+            template='email_form.myt',
+            form=model.forms.build.StandardForm
+        )
+        if response:
+            return response
+        return Response(
+            'You are %s years old and have the following email: %s'%(
+                results['age'],
+                results['email'],
+            )
+        )
+
+Remember to import formbuild the top of the file::
+    
+    import formbuild
+
+All aspects of the handling are customisable. For example if you want to
+specify the values to be handled, perhaps if you are initially populating the
+form with data from a database rather than from request.params you can specify
+a dictionary of data as the ``data`` parameter. If you want the rendering to be
+done differently you can specify a new function to the ``render`` parameter.
+
+
+Creating Your Own Form Layouts
+==============================
+
+The real power of FormBuild is that you can create your own form layouts.
+
+Add this to your ``models/forms/build.py`` file replacing ``helloworld`` with
+the name of your project::
+
+    from pylons.templating import render
+    from formbuild import Form
+    from formbuild.builder.field import basic
+    from formbuild.builder.field import compound
+    from formbuild.builder.layout import LayoutBuilder
+    
+    class MainLayout(LayoutBuilder):
+        type = 'helloworld.model.forms.build.MainLayout'
+    
+        def field_start(self, **p):
+            return render('field_layout.myc', fragment=True, **p)
+    
+        def field_end(self, **p):
+            return ''
+    
+    class MainForm(Form):
+        field = basic.HtmlFields(), compound.HtmlFields()    
+        layout = MainLayout()
+    
+Create this file as ``templates/field_layout.myc``::
+
+    <div style="clear: both">
+        <label style="float: left; width: 100px;" for="<% ARGS['name'] %>">
+            <% ARGS.get('caption','&nbsp;') %>
+        </label>
+        <% getattr(c.form.field, ARGS['field'])(
+            name=ARGS['name'], 
+            **ARGS.get('params',{})
+        ) %>
+        <% c.form.get_error(
+            ARGS['name'], 
+            format='<span style="clear: both; margin: 0 0 30px 10px;">%s</span>'
+        ) %>
+    </div>
+
+Tweak your ``edit_form`` method to use the new form type ``MainForm`` instead
+of ``StandardForm``::
+
+    def email_form(self):
+        results, errors, response = formbuild.handle(
+            ...
+            form=model.forms.build.MainForm
+        )
+        ...
+
+Finally change your ``templates/form_email.myt`` file to look like this::
+
+    <% c.form.start(
+        name="form",
+        action=h.url_for(action='email_form'),
+        method="GET"
+    ) %>
+        <% c.form.layout.field(field='text', caption='Email', name='email') %>
+        <% c.form.layout.field(field='text', caption='Age', name='age') %>
+        <% c.form.layout.field(
+            field='submit', 
+            params={'value':'Submit'}, 
+            name='go',
+        ) %>
+    <% c.form.end() %>
+
+You can no customise ``templates/field_layout.myc`` to your heart's content
+without needing to revist ``templates/form_email.myt``.
+
+Visit http://localhost:5000/hello/email_form to see your new form.
+
+If you do create your own layouts please drop a line to the `mailing list
+<http://formbuild.org/community.html>`_ to let others who might wish to use it
+know or so that it can be inclused in a future release.
+
