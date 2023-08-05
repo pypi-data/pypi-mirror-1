@@ -1,0 +1,70 @@
+>>> import os, sys
+>>> from simple_auth.client.model import AuthModel
+>>> from sqlalchemy import *
+>>>
+>>> auth = AuthModel("mysql://username:password@localhost:3306/simple_auth", "mysql")
+>>> session = create_session()
+>>> errors = []
+>>>
+>>> user = service = role = None
+>>> user_name = "test_user"
+>>> user_pass = "test_pass"
+>>> service_name = "test_service"
+>>> role_name = "test_role"
+>>>
+>>> def build_test_objects():
+...     user = auth.User(name=user_name, password=user_pass)
+...     service = auth.Service(name=service_name)
+...     role = auth.Role(name=role_name)
+...     for obj in [user, service, role]:
+...         session.save(obj)
+...     return (user, service, role)
+...
+>>> def destroy_test_objects(objs, session):
+...     for obj in objs:
+...         if isinstance(obj, auth.User) or isinstance(obj, auth.Service):
+...             for r in obj.roles:
+...                 obj.roles.remove(r)
+...         session.delete(obj)
+...
+>>> def flush_with_trans(session, errors=[]):
+...     trans = session.create_transaction(autoflush=False)
+...     try:
+...         session.flush()
+...     except Exception, e:
+...         errors.append((None, e, None))
+...         trans.rollback()
+...         trans.close()
+...     else:
+...         trans.commit()
+...         trans.close()
+...
+>>> user, service, role = build_test_objects()
+>>> flush_with_trans(session, errors)
+>>> errors
+[]
+>>>
+>>> authenticated = auth.authenticate(user_name, user_pass, session=session)
+>>> authenticated
+True
+>>>
+>>> authorized = auth.authorize(service_name, user_name, role_name, session=session)
+>>> authorized
+False
+>>>
+>>> user.roles.append(role)
+>>> service.roles.append(role)
+>>>
+>>> authorized = auth.authorize(service_name, user_name, role_name, session=session)
+>>> authorized
+True
+>>>
+>>> destroy_test_objects([user, service, role], session)
+>>> flush_with_trans(session, errors)
+>>> errors
+[]
+>>>
+>>> if len(errors) == 0:
+...     session.close()
+...
+>>>
