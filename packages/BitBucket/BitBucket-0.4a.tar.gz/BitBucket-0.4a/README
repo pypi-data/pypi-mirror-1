@@ -1,0 +1,126 @@
+ As soon as I heard about the S3 service I wanted to try it out. I already had an Amazon developer's key so I filled out the rest of the information to get my access key and secret key for S3. Since Python is still by far my favorite language for computing I downloaded the sample Python code from the S3 developer's section and started hacking away.
+
+I wanted to come up with some code that had a slightly more Pythonic feel to it so I came up with what I call BitBucket. BitBucket defines two main classes; Bits and BitBuckets. Bits are objects that you create to hold the data that you either want to store in S3 or retrieve from S3. In addition to holding the data itself, Bits objects let you add arbitrary metadata that will also be stored in S3 and associated with your data. The BitBucket object is an abstraction of the S3 bucket which is where you store content in S3. Developer's can create multiple buckets but it's a flat namespace across all developers so you can almost think of buckets in the same way you think of domain names. A developer is limited to a maximum of 100 buckets but that's not really much of a limit because an individual bucket can hold unlimited data.
+
+Because I was trying for a more Pythonic feel to the code, I've made BitBucket's act largely like mapping objects (dictionaries) in Python. So, if you are familiar with Python dicts the BitBucket will feel familiar.
+
+Before using BitBucket you will need to tell it about your own access key and secret key (information that Amazon gives you when you sign up for S3). An additional parameter provided in the config file is the Debug flag.  If this is set to 0 then no debug info will be printed, if it is set to 1 some BitBucket specific info will be printed and if you set it to 2 it will print the BitBucket stuff AND debug info from the underlying httplib.py module.  The best way to provide this information is by creating a bitbucket.cfg file.  The file should look like this:
+
+[DEFAULT]
+AccessKeyID: YourAccessKeyHere
+SecretAccessKey: YourSecretAccessKeyHere
+Debug: False
+
+You can place the file in your home directory or in the directory in which you are running the BitBucket code.
+
+Now that we have that taken care of, let's take a look at BitBucket in action:
+
+jobs:mitch$ python
+Python 2.4.1 (#2, Mar 31 2005, 00:05:10) 
+[GCC 3.3 20030304 (Apple Computer, Inc. build 1666)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import bitbucket
+>>> connection = bitbucket.connect()
+>>> bucket = connection.get_bucket('test')
+>>> bucket.keys()
+[]
+
+As you can see, the first step is to establish a connection to S3.  Use the module method "connect" to do that.  If you don't pass any parameters to the method it will use the defaults it finds in your Bitbucket config file.  If you want to override those values or don't want to mess around with a config file just pass your AWS Access Key and Secret Key in as parameters.  Once we have established a connection we use the get_bucket method to get or create a BitBucket object instance.  The string you pass in to the constructor is the name of the bucket.  If there isn't a bucket by that name yet one will be created.  Having created the bucket, let's create some Bits to put in the bucket.
+
+>>> bits = bitbucket.Bits()
+>>> bits.data = 'No one expects the Spanish Inquisition'
+>>> bits['weapon1'] = 'fear'
+>>> bits['weapon2'] = 'surprise'
+>>> bits['weapon3'] = 'ruthless efficiency'
+>>> bucket['ximinez'] = bits
+>>> bucket.keys()
+['ximinez']
+
+We create a new Bits object and set the data attribute to be the data we want to store in S3.  We also want to set some metadata for the object.  The Bits object acts like a dictionary for the purpose of getting and setting metadata.  Once we have set the three metadata field we add the Bits object to the BitBucket object (again, treating the bucket like a dictionary object).  The key used will be the key under which the data will be stored in S3.  The act of adding the Bits object to the BitBucket causes the data and metadata to be sent to S3.
+
+Now, let's end this session and start up another one.  We will create a BitBucket object pointing to the same resource on S3 and verify that our data was stored.
+
+jobs:~/Projects/s3-example-libraries/python/bitbucket mitch$ python
+Python 2.4.1 (#2, Mar 31 2005, 00:05:10) 
+[GCC 3.3 20030304 (Apple Computer, Inc. build 1666)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import bitbucket
+>>> connection = bitbucket.connect()
+>>> bucket = connection.get_bucket('test')
+>>> bucket.keys()
+[u'ximinez']
+>>> bits = bucket['ximinez']
+>>> bits
+<bitbucket.Bits instance at 0x2c7c60>
+>>>
+
+At this point the Bits object only contains the high-level information that S3 sends when you ask it to list the objects in a bucket.  The content behind the Bits object hasn't been retrieved yet.  Instead, we use a lazy fetching approach to get the data only when it is asked for.  As soon as I reference the data attribute of the object below, the data and metadata are fetched from S3.
+
+>>> bits.data
+'No one expects the Spanish Inquisition'
+>>> bits['weapon1']
+'fear'
+>>> bits['weapon2']
+'surprise'
+>>> bits['weapon3']
+'ruthless efficiency'
+>>> 
+
+Storing strings in S3 is kind of useful but it's probably much more likely that you would want to store files.  The Bits object allows you to specify a filename at construction time.  Then, when the Bits object is added to the BitBucket the contents of the file will be sent to S3.
+
+>>> f = bitbucket.Bits(filename='foo.gif')
+>>> f['description'] = 'An image file.'
+>>> bucket['sample_image'] = f
+
+So, what's actually happening here?  Well, first of all, when you create the Bits object with the filename passed in to the constructor, that Bits object becomes associated with that file on your local filesystem.  The md5 checksum of the file is computed and BitBucket attempts to guess the mime type (e.g. Content-type) of the file.  At this point you can also associate arbirary metadata with the file just as we did in the above string-based example.  When the Bits object gets added to the BitBucket, the contents of the file on your local filesystem are transferred to S3 and stored there using the key "sample_image".  Any content previously stored on S3 using that key would be overwritten.  It should be noted that the BitBucket object streams the files to and from S3 rather than loading the entire contents of the file into memory as the initial sample code from Amazon does.  This is important when you are dealing with lots of files or very big files.
+
+In addition to storing information from local files you can also retrieve information from S3 to a local file.  Here's a snippet that shows the to_file method of the Bits object in action:
+
+>>> import bitbucket
+>>> connection = bitbucket.connect()
+>>> b = connection.get_bucket('test')
+>>> b.keys()
+[u'sample_image', u'mitchtest1', u'ximinez']
+>>> bits = b['sample_image']
+>>> bits.filename = 'bar.gif'
+>>> 
+
+In this example, the existing Bits object related to the key "sample_image" would be associated with the local file "bar.gif".  If the md5 hash of the local file matches the etag of the S3 file then nothing else will happen as a result of this assignment; no data is transmitted because the local file and the S3 content are in sync.  If, however, the md5 hash of the local file is different than what's in S3, the local content will be sent to S3 and overwrite the current content.  The final possibility is that the filename passed to the Bits constructor doesn't exist on the local filesystem.  In that case, the content will be retrieved from S3 and written to the local file.  The basic idea is that when you associate a Bits object with a filename (either by passing it in the constructor or setting the "filename" attribute) BitBucket will try to syncronise that local file with S3 and generally views the local copy as the "master" copy.  This syncronization happens implicitly when you set the "filename" attribute of the Bits object but you can also cause it to happen explicitely by calling the "sync" method of the Bits object.
+
+Currently, there is no situation in which BitBucket would overwrite an existing local file with content from S3.  It may be possible that you would like that behavior and it may be possible that it will be added at some point but for the moment it doesn't happen.
+
+To see how all of this can be combined to produce something useful, consider the following function (contained in bb_example.py):
+
+def sync_dir(bucket_name, path, ignore_dirs=[]):
+    connection = bitbucket.connect()
+    bucket = connection.get_bucket(bucket_name)
+    for root, dirs, files in os.walk(path):
+	for ignore in ignore_dirs:
+	    if ignore in dirs:
+		dirs.remove(ignore)
+	for file in files:
+	    fullpath = os.path.join(root, file)
+	    try:
+		if bucket.has_key(fullpath):
+		    bits = bucket[fullpath]
+		    bits.filename = fullpath
+		else:
+		    bits = bitbucket.bits(filename=fullpath)
+		    bucket[fullpath] = bits
+	    except bitbucket.BitBucketEmptyError:
+		print 'sync_dir: Empty File - Ignored %s' % fullpath
+    return bucket
+
+This function uses the walk function in Python's os module.  You pass in as arguments the name of the S3 bucket in which the content will be stored, the path to the directory you want to sync up with S3 and, optionally, any directory names you want the function to ignore during the sync processes.  The function then walks the directory structure and makes sure that the content in S3 is consistent with the content on your filesystem.  The first time you run the function all of the local files will have to be transferred to S3 but in subsequent calls only files that are actually modified (i.e. have a different md5 checksum) will be sent to S3.
+
+One other thing that I have added to BitBucket but won't describe in alot of detail at the moment is support for prefixes.  When you create a BitBucket you can specify a string to use as a prefix.  What this does is essentially create a logical namespace within the bucket.  So, for example, if you specified "prefix='mitch'" to the constructor then the BitBucket would only show you objects in S3 that are in the S3 bucket AND which match the given prefix.  You won't see anything else and all new Bits that are added to the BitBucket will have this prefix added to the front of their key strings.  This all happens transparently.  I haven't fully figured out how best to use this capability but it's pretty cool and it is supported in BitBucket.
+
+That gives you a pretty good idea of what BitBucket is all about and also should give you an appreciation for how cool S3 is.  This is very much a quick hack at the moment but I'm looking forward to trying other ideas out with S3 and also seeing what others are doing with the service.
+
+Acknowledgements
+----------------
+Thanks to Emanuele Ruffaldi.  I stole most of the streaming get_file method
+from his S3 Tool.
+
+Thanks to Ian Bicking for showing me how to use distutils to package up
+the code for easier distribution.  
