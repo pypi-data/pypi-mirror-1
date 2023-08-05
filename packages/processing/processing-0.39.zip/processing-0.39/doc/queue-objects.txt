@@ -1,0 +1,118 @@
+.. include:: header.txt
+
+===============
+ Queue objects
+===============
+
+The queue types provided by `processing` are multi-producer,
+multi-consumer FIFO queues modelled on the `Queue.Queue` class in the
+standard library.  
+
+In general it is best to stick to `processing.Queue` which has the
+important advantage that (unless a maximum size is specified) putting
+an object on the queue will always succeed without blocking.  Without
+this guarantee one must be much more careful to avoid the possibility
+of deadlocks.
+
+`Queue(maxsize=0)`
+    Returns a process shared queue implemented using a pipe and a
+    few locks/semaphores.  A background thread transfers objects
+    from a buffer into the pipe.
+
+    It is a near clone of `Queue.Queue` except that the `qsize()`
+    method is not implemented and that the `task_done()` and
+    `join()` methods introduced in Python 2.5 are also missing.
+
+    `Queue` has a few additional methods which are usually
+    unnecessary:
+
+        `putmany(iterable)` 
+            If the queue has infinite size then this adds all
+            items in the iterable to the queue's buffer.  So
+            `q.putmany(X)` is a faster alternative to `for x in X:
+            q.put(x)`.  Raises an error if the queue has finite
+            size.
+
+        `close()`
+            Indicates that no more data will be put on this queue by
+            the current process.  The background thread will quit once
+            it has flushed all buffered data to the pipe.  This is
+            called automatically when the queue is garbage collected.
+
+        `jointhread()`
+            This joins the background thread and can only be used
+            after `close()` has been called.  This blocks until
+            the background thread exits, ensuring that all data in
+            the buffer has been flushed to the pipe.  
+
+            By default if a process is not the creator of the
+            queue then on exit it will attempt to join the queue's
+            background thread.  The process can call
+            `canceljoin()` to prevent this behaviour.
+
+        `canceljoin()`
+            Prevents the background thread from being joined
+            automatically when the process exits.  Unnecessary if
+            the current process created the queue.
+
+    Note that if a process is killed while it is trying to receive
+    or send to a queue then the data in the queue is likely to
+    become corrupted (because it may become impossible to be sure
+    where the message boundaries lie).
+
+`SimpleQueue()`
+    A simplified and faster alternative to `Queue()`.  It is really
+    just a non-duplex pipe protected by a couple of locks.
+
+    It has `get()` and `put()` methods but these do not have
+    `block` or `timeout` arguments.  It also has an `empty()`
+    method.
+
+    **Warning**: Unlike with `Queue` (when `maxsize` is zero)
+    using `put()` may block if the pipe's buffer does not have
+    sufficient space, so one must take care that no deadlocks are
+    possible.
+
+`PosixQueue(maxsize=0, msgsize=0)`
+    A faster alternative to `Queue()` which is available on Unix
+    systems which support Posix message queues.
+
+    However, posix queues have a maximum number of messages that
+    can occupy the queue at a given time, and each message (when
+    expressed as a pickled string) has a maximum length --- see
+    `man 7 mq_overview`.
+
+    `maxsize` if specified determines the maximum number of items
+    that be in the queue.  Note that unlike Pythons's normal queue
+    type if this is greater than a system defined maximum then an
+    error is raised.  If `maxsize` is zero then this maximum value
+    is used.
+
+    `msgsize` if specified determines the maximum length that each
+    message can be (when expressed as a pickled string).  If this
+    is greater than a system defined maximum then an error is
+    raised.  If `msgsize` is zero then this maximum value is used.
+    
+    If one tries to send a message which is too long then
+    `ValueError` will be raised.
+
+
+.. admonition:: `Empty` and `Full`
+
+    `processing` uses the usual `Queue.Empty` and `Queue.Full` 
+    exceptions to signal a timeout.  They are not available in the 
+    `processing` namespace so you need to import them from `Queue`.
+
+
+.. warning::    
+
+    If a process is killed while it is trying to use a `Queue` or
+    `SimpleQueue` then the data in the queue is likely to become
+    corrupted because it may become impossible to be sure where the
+    message boundaries lie.  However, `PosixQueue` does not have this
+    problem.
+
+
+.. _Prev: process-objects.html
+.. _Up: processing-ref.html
+.. _Next: connection-objects.html

@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils 0.4: http://docutils.sourceforge.net/" />
+<title>Queue objects</title>
+<link rel="stylesheet" href="html4css1.css" type="text/css" />
+</head>
+<body>
+<div class="header">
+<a class="reference" href="process-objects.html">Prev</a> &nbsp; &nbsp; &nbsp; &nbsp; <a class="reference" href="processing-ref.html">Up</a> &nbsp; &nbsp; &nbsp; &nbsp; <a class="reference" href="connection-objects.html">Next</a>
+<hr class="header"/>
+</div>
+<div class="document" id="queue-objects">
+<h1 class="title">Queue objects</h1>
+<p>The queue types provided by <tt class="docutils literal"><span class="pre">processing</span></tt> are multi-producer,
+multi-consumer FIFO queues modelled on the <tt class="docutils literal"><span class="pre">Queue.Queue</span></tt> class in the
+standard library.</p>
+<p>In general it is best to stick to <tt class="docutils literal"><span class="pre">processing.Queue</span></tt> which has the
+important advantage that (unless a maximum size is specified) putting
+an object on the queue will always succeed without blocking.  Without
+this guarantee one must be much more careful to avoid the possibility
+of deadlocks.</p>
+<dl class="docutils">
+<dt><tt class="docutils literal"><span class="pre">Queue(maxsize=0)</span></tt></dt>
+<dd><p class="first">Returns a process shared queue implemented using a pipe and a
+few locks/semaphores.  A background thread transfers objects
+from a buffer into the pipe.</p>
+<p>It is a near clone of <tt class="docutils literal"><span class="pre">Queue.Queue</span></tt> except that the <tt class="docutils literal"><span class="pre">qsize()</span></tt>
+method is not implemented and that the <tt class="docutils literal"><span class="pre">task_done()</span></tt> and
+<tt class="docutils literal"><span class="pre">join()</span></tt> methods introduced in Python 2.5 are also missing.</p>
+<p><tt class="docutils literal"><span class="pre">Queue</span></tt> has a few additional methods which are usually
+unnecessary:</p>
+<blockquote>
+<dl class="docutils">
+<dt><tt class="docutils literal"><span class="pre">putmany(iterable)</span></tt></dt>
+<dd>If the queue has infinite size then this adds all
+items in the iterable to the queue's buffer.  So
+<tt class="docutils literal"><span class="pre">q.putmany(X)</span></tt> is a faster alternative to <tt class="docutils literal"><span class="pre">for</span> <span class="pre">x</span> <span class="pre">in</span> <span class="pre">X:</span>
+<span class="pre">q.put(x)</span></tt>.  Raises an error if the queue has finite
+size.</dd>
+<dt><tt class="docutils literal"><span class="pre">close()</span></tt></dt>
+<dd>Indicates that no more data will be put on this queue by
+the current process.  The background thread will quit once
+it has flushed all buffered data to the pipe.  This is
+called automatically when the queue is garbage collected.</dd>
+<dt><tt class="docutils literal"><span class="pre">jointhread()</span></tt></dt>
+<dd><p class="first">This joins the background thread and can only be used
+after <tt class="docutils literal"><span class="pre">close()</span></tt> has been called.  This blocks until
+the background thread exits, ensuring that all data in
+the buffer has been flushed to the pipe.</p>
+<p class="last">By default if a process is not the creator of the
+queue then on exit it will attempt to join the queue's
+background thread.  The process can call
+<tt class="docutils literal"><span class="pre">canceljoin()</span></tt> to prevent this behaviour.</p>
+</dd>
+<dt><tt class="docutils literal"><span class="pre">canceljoin()</span></tt></dt>
+<dd>Prevents the background thread from being joined
+automatically when the process exits.  Unnecessary if
+the current process created the queue.</dd>
+</dl>
+</blockquote>
+<p class="last">Note that if a process is killed while it is trying to receive
+or send to a queue then the data in the queue is likely to
+become corrupted (because it may become impossible to be sure
+where the message boundaries lie).</p>
+</dd>
+<dt><tt class="docutils literal"><span class="pre">SimpleQueue()</span></tt></dt>
+<dd><p class="first">A simplified and faster alternative to <tt class="docutils literal"><span class="pre">Queue()</span></tt>.  It is really
+just a non-duplex pipe protected by a couple of locks.</p>
+<p>It has <tt class="docutils literal"><span class="pre">get()</span></tt> and <tt class="docutils literal"><span class="pre">put()</span></tt> methods but these do not have
+<tt class="docutils literal"><span class="pre">block</span></tt> or <tt class="docutils literal"><span class="pre">timeout</span></tt> arguments.  It also has an <tt class="docutils literal"><span class="pre">empty()</span></tt>
+method.</p>
+<p class="last"><strong>Warning</strong>: Unlike with <tt class="docutils literal"><span class="pre">Queue</span></tt> (when <tt class="docutils literal"><span class="pre">maxsize</span></tt> is zero)
+using <tt class="docutils literal"><span class="pre">put()</span></tt> may block if the pipe's buffer does not have
+sufficient space, so one must take care that no deadlocks are
+possible.</p>
+</dd>
+<dt><tt class="docutils literal"><span class="pre">PosixQueue(maxsize=0,</span> <span class="pre">msgsize=0)</span></tt></dt>
+<dd><p class="first">A faster alternative to <tt class="docutils literal"><span class="pre">Queue()</span></tt> which is available on Unix
+systems which support Posix message queues.</p>
+<p>However, posix queues have a maximum number of messages that
+can occupy the queue at a given time, and each message (when
+expressed as a pickled string) has a maximum length --- see
+<tt class="docutils literal"><span class="pre">man</span> <span class="pre">7</span> <span class="pre">mq_overview</span></tt>.</p>
+<p><tt class="docutils literal"><span class="pre">maxsize</span></tt> if specified determines the maximum number of items
+that be in the queue.  Note that unlike Pythons's normal queue
+type if this is greater than a system defined maximum then an
+error is raised.  If <tt class="docutils literal"><span class="pre">maxsize</span></tt> is zero then this maximum value
+is used.</p>
+<p><tt class="docutils literal"><span class="pre">msgsize</span></tt> if specified determines the maximum length that each
+message can be (when expressed as a pickled string).  If this
+is greater than a system defined maximum then an error is
+raised.  If <tt class="docutils literal"><span class="pre">msgsize</span></tt> is zero then this maximum value is used.</p>
+<p class="last">If one tries to send a message which is too long then
+<tt class="docutils literal"><span class="pre">ValueError</span></tt> will be raised.</p>
+</dd>
+</dl>
+<div class="admonition-empty-and-full admonition">
+<p class="first admonition-title"><tt class="docutils literal"><span class="pre">Empty</span></tt> and <tt class="docutils literal"><span class="pre">Full</span></tt></p>
+<p class="last"><tt class="docutils literal"><span class="pre">processing</span></tt> uses the usual <tt class="docutils literal"><span class="pre">Queue.Empty</span></tt> and <tt class="docutils literal"><span class="pre">Queue.Full</span></tt>
+exceptions to signal a timeout.  They are not available in the
+<tt class="docutils literal"><span class="pre">processing</span></tt> namespace so you need to import them from <tt class="docutils literal"><span class="pre">Queue</span></tt>.</p>
+</div>
+<div class="warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">If a process is killed while it is trying to use a <tt class="docutils literal"><span class="pre">Queue</span></tt> or
+<tt class="docutils literal"><span class="pre">SimpleQueue</span></tt> then the data in the queue is likely to become
+corrupted because it may become impossible to be sure where the
+message boundaries lie.  However, <tt class="docutils literal"><span class="pre">PosixQueue</span></tt> does not have this
+problem.</p>
+</div>
+</div>
+<div class="footer">
+<hr class="footer" />
+<a class="reference" href="process-objects.html">Prev</a> &nbsp; &nbsp; &nbsp; &nbsp; <a class="reference" href="processing-ref.html">Up</a> &nbsp; &nbsp; &nbsp; &nbsp; <a class="reference" href="connection-objects.html">Next</a>
+</div>
+</body>
+</html>
