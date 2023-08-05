@@ -1,0 +1,373 @@
+Pylons Integration
+++++++++++++++++++
+
+Pylons is a highly configurable system that encourages many different ways of restricting access to code. 
+
+In general to implement security in Pylons you install some auth middleware in your middleware config to do the authentication, you implement sign in and sign out functions in an action and check your user has permission to access code at each place authorisation is required, displaying a sign in prompt if necessary.
+
+AuthKit can be useful at all of these stages in different ways and you are free to use it in whatever way you see fit to implement your own security.
+
+This document shows you one way to build a complete security system with AuthKit and then shows you how to modify it to use HTTP digest sign in instead of a form and cookie based sign in. This way of doing things can also be used as a basis for your own security system.
+
+Setting up a Secure Application
+===============================
+
+Getting Started
+---------------
+
+Create a pylons project if you haven't already done so. We are going to call our project authexample::
+
+    paster create --template=pylons authexample
+    
+or on Windows::
+    
+    python C:\Python24\Scripts\paster create --template=pylons authexample
+
+Then add the AuthKit security controllers and templates::
+
+    cd authexample
+    paster authkit
+    
+or on Windows::
+
+    cd authexample
+    python C:\Python24\Scripts\paster authkit
+    
+This creates a ``security`` directory in your ``templates`` directory and adds a controller named ``security`` in ``controllers``.
+
+The templates in ``templates/security`` are not styled so you will probably want to add a file named ``autohandler`` in ``templates/security`` so that the security pages fit in with the design of the rest of your application. 
+
+Create the file``templates/security/autohandler`` and add the following to it::
+
+    <html>
+    <head>
+    <title>Security</title>
+    </head>
+    <body>
+    <% m.call_next() %>
+    </body>
+    </html>
+    
+You can customize the code you put in the ``autohandler`` file to change how the sign in pages look.
+
+Writing a Secure Controller
+---------------------------
+
+Add a new controller named ``permissions`` which is going to have some public actions and some private ones::
+
+    paster controller permissions
+
+We need to make sure the controller is a secure controller so modify ``controllers/permissions.py`` to be based on a ``PylonsSecureController`` and then add some actions so that it looks like this::
+
+    from authexample.lib.base import *
+    import authkit
+    from authkit.controllers import *
+    
+    class PermissionsController(authkit.PylonsSecureController):
+        def index(self):
+            m.write('<a href="/permissions/private">See a private page</a>.<br />')
+            m.write('<a href="/permissions/public">See a public page</a>.<br />')
+    
+        def public(self):
+            m.write('This is public')
+            
+        def private(self):
+            m.write('This is private!')
+        private.permissions = authkit.permissions(signed_in=True)
+        
+
+Notice that the method ``private()`` has a ``.permissions`` attribute which is assigned the result of calling the AuthKit function ``permissions()``. The options specified in ``permissions()`` will determine which users have permission to access the ``private()`` action. In this example the only condition is that the user is signed in. ``permissions()`` takes the same parameters at the auth store ``authorise()`` method so you can read `Understanding the AuthStore <manual.html>`_ for more information.
+
+Global Auth Access
+------------------
+
+Since your application is going to need access to the AuthKit store on each request it makes sense to set the store up as an application global variable so that it can be used on each request without having to be reloaded each time. Edit ``lib/app_globals.py`` to look like this::
+
+    import pylons.middleware 
+    from authkit import SQLObjectAuthStore, connectionForURI
+    
+    class Globals(pylons.middleware.Globals):
+    
+        def __init__(self, global_conf, app_conf, **extra):
+            self.auth = SQLObjectAuthStore(connection=connectionForURI(app_conf['authkit.dsn']))
+            
+        def __del__(self):
+            pass
+
+The code above uses the ``authkit.dsn`` config variable to specify the database to use to store the auth information so you need to ensure your application specifies this variable in the config file. 
+
+Edit ``authexample.egg-info/paste_deploy_config.ini_tmpl`` so that the appropriate section looks like this so that when your end user generates a config file it is obvious to them that they need to add a valid DSN::
+
+    [app:main]
+    use = egg:authexample
+    cache_dir = %(here)s/cache
+    # Enter an SQLObject style DSN for the Auth Store
+    # authkit.dsn = sqlite:/somedb.db
+
+Now edit the relevant part of ``development.ini`` to enter the DSN you wish to use for testing::
+
+    [app:main]
+    use = egg:authexample
+    cache_dir = %(here)s/cache
+    authkit.dsn = sqlite:/somedb.db
+
+Application Setup
+-----------------
+
+The connection to the AuthKit store is made in the ``app_globals.py`` file but that doesn't mean the necessaey tables, users, roles etc have been setup. We set them up in the ``websetup.py`` file. 
+
+Add the following code so that ``websetup.py`` looks like this::
+
+    from lib.app_globals import Globals
+    from paste.deploy import appconfig
+    import os
+        
+    def setup_config(command, filename, section, vars):
+        config_spec = 'config:' + filename
+        app = appconfig(config_spec, relative_to=os.getcwd())
+        g = Globals({}, app)
+        g.auth.create_store()
+        g.auth.add_user('james', password='bananas')
+        print "Setup successfully, now run ``paster serve %s`` or similar."%filename
+
+# XXX Note it would be much nicer if ``websetup()`` just passed the app dictionary in.
+
+Here we are using the ``auth`` attribute of the ``Globals`` object from ``lib/app_globals.p``. This variable will automatically be available in your controllers as ``g.auth`` but since the code above is run before a request, the ``g`` variable is not available and so has to be setup manually. After we have manually created the ``g`` variable the code above prepares the auth store and add a user with the username ``james`` and the rather bad password ``bananas``. 
+
+You can customize this code to setup the auth store appropriate for your application, perhaps using other variables from the config file to set usernames and passwords.
+
+Implementing the Middleware
+---------------------------
+
+Now you need to add the ``authkit.middleware.Security`` middleware to your project's ``config/middleware.py`` file to catch ``401 No User`` HTTP errors for when no user is signed in to display a sign in page. You also need to add the ``pylons.security.ShowSignInOn403`` middleware to catch ``403 Access Denied`` HTTP errors to turn them into ``401`` errors so that ``authkit.middleware.Security`` can catch them and display a sign in the same way it does for ``401`` errors.
+
+Immediately after the lines::
+
+    # @@@ Change HTTPExceptions to HTTP responses @@@
+    app = httpexceptions.make_middleware(app, global_conf)
+    
+add the following::
+
+    from authkit.middleware import Security, Authenticator, ShowSignInOn403
+
+    class SimplestAuthenticator(Authenticator):
+        def check_auth(self, username, password):
+            return g.auth.authenticate(username, password)
+    
+    app = ShowSignInOn403(app) 
+    app = Security(
+        app,
+        global_conf=global_conf,
+        http_login=False,
+        cookie_prefix='',
+        login_page='security/signin',
+        logout_page='security/signout',
+        secret=None,
+        authenticator=SimplestAuthenticator,
+    )
+
+The options to ``Security`` are as follows:
+
+http_login:
+    If true, then we'll prefer HTTP Basic logins, passing a 401 to
+    the user.  If false, we'll use form logins with Cookie
+    authentication.
+http_realm:
+    The realm to use.  If http_overwrite_realm is true then we will
+    force this to be the realm (even if the application supplies
+    its own realm).
+http_and_cookie:
+    If true, we'll give the user a login cookie even if they use
+    HTTP.  Then we don't have to throw a 401 on every page to get
+    them to re-login.
+cookie_prefix:
+    Used before all cookie names; like a domain.
+login_page:
+    If using cookie login and we get a 401, we'll turn it into a
+    200 and do an internal redirect to this page (using recursive).
+logout_page:
+    Ditto the logout (logout will at some point be triggered with
+    another key we add to the environment).
+secret:
+    We use this for signing cookies.  We'll generate it automatically
+    if it's not provided explicitly (set it explicitly to be sure
+    it is stable).
+authenticator:
+    When we do HTTP logins we need to tell if they are using the
+    correct login immediately.  See the Authenticator object for
+    the framework of an implementation.
+
+
+If you do not want ``403 Access Denied`` errors to be converted to ``401`` so that the sign in form is displayed then remove the line ``app = ShowSignInOn403(app)``.
+
+The class we have created called ``SimplestAuthenticator`` is passed to the rest of the security system and will be used to check the username and password a user enters when they attempt to sign in. In this case ``james`` and ``bananas`` are the only username and password combination that will be allowed because these were the only ones setup in ``websetup.py``.
+
+Now that now our security middleware is setup, if our application returns any ``401`` or ``403`` HTTP headers, the user will be presented with a form to sign in.
+
+Testing Your Application
+========================
+
+Now that you have added auth facilities to your application we will create an egg and then test it by going through the process an end user would go through to use your application.
+
+Specifying Dependencies
+-----------------------
+
+Since our application now depends on both ``AuthKit`` and ``database`` modules, they should be added to the ``setup.py`` file::
+
+    install_requires=[
+        "Pylons >= 0.8dev,>=0.8dev-r292",
+        "AuthKit[SQLObject] >= 0.1dev",
+    ],
+
+When a user installs your application with easy_install, the required packages will also be automatically installed. Note ``AuthKit[SQLObject]`` means that your application requires AuthKit with the SQLObject driver.
+
+Creating a Release
+------------------
+
+Run the command::
+
+    setup.py bdist_egg
+    
+to generate an egg in your ``dist`` directory. The egg file is your application distributable and is the only thing you need to give to your users for them to be able to use your application (although they will need easy_install and may need to be connected to the internet so that additional information can be downloaded during setup).
+
+If you wanted to register your application with the Python CheeseShop so that other users could install it directly you would run the command below. Best not to do this yet because your application isn't finished::
+
+    # DON'T RUN THIS UNLESS YOU DO WANT TO REGISTER WITH CHEESESHOP
+    setup.py register
+    
+Installing your application
+---------------------------
+
+Move your project's egg somewhere sensible such as ``C:\eggs\authexample-0.0.0dev-py2.4.egg`` then run easy_install to install it the way your users would::
+
+    easy_install -f C:/eggs "authexample==0.0.0"
+    
+In this case we want to install the egg from where it is, not from the CheeseShop so we use the ``-f`` option which specifies a place to look for eggs. The command installs the egg by copying it to your ``site-packages`` directory and adding an entry to ``site-packages/easy_install.pth`` but this behaviour is controlled by setuptools and may change with different releases of the setuptools software. As a result it is always best to install and remove packages using easy_install rather than trying to do so manually.
+
+Next we generate a sample config file to use (I know we already have ``development.ini`` as part of the source directory structure but your users don't have the source directory, just the egg so they generate a config file this way)::
+
+    paster make-config authexample test.ini
+    
+This creates a template configuration file for the authexample appliction named ``test.ini``. The ``[app:main]`` section of ``test.ini`` looks like this because it is generated from the ``authexample.egg-info/paste_deploy_config.ini_tmpl`` file you editied earlier::
+
+    [app:main]
+    use = egg:authexample
+    cache_dir = %(here)s/cache
+    # Enter an SQLObject style DSN for the Auth Store
+    # authkit.dsn = sqlite:/somedb.db
+    
+Uncomment and edit your ``test.ini`` file with the correct DSN to use for the database which is going to contain the Auth data so that it works. 
+
+Finally setup the tables using the database connection specified in ``test.ini``::
+
+    paster setup-app test.ini
+    
+This command calls the code in your ``websetup.py`` file to setup the auth store in the way you coded it earlier.
+    
+You have now installed the application and setup the necessary database tables so you can start the server::
+
+    paster serve test.ini
+
+Testing the Setup
+-----------------
+
+You can visit http://localhost:5000/permissions/ to test that the sign in form is correctly displayed.
+
+You can sign in and out at ``/security/signin`` and `/security/signout`` respectively.
+
+Going back to modify the code
+=============================
+
+Now that you have tested the egg you will probably want to go back to developing your application. At the moment setuptools thinks the version of the code in the egg file is the correct version to use since we just installed it so you need to tell setuptools to use the code from the filesystem instead::
+
+    setup.py develop
+
+This puts setuptools in a special development mode that lets you run your application code from the source filesystem in the same way and with the same features as if it were an egg but without the inconvenience of having to keep creating eggs every time you want to test your code.
+    
+Changing What Happens on Sign in
+--------------------------------
+
+You might also want to customise what happens after a user signs in. Change ``signedin.myt`` so that it looks like this::
+
+    <% m.send_redirect('/permissions/private') %>
+    
+Now when you sign in you will see the private page straigt away.
+
+You can customise the other files in a similar way.
+
+Other Useful Features
+=====================
+
+Using HTTP sign in
+------------------
+
+The ``Security`` middleware supports Basic HTTP sign in as well as form based sign in. Try changing the  parameters to ``Security`` in ``__init__.py`` to the following::
+
+    app = Security(
+        app,
+        global_conf=global_conf,
+        http_login=True,
+        http_realm='Secure Website 3',
+        http_overwrite_realm=True,
+        http_and_cookie=True,
+        cookie_prefix='',
+        secret=None,
+        authenticator=SimplestAuthenticator,
+    )
+    
+You will now find that rather than displaying a form, the sign in is done with a box that your browser pops up.
+
+If you visit http://localhost:5000/security/signout you will be signed out.
+
+All the AuthKit middleware is fully pluggable so that you can use entirely different auth systems with AuthKit.
+
+Testing the Sign In Manually
+----------------------------
+
+Lets just check that sending a ``401`` or ``403`` error does indeed send show the form in the same way that specifying ``.permissions`` on an action attribute does.
+
+Add a new controller::
+
+    paster controller auth
+    
+Now edit your ``auth.py`` controller to look like this::
+
+    from authexample.lib.base import *
+
+    class AuthController(BaseController):
+        def index(self):
+            m.write('<a href="/auth/error401">Generate a 401 Error</a><br />')
+            m.write('<a href="/auth/error403">Generate a 403 Error</a><br />')
+            m.write('<a href="/auth/public">See a public page.</a><br />')
+            
+        def error401(self):
+            m.abort('401 Not signed in')
+            
+        def public(self):
+            m.write('This is public')
+            
+        def error403(self):
+            m.abort('403 Access denied')
+
+Start the server::
+
+    paster serve --reload development.ini
+
+and visit http://localhost:5000/ to test that the sign in form is correctly displayed. You can try commenting out the line ``app = ShowSignInOn403(app)`` in ``__init__.py`` and you will see that the ``403`` error no longer results in a sign in being displayed.
+
+When a user is correctly signed in the environmental variable ``REMOTE_USER`` is set to their username. This means you could add another method to the ``auth.py`` controller as follows::
+
+    def private(self, m, r, **params):
+        if r.environ.has_key('REMOTE_USER'):
+            if r.environ['REMOTE_USER'] == 'james':
+                m.write('Worked!')
+            else:
+                m.abort('403 Access denied')
+        else:
+            m.abort('401 No user signed in')
+
+Now if you visited http://localhost:5000/auth/private signed in as ``james`` you would see the message ``Worked!`` otherwise you would be prompted to sign in.
+
+
+
+            

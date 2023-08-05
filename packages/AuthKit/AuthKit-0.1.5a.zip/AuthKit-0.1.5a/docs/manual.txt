@@ -1,0 +1,273 @@
+Understanding the Auth Store
+++++++++++++++++++++++++++++
+
+Getting Started
+===============
+
+In order to use AuthKit you need to setup an AuthKit store for the driver you choose. 
+
+Get a list of available driver names::
+
+    >>> import authkit
+    >>> authkit.driver_names()
+    ('DatabaseAuthStore', 'SQLObjectAuthStore')
+    
+Setup the auth store, in this case we will use a database backend::
+
+
+    >>> from authkit import SQLObjectAuthStore, connectionForURI
+    >>> connection = connectionForURI("sqlite:///test.db")
+    >>> auth = SQLObjectAuthStore(connection=connection)
+    >>> auth.create_store()
+
+Once you have created an auth store you will also need at least one user::
+
+    >>> auth.add_user(username='james', password='bananas')
+
+You must specify a username when using ``add_user()`` and would normally set a password too but you set any of ``firstname``, ``lastname``, ``email``. These have been chosen since they are often used in auth systems to email password reminders and can also be set like this::
+
+    >>> auth.set_user(username='james', firstname='James')
+
+
+If you want to hold more information on a user you should store it elsewhere in your application using the username to reference your custom information.
+    
+Now we can write an application to authenticate a user::
+
+    >>> auth.authenticate(username='james', password='apples')
+    False
+    >>> auth.authenticate(username='james', password='baNaNas')
+    False
+    >>> auth.authenticate(username='james', password='bananas')
+    True
+    
+Please note that authentication is separate from authorisation. Authentication is the process of verifying someone's identity using a username and password, authorisation is the process of checking a particular user has sufficient permissions. Also note that passwords are case sensitive but usernames are not. 
+
+Signing In and Out
+==================
+
+Typically after a user is authenticated you would record the fact that they have signed in successfully. This is often handled by your application but AuthKit also provides a way to log sign ins::
+
+    >>> auth.sign_in(username='james')
+    
+Other parts of you application might need to know if user ``james`` has signed in::
+
+    >>> if not auth.authorise(username='james', signed_in=True):
+    ...     print "Access denied"
+    ...
+    ... else:
+    ...     print "User is signed in"
+    ...
+    User is signed in
+
+For people who prefer the American spelling::
+
+    >>> auth.authorise == auth.authorize
+    True
+    >>> auth.authorize(username='james', signed_in=True)
+    True
+
+The method ``auth.last_authorized(username='james')`` would provide the date and time of the last authorization attempt or None if there has been no authorisation since sign in.
+
+You might also want to see a log of user ``james``'s sign ins::
+
+     >> for item in auth.history(username='james'):
+    ...     print "Signed in:      %s\nLast Accessed: %s\nSigned out:    %s"%item
+    ...
+    Signed In:     2006-01-05 18:49:12
+    Last Accessed: 2006-01-05 18:49:12
+    Signed Out:    None
+    >>>
+
+You can also specify a maximum time since sign in, in this case 60 seconds::
+
+    >>> auth.authorise(username='james', signed_in=True, session_max=60)
+    True
+    
+or a maximum length of time since the last authorisation::
+
+    >>> auth.authorise(username='james', signed_in=True, idle_max=60)
+    True
+    
+At some point user ``james`` will need to sign out::
+
+    >>> auth.sign_out(username='james')
+    >>> auth.authorise(username='james', signed_in=True)
+    False
+
+     >> for item in auth.history(username='james'):
+    ...     print "Signed in:      %s\nSigned out:    %s\nLast Accessed: %s"%item
+    ...
+    Signed In:     2006-01-05 18:49
+    Signed Out:    2006-01-05 18:52
+    Last Accessed: 2006-01-05 18:49
+    >>> 
+
+Introducing Roles
+=================
+
+AuthKit allows you to assign multiple roles to users. The user ``james`` might be allowed to edit pages in a content management system but not create them. Only his boss with the username ``ian`` is allowed to create pages::
+
+    >>> auth.add_user('ian')
+    >>> auth.add_role('creator')
+    >>> auth.add_role('editor')
+    >>> auth.set_role(username='james', role='editor')
+    >>> auth.set_role(username='ian', role=['creator','editor'])
+    
+Now we can inspect the roles like this::
+
+    >>> auth.roles()
+    ('creator', 'editor')
+    >>> auth.role_exists('creator')
+    True
+    >>> auth.role_exists('crEaTtor')
+    False
+    >>> auth.has_role(username='james', role='creator')
+    False
+    >>> auth.has_role(username='james', role='editor')
+    True
+    
+We can unset roles like this::
+    
+    >>> auth.unset_role(username='ian', role='creator')
+    
+Role checking is built into the ``authorise()`` method::
+
+    >>> auth.authorise(username='ian', role='creator')
+    False
+    >>> auth.authorise(username='ian', role='editor')
+    True
+
+Of course it is more likely that you would want authorisation to be successful only if the user was signed in::
+
+    >>> auth.authorise(username='ian', role='editor', signed_in=True)
+    False
+
+Multiple Applications
+=====================
+
+So far everything we have done has affected the default application named ``default`` which is the only application that exists and is affected if no application is specified in the methods we have used so far::
+
+    >>> auth.applications()
+    ('default',)
+
+You can inspect each users roles. The result is a dictionary of application:role pairs::
+
+    >>> auth.roles(username='james')
+    {'default': ('editor',)}
+    
+Notice that the roles we set in the previous section actually affected the default application.
+    
+We can add other applications to the auth store. Each application's roles are independant so that a user can have access to multiple applications through the same sign in.
+
+::
+
+    >>> auth.add_application(name='email')
+    >>> auth.set_role(username='james', application='email', role='creator')
+    >>> auth.authorise(username='james', role='creator')
+    False
+    >>> auth.authorise(username='james', role='creator', application='default')
+    False
+    >>> auth.authorise(username='james', role='creator', application='email')
+    True
+    
+
+    
+We can also remove applications as follows::
+
+    >>> auth.remove_application(name='email', unset_roles=True)
+    >>>
+
+The ``unset_roles`` parameter means that all related roles will be removed along with the application. If ``unset_roles`` wasn't specified an error would be raised since there are roles associated with the application. You cannot delete the default application but ``auth.add_application(name='default', unset_roles=True)`` will have the effect of removing all roles associated with the default application.
+
+We can remove users like this::
+    
+    >>> auth.remove_user(username='james')
+    
+Groups
+======
+
+Each user can be a member of 0 or more groups in addition to having multiple roles for multiple applications. You create a group like this::
+
+    >>> auth.add_group('butcher')
+    >>> auth.add_group('fishmonger')
+    
+
+The when adding users you can specify the group::
+    
+    >>> auth.add_user(username='james', password='password', group='butcher')
+    >>> auth.add_user(username='sally', password='password', group='butcher')
+    >>> auth.add_user(username='anne',  password='password', group='fishmonger')
+    
+You can obtain a list of groups using the ``groups()`` method::
+    
+    >>> auth.groups()
+    ('butcher', 'fishmonger')
+    
+You can then authorise a user based on their group::
+
+    >>> auth.group_exists('fishmonger')
+    True
+    >>> auth.authorise(username='anne', group='fishmonger')
+    True
+    >>> auth.authorise(username='james', group='butcher')
+    True
+    >>> auth.authorise(username='james', group='fishmonger')
+    False
+    
+There are also methods ``group_exists()`` and ``remove_groups()``.
+
+Disabling Accounts
+==================
+    
+Occasionally it is useful to disable a user, say for example if they haven't renewed their subscription. You don't want to completely remove their accound since you would have to add all the information if they paid the fee, you just want to disable the account.
+    
+This can be achieved by setting a user's active property. Here are some ways of setting the active property::
+    
+    >>> auth.add_user(username='vicki', group='butcher', password='password', active=1)
+    >>> auth.set_user(username='james', active=0)
+    
+The default value of the ``active`` parameter in the ``authorise()`` method is ``True``::
+    
+    >>> auth.authorise(username='vicki')
+    True
+    >>> auth.authorise(username='vicki', active=True)
+    True
+    >>> auth.authorise(username='james')
+    False
+    
+To specify that only disabled accounts should be authoried::
+
+    >>> auth.authorise(username='vicki', active=False)
+    False
+    >>> auth.authorise(username='james', active=False)
+    True
+    
+To specify that you all accounts should be authorised, active or not::
+
+    >>> auth.authorise(username='vicki', active=None)
+    True
+    >>> auth.authorise(username='james', active=None)
+    True
+
+Encryption
+==========
+    
+The password stored in the database can be encrypted for extra security. Encryption can be enabled by specifying ``encryption='md5'`` when creating the auth store object::
+
+    >>> from authkit import DatabaseAuthStore
+    >>> import database; connection=database.connect(dsn="sqlite:///test.db")
+    >>> auth = DatabaseAuthStore(
+    ...     encryption='md5', 
+    ...     cursor=connection.cursor()
+    ... )
+    ...
+    >>>
+    
+The drawback of encrypting the password is if a user forgets their password you must give them a new one since you cannot read it from the database.
+
+You cannot change the encryption type after you have added a user without resetting the user's password so whatever encryption you used when you set the password has to be used when you authenticate the user.
+
+Final Note
+==========
+
+Of course in a real application you probably want the changes you made to the ``DatabaseAuthStore`` saved so you should commit your changes with ``connection.commit()``.
