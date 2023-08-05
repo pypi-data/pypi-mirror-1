@@ -1,0 +1,168 @@
+========
+ZContact
+========
+The Online Contact Manager
+--------------------------
+
+ZContact is an online contact management application built on the
+Zope3 web application framework.  Below are instructions for managing
+ZContact on Ubuntu Linux.  With some tweaks, this might even work on
+Mac OSX and Windows.
+
+Quick Start
+===========
+
+Follow these instructions to install ZContact and create a default
+server setup.
+
+0. Install dependencies if they are not installed already (most of
+   these dependencies are from Zope 3)::
+
+     $ sudo apt-get install build-essential python-all python-all-dev
+       libc6-dev libicu-dev python-setuptools
+
+1. Install ZContact::
+
+     $ sudo easy_install-2.4 zcontact
+
+#. Create an "instance" of zcontact (including server configuration,
+   log files and database) called "MyZContactServer".  Feel free to
+   replace MyZContactServer with whatever you want, or leave it blank and
+   it will default to just "zcontact"::
+
+     $ paster make-config zcontact MyZContactServer
+
+#. Go to the newly created configuration area for your zcontact
+   instance and start the server::
+
+     $ cd MyZContactServer
+     $ paster serve deploy.ini
+
+#. ZContact will now be available at http://localhost:8080 .
+
+
+Updating Your ZContact Installation
+===================================
+
+To update your ZContact application, simply run the following command
+and restart your server.
+
+  $ sudo easy_install-2.4 -U zcontact
+
+(the -U stands for "Update").
+
+
+Running ZContact as a Daemon
+============================
+
+To run ZContact as a daemon, go to the directory where your ZContact
+instance is located and type:
+
+  $ paster serve deploy.ini --daemon
+
+The running daemon can be stopped with:
+
+  $ paster serve deploy.ini stop
+
+
+Migrating Data
+==============
+
+To migrate data from one zcontact server to another follow these
+steps:
+
+1. Make sure both zcontact instances are **not** running.
+
+#. Copy the database file you want to migrate to the new instance.
+   The database file is located in the var/ directory of the ZContact
+   instance and is called Data.fs.  You do not need to move any of the
+   Data.fs.* files.
+
+#. Restart your ZContact instance.
+
+
+Developer Installation
+======================
+
+If you want to setup ZContact as a developer (i.e. from a repository
+checkout) rather than installing it as an egg on your system, follow
+these steps:
+
+1. Grab a branch of the latest ZContact code from Launchpad::
+
+      $ bzr branch http://bazaar.launchpad.net/~pcardune/zcontact/zcontact-lp
+
+     (Note: you can also use bzr checkout instead of bzr branch if you
+     don't want to get all the revision information)
+
+#. Change to the directory where you just create the branch::
+
+      $ cd zcontact-lp
+
+#. Run make::
+
+      $ make
+
+     (Note: This will run the bootstrap.py script which sets up buildout,
+     and it will invoke buildout which downloads all the necessary eggs
+     to the eggs/ directory.  If you have a common place where you have
+     development eggs available, you should modify buildout.cfg before
+     running make.)
+
+#. Run the tests::
+
+      $ make test
+
+#. Create the configuration::
+
+      $ make install
+
+     (This adds the var and log directories along with a deploy.ini,
+     site.zcml, and zope.conf in the checkout)
+
+#. Start the server::
+
+      $ make run
+
+#. Generate test coverage reports::
+
+      $ make coverage
+
+
+NOTE: if you get errors about setuptools not being the right version,
+then you need to install the easy_install script and run::
+
+  $ sudo easy_install-2.4 -U setuptools
+
+(The -U option forces setuptools to look online for the latest
+updates)
+
+If you don't like using make, or you are not on a Linux system, then
+try the following::
+
+  $ python bootstrap.py
+  $ ./bin/buildout -vN
+
+A note to the wise:  It seems to be the consensus of the Zope
+community that one should never use the standard system python to run
+your software because you might screw it up.  And screwing up system
+pythong is not a good idea if you can avoid it.  So to really do this
+properly, you should install your own python by actually downloading
+the src, compiling it, and installing it to some place like
+/opt/mypython.  Then when you install the checkout, use::
+
+  $ /opt/mypython/bin/python bootstrap.py
+  $ ./bin/buildout -vN
+
+And that will be best.
+
+
+Getting More Information
+========================
+
+Contact me on chat.freenode.net.  My most common username is pcardune
+and I hang around #schooltool and #zope3-dev.  Otherwise, email me at
+paul_at_carduner_dot_net
+
+Please send me requests for other instructions you want to be put into
+this README file.
