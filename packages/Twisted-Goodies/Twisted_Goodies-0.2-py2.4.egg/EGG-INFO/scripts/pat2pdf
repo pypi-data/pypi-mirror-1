@@ -1,0 +1,63 @@
+#!/usr/bin/python
+# -*- mode:python; -*-
+#
+# Twisted Goodies:
+# Miscellaneous add-ons and improvements to the separately maintained and
+# licensed Twisted (TM) asynchronous framework. Permission to use the name was
+# graciously granted by Twisted Matrix Laboratories, http://twistedmatrix.com.
+#
+# Copyright (C) 2006 by Edwin A. Suominen, http://www.eepatents.com
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2 of the License, or (at your option) any later
+# version.
+# 
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the file COPYING for more details.
+# 
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to the Free Software Foundation, Inc., 51
+# Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA
+
+import os, os.path, sys
+from twisted.internet import reactor, defer
+from twisted_goodies.webfetch import patents
+
+
+class Patents(object):
+    def __init__(self):
+        destPath = os.getcwd()
+        self.fetcher = patents.PatentFetcher(destPath)
+
+    def fetchAll(self, pubNumbers):
+        dList = []
+        for pubNumber in pubNumbers:
+            validated = self.fetcher.parsePubNumber(pubNumber)
+            if validated:
+                print "Fetching US%d ->" % validated
+                if self.fetcher.filePath(validated) is None:
+                    d = self.fetcher.fetch(validated)
+                    d.addCallback(self.fetched)
+                    dList.append(d)
+        self.d = defer.DeferredList(dList)
+        self.d.addCallback(self.done)
+
+    def fetched(self, filePath):
+        print " -> %s" % os.path.basename(filePath)
+
+    def done(self, null):
+        print "%s\nAll Done" % ('-'*70,)
+        reactor.stop()
+
+
+def main():
+    patents = Patents()
+    reactor.callWhenRunning(patents.fetchAll, sys.argv[1:])
+    reactor.run()
+
+
+# The script runs here
+if __name__ == '__main__':
+    main()
