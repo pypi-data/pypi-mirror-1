@@ -1,0 +1,303 @@
+<?xml version="1.0" encoding="ascii"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+          "DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+  <title>Help</title>
+  <link rel="stylesheet" href="epydoc.css" type="text/css" />
+  <script type="text/javascript" src="epydoc.js"></script>
+</head>
+
+<body bgcolor="white" text="black" link="blue" vlink="#204080"
+      alink="#204080">
+<!-- ==================== NAVIGATION BAR ==================== -->
+<table class="navbar" border="0" width="100%" cellpadding="0"
+       bgcolor="#a0c0ff" cellspacing="0">
+  <tr valign="middle">
+  <!-- Home link -->
+      <th>&nbsp;&nbsp;&nbsp;<a
+        href="spoon-module.html">Home</a>&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Tree link -->
+      <th>&nbsp;&nbsp;&nbsp;<a
+        href="module-tree.html">Trees</a>&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Index link -->
+      <th>&nbsp;&nbsp;&nbsp;<a
+        href="identifier-index.html">Indices</a>&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Help link -->
+      <th bgcolor="#70b0f0" class="navbar-select"
+          >&nbsp;&nbsp;&nbsp;Help&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Project homepage -->
+      <th class="navbar" align="right" width="100%">
+        <table border="0" cellpadding="0" cellspacing="0">
+          <tr><th class="navbar" align="center"
+            ><a class="navbar" target="_top" href="http://www.zarrf.com/SpoonRPC">SpoonRPC</a></th>
+          </tr></table></th>
+  </tr>
+</table>
+<table width="100%" cellpadding="0" cellspacing="0">
+  <tr valign="top">
+    <td width="100%">&nbsp;</td>
+    <td>
+      <table cellpadding="0" cellspacing="0">
+        <!-- hide/show private -->
+        <tr><td align="right"><span class="options">[<a href="javascript: void(0);" class="privatelink"
+    onclick="toggle_private();">hide private</a>]</span></td></tr>
+        <tr><td align="right"><span class="options"
+            >[<a href="frames.html" target="_top">frames</a
+            >]&nbsp;|&nbsp;<a href="help.html"
+            target="_top">no&nbsp;frames</a>]</span></td></tr>
+      </table>
+    </td>
+  </tr>
+</table>
+<html>
+    <head>
+        <title>SpoonRPC HOWTO</title>
+        <link rel="stylesheet" href="spoonrpc.css" type="text/css"/>
+    </head>
+    <body>
+        <div class="headerMain">
+            <span style="vertical-align: top"><a class="crumb" href="/SpoonRPC">SpoonRPC</a> - HOWTO</span>
+            <img src="logo3.png" alt="SpoonRPC Logo"/>
+        </div>
+        <div class="sectionHeader">
+            Overview (or what are we trying to accomplish?)
+        </div>
+        <div class="textblock">
+        This document describes how SpoonRPC's messaging system works and how to use it.  First off, an overview.  A
+        message is composed of two parts, a message type which is just a string, then an arbitrary object attachment.  
+        There is of course also a source and a destination, but I'll get to that stuff later.  The message type is used
+        to identify what the message is about, and it's how functions indicate that they want to receive the messages. 
+        In most cases, a function decorator can be used to make a function receive messages.  Ex:
+        <pre>
+        @spoon.messaging.receive("foo")
+        def fooHandler(src, mtype, attach):
+            ...
+        </pre>
+        <p>
+        The above will cause the fooHandler function to be called whenever a message with the type "foo" comes in.  Any
+        number of functions can be made to receieve a message of the same type (they will all be called with every
+        message that comes in) and a single function can handle many message types.  In fact you give a list of message
+        types in the function decorator.  The function's arguments are pretty straight forward, src is the node id of
+        the source of the message, mtype is the message type (in this case "foo"), and attach is the arbitrary object
+        attachment.  There's more about how the attachment works in the section on Object Serialization.
+        </p>
+        
+        <p>
+        Now let's talk about how it all works.
+        </p>
+        
+        </div>
+        
+        <div class="sectionHeader">
+            Object serialization
+        </div>
+        <div class="textblock">
+        <p>
+        Object serialization is the foundation of this whole system, RPC and message passing aren't nearly as cool if
+        you're limitted to primative types.  SpoonRPC uses ASN.1 BER as the basis of it's object serialization (if
+        you're not familiar with it, it's also the foundation of SNMP among many other things.)  Primatives, or simple
+        types, like int/long, string/unicode, null(None) are all encodable of course.  Lists, tuples and dicts are also
+        handled without any caveats (except that for lists and tuples, regardless of the input, the output will be a
+        list.)  Object serialization is slightly more complicated.  The general approach that SpoonRPC takes is to
+        encode the "public" properties/members of an object.  This requires that the side decoding the object actually
+        has a copy of the class.  It also means that code never has to be (nor can be) encoded or decoded which squashes
+        a gigantic security problem right off the bat. Specifically though, there are two separate ways SpoonRPC will try to
+        encode an object.
+        </p>
+        <p>
+        First off is the recommended way to do this.  In the spoon package there is a class called Serial which, through
+        some python metaclass magic will setup some secret variables that tell spoon which properties or members to
+        encode.  All you have to do is inheirit this class in your class, set the properties you want to be serialized
+        and away you go. There are two types of "serialize" properties that are available, and the only difference between
+        them is how/when they get decoded.  The properties specified in the class definition
+        behave exactly like instance variables (unlike the properties usually used in class
+        definitions.)
+        </p>
+        <pre>
+        class fooClass(spoon.Serial):
+            fooProp = spoon.serialprop()
+            barProp = spoon.lazyprop("default value")
+        </pre>
+        <p>
+        In the above example, when fooClass is serialized ONLY fooProp and barProp will be
+        serialized.  Any other properties will be ignored, so when using this way of handling
+        object serialization, you must classify all of your class' properties with serialprop,
+        or lazyprop.  So what's the difference between serialprop and lazyprop?  Simply put,
+        lazyprop attributes are not decoded until they are accessed.  This basically just means
+        that lazyprops require less work at decode time, particularly if the object is going to
+        be forwarded along.  There is no special handling required from the programmer's
+        perspective to handle this, as soon as any lazyprop attribute is accessed, all of the
+        lazyprops are decoded.  This is all accomplished through python property magic.
+        </p>
+        <p>
+        The second way is to let SpoonRPC figure out the attributes to encode on its own.  The general rule is that
+        attributes whose name begins with an "_" or any attribute whose value has a __call__ method (e.g. a method,
+        function or some other executable something) will not be encoded, everything else will be.  In the next release,
+        it is likely that the class of an object being decoded will need to be in a whitelist (unless it's
+        descended from Serial) in order to prevent possible abuses.  
+        </p>
+        <p>
+        The last thing to know about object serialization is that if the object being serialized has a method called
+        "pre_serialize", it will be called (with no arguments) immediately before the object is serialized in order to
+        give it a chance to perform an necessary preparations.  Similiarly, if an object being de-serialized has a
+        "post_deserialize" method, it will be called with no arguments immediately after all of the attributes have been
+        set by the deserializer.
+        </p>
+        </div>
+        <div class="sectionHeader">
+        Routing Network
+        </div>
+        <div class="textblock">
+        <p>
+        A number of connected nodes in SpoonRPC can be considered a network.  Routing in
+        SpoonRPC behaves much like routing in normal IP networks (except that rather than
+        working with networks, SpoonRPC deals with individual nodes.)  When working with the
+        library, you really don't have to know how this works, just that it does, there is no
+        direct interaction required here.  However, here's the basic idea in case you're
+        interested.
+        </p>
+        <p>
+        Each node keeps a dictionary with an entry for all other nodes on the network.  The
+        only information it needs to know about each node is the hop count (the number of nodes
+        between the node and itself) and the transport to send the traffic to.  Routing updates 
+        are sent as dictionaries containing just the node id mapped to the hopcount to all of
+        a node's neighbors.  These updates are sent only when a nodes routing table actually
+        changes, and then only the changes are sent.  When a new connection is established,
+        each node sends it entire routing table.  A node will update it's routing table when it
+        recieves a better route (lower hopcount) to a given node, or when the node's current
+        route sends it an increased hopcount.  Furthermore, if a node receives an update from a
+        neighbor containing a less efficient route than the neighbor would have if it used the
+        node, it will send it's neighbor its own route so that it can take advantage of that. 
+        This is called the "good neighbor policy."
+        </p>
+        <p>
+        Ok, enough with the theory, what do you actually have to know to use it?  Basically
+        just that a node can be part of more than one network, without necessarily bridging
+        them together (or acting as a router between them.)  This is handled by making each
+        transport (direct connection between two nodes) be tied to a network instance.  This
+        means that all of a node's transports can have the same network instance, in which case
+        all transports will be considered to be on the same network.  Alternatively, transports
+        can have different network instances and they will be treated as separate networks.  In
+        most cases you will probably only have one network.  The class that represents these
+        networks is currently just spoon.routing.MeshNetwork, however it's possible that there
+        will be other options in the future.
+        </p>
+        <p>
+        The important thing to remember is that nodes are all uniquely identified by their
+        nodeId.   At a protocol level there is probably no reason this needs to be a number
+        (int), but frankly the nodeId should be an int.  These nodeIds must be unique, the
+        behavior of SpoonRPC if there are nodeId collisions is undefined.  Furthermore it is
+        the programmer's responsibility to set this nodeId.  To set a node's Id to 1 for
+        example:
+        <pre>
+        spoon.transports.TransportHub.nodeId = 1        
+        </pre>
+        This MUST be done on every node on the network.  Things will behave very poorly if you
+        do not do this.
+        </p>
+        </div>
+        <div class="sectionHeader">
+        Messaging
+        </div>
+        <div class="textblock">
+        <p>
+        The messaging system is very simple.  As mentioned above, messages have a message type which is an arbitrary
+        string, and some object attached.  You are free to make the object attached be anything you want that is
+        serializable, including lists, dictionaries, an actual object, an int, another string, whatever you want.  All
+        handlers defined on the receiving node for the message type will be called.  Keep in mind that this messaging
+        system is totally asynchronous and "unreliable."  Meaning that after a message is sent from a node, if it is
+        dropped or lost anywhere along the way, the sender will not be notified in any way.  Furthermore, no response
+        from the receiving node is expected, so the call to send the message will return as soon as it is sent from the
+        node.  If send is called with a destination node that is not currently reachable according to the local routing
+        table, a NodeUnreachable exception is raised.  Given that the routing is totally dynamic, this may be a
+        temporary situation due to some link state changing and making the same call again in two seconds could succeed.
+        </p>
+        <p>
+        There are currently two classes to represent the messaging system in SpoonRPC.  The first is the
+        SingletonMessaging class which is useful if you have only ONE network and therefor only one messaging system
+        running.  The receive decorator can only be used with the SingletonMessaging class (otherwise it wouldn't be
+        able to figure out which messaging instance it was referring to.)  If you need more than one messaging instance,
+        you can use the Messaging class and tie each instance to a specific network.  In this case you will need to use
+        "registerHandler" method on the messaging instance to register functions to receieve messages.  
+        </p>
+        <p>
+        Each messaging instance (or the SingleMessaging class) has a send method which will send a message to another
+        node on the network associated with that messaging instance.  It takes the parameters dst, which is the
+        destination node id, messageStr, which is the message type string, and obj which is the arbitrary attachment.
+        </p>
+        <pre>
+        spoon.messaging.SingletonMessaging.send(1, "test-message", [1,2,3, "testing"])
+        </pre>
+        <p>
+        The above sends a message to the node with nodeId 1, with the message type of "test-message".  The attachment of
+        course is a strange, contrived list, but it demonstrates that sending complex objects is not a problem. 
+        Assuming nodeId 1 had the following method and the sending nodeId was 2:
+        </p>
+        <pre>
+        @spoon.messaging.receive("test-message")
+        def testHandler(src, mtype, attach):
+            print "Got message from nodeId %d of type '%s' and attachment '%s'"%(src, mtype, attach)
+        </pre>
+        <p>
+        When above message was sent, the result would be nodeId 1 printing out "Got message from nodeId 2 of type
+        'test-message' and attachment '[1,2,3, 'testing']"  So there you have it, simple distributed messaging for
+        python.
+        </p>
+        </div>
+    </body>
+</html>
+<!-- ==================== NAVIGATION BAR ==================== -->
+<table class="navbar" border="0" width="100%" cellpadding="0"
+       bgcolor="#a0c0ff" cellspacing="0">
+  <tr valign="middle">
+  <!-- Home link -->
+      <th>&nbsp;&nbsp;&nbsp;<a
+        href="spoon-module.html">Home</a>&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Tree link -->
+      <th>&nbsp;&nbsp;&nbsp;<a
+        href="module-tree.html">Trees</a>&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Index link -->
+      <th>&nbsp;&nbsp;&nbsp;<a
+        href="identifier-index.html">Indices</a>&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Help link -->
+      <th bgcolor="#70b0f0" class="navbar-select"
+          >&nbsp;&nbsp;&nbsp;Help&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Project homepage -->
+      <th class="navbar" align="right" width="100%">
+        <table border="0" cellpadding="0" cellspacing="0">
+          <tr><th class="navbar" align="center"
+            ><a class="navbar" target="_top" href="http://www.zarrf.com/SpoonRPC">SpoonRPC</a></th>
+          </tr></table></th>
+  </tr>
+</table>
+<table border="0" cellpadding="0" cellspacing="0" width="100%%">
+  <tr>
+    <td align="left" class="footer">Generated by Epydoc
+        3.0alpha3 on Mon Nov 27 18:56:25 2006</td>
+    <td align="right" class="footer">
+      <a href="http://epydoc.sourceforge.net">http://epydoc.sourceforge.net</a>
+    </td>
+  </tr>
+</table>
+
+<script type="text/javascript">
+  <!--
+  // Private objects are initially displayed (because if
+  // javascript is turned off then we want them to be
+  // visible); but by default, we want to hide them.  So hide
+  // them unless we have a cookie that says to show them.
+  checkCookie()
+  // -->
+</script>
+  
+</body>
+</html>
