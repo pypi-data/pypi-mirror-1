@@ -1,0 +1,278 @@
+\chapter{Examples}
+
+This chapter contains a number of examples to show off some of \ZSI{}'s
+features.
+It is broken down into client-side and server-side examples, and
+explores different implementation options \ZSI{} provides.
+
+\section{Server Side Examples}
+\subsection{Simple example}
+Using the \module{ZSI.cgi} module, it is simple to expose Python
+functions as web services.
+Each function is invoked with all the input parameters specified in the
+client's SOAP request.
+Any value returned by the function will be serialized back to the client;
+multiple values can be returned by returning a tuple.
+
+The following code shows some simple services:
+
+\begin{verbatim}
+def hello():
+    return "Hello, world"
+
+def echo(*args):
+    return args
+
+def average(*args):
+    sum = 0
+    for i in args: sum += i
+    return sum / len(args)
+
+from ZSI import dispatch
+dispatch.AsCGI()
+\end{verbatim}
+
+Each function defines a SOAP request, so if this script is installed
+as a CGI script, a SOAP message can be posted to that script's URL with any of
+\code{hello}, \code{echo}, or \code{average} as the request element,
+and the value returned by the function will be sent back.
+
+The \ZSI{} CGI dispatcher catches exceptions and sends back a SOAP fault.
+For example, a fault will be sent if the  \code{hello} function is given any
+arguments, or if the \code{average} function is given a non-integer.
+
+\subsection{More complex example}
+
+We will now show a more complete example of a robust web service.
+It takes as input a player name and array of integers, and returns
+the average.
+It is presented in sections, following the steps detailed above.
+
+The first section reads in a request, and parses the SOAP header.
+
+\begin{verbatim}
+from ZSI import *
+import sys
+IN, OUT = sys.stdin, sys.stdout
+
+try:
+    ps = ParsedSoap(IN)
+except ParseException, e:
+    FaultFromZSIException(e).AsSOAP(OUT)
+    sys.exit(1)
+except Exception, e:
+    # Faulted while processing; we assume it's in the header.
+    FaultFromException(e, 1).AsSOAP(OUT)
+    sys.exit(1)
+
+# We are not prepared to handle any actors or mustUnderstand elements,
+# so we'll arbitrarily fault back with the first one we found.
+a = ps.WhatActorsArePresent()
+if len(a):
+    FaultFromActor(a[0]).AsSOAP(OUT)
+    sys.exit(1)
+mu = ps.WhatMustIUnderstand()
+if len(mu):
+    uri, localname = mu[0]
+    FaultFromNotUnderstood(uri, localname).AsSOAP(OUT)
+    sys.exit(1)
+\end{verbatim}
+
+This section defines the mappings between Python objects and the SOAP
+data being transmitted.
+Recall that according to the SOAP specification, RPC input and output
+are modeled as a structure.
+
+\begin{verbatim}
+class Player:
+    def __init__(self, name):
+        pass
+Player.typecode = TC.Struct(Player, [
+                                TC.String('Name'),
+                                TC.Array('Integer', TC.Integer(), 'Scores'),
+                                ], 'GetAverage')
+class Average:
+    def __init__(self, average):
+        self.average = average
+Average.typecode = TC.Struct(Average, [
+                                TC.Integer('average'),
+                                ], 'GetAverageResponse')
+\end{verbatim}
+
+This section parses the input, performs the application-level
+activity, and serializes the response.
+\begin{verbatim}
+try:
+    player = ps.Parse(Player.typecode)
+except EvaluateException, e:
+    FaultFromZSIException(e).AsSOAP(OUT)
+    sys.exit(1)
+
+try:
+    total = 0
+    for value in player.Scores: total = total + value
+    result = Average(total / len(player.Scores))
+    sw = SoapWriter(OUT)
+    sw.serialize(result, Average.typecode)
+    sw.close()
+except Exception, e:
+    FaultFromException(e, 0, sys.exc_info()[2]).AsSOAP(OUT)
+    sys.exit(1)
+\end{verbatim}
+
+In the \method{serialize()} call above, the second parameter is optional,
+since \code{result} is an instance of the 
+\class{Average} class, and the \code{Average.typecode} attribute is
+the typecode for class instances.
+In addition, since the \class{SoapWriter} destructor will call \method{close()}
+if necessary, sending a SOAP response can often be written like
+this one-liner:
+\begin{verbatim}
+SoapWriter(OUT).serialize(result)
+\end{verbatim}
+
+
+\subsection{A mod_python example}
+
+The Apache module \code{mod_python} (see
+\url{http://www.modpython.org}) embeds Python within the Apache server.
+In order to expose operations within a module via mod_python, use the 
+\method{dispatch.AsHandler()} function.  The \method{dispatch.AsHandler()}
+function will dispatch requests to any operation defined in the module you
+pass it, which allows for multiple operations to be defined in a module.
+The only trick is to use __import__ to load the XML encodings your service 
+expects.  This is a required workaround to avoid the pitfalls of restricted
+execution with respect to XML parsing.
+
+The following is a complete example of a simple handler.  The soap operations
+are implemented in the MyHandler module:
+
+\begin{verbatim}
+def hello():
+    return "Hello, world"
+
+def echo(*args):
+    return args
+
+def average(*args):
+    sum = 0
+    for i in args: sum += i
+    return sum / len(args)
+\end{verbatim}
+
+Dispatching from within mod_python is achieved by passing the aforementined
+MyHandler module to \code{dispatch.AsHandler()}.  The following code exposes
+the operations defined in MyHandler via SOAP:
+
+\begin{verbatim}
+from ZSI import dispatch
+from mod_python import apache
+
+import MyHandler
+mod = __import__('encodings.utf_8', globals(), locals(), '*')
+mod = __import__('encodings.utf_16_be', globals(), locals(), '*')
+
+def handler(req):
+    dispatch.AsHandler(modules=(MyHandler,), request=req)
+    return apache.OK
+\end{verbatim}
+
+
+\section{Client Side Examples}
+
+\subsection{Simple Example}
+\ZSI{} provides two ways for a client to interactive with a server:
+the \class{Binding} class and the \class{ServiceProxy} class.
+The first is useful when the operations to be invoked are not defined
+in WSDL or when only simple Python datatypes are used; the \class{ServiceProxy}
+class can be used to parse WSDL definitions in order
+to determine how to serialize and parse the SOAP messages.
+
+During development, it is often useful to record ``packet traces'' of
+the SOAP messages being exchanged.
+Both the \class{Binding} and \class{ServiceProxy} classes provide a
+\code{tracefile} parameter to specify an output stream (such as a file)
+to capture messages.
+It can be particularly useful when debugging unexpected SOAP faults.
+
+The first example provided below demonstrates how to use the \class{Binding}
+class to connect to a remote service and perform an operation.  It assumes
+that the simple server-side example shown above is installed on the webserver 
+running on the local host, and if the URL is \code{/cgi-bin/simple-test}:
+
+\begin{verbatim}
+from ZSI.client import Binding
+fp = open('debug.out', 'a')
+b = Binding(url='/cgi-bin/simple-test', tracefile=fp)
+fp.close()
+a = b.average(range(1,11))
+assert a == 5
+print b.hello()
+\end{verbatim}
+
+\subsection{Complex Example}
+If the operation invoked returns a ComplexType, typecode information must
+be provided in order to tell \ZSI{} how to deserialize the response.
+Here is a sample server-side implementation:
+
+\begin{verbatim}
+# Complex type definition
+class Person:
+  def __init__(self, name=None, age=0):
+    self.name = name
+    self.age = age
+
+Person.typecode = TC.Struct(Person,
+			    [TC.String('name'),
+			     TC.InonNegativeInteger('age')],
+			    'myApp:Person')
+
+# my web service that returns a complex structure
+def getPerson(name):
+  fp = open('%s.person.pickle', % name, 'r')
+  return pickle.load(fp)
+
+# my web service that accepts a complex structure
+def savePerson(person):
+  fp = open('%s.person.pickle' % person.name, 'w')
+  pickle(person, fp)
+  fp.close()
+\end{verbatim}
+
+In order for \ZSI{} to transparently deserialize the returned complex type into
+a \class{Person} instance, a module defining the class and its typecode must
+be appended to the \var{ZSI.Path} list.
+It is also possible to explicitly tell \ZSI{} what class and typecode to
+use by passing the class as a parameter to the
+\method{Binding.Receive()} method.
+The first method is often preferred, particularly for publically-distributed
+libraries.
+
+The following fragment shows both styles:
+
+\begin{verbatim}
+from ZSI.client import Binding
+from ZSI import Path
+
+# Explicitly stating what to get back.
+from MyComplexTypes import Person
+a = apply(b.getPerson, 'christopher')
+person = b.Receive(Person)
+
+# Transparent deserialization
+import MyComplexTypes
+b = Binding(url='/cgi-bin/complex-test', typesmodule=MyComplexTypes)
+person = b.getPerson('christopher')
+\end{verbatim}
+
+Because the returned complex type is defined in a class registered in 
+\var{ZSI.Path}, transparent deserialization is possible.  When sending
+complex types to the server, it is not necessary to list the module
+in \var{ZSI.Path}:
+
+\begin{verbatim}
+from ZSI.client import Binding
+b = Binding(url='/cgi-bin/complex-test')
+person = Person('christopher', 26)
+b.savePerson(person)
+\end{verbatim}
