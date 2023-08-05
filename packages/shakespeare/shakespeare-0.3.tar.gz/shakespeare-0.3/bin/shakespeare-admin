@@ -1,0 +1,215 @@
+#!/usr/bin/env python
+
+import cmd
+import StringIO
+
+import shakespeare.index
+
+class ShakespeareAdmin(cmd.Cmd):
+    """
+    TODO: self.verbose option and associated self._print
+    """
+
+    prompt = 'The Bard > '
+
+    def __init__(self):
+        cmd.Cmd.__init__(self) # cmd.Cmd is not a new style class
+        self._index = shakespeare.index.all
+
+    def run_interactive(self, line=None):
+        """Run an interactive session.
+        """
+        print 'Welcome to shakespeare-admin interactive mode\n'
+        self.do_about()
+        print 'Type:  "?" or "help" for help on commands.\n'
+        while 1:
+            try:
+                self.cmdloop()
+                break
+            except KeyboardInterrupt:
+                raise
+
+    def do_help(self, line=None):
+        cmd.Cmd.do_help(self, line)
+
+    def do_about(self, line=None):
+        import shakespeare
+        version = shakespeare.__version__
+        about = \
+'''Open Shakespeare version %s. Copyright the Open Knowledge Foundation.
+Open Shakespeare is open-knowledge and open-source. See COPYING for details.
+''' % version
+        print about
+
+    def do_quit(self, line=None):
+        sys.exit()
+
+    def do_EOF(self, *args):
+        print ''
+        sys.exit()
+
+    def _filter_index(self, line):
+        """Filter items in index return only those whose id (url) is in line
+        If line is empty or None return all items
+        """
+        if line:
+            textsToAdd = []
+            textNames = line.split()
+            for item in self._index:
+                if item.name in textNames:
+                    textsToAdd.append(item)
+            return textsToAdd
+        else:
+            return self._index
+    
+    # =================
+    # Commands
+
+    def do_db(self, line=None):
+        actions = [ 'create', 'clean', 'rebuild' ]
+        if line is None or line not in actions:
+            self.help_db()
+            return 1
+        import shakespeare.dm
+        shakespeare.dm.__dict__[line+'db']()
+
+    def help_db(self, line=None):
+        usage = \
+'''db <action>
+
+Where action is one of create, clean, rebuild.'''
+        print usage
+    
+    def do_gutenberg(self, line=None):
+        import shakespeare.gutenberg
+        helper = shakespeare.gutenberg.Helper(verbose=True)
+        if not line:
+            helper.execute()
+        elif line == 'print_index':
+            import pprint
+            pprint.pprint(helper.get_index())
+        else:
+            msg = 'Unknown argument %s' % line
+            raise Exception(msg)
+
+    def help_gutenberg(self, line=None):
+        usage = \
+"""
+Download and process all Project Gutenberg shakespeare texts"""
+        print usage 
+
+    def do_moby(self, line=None):
+        import shakespeare.moby
+        helper = shakespeare.moby.Helper(verbose=True)
+        if not line:
+            helper.execute()
+        elif line == 'print_index':
+            import pprint
+            pprint.pprint(helper.get_index())
+        else:
+            msg = 'Unknown argument %s' % line
+            raise Exception(msg)
+
+    def help_moby(self, line=None):
+        usage = \
+'''
+Download and process all Moby/Bosak shakespeare texts'''
+        print usage 
+
+    
+    def do_print_index(self, line):
+        header = \
+'''          +-------------------+
+          | Index of Material |
+          +-------------------+
+
+'''
+        print header
+        for row in self._index:
+            print row.name.ljust(35), row.title
+
+    def help_print_index(self, line=None):
+        usage = \
+'''Print index of Shakespeare texts to stdout'''
+        print usage
+
+    def do_make_concordance(self, line=None):
+        print 'Making concordance (this may take some time ...):'
+        from shakespeare.concordance import ConcordanceBuilder
+        import time
+        start = end = 0
+        start = time.time()
+        cc = ConcordanceBuilder()
+        textsToAdd = []
+        if line is not None:
+            textsToAdd = self._filter_index(line)
+        else:
+            def gut_non_folio(material):
+                return '_gut' in material.name and 'gut_f' not in material.name
+            textsToAdd = filter(gut_non_folio, self._index) 
+        for item in textsToAdd:
+            print 'Adding: %s (%s)' % (item.name, item.title)
+            cc.add_text(item.name)
+        end = time.time()
+        timetaken = end - start
+        print 'Finished. Time taken was %ss' % timetaken
+
+    def help_make_concordance(self, line=None):
+        usage = \
+'''Create a concordance
+
+If no arguments supplied then use all non-folio gutenberg shakespeare texts.
+Otherwise arguments should be a space seperated list of work name ids
+'''
+        print usage
+
+    def do_init(self, line=None):
+        self.do_gutenberg(line)
+        self.do_moby(line)
+        self.do_make_concordance(line)
+
+    def help_init(self, line=None):
+        usage = \
+'''Convenience function that sets everything up by running:
+    1. gutenberg
+    2. moby
+    3. make_concordance'''
+        print usage
+
+    def do_runserver(self, line=None):
+        import shakespeare.cherrypy_handler
+        import cherrypy
+        cherrypy.root = shakespeare.cherrypy_handler.ShakespeareWebInterface()
+        configDict = {
+                'server.socketPort' : 8080,
+                'server.threadPool' : 10,
+                'server.showTracebacks' : True,
+                '/scripts' : { 'staticFilter.on' : True,
+                              'staticFilter.dir': '/scripts'
+                              },
+                '/styles' : { 'staticFilter.on' : True,
+                             'staticFilter.dir': '/styles'
+                              },
+                }
+        cherrypy.config.update(configDict)
+        cherrypy.server.start()
+
+    def help_runserver(self, line=None):
+        usage = \
+'''Start a cherrypy webserver to provide the user interface to the shakespeare
+package.
+
+The resulting website should be availabe at http://localhost:8080
+'''
+        print usage
+
+
+if __name__ == '__main__':
+    import sys
+    adminCmd = ShakespeareAdmin()
+    if len(sys.argv) < 2:
+        adminCmd.run_interactive()
+    else:
+        args = ' '.join(sys.argv[1:])
+        args = args.replace('-','_')
+        adminCmd.onecmd(args)
