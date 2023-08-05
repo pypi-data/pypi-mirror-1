@@ -1,0 +1,5 @@
+tinyMCE.addI18n('zh.paste_dlg',{
+text_title:" \u4F7F\u7528\u9375\u76E4 CTRL+V \u4EE5\u8CBC\u4E0A\u5167\u5BB9\u81F3\u7A97\u53E3 .",
+text_linebreaks:" \u4FDD\u6301\u5206\u884C\u7B26\u865F ",
+word_title:" \u4F7F\u7528\u9375\u76E4 CTRL+V \u4EE5\u8CBC\u4E0A\u5167\u5BB9\u81F3\u7A97\u53E3 ."
+});

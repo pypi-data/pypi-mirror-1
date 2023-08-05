@@ -1,0 +1,49 @@
+import os
+from setuptools import setup, find_packages
+
+def read(*rnames):
+    return open(os.path.join(os.path.dirname(__file__), *rnames)).read()
+
+setup(name='zw.widget',
+
+      # Fill in project info below
+      version='0.0.3',
+      description="Additional widgets for z3c.form",
+      long_description=(
+        read('README.txt') + \
+            read('src/zw/widget/tiny/README.txt') ),
+      keywords='zope3',
+      author='Gregor Giesen',
+      author_email='giesen@zaehlwerk.net',
+      url='http://bzr.zaehlwerk.net/zw.widget',
+      license='GPLv3',
+      # Get more from http://www.python.org/pypi?%3Aaction=list_classifiers
+      classifiers=['Development Status :: 3 - Alpha',
+                   'Programming Language :: Python',
+                   'Environment :: Web Environment',
+                   'Topic :: Internet :: WWW/HTTP :: WSGI :: Application',
+                   'Framework :: Zope3',
+                   'Intended Audience :: Developers',
+                   'License :: OSI Approved :: GNU General Public License (GPL)',
+                   ],
+
+      packages=find_packages('src'),
+      package_dir = {'': 'src'},
+      include_package_data=True,
+      zip_safe=False,
+      extras_require = dict(
+        test = [ 'zope.testing',
+                 'zope.app.testing',
+                 'zope.app.zcmlfiles',
+                 'zope.testbrowser',
+                 'zc.resourcelibrary',
+                ], ),
+      install_requires = ['setuptools',
+                          'zope.i18nmessageid',
+                          'zope.interface',
+                          'zope.schema',
+                          'z3c.form',
+                          'zw.schema',
+                          'zc.resourcelibrary',
+                          ],
+      )
