@@ -1,0 +1,199 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>LoginRedirect and Login Modules</title>
+  <meta name="generator"
+ content="amaya 8.1a, see http://www.w3.org/Amaya/" />
+  <link href="styles.css" rel="stylesheet" type="text/css" />
+</head>
+<body>
+<h1>LoginRedirect and Login Modules</h1>
+<p>The <code>LoginRedirect</code> and <code>Login</code> modules
+provide a
+"single sign-on" environment for WebStack applications. Unlike the
+authenticator-only approach, each application or part of an application
+utilising this mechanism must be wrapped inside a
+<code>LoginRedirectResource</code> object which determines whether a
+given
+transaction contains information identifying the application's user.</p>
+<h2>How the Modules Work</h2>
+<p>When a request arrives in the application, the following things
+happen:</p>
+<ol>
+  <li>The <code>LoginRedirectResource</code> examines the transaction
+and attempts to find out whether it identifies a user.</li>
+  <li>Should sufficient information be present in the transaction, the
+user is allowed to access the application and is identified in the
+normal way (ie. the <code>get_user</code> method on the transaction
+object).</li>
+  <li>Otherwise, a redirect occurs to a login screen provided by a <code>LoginResource</code>
+object which then presents a login form to be completed by the user.</li>
+  <li>The <code>LoginResource</code> object then receives the
+completed form information and verifies the identity of the user,
+testing the supplied credentials against the credentials database
+specified in the deployment of the resource.</li>
+  <li>Upon successful authentication, the user is redirected back to
+the application, guarded by <code>LoginRedirectResource</code> which
+should let the user gain access.</li>
+</ol>
+<h2>Introducing LoginRedirectResource</h2>
+<p>The easiest way of introducing <code>LoginRedirectResource</code>
+objects
+is to do so in the adapter code, as described in <a
+ href="writing-adapters.html">"Writing Adapters"</a>. The most
+significant
+difference between deploying normal resources and
+<code>LoginRedirectResource</code> objects is the special way in which
+such
+objects are initialised and that they themselves contain the actual
+resources
+of the application which provide the real functionality.</p>
+<p>Here is what the deployment of <code>LoginRedirectResource</code>
+objects
+often looks like:</p>
+<pre>from WebStack.Resources.LoginRedirect import LoginRedirectResource, LoginRedirectAuthenticator<br /><br />deploy(<br />    LoginRedirectResource(<br />        login_url="http://localhost:8081",<br />        app_url="http://localhost:8080",<br />        resource=[some resource object which provides the real application behaviour],<br />        authenticator=LoginRedirectAuthenticator(secret_key="horses"),<br />        anonymous_parameter_name="anonymous",<br />        logout_parameter_name="logout"<br />    )<br />)</pre>
+<p>Certain parts of the resource are configurable, according to which
+other
+services may exist in or alongside the deployed application.</p>
+<div class="WebStack">
+<h3>WebStack API - LoginRedirectResource Initialisation</h3>
+<p>The following parameters must be provided when initialising a
+<code>LoginRedirectResource</code> object:</p>
+<dl>
+  <dt><code>login_url</code></dt>
+  <dd>This specifies the location of the separate login application or
+resource which presents a login screen to unidentified users and logs
+them in.</dd>
+  <dt><code>app_url</code></dt>
+  <dd>This specifies the location of the application itself - it must
+therefore be updated according to where the application is eventually
+deployed.</dd>
+  <dt><code>resource</code></dt>
+  <dd>This provides the resource object which contains the application
+code, or at least the entry point into various parts of the application
+code.</dd>
+  <dt><code>authenticator</code></dt>
+  <dd>This provides the authenticator object which decides whether a
+user is recognised or not. The special <code>LoginRedirectAuthenticator</code>
+is recommended and must itself be configured using a <code>secret_key</code>
+parameter which is used to protect user-related information exchanged
+over the network - the value provided for <code>secret_key</code> must
+be unguessable and kept secret from unauthorised individuals.</dd>
+  <dt><code>anonymous_parameter_name</code></dt>
+  <dd>An optional parameter providing the name of a request parameter
+(see <a href="parameters.html">"Request Parameters and Uploads"</a>)
+which, if specified, permits a user to access an application without
+being formally identified. If omitted, all users will be required to
+identify themselves explicitly.</dd>
+  <dt><code>anonymous_username</code></dt>
+  <dd>An optional parameter providing the name given to anonymous users
+which is returned when a transaction's <code>get_user</code> method is
+called. By default, <code>anonymous</code> is used for such users.</dd>
+  <dt><code>logout_parameter_name</code></dt>
+  <dd>An optional parameter providing the name of a request parameter
+which, if specified, permits a user to log out of an application. If
+omitted, no means of logging out will be available, although deleting
+browser cookies will probably have the desired effect.</dd>
+  <dt><code>logout_url</code></dt>
+  <dd>An optional parameter which indicates the location of the
+resource visited when a user logs out. By default, the location is a
+path to the root resource in the server environment of the application.</dd>
+  <dt><code>use_logout_redirect</code></dt>
+  <dd>An optional parameter which determines whether users logging out
+of an application will be redirected to the <code>logout_url</code> or
+not. By default, users are redirected, but if a false value is given
+for this parameter, a simple page is presented to the user informing
+them of the situation - it is recommended that a subclass of <code>LoginRedirectResource</code>
+be employed should more informative pages be required.</dd>
+</dl>
+</div>
+<h3>Redirection from/to the Application</h3>
+<p>Some server/framework environments do not permit automatic
+redirection
+back to the application, notably Apache/mod_python. In such cases, a
+success
+screen is presented to the user with a link to the application they
+were
+attempting to access.</p>
+<h3>The Role of Authenticators</h3>
+<p>In this mechanism, authenticators are employed, but only to verify
+the
+credentials of users when <code>LoginResource</code> or
+<code>LoginRedirectResource</code> objects are accessed. Although it
+should
+be possible to reuse <a href="authenticators.html">application-wide
+authenticator</a> classes in conjunction with <code>LoginResource</code>,
+such classes will not provide the additional functionality required to
+support the "single sign-on" aspects of this mechanism - mixing in such
+classes with <code>LoginAuthenticator</code> may provide a solution to
+this
+issue, however.</p>
+<h2>Deploying a Login Application</h2>
+<p>In order for this authentication mechanism to function in its
+entirety, a
+login application (or resource) must be available to authenticate
+unidentified users. It may already be the case that such an application
+has
+been deployed and is available at a certain URL - if so, it should be
+sufficient for a <code>LoginRedirectResource</code> object to be
+configured
+as described above, making sure that the <code>login_url</code>
+actually
+refers to the location of the existing login application, and that the
+<code>authenticator</code> object's <code>secret_key</code> is
+consistent
+with the way the existing login application has been set up.</p>
+<p>However, if no existing login application (or resource) exists, one
+may be
+deployed using adapter code similar to the following:</p>
+<pre>from WebStack.Adapters.BaseHTTPRequestHandler import deploy<br />from WebStack.Resources.Login import LoginResource, LoginAuthenticator<br /><br />deploy(<br />    LoginResource(                   # This is the login application's main resource.<br />        LoginAuthenticator(          # This provides authentication support.<br />            secret_key="horses",<br />            credentials=(<br />                ("badger", "abc"),<br />                ("vole", "xyz"),<br />            )<br />        )<br />    ),<br />    address=("", 8081)<br />)</pre>
+<p>The above code merely starts a login application in the
+BaseHTTPRequestHandler environment at a specific address (which
+corresponds
+to that specified in the <code>login_url</code> of the
+<code>LoginRedirectResource</code> used above) and provides a
+<code>LoginAuthenticator</code> object configured to use a
+<code>secret_key</code> (which corresponds to the <code>secret_key</code>
+used in the <code>authenticator</code> of the
+<code>LoginRedirectResource</code> above) and some user credentials.
+The user
+credentials define which users are to be recognised for applications
+which
+employ this login application, along with the password details of each
+user.</p>
+<div class="WebStack">
+<h3>WebStack API - LoginAuthenticator Credentials</h3>
+<p>When initialising a <code>LoginAuthenticator</code> object with
+credentials, the supplied credentials object must support tests on its
+contents of the following form:</p>
+<pre>(username, password) in credentials</pre>
+<p>In other words, the credentials object must either be a sequence of
+username and password tuples, or it must implement the
+<code>__contains__</code> method and accept such tuples as arguments to
+that
+method.</p>
+</div>
+<h2>Anonymous Access</h2>
+<p>With the <code>LoginRedirect</code> and <code>Login</code>
+modules, it is
+possible to declare a particular request parameter (see
+<code>anonymous_parameter_name</code> above) which must be present in
+the URL
+used to access a particular application for the client to be given
+anonymous
+access. Consequently, anonymous users are then identified specially
+with a
+special username that can also be configured (see
+<code>anonymous_username</code> above).</p>
+<h2>Logout Functions</h2>
+<p>With the <code>LoginRedirect</code> and <code>Login</code>
+modules, it is
+possible to declare a particular request parameter (see
+<code>logout_parameter_name</code> above) which must be present in the
+URL
+used to access a particular application for the client to be logged
+out. A
+special logout confirmation URL may also be configured (see
+<code>logout_url</code> and <code>use_logout_redirect</code> above).</p>
+</body>
+</html>
