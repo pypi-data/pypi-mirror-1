@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils 0.4: http://docutils.sourceforge.net/" />
+<title>Using custom Element classes in lxml</title>
+<link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+<body>
+<div class="document" id="using-custom-element-classes-in-lxml">
+<h1 class="title">Using custom Element classes in lxml</h1>
+<p>lxml has very sophisticated support for custom Element classes.  You can
+provide your own classes for Elements and have lxml use them by default or
+only for a specific tag name in a specific namespace.</p>
+<p>Custom Elements must inherit from the <tt class="docutils literal"><span class="pre">lxml.etree.ElementBase</span></tt> class, which
+provides the Element interface for subclasses:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; from lxml import etree
+&gt;&gt;&gt; class HonkElement(etree.ElementBase):
+...    def honking(self):
+...       return self.get('honking') == 'true'
+...    honking = property(honking)
+</pre>
+<p>This defines a new Element class <tt class="docutils literal"><span class="pre">HonkElement</span></tt> with a property <tt class="docutils literal"><span class="pre">honking</span></tt>.</p>
+<p>Note that you cannot (or rather <em>must not</em>) instantiate this class yourself.
+lxml.etree will do that for you through its normal ElementTree API.</p>
+<div class="section">
+<h1><a id="changing-the-default-element-class" name="changing-the-default-element-class">Changing the default element class</a></h1>
+<p>You can let lxml use your new class for every Element it generates:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; etree.setDefaultElementClass(HonkElement)
+&gt;&gt;&gt; el = etree.Element(&quot;myelement&quot;)
+&gt;&gt;&gt; print isinstance(el, HonkElement)
+True
+&gt;&gt;&gt; el.honking
+False
+&gt;&gt;&gt; el = etree.Element(&quot;myelement&quot;, honking='true')
+&gt;&gt;&gt; print etree.tostring(el)
+&lt;myelement honking=&quot;true&quot;/&gt;
+&gt;&gt;&gt; el.honking
+True
+</pre>
+<p>To reset lxml.etree to the original element class, pass <tt class="docutils literal"><span class="pre">None</span></tt> or nothing:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; etree.setDefaultElementClass()
+&gt;&gt;&gt; el = etree.Element(&quot;myelement&quot;)
+&gt;&gt;&gt; print isinstance(el, HonkElement)
+False
+</pre>
+</div>
+<div class="section">
+<h1><a id="implementing-namespaces" name="implementing-namespaces">Implementing namespaces</a></h1>
+<p>lxml allows you to implement namespaces, in a rather literal sense.  You can
+build a new element namespace (or retrieve an existing one) by calling the
+Namespace class:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; namespace = etree.Namespace('http://hui.de/honk')
+</pre>
+<p>and then register the new element type with that namespace, say, under the tag
+name <tt class="docutils literal"><span class="pre">honk</span></tt>:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; namespace['honk'] = HonkElement
+</pre>
+<p>After this, you create and use your XML elements through the normal API of
+lxml:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; xml = '&lt;honk xmlns=&quot;http://hui.de/honk&quot; honking=&quot;true&quot;/&gt;'
+&gt;&gt;&gt; honk_element = etree.XML(xml)
+&gt;&gt;&gt; print honk_element.honking
+True
+</pre>
+<p>The same works when creating elements by hand:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; honk_element = etree.Element('{http://hui.de/honk}honk',
+...                              honking='true')
+&gt;&gt;&gt; print honk_element.honking
+True
+</pre>
+<p>Essentially, what this allows you to do, is to give elements a custom API
+based on their namespace and tag name.</p>
+<p>A somewhat related topic are <a class="reference" href="extensions.html">extension functions</a> which use a similar
+mechanism for registering extension functions in XPath and XSLT.</p>
+</div>
+<div class="section">
+<h1><a id="element-initialization" name="element-initialization">Element initialization</a></h1>
+<p>There is one thing to remember.  Element classes <em>must not</em> have a
+constructor, neither must there be any internal state (except for the data
+stored in the underlying XML tree).  Element instances are created and garbage
+collected at need, so there is no way to predict when and how often a
+constructor would be called.  Even worse, when the <tt class="docutils literal"><span class="pre">__init__</span></tt> method is
+called, the object may not even be initialized yet to represent the XML tag,
+so there is not much use in providing an <tt class="docutils literal"><span class="pre">__init__</span></tt> method in subclasses.</p>
+<p>However, there is one possible way to do things on element initialization, if
+you really need to.  ElementBase classes have an <tt class="docutils literal"><span class="pre">_init()</span></tt> method that can
+be overridden.  It can be used to modify the XML tree, e.g. to construct
+special children or verify and update attributes.</p>
+<p>The semantics of <tt class="docutils literal"><span class="pre">_init()</span></tt> are as follows:</p>
+<ul class="simple">
+<li>It is called at least once on element instantiation time.  That is, when a
+Python representation of the element is created by lxml.  At that time, the
+element object is completely initialized to represent a specific XML element
+within the tree.</li>
+<li>The method has complete access to the XML tree.  Modifications can be done
+in exactly the same way as anywhere else in the program.</li>
+<li>Python representations of elements may be created multiple times during the
+lifetime of an XML element in the underlying tree.  The <tt class="docutils literal"><span class="pre">_init()</span></tt> code
+provided by subclasses must take special care by itself that multiple
+executions either are harmless or that they are prevented by some kind of
+flag in the XML tree.  The latter can be achieved by modifying an attribute
+value or by removing or adding a specific child node and then verifying this
+before running through the init process.</li>
+<li>Any exceptions raised in <tt class="docutils literal"><span class="pre">_init()</span></tt> will be propagated throught the API
+call that lead to the creation of the Element.  So be careful with the code
+you write here as its exceptions may turn up in various unexpected places.</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="default-implementations" name="default-implementations">Default implementations</a></h1>
+<p>In the Namespace example above, we associated the HonkElement class only with
+the 'honk' element.  If an XML tree contains different elements in the same
+namespace, they do not pick up the same implementation:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; xml = '&lt;honk xmlns=&quot;http://hui.de/honk&quot; honking=&quot;true&quot;&gt;&lt;bla/&gt;&lt;/honk&gt;'
+&gt;&gt;&gt; honk_element = etree.XML(xml)
+&gt;&gt;&gt; print honk_element.honking
+True
+&gt;&gt;&gt; print honk_element[0].honking
+Traceback (most recent call last):
+...
+AttributeError: 'etree._Element' object has no attribute 'honking'
+</pre>
+<p>You can therefore provide one implementation per element name in each
+namespace and have lxml select the right one on the fly.  If you want one
+element implementation per namespace (ignoring the element name) or prefer
+having a common class for most elements except a few, you can specify a
+default implementation for an entire namespace by registering that class with
+the empty element name (None).</p>
+<p>You may consider following an object oriented approach here.  If you build a
+class hierarchy of element classes, you can also implement a base class for a
+namespace that is used if no specific element class is provided.  Again, you
+can just pass None as an element name:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; class HonkNSElement(etree.ElementBase):
+...    def honk(self):
+...       return &quot;HONK&quot;
+&gt;&gt;&gt; namespace[None] = HonkNSElement
+
+&gt;&gt;&gt; class HonkElement(HonkNSElement):
+...    def honking(self):
+...       return self.get('honking') == 'true'
+...    honking = property(honking)
+&gt;&gt;&gt; namespace['honk'] = HonkElement
+</pre>
+<p>Now you can rely on lxml to always return objects of type HonkNSElement or its
+subclasses for elements of this namespace:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; xml = '&lt;honk xmlns=&quot;http://hui.de/honk&quot; honking=&quot;true&quot;&gt;&lt;bla/&gt;&lt;/honk&gt;'
+&gt;&gt;&gt; honk_element = etree.XML(xml)
+
+&gt;&gt;&gt; print type(honk_element), type(honk_element[0])
+&lt;class 'HonkElement'&gt; &lt;class 'HonkNSElement'&gt;
+
+&gt;&gt;&gt; print honk_element.honking
+True
+&gt;&gt;&gt; print honk_element.honk()
+HONK
+&gt;&gt;&gt; print honk_element[0].honk()
+HONK
+&gt;&gt;&gt; print honk_element[0].honking
+Traceback (most recent call last):
+...
+AttributeError: 'HonkNSElement' object has no attribute 'honking'
+</pre>
+<p>Note that you can also combine this with the global default class.  Namespace
+specific classes will simply override the less specific default.</p>
+</div>
+</div>
+</body>
+</html>
