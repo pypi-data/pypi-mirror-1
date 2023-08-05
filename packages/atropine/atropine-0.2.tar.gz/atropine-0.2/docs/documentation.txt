@@ -1,0 +1,277 @@
++------------------------+
+| Atropine Documentation |
++------------------------+
+written on 2005-10-20 by Moe Aboulkheir (moe@divmod.com)
+
+please note, using this library is not as complicated as it sounds, it consists
+of only 275 lines of python, which is several orders of magnitude shorter than 
+this documentation.
+
++-------+
+| Ideas |
++-------+
+
+        * It is better to get no data than to get the wrong data
+        * The key to screen-scraping the right data is to make a painful amount of
+          assertions about document structure
+
+
++----------+
+| Examples |
++----------+
+
+        here is a simple example session:
+
+        =============================================================================
+        from atropine import go, check, special
+        from atropine.atropine import Atropine
+        import re
+
+        atropine = Atropine('''
+        <!-- snip -->
+        <table id="earningsTable">
+        <tbody>
+                <tr>
+                <td class="headerTableCell">
+                Quarterly Earnings
+                </td>
+                <td class="dataTableCell">
+                <span class="unhelpfulClassName">GBP</span>
+                <span class="unhelpfulClassName">123.45</span>
+                </td>
+                </tr>
+        </tbody>
+        </table>''', ignorewhitespace=True)
+
+        qearningsregex = re.compile(r'quarterly earnings', re.IGNORECASE)
+        atropine = atropine.resolve(go.only(tag='table', attrs=dict(id='earningsTable')),
+                                    go.child(0), check.has(tag='tbody'),
+                                    go.child(0), check.has(tag='tr'),
+                                    go.child(0), check.has(tag='td',
+                                                           cls='headerTableCell',
+                                                           onlytext=qearningsregex),
+
+                                    go.nextsib,  check.has(tag='td', cls='dataTableCell'),
+
+                                    special.collect('earnings-info', alltext=True))
+
+        (currency, amount) = atropine.collection['earnings-info']
+        amount = int(float(amount) * 100)
+        # store these variables somewhere
+        =============================================================================
+
++-----------+
+| Reference |
++-----------+
+
+        Atropine(html, ignorewhitespace=True)
+                just like BeautifulSoup, html can be a string or a file like object. the
+                ignorewhitespace argument determines whether text nodes consisting only of
+                white space characters should be considered.
+
+        Atropine.soup
+                instance variable representing the underlying BeautifulSoup instance. this will
+                generally be the result of parsing the html passed to Atropine.
+
+        Atropine.current
+                instance variable that represents the current tag (as a BeautifulSoup.Tag
+                instance). this will only be set to something sensible when an Atropine.resolve
+                call is underway.
+
+        Atropine.registerchecker(name, function)
+                this method does pretty much what the signature says - registers the checker
+                function function under the name name. the null_resolvers section talks about
+                checker functions.
+
+        Atropine.getchecker(name)
+                returns the checker function associated with name
+
+        Atropine.istextnode(tag)
+                static method - returns a boolean indicating whether the BeautifulSoup.Tag
+                instance tag is a text node
+
+        Atropine.onlytext(tag)
+                returns the contents of tag, if it contains only one element, which also
+                happens to be a text node. otherwise it explodes
+
+        Atropine.assimilate(tag)
+                this method sets the value of self.current to tag, while asserting that
+                whatever it is passed is a sane value. it is typically called only by
+                directional resolvers.
+                
+        Atropine.resolve(resolver, [resolver, ...])
+                resolve takes any number of callables as its arguments. these callables
+                generally locate some node in the document, and set the current node in the
+                associated Atropine instance, so they are called resolvers. there are a bunch
+                of built in resolvers - directional resolvers live in the atropine.go module,
+                and null resolvers live in the atropine.check module. resolvers that do weird
+                things live in atropine.special.
+                
+                a null resolver is defined as any resolver that asserts some stuff about the
+                current node, but doesn't change it - conversely, a directional resolver is one
+                which locates some node and sets it as the current one.
+
+                resolve returns a new Atropine instance that represents the current tag at the
+                end of the resolve call
+
+        = Directional Resolvers =
+                go.child(n)
+                        set the current tag to the nth child of the current tag
+                
+                go.only(tag=None, cls=None, attrs=None)
+                        assert that the current tag only has one child that meets the given criteria,
+                        and set that tag to the current one. cls expands to 'class', which is a
+                        reserved word in python. all of the keyword arguments can be strings or
+                        sequences of strings, and the values in the attrs dictionary can be strings,
+                        sequences of strings, regular expression objects or functions which accept
+                        strings and return a boolean.
+
+                examples:
+                        go.only(cls=('textbox-container', 'button-container'))
+                                will assert that the current tag only has one child whose 'class' attribute has
+                                a value of either 'textbox-container' or 'button-container', and will set that
+                                child as the current tag
+
+                        
+                        go.only(tag='tr', attrs=dict(id='123'))
+                                will assert that the current tag only has one child with a tag name of 'tr' and
+                                an attribute 'id' with the value '123', and will set the current tag to this
+                                tag.
+                        
+                        go.only()
+                                will assert the current tag only has one child, and will set the current tag to
+                                this tag.
+                        
+                        go.parent(n)
+                                set the current tag to the nth parent of the current tag.
+                        
+                        go.prevsib
+                                set the current tag to the previous sibling of the current tag. this is a
+                                predicate resolver, and so does not take any user-supplied arguments
+
+                        go.nextsib
+                                same as go.prevsib, but sets the current tag to the next sibling of the current
+                                tag
+
+                        go.nth(n, tag=None, cls=None, attrs=None)
+                                set the current tag to the nth child of the current tag which meets the given
+                                criteria. the keyword arguments are the same as go.only()
+
+                = Writing Your Own Directional Resolver =
+                        =============================================================
+                        def randomchild(atropine):
+                                # Atropine.assimilate is identical to assigning to
+                                # atropine.current, but it asserts it argument is not
+                                # BeautifulSoup.Null or None
+
+                        atropine.assimilate(random.choice(atropine.current.contents))
+
+                        # then use it just as you would any other resolver
+                        atropine.resolve(randomchild)
+                        ==============================================================
+
+
+        = Null Resolvers =
+                check.has(**k)
+                        check that the current tag meets all of the given criteria
+
+                check.doesnthave(**k)
+                        inverse of check.has()
+
+                The arguments accepted by check.has and check.doesnthave are keyword arguments
+                that name "checker" functions - checkers are functions that accept two
+                arguments - an Atropine instance, as well as the value of the keyword argument.
+                as checkers are expected to return a boolean indicating matchingness, all
+                check.has does is call each checker in turn, raising an exception if any one of
+                them returns False. check.doesnthave does the same, but explodes if any checker
+                returns True.
+
+                = Writing Your Own Checkers =
+                        =======================================================================
+                        def ntextnodes(atropine, n):
+                                #(check.equal is a utility function equal(x, y) that returns
+                                # x == y if y is not a sequence, or x in y, if y is a sequence)
+                                return check.equal(len(t for t in atropine.current.contents
+                                                        if atropine.istextnode(t)), n)
+
+                        atropine.registerchecker('ntextnodes', ntextnodes)
+                        # you can now use this like so:
+                        atropine.resolve(check.has(tag='td', ntextnodes=4))
+                        atropine.resolve(check.has(tag='td', ntextnodes=(1, 2, 3, 4)))
+                        =======================================================================
+
+                = Simple Checkers =
+                        all simple checkers accept a string or integer, or a sequence of strings or
+                        integers.
+
+                        indexonparent        
+                                assert that the current tag is (or is not) the nth child of its parent tag
+                                (starting from 0)
+                        id
+                                assert that the current tag has (or doesnt have) an id attribute with the given
+                                value
+                        cls
+                                same as id, but checks the 'class' attribute
+                        tag
+                                assert that the current tag has (or doesnt have) the given tag name
+                                examples:
+                        
+                        check.has(id='something')
+                                will match '<anything id="something">'
+                        
+                        check.has(id=('something', 'something_else'))
+                                will match '<anything id="something">' and '<anything id="something_else">
+                        
+                        check.doesnthave(id='something')
+                                will match everything that doesnt have an id of 'something'
+                
+                = Not So Simple Checkers =
+                        attrs
+                                accepts a dictionary of attributename:attributevalue, and checks that the
+                                attributes of the current tag match (or dont match) the given attribute values.
+                                note that only the given attributes are checked, e.g. check.has(tag='td',
+                                attrs=dict(x='x', y='y')) will match '<td x="x" y="y" somethingunrelated="abc">'.
+                                the values in the dictionary can be either strings, sequences of strings, regular 
+                                expression objects or functions that take a string and a return a boolean
+                        allchildren
+                                accepts a function and asserts that it returns True across all children of the
+                                current tag
+                        onlytext
+                                assert that the current tag has only one child node, which is a text node,
+                                whose contents match (or dont match, if you are using check.doesnthave) the
+                                given value. the value can be a string, a regular expression object, or a
+                                callable that returns a boolean
+                
+                                examples:
+                                        check.has(tag='span', onlytext='abc')
+                                                will match '<span>abc</span>'
+                        
+                                        check.has(tag='span', onlytext=re.compile('\d+,\d+,\d+'))
+                                                will match '<span>1,2,3</span>' and '<span>3,2,1</span>', etc
+                        
+                                        check.has(tag='span', onlytext=lambda text: True)
+                                                will match a span element that contains any one text node, no matter what
+                                                characters it is composed of
+                        alltext
+                                probably useless - it checks that all of the text nodes that are children of
+                                the current node match (or dont match) the given value
+                
+                                examples:
+                                        check.has(tag='span', alltext='HELLO!')
+                                                will match '<span><b>HELLO!</b><b>HELLO!</b></span>'
+
+                                        check.has(tag='span', alltext=lambda text: text.startswith('H'))
+                                                will match '<span><b>HELLO!</b><b>HOWDY</b></span>', etc
+
+                                        check.doesnthave(alltext=re.compile('cheese'))
+                                                will match any element which doesn't have any descendant text nodes that
+                                                contain 'cheese'
+
+        = Special Resolvers =
+                special.collect(keyname, alltext=False, onlytext=False)
+                        if alltext is True, all descendant text nodes of the current element will be
+                        stored in a list under the key keyname in a dictionary which can be accessed
+                        via the collection instance attribute of the Atropine instance returned by the
+                        current resolve call. the same goes for onlytext, except it will be asserted
+                        that the current node contains only one element (which is a text node) and the
+                        value of that node will be stored (as a string).
