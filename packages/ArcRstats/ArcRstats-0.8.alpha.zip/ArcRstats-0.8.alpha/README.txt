@@ -1,0 +1,1 @@
+ArcRstats - produces multivariate habitat prediction rasters using ArcGIS and the open-source R statistical package for implementing classification and regression (CART), generalized linear models (GLM) and generalized additive models (GAM)
