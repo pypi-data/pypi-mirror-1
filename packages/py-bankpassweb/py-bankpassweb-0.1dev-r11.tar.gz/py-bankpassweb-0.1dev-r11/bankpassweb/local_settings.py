@@ -1,0 +1,6 @@
+env = 'http://sis-test-bankpass.ssb.it/bankpass/master/main?PAGE=MASTER'
+env_api = 'http://sis-test-bankpass.ssb.it/bankpass/apibo/apiBO.app'
+start_secret = 'rAPu5Nto2kv76B2cPJjWhADuwjACYLELtAo3AEAYUymbkqADjA'
+result_secret = 'EAAYYXC3LcEj8D3uq7kREiAE9vxgFaCbpSLZqjAzA8Dx7iJrVP'
+crn='010500000000001'
+operator='PROVA001'
