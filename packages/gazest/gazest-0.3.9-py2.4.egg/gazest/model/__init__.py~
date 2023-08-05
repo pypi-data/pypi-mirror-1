@@ -1,0 +1,284 @@
+
+from sqlalchemy import *
+from sqlalchemy.ext.assignmapper import assign_mapper
+from pylons.database import create_engine
+from pylons.database import session_context as ctx
+
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+
+import uuid
+import hmac
+from hashlib import sha256
+
+# FIXME: this is presentation stuff, it might need to move to other layers
+from markdown import markdown
+import webhelpers as h
+
+meta = MetaData()
+
+def soon():
+    return datetime.now() + relativedelta(days=3)
+
+from sqlalchemy import types, exceptions
+class Enum(types.TypeDecorator):
+    '''Implement columns with a discrete, finite set of possible values'''
+    # not fully tested, it comes from
+    #   http://www.sqlalchemy.org/trac/wiki/UsageRecipes/Enum
+
+    impl = types.Unicode
+    
+    def __init__(self, values, empty_to_none=False):      
+        """Emulate an Enum type.
+        
+        values : a list of values that are valid for this column
+        empty_to_none : treat the empty string '' as None
+        """
+
+        if values is None or len(values) is 0:
+            raise exceptions.AssertionError('Enum requires a list of values')
+        self.empty_to_none = empty_to_none
+        self.values = values[:]
+        # the length of the string/unicode column should be the longest string
+        # in values
+        size = max([len(v) for v in values if v is not None])
+        super(Enum, self).__init__(size)        
+        
+        
+    def convert_bind_param(self, value, engine):
+        if self.empty_to_none and value is '':
+            value = None
+        if value not in self.values:
+            raise exceptions.AssertionError('"%s" not in Enum.values' % value)
+        return super(Enum, self).convert_bind_param(value, engine)
+        
+        
+    def convert_result_value(self, value, engine):
+        if value not in self.values:
+            raise exceptions.AssertionError('"%s" not in Enum.values' % value)
+        return super(Enum, self).convert_result_value(value, engine)
+
+
+users_table = Table('users', meta,
+                    Column('id', Integer, primary_key=True),
+                    Column('creation_date', DateTime,
+                           default=datetime.now),
+                    Column('name', Unicode, nullable=True, unique=True), 
+                    Column('username', Unicode, nullable=False, unique=True), 
+                    Column('email', Unicode, nullable=True, unique=True),
+                    Column('openid', Unicode, nullable=True, unique=True),
+                    Column('authtype', 
+                           Enum(["email", "openid"]), 
+                           nullable=False),
+                    Column('status', 
+                           Enum(["conf_pending", "active"]), 
+                           nullable=False, 
+                           default="conf_pending"),
+                    # password is hashed
+                    Column('password', Unicode, nullable=True),
+                    Column('salt', Unicode, nullable=True),
+                    Column('can_post', Boolean, nullable=False, default=True),
+                    )
+
+class User(object):
+    def check_password(self, password):
+        return self.password == self.hash_password(password)
+
+    def hash_password(self, password):
+        return hmac.new(self.salt, password).hexdigest()
+    
+    def set_password(self, password):
+        self.salt = str(uuid.uuid4())
+        self.password = self.hash_password(password)
+
+
+# in system mail
+gazmails_table = Table('gazmails', meta,
+                       Column('id', Integer, primary_key=True),
+                       Column('creation_date', DateTime,
+                              default=datetime.now),
+                       Column('subject', Unicode, nullable=True), 
+                       Column('body', Unicode, nullable=False, unique=True), 
+                       Column('format', 
+                              Enum(["plain", "markdown"]), 
+                              default="markdown",
+                              nullable=False),
+                       Column('sender_status', 
+                              Enum(["draft", "sent"]), 
+                              nullable=False, 
+                           default="draft"),
+                       Column('reader_status', 
+                              Enum(["new", "read", "spam", "deleted"]), 
+                              nullable=False, 
+                           default="new"),
+                       Column('parent_id', Integer,
+                              ForeignKey("gazmails.id"), 
+                              nullable=True), 
+                       Column('from_id', Integer,
+                              ForeignKey("users.id"), 
+                              nullable=False), 
+                       Column('to_id', Integer,
+                              ForeignKey("users.id"), 
+                              nullable=True), 
+                       Column('is_important', Boolean, 
+                              nullable=False,
+                              default=False),
+                       Column('is_replied', Boolean, 
+                              nullable=False,
+                              default=False),
+                       )
+
+class Gazmail(object):
+    def render_body(self):
+        # TODO: implement other markups
+        # FIXME: this definitly is part of the presentation layer...
+        return markdown(h.escape_once(self.body))
+
+
+# Revisions are stored in a DAG.  Revisions are the nodes. 
+# we use this semantic:
+#  http://en.wikipedia.org/wiki/Revision_control#Common_vocabulary
+# a revision is the content of one page at a given time
+# The mapping is a bit different than the usual Alchemy stuff.  It's
+# base on the graph example in the Alchemy distribution.
+
+
+revnodes_table = Table('revnodes', meta,
+              Column("id", Integer, primary_key=True),
+              # TODO: kick name after debug
+              Column("name", Unicode)
+)
+ 
+revarcs_table = Table('revarcs', meta,
+    Column("lower_id", Integer, ForeignKey('revnodes.id'), primary_key=True),
+    Column("higher_id", Integer, ForeignKey('revnodes.id'), primary_key=True)
+)
+
+class RevNode(object):
+    def __init__(self, name):
+        self.name = name
+    def __repr__(self):
+        return "<%s %s: %s>" % (self.__class__.__name__, 
+                                self.id, 
+                                self.name)
+
+    def add_parent(self, othernode):
+        RevArc(othernode, self)
+
+    def add_child(self, othernode):
+        RevArc(self, othernode)
+
+    def children(self):
+        return [x.higher_node for x in self.lower_arcs]
+    def parents(self):
+        return [x.lower_node for x in self.higher_arcs]
+
+class RevArc(object):
+    def __init__(self, low, high):
+        self.lower_node = low
+        self.higher_node = high
+
+
+_nodeid = revnodes_table.c.id
+assign_mapper(ctx, RevNode, revnodes_table)
+assign_mapper(ctx, RevArc, revarcs_table, properties={
+    'lower_node':relation(RevNode,
+primaryjoin=revarcs_table.c.lower_id==_nodeid, backref='lower_arcs'),
+    'higher_node':relation(RevNode,
+primaryjoin=revarcs_table.c.higher_id==_nodeid, backref='higher_arcs')
+    }
+)
+
+
+
+def gen_conf_key():
+    # TODO: check for clashes
+    return str(uuid.uuid4())
+
+confirmations_table = Table('confirmations', meta,
+                            Column('id', Integer, primary_key=True),
+                            Column('creation_date', DateTime,
+                                   default=datetime.now),
+                            Column('expiration_date', DateTime,
+                                   default=soon),
+                            
+                            Column('key', Unicode, nullable=False, 
+                                   unique=True, 
+                                   default=gen_conf_key), 
+                            Column('user_id', Integer,
+                                   ForeignKey("users.id"), 
+                                   nullable=False), 
+                            Column('authtype', 
+                                   Enum(["email", "openid"]), 
+                                   nullable=False),
+
+                          )
+
+class Confirmation(object):
+    pass
+
+
+
+
+assign_mapper(ctx, Gazmail, gazmails_table, 
+              properties=dict(children=relation(Gazmail,
+                                                primaryjoin=gazmails_table.c.parent_id==gazmails_table.c.id,
+                                                backref=backref("parent", remote_side=[gazmails_table.c.id]),
+                                                ),
+                              parent=relation(Gazmail,
+                                              uselist=False,
+                                              remote_side=[gazmails_table.c.id],),
+                              ))
+
+_from_id = gazmails_table.c.from_id
+_to_id = gazmails_table.c.to_id
+_sender_status = gazmails_table.c.sender_status
+_reader_status = gazmails_table.c.reader_status
+assign_mapper(ctx, Confirmation, confirmations_table,
+              properties=dict(user=relation(User)))
+
+assign_mapper(ctx, User, users_table,
+              properties=dict(
+        out_mails=relation(Gazmail, 
+                          foreign_keys=[gazmails_table.c.from_id], 
+                          primaryjoin=_from_id==users_table.c.id,
+                          backref="from_user"),
+        sent_mails=relation(Gazmail, 
+                          foreign_keys=[_from_id], 
+                          primaryjoin=and_(_from_id==users_table.c.id,
+                                           _sender_status=="sent")),
+        draft_mails=relation(Gazmail, 
+                             foreign_keys=[gazmails_table.c.from_id], 
+                             primaryjoin=and_(_from_id==users_table.c.id,
+                                              _sender_status=="draft")),
+        
+
+        # all the mails addressed to this user but not all of it is sent yet
+        to_mails=relation(Gazmail, 
+                          foreign_keys=[_to_id], 
+                          primaryjoin=_to_id==users_table.c.id,
+                          backref="to_user"),
+        recvd_mails=relation(Gazmail, 
+                             foreign_keys=[_to_id], 
+                             primaryjoin=and_(_to_id==users_table.c.id,
+                                              _sender_status=="sent")),
+        new_mails=relation(Gazmail, 
+                           foreign_keys=[gazmails_table.c.to_id], 
+                           primaryjoin=and_(_to_id==users_table.c.id,
+                                            _sender_status=="sent", 
+                                            _reader_status=="new", 
+                                            )),
+        inbox_mails=relation(Gazmail, 
+                             foreign_keys=[gazmails_table.c.to_id], 
+                             primaryjoin=and_(_to_id==users_table.c.id,
+                                              _sender_status=="sent", 
+                                              or_(_reader_status=="new", 
+                                                  _reader_status=="read"), 
+                                              )),
+       
+        
+        ))
+
+
+#for cls, table in [(User, users_table),]:
+#    assign_mapper(ctx, cls, table)
