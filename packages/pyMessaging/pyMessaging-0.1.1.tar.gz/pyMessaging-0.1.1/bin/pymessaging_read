@@ -1,0 +1,55 @@
+#!/usr/bin/env python
+# encoding: utf-8
+"""
+__init__.py
+
+Created by Maximillian Dornseif on 2007-04-09.
+Copyright (c) 2007 HUDORA GmbH. Consider it BSD licensed.
+
+My rough attempts in implementing the Stomp protocol. Tested with Apache AcitveMQ.
+See http://stomp.codehaus.org/ for more Information on Stomp.
+"""
+
+
+import optparse, os
+from pyMessaging.stomp import get_message_bodies, StompConnection
+
+__revision__ = "$Revision: 2282 $"
+
+HOST = 'localhost'
+if os.environ.get('STOMPBROKER'):
+    HOST = os.environ.get('STOMPBROKER').split(':')[0]
+PORT = 61613
+if os.environ.get('STOMPBROKER') and len( os.environ.get('STOMPBROKER').split(':')) > 1:
+    PORT = os.environ.get('STOMPBROKER').split(':')[1]
+
+
+parser = optparse.OptionParser(version=True)
+parser.version = "%%prog %s" % (__revision__.strip('$Revision: '),)
+parser.description = 'Reading information from a pyMessaging channel.'
+
+parser.set_usage('usage: %prog [options] <channelname> [<channelname> ...]')
+parser.add_option('--host', action='store', default=HOST, help='hostname of broker [%default]')
+parser.add_option('--port', action='store', type='int', default=PORT, help='port of broker [%default]')
+parser.add_option('--timeout', action='store', type='float', default=0.25, help='wait that many seconds for messages to arrive [%default]')
+parser.add_option('--max', action='store', type='int', default=0, help='do not request more than MAX messages. If set to 0 get as many as we can get [%default]')
+parser.add_option('--reinject', action='store_true', help='reinject the messages into the queue (breaks message headers)')
+parser.add_option('--uniq', action='store_true', help='supress duplicate messages')
+parser.add_option('--sep', action='store', default='\n', help='separate messages by SEP. [\\n]')
+
+options, args = parser.parse_args()
+if not args:
+    parser.error("no channel given")
+
+for channel in args:
+    messages = get_message_bodies(channel, host=options.host, port=options.port,
+                                  maxmessages=options.max, timeout=options.timeout)
+    if options.uniq:
+        messages = set(messages)
+    print options.sep.join(messages)
+    if options.reinject:
+        conn = StompConnection(options.host, options.port)
+        for msg in messages:
+            conn.send_message(channel, msg)
+        conn.close()
+
