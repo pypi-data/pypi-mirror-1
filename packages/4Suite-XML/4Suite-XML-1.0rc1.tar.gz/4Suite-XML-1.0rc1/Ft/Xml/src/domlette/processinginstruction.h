@@ -1,0 +1,38 @@
+#ifndef DOMLETTE_PROCESSING_INSTRUCTION_H
+#define DOMLETTE_PROCESSING_INSTRUCTION_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "Python.h"
+#include "node.h"
+
+  typedef struct {
+    PyNode_HEAD
+    PyObject *nodeName;
+    PyObject *nodeValue;
+  } PyProcessingInstructionObject;
+
+#define PyProcessingInstruction_TARGET(op) \
+(((PyProcessingInstructionObject *)(op))->nodeName)
+#define PyProcessingInstruction_DATA(op) \
+(((PyProcessingInstructionObject *)(op))->nodeValue)
+
+  extern PyTypeObject DomletteProcessingInstruction_Type;
+
+#define PyProcessingInstruction_Check(op) ((op)->ob_type == &DomletteProcessingInstruction_Type)
+
+  /* Module Methods */
+  int DomletteProcessingInstruction_Init(PyObject *module);
+  void DomletteProcessingInstruction_Fini(void);
+
+  /* ProcessingInstruction Methods */
+  PyProcessingInstructionObject *ProcessingInstruction_CloneNode(
+    PyObject *node, int deep, PyNodeObject *newOwnerDocument);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* DOMLETTE_PROCESSING_INSTRUCTION_H */
