@@ -1,0 +1,311 @@
+<?python
+def initialize(t):
+    for name, default in {
+        'normal_link_color': '#930',
+        'visited_color': '#505',
+        'hover_color': '#fd8',
+        'body_outer_bg_color': '#a31',
+        'body_bg_color': '#fff',
+        'body_border_color': '#f70',
+        'header_color': '#555',
+        'header_border_color': '#f95',
+        'soft_color': '#444',
+        'blockquote_border_color': '#ccc',
+        'nav_container_color': '#f95',
+        'nav_button_color': '#730',
+        'nav_border_color': '#f50',
+        'nav_hover_color': '#000',
+        'nav_hover_bg_color': '#fff',
+        'doctitle_color': '#ff5000',
+        }.items():
+        setattr(t, name, t.settings.get(name, default))
+
+?>
+<css>
+/* This is a generated, using these settings:
+   ${repr(self.settings)} */
+i, em {
+  font-family: Times New Roman,Times,serif;
+}
+
+a {
+  font-weight: bold;
+}
+
+a:link { 
+  color: ${normal_link_color};
+}
+
+a:visited { 
+  color: ${visited_color};
+}
+
+a:hover {
+  background-color: ${hover_color};
+}
+
+/*
+Theme Name: Almodovar
+Theme URI: http://blog.ratterobert.com/archiv/2005/03/09/almodovar/
+Description: Das Theme basiert im Ursprung auf Michael Heilemanns <a href="http://binarybonsai.com/kubrick/">Kubrick</a>-Template und ist von dem einen oder anderen Gimmick anderer sehr guter Templates inspiriert worden.
+Version: 0.7
+Author: ratte / robert
+Author URI: http://blog.ratterobert.com/
+*/
+
+/* Begin Typography &amp; Colors */
+body {
+	font-family: 'Lucida Grande', 'Trebuchet MS', 'Bitstream Vera Sans', Sans-Serif;
+	background-color: ${body_outer_bg_color};
+	text-align: center;
+}
+
+#page {
+	background-color: ${body_bg_color};
+	border: 2px solid ${body_border_color};
+	text-align: left;
+}
+
+#content {
+	margin: 0;
+	}
+
+#content p,
+#content ul,
+#content blockquote { 
+  /*line-height: 1.6em;*/
+}
+
+#footer {
+  border-top: 1px solid #000;
+  margin-top: 2em;
+  color: #666;
+  font-size: 75%;
+}
+
+#footer a:link, #footer a:visited {
+  font-weight: normal;
+}
+
+small {
+	font-family: 'Trebuchet MS', Arial, Helvetica, Sans-Serif;
+	font-size: 0.9em;
+	line-height: 1.5em;
+	}
+
+h1, h2, h3 {
+	font-family: 'Trebuchet MS', 'Lucida Grande', Verdana, Arial, Sans-Serif;
+	font-weight: bold;
+  margin-top: .7em;
+  margin-bottom: .7em;
+	}
+
+h1 { 
+  font-size: 2.0em;
+}
+h2 {
+  font-size: 1.75em;
+}
+h3 {
+  font-size: 1.25em;
+}
+
+div#content h1, div#content h2, div#content h3 {
+	color: ${header_color};
+        border-bottom: 2px solid ${header_border_color}_;
+}
+
+h1 a, h2 a, h3 a {
+	color: ${header_color};
+}
+
+h1, h1 a, h1 a:hover, h1 a:visited, 
+h2, h2 a, h2 a:hover, h2 a:visited, 
+h3, h3 a, h3 a:hover, h3 a:visited, 
+cite {
+	text-decoration: none;
+}
+
+small, blockquote, strike {
+	color: ${soft_color};
+}
+
+#links ul ul li, #links li {
+	list-style: none;
+}
+
+code {
+	font: 1.1em 'Courier', 'Courier New', Fixed;
+}
+
+acronym, abbr, span.caps {
+	font-size: 0.9em;
+	letter-spacing: .07em;
+}
+
+/* Special case doc-title */
+h1.doc-title { 
+  font-variant: small-caps;
+  letter-spacing: 0.25em;
+  font-size: 2em;
+  margin: 0;
+}
+h1.doc-title a { 
+  display: block;
+  padding-left: 0.8em;
+  padding-bottom: .5em;
+  padding-top: .5em;
+  margin: 0;
+  border-bottom: 1px #fff solid;
+}
+h1.doc-title, 
+h1.doc-title a, 
+h1.doc-title a:visited,
+h1.doc-title a:hover {
+	text-decoration: none;
+	color: ${doctitle_color};
+}
+/* End Typography &amp; Colors */
+
+
+/* Begin Structure */
+body {
+	margin: 0;
+	padding: 0;
+}
+
+#page {
+	background-color: white;
+	margin: 0 auto 0 5em;
+	padding: 0;
+        max-width: 60em;
+	border: 1px solid #959596;
+}
+* html #page { 
+  width: 60em;
+}
+
+#content {
+	margin: 0 1em 0 3em;
+}
+
+#content h1 { 
+  margin-left: 0;
+}
+
+#footer {
+	padding: 0 0 0 1px;
+	margin: 0;
+  margin-top: 1.5em;
+	clear: both;
+	}
+
+#footer p {
+	margin: 1em;
+	}
+
+/* End Structure */
+
+
+
+/*	Begin Headers */
+.description {
+	text-align: center;
+	}
+
+/* End Headers */
+
+
+/* Begin Form Elements */
+#searchform {
+	margin: 1em auto;
+	text-align: right;
+	}
+
+#searchform #s {
+	width: 100px;
+	padding: 2px;
+	}
+
+#searchsubmit {
+	padding: 1px;
+	}
+/* End Form Elements */
+
+
+/* Begin Various Tags &amp; Classes */
+acronym, abbr, span.caps {
+	cursor: help;
+}
+
+acronym, abbr {
+	border-bottom: 1px dashed #999;
+}
+
+blockquote {
+	margin: 15px 30px 0 10px;
+	padding-left: 20px;
+	border-left: 5px solid ${blockquote_border_color};
+}
+
+blockquote cite {
+	margin: 5px 0 0;
+	display: block;
+}
+
+hr {
+	display: none;
+}
+
+a img {
+	border: none;
+}
+
+.navigation {
+	display: block;
+	text-align: center;
+	margin-top: 10px;
+	margin-bottom: 60px;
+}
+/* End Various Tags &amp; Classes*/
+
+span a { color: #CCC; }
+
+span a:hover { color: #FF5000; }
+
+#navcontainer {
+	margin-top: 0px;
+	padding-top: 0px;
+	width: 100%;
+	background-color: ${nav_container_color};
+	text-align: right;
+}
+
+#navlist ul {
+	margin-left: 0;
+	margin-right: 5px;
+	padding-left: 0;
+	white-space: nowrap;
+}
+
+#navlist li {
+	display: inline;
+	list-style-type: none;
+}
+
+#navlist a {
+  padding: 3px 10px;
+  color: #fff;
+	background-color: ${nav_button_color};
+	text-decoration: none;
+	border: 1px solid ${nav_border_color};
+  font-weight: normal;
+}
+
+#navlist a:hover {
+	color: ${nav_hover_color};
+	background-color: ${nav_hover_bg_color};
+	text-decoration: none;
+  font-weight: normal;
+}
+</css>
