@@ -1,0 +1,171 @@
+====================
+Building replicators
+====================
+
+:Author: Olivier Grisel <olivier.grisel@ensta.org>
+:Description: Basic replicators usage and domain restrictions
+
+Replicators are the building blocks of the evolutionary process. They hold the
+genetic information (``candidate_solution``) and a measure of it's fitness
+according to some component that provides the ``IEvaluator`` interface. The set
+of admissible ``candidate_solution`` can further get restricted according to an
+``IDomain`` component.
+
+Replicators implement at least the ``IReplicator`` interface, domain aware
+replicators further implement ``IDomainedReplicator``::
+
+  >>> from zope.interface.verify import verifyClass
+  >>> from evogrid.interfaces import IReplicator, IDomainedReplicator
+
+.. sectnum::    :depth: 2
+.. contents::   :depth: 2
+
+
+Basic replicators
+=================
+
+The ``evogrid.common.replicators`` provides a basic implementation of a
+replicator::
+
+  >>> from evogrid.common.replicators import Replicator
+  >>> verifyClass(IReplicator, Replicator)
+  True
+  >>> r1 = Replicator()
+  >>> r1
+  Replicator()
+  >>> (r1.candidate_solution, r1.evaluation)
+  (None, None)
+
+Make it replicate::
+
+  >>> copy_of_r1 = r1.replicate()
+  >>> copy_of_r1
+  Replicator()
+
+The result is a similar yet distinct Replicator instance::
+
+  >>> r1 is copy_of_r1
+  False
+  >>> r1.candidate_solution == copy_of_r1.candidate_solution
+  True
+  >>> r1.evaluation == copy_of_r1.evaluation
+  True
+
+Replicating twice bring another distinct copy::
+
+  >>> second_copy_of_r1 = r1.replicate()
+  >>> second_copy_of_r1 is copy_of_r1
+  False
+  >>> second_copy_of_r1 is r1
+  False
+
+Replicators can get directly built with a ``candidate_solution`` at init time::
+
+  >>> r2 = Replicator(cs=42)
+  >>> r2
+  Replicator(cs=42)
+  >>> r2.candidate_solution
+  42
+
+  >>> copy_of_r2 = r2.replicate()
+  >>> copy_of_r2
+  Replicator(cs=42)
+
+  >>> copy_of_r2 is r2
+  False
+  >>> copy_of_r2.candidate_solution == r2.candidate_solution
+  True
+
+One can also directly build evaluated replicators::
+
+  >>> r3 = Replicator(cs=42, ev=1)
+  >>> r3
+  Replicator(cs=42, ev=1)
+
+
+Domain aware replicators
+========================
+
+Replicators can constrain the set of admissible ``candidate_solutions`` by using
+an ``IDomain`` implementation::
+
+  >>> from evogrid.interfaces import IDomain
+
+
+Building a domain
+-----------------
+
+Let us build a sample dummy domain that restricts ``candidate_solutions`` to the
+integer intervalle [0, 99]::
+
+  >>> from zope.interface import implements
+  >>> class OneToNinetyNineDomain(object):
+  ...     implements(IDomain)
+  ...
+  ...     def __contains__(self, cs):
+  ...         return cs in xrange(100)
+  ...
+  ...     def ensure_belong(self, cs):
+  ...         if cs > 99:
+  ...             return 99
+  ...         elif cs < 0:
+  ...             return 0
+  ...         else:
+  ...             return int(cs)
+  ...
+  ...     def __repr__(self):
+  ...         return "%s()" % self.__class__.__name__
+  ...
+  >>> verifyClass(IDomain, OneToNinetyNineDomain)
+  True
+
+A domain can thus tell whether or not a ``candidate_solution`` is admissible::
+
+  >>> dom = OneToNinetyNineDomain()
+  >>> 0 in dom
+  True
+  >>> -1 in dom
+  False
+  >>> 100 in dom
+  False
+  >>> 50.2 in dom
+  False
+
+It can also find the nearest member of the domain from any (potentially non
+admissible) ``candidate_solution``::
+
+  >>> dom.ensure_belong(102)
+  99
+  >>> dom.ensure_belong(-543)
+  0
+
+If the candidate solution is already admissible, this does not change it::
+
+  >>> dom.ensure_belong(45)
+  45
+  >>> dom.ensure_belong(50.2)
+  50
+
+
+Plugging a domain on a replicator
+---------------------------------
+
+Domain definitions are best exploited with ``IDomainedReplicator``
+implementations such as ``evogrid.common.replicators.DomainedReplicator``::
+
+  >>> from evogrid.common.replicators import DomainedReplicator
+  >>> verifyClass(IDomainedReplicator, DomainedReplicator)
+  True
+
+Buy building a ``DomainedReplicator`` instance against our new
+``OneToNinetyNineDomain`` instance we are ensured that the candidate solution
+will always remain in ``[0, 99]``::
+
+  >>> dr1 = DomainedReplicator(cs=-1, dom=dom)
+  >>> dr1
+  DomainedReplicator(cs=0, dom=OneToNinetyNineDomain())
+
+  >>> dr1.candidate_solution = 120
+  >>> dr1.candidate_solution
+  99
+
