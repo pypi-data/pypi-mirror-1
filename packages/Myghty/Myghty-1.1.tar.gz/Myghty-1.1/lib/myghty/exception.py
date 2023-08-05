@@ -1,0 +1,757 @@
+# $Id: exception.py 2136 2006-09-08 19:46:55Z dairiki $
+# exception.py - exception classes for Myghty
+# Copyright (C) 2004, 2005 Michael Bayer mike_mp@zzzcomputing.com
+# Original Perl code and documentation copyright (c) 1998-2003 by Jonathan Swartz. 
+#
+# This module is part of Myghty and is released under
+# the MIT License: http://www.opensource.org/licenses/mit-license.php
+# 
+
+import string, sys, re, traceback, os
+from myghty.util import *
+
+# get the directory of myghty, to filter it out of friendly stack traces
+import myghty
+MYGHTY_DIR = os.path.normcase(os.path.dirname(myghty.__file__))
+        
+class Error(Exception):
+    """generic exception class"""
+    
+    def __init__(self, message=None, wrapped=None, *args, **params):
+        self.wrapped = wrapped
+
+        if message is None:
+            if self.wrapped is None:
+                self.msg = self.__class__.__name__
+            else:
+                self.msg = "%s(%s): %s" % (
+                    self.__class__.__name__,
+                    self.wrapped.__class__.__name__,
+                    self.wrapped)
+        else:
+            self.msg = self.__class__.__name__ + ": " + message
+
+        self.trace_records = []
+        self.lead_rec = None
+        
+        self.reversefiles = {}
+
+        if self.wrapped is not None and isinstance(self.wrapped, SyntaxError):
+            self.lead_rec = Error.TBTraceLine(Error.SimpleTraceLine(self.wrapped.text, self.wrapped.lineno, self.wrapped.filename))
+            self.ispythonsyntax = True
+        else:
+            self.ispythonsyntax = False
+            
+        Exception.__init__(self, *args, **params)
+        
+        
+    def initTraceback(self, interpreter = None):
+        """ call this right before each re-raise of the exception"""
+
+        # at the moment, initTraceback only needs to be called once, so
+        # return if we already got trace records
+        if len(self.trace_records): return
+
+        # extract stack info from the exception throw:
+        (type, value, trcback) = sys.exc_info()
+        self.raw_excinfo = (type, value, trcback)
+        rawrecords = traceback.extract_tb(trcback)
+
+        # add to that, stack info from the current stack frame
+        rawrecords = traceback.extract_stack() + rawrecords
+
+        # if a lead record was programmatically hardcoded, init that
+        # (it is probably a SyntaxTraceLine from Lexer)
+        # and dont change it
+        if self.lead_rec is not None:
+            self.lead_rec.init_reverse_file(self, interpreter)
+            set_lead_rec = False
+        else:
+            set_lead_rec = True
+            
+        recs = []
+        
+        # create TBTraceLines out of the stack frames in an attempt to sort out
+        # compiled templatelines, myghty library lines, and non-myghty python lines
+        for rec in rawrecords:
+            rec = Error.TBTraceLine(Error.SimpleTraceLine(rec[3], rec[1], rec[0]))
+            rec.init_reverse_file(self, interpreter)
+            
+            if not rec.is_myghty_lib() and set_lead_rec:
+                self.lead_rec = rec
+            recs.insert(0, rec)
+        
+        self.trace_records += recs
+
+    class CodeLine:
+        """represents a line of code in a python source file"""
+        def __init__(self, linenum, line, encoding=None):
+            self.linenum = linenum
+            if line is None:
+                self.line = 'None'
+            else:
+                self.line = _EncodedLine(string.rstrip(line), encoding)
+
+    class TraceLine:
+        """represents a trace line in a stack trace"""
+        
+        def __init__(self):
+            self.codeline = None
+            self.code = None
+            self.file = None
+            self.original = None
+            
+        def init_reverse_file(self, parent, interpreter):raise NotImplementedError()
+
+
+
+        def is_myghty_lib(self):
+            "returns True if this line corresponds to package in the myghty distribution"
+            return self.has_file() and os.path.commonprefix([MYGHTY_DIR, os.path.normcase(self.file)]) == MYGHTY_DIR
+            
+
+        def get_lines(self, span = 3):raise NotImplementedError()
+        
+        def get_file_lines(self, f, linenum, span):
+            i = 0
+            lines = []
+            encoding = self.get_source_encoding()
+
+            while True:
+                l = f.readline()
+                i += 1
+                if i in range(linenum - span, linenum + span + 1):
+                    lines.append(Error.CodeLine(i, l, encoding))
+                if i == linenum + span: break
+
+            f.close()
+            return lines
+        
+        def has_file(self):
+            return self.file is not None and os.access(self.file, os.F_OK)
+
+        def get_source_encoding(self):
+            raise NotImplementedError
+
+        
+        
+    class SyntaxTraceLine(TraceLine):
+        """a traceline generated by Lexer to mark a pre-python syntax error"""
+        
+        def __init__(self, code, line, name, source, file,
+                     source_encoding=None):
+            self.code = code
+            self.line = line
+            self.name = name
+            self.file = file
+            self.source = source
+            self.init = False
+            self.original = self
+            self.codeline = self.line
+            if source_encoding is None:
+                source_encoding = sys.getdefaultencoding()
+            self.source_encoding = source_encoding
+
+        def init_reverse_file(self, parent, interpreter):
+            pass
+
+        def get_lines(self, span = 3):
+            f = StringIO(self.source)
+            return self.get_file_lines(f, self.line, span)
+
+        def get_source_encoding(self):
+            return self.source_encoding
+        
+    class SimpleTraceLine(TraceLine):
+        """a traceline for a regular python file"""
+        
+        def __init__(self, code, line, file):
+            self.__code = code
+            self.line = line
+            self.codeline = self.line
+            self.original = self
+            self.file = file
+            self.compiled_record = None
+            
+        def init_reverse_file(self, parent, interpreter):
+            pass
+            
+        def _get_code(self):
+            if self.__code is None:
+                return self.get_lines(span = 0)[0].line
+            else:
+                return self.__code
+        code = property(_get_code)      
+
+        def get_lines(self, span = 3):
+            if self.compiled_record is not None:
+                f = self.compiled_record.get_compiled_source()
+            elif not self.has_file():
+                return [Error.CodeLine(self.line, self.__code)] #FIXME: encoding
+            else:
+                f = file(self.file)
+
+            return self.get_file_lines(f, self.line, span)
+
+        def get_source_encoding(self):
+            if self.compiled_record is not None:
+                f = self.compiled_record.get_compiled_source()
+            elif not self.has_file():
+                return sys.getdefaultencoding() # FIXME: this is wrong
+            else:
+                f = file(self.file)
+            return _parse_encoding(f)
+
+    class TBTraceLine(TraceLine):
+        """a wrapper for a simpletraceline that attempts to map its python string or file to an 
+        originating myghty template string or file, with line numbers cross-linked between them."""
+        
+        def __init__(self, original):
+            self.original = original
+            
+        def init_reverse_file(self, parent, interpreter):
+            original = self.original
+            file = original.file
+            self.ismyghtylib = None
+                
+            if parent.reversefiles.has_key(file):
+                self.reversefile = parent.reversefiles[file]
+            elif interpreter is not None and interpreter.reverse_lookup.has_key(file):
+                comprec = interpreter.reverse_lookup[file]
+                self.reversefile = Error.ReverseFile(interpreter, compiled_record = comprec)
+                parent.reversefiles[file] = self.reversefile
+            else:
+                self.reversefile = None
+
+            if self.reversefile is not None:
+                self.codeline = self.reversefile.get_line_number(original.codeline)
+                self.original.compiled_record = self.reversefile.compiled_record
+                if self.codeline is None:
+                    # if we are a compiled template and the line number is within the
+                    # area beyond user-defined code, then we are a myghtylib traceline 
+                    self.ismyghtylib = True
+            else:
+                self.codeline = None
+
+            if self.codeline is None:
+                self.codeline = original.codeline
+                self.reversefile = None
+
+
+        def is_myghty_lib(self):
+            if self.ismyghtylib is not None:
+                return self.ismyghtylib
+            else:
+                return Error.TraceLine.is_myghty_lib(self)
+
+            
+        def _get_code(self):
+            if self.reversefile is not None:
+                return self.get_lines(span = 0)[0].line
+            else:
+                return self.original.code
+                
+        code = property(_get_code, lambda s,p:None)
+        
+        def _get_file(self):
+            if (
+                self.reversefile is not None
+                and 
+                self.reversefile.compiled_record.csource.file_path is not None):
+                
+                return self.reversefile.compiled_record.csource.file_path
+            else:
+                return self.original.file
+                
+        file = property(_get_file, lambda s,p:None)
+
+        def get_lines(self, span = 3):
+            if self.reversefile is not None:
+                return self.get_file_lines(self.reversefile.get_source(), self.codeline, span)
+            else:
+                #return [Error.CodeLine(self.codeline, self.original.get_code())]
+                return self.original.get_lines(span)
+
+        def get_source_encoding(self):
+            return self.original.get_source_encoding()
+        
+    class ReverseFile:
+        """represents a python source string or file, a pointer back to
+        the myghty template file or string that originated it, and a cross reference of
+        all line numbers in the python file that map back to the template file."""
+    
+        def __init__(self, interpreter, compiled_record):
+            self.sourcemap = []
+            self.compiled_record = compiled_record
+            self.isvalid = False
+
+            f = compiled_record.get_compiled_source()                   
+            try:
+                line = f.readline()
+                match = re.match(r"# File: (\S+) CompilerID: (.*?) Timestamp: (.*?)", line)
+                if not match: return
+
+                (self.path, self.compilerid, self.timestamp) =  \
+                (match.group(1), match.group(2), match.group(3) )
+
+                self.sourcemap.append(None)
+                state = 0
+                linecounter = 0
+
+                for line in f:
+                    if state == 0:
+                        self.sourcemap.append(None)
+                        match = re.match(r"\s*#\s*BEGIN BLOCK (\w+)", line)
+                        if match:
+                            state = 1
+
+                        continue
+
+                    elif state == 1:
+                        match = re.match(r"\s*#\s*BEGIN CODE BLOCK", line)
+                        if match:
+                            state = 2
+                            self.sourcemap.append(None)
+                            continue
+                    elif state == 2:
+                        match = re.match(r"\s*#\s*END CODE BLOCK", line)
+                        if match:
+                            state = 1
+                            self.sourcemap.append(None)
+                            continue
+                    
+                        
+                    if state == 1 or state == 2:    
+                        match = re.match(r"\s*#\s*SOURCE LINE (\w+)", line)
+                        if match:
+                            self.sourcemap.append(None)
+                            linecounter = int(match.group(1))   
+                        else:
+                            match = re.match(r"\s*#\s*END BLOCK (\w+)", line)
+                            if match:
+                                self.sourcemap.append(None)
+                                state = 0
+                            else:
+                                self.sourcemap.append(linecounter)
+                                if state == 2: linecounter += 1
+
+                self.isvalid = True
+            finally:
+                f.close()
+                
+        def get_source(self):
+            try:
+                return self.compiled_record.csource.get_component_source_file()
+            except:
+                raise "Cant open file '%s'" % self.compiled_record.csource.file_path
+            
+        def get_line_number(self, linenum):
+            if linenum < len(self.sourcemap):
+                return self.sourcemap[linenum - 1]
+            else:
+                return None
+
+
+    def htmlformat(self):
+        return HTMLErrorFormatter(self).format()
+
+    def textformat(self):
+        return PlainTextErrorFormatter(self).format()
+
+    def format(self):
+        return PlainTextErrorFormatter(self).format()
+        
+    def singlelineformat(self):
+        if len(self.trace_records):
+            return "%s at %s line %d" % (self.msg, self.file, self.codeline)
+        else:
+            return self.msg
+            
+    file =property(lambda self: self.trace_records[0].file)
+    
+
+    codeline = property(lambda self:self.trace_records[0].codeline)
+    
+        
+            
+    def __str__(self):
+        return self.singlelineformat()
+
+    def is_python_syntax(self):
+        return self.ispythonsyntax
+        
+    def message(self):
+        return self.msg
+
+
+class ErrorFormatter:
+    """base class for an object that returns a string representation of an error"""
+    
+    def format(self):
+        try:
+            return self.do_format()
+        except Exception, e:
+            return "ErrorFormatter had an exception: " + str(e)
+        except:
+            e = sys.exc_info()[0]
+            return "ErrorFormatter had an exception: " + str(e)
+
+
+class PlainTextErrorFormatter(ErrorFormatter):
+    def __init__(self, error):
+        self.error = error
+        error.initTraceback(None)
+        self.records = self.error.trace_records
+        self.lead_rec = self.error.lead_rec
+
+    def do_format(self):
+        templatetrace = self._format_traceback(self.records, True)
+    
+        realtrace = self._format_traceback(self.records, False)
+
+        if self.lead_rec is not None:
+            ret = (self._format_record(self.error.message(), self.lead_rec, templatetrace) +
+                "\n---------------------------------------------\n" +
+                               "Original Stack Trace:\n");
+                               
+            if self.error.is_python_syntax():
+                ret += self._format_record(self.error.message(), self.lead_rec.original, realtrace)
+            else:
+                ret += self._format_record(self.error.message(), self.records[0].original, realtrace)
+                
+            return ret
+        else:
+            return self._format_record(self.error.message(), self.records[0], realtrace)
+
+    def _format_traceback(self, records, friendly):
+        trace = ""
+        for rec in self.records:
+            if not friendly:
+                rec = rec.original
+
+            if not friendly or not rec.is_myghty_lib():
+                trace += "%s:%s\n" % (rec.file, rec.codeline)
+
+        return trace
+
+    def _format_record(self, message, rec, trace):
+        frec = (
+            message + "\n\n" + 
+            "file: %s line %s\n" % (rec.file, rec.codeline)
+            )
+    
+        frec += "\n" + str(rec.code);
+        if trace: frec += "\n\n" + trace
+
+        return frec
+
+class HTMLErrorFormatter(ErrorFormatter):
+    def do_format(self):
+        buffer = StringIO()
+
+        try:            
+            self.interp.execute(self.comp,
+                                out_buffer=buffer,
+                                output_encoding='latin1', # Default for HTML
+                                encoding_errors='htmlentityreplace',
+                                request_args = argdict(
+                records = self.records,
+                lead_rec = self.lead_rec,
+                error = self.error
+            ))
+            return buffer.getvalue()
+        except Exception, e:
+            nestederror = Error(wrapped = e)
+        except:
+            nestederror = Error(wrapped = sys.exc_info()[0])
+
+        nestederror.initTraceback(self.interp)
+        return ("<pre>%s\n\nAdditionally, HTMLErrorFormatter had the following error:\n\n%s</pre>" % 
+            (PlainTextErrorFormatter(self.error).format(),
+            PlainTextErrorFormatter(nestederror).format()))
+
+
+    def __init__(self, error):
+        import myghty.interp as interp
+        self.error = error
+        error.initTraceback(None)
+        self.records = self.error.trace_records
+        self.lead_rec = self.error.lead_rec
+
+        def handle(e, m, **params):
+            raise e
+
+        self.interp = interp.Interpreter(error_handler = handle)
+        self.comp = self.interp.make_component("""
+<%args>
+    records
+    lead_rec
+    error
+</%args>
+<html>
+<head>
+    <title>Myghty Template Error</title>
+    <style>
+        body, td {
+            margin: 20px;
+            font-family: verdana, sans-serif;
+            font-size: 8pt;
+        }
+        .red {
+            color:#FF0000;
+        }
+        .bold {
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+% if lead_rec is not None:
+    <h2>Myghty Template Error</h2>
+
+    <& formatrecord, message = error.message(), lead_rec = lead_rec, records = records, friendly = True &>
+
+    <br/>
+    <hr/>
+    <h3>Original Stack Trace:</h3>
+%   if error.is_python_syntax():
+        <& formatrecord, message = error.message(), lead_rec = lead_rec.original, records = records, friendly = False &>
+%   else:
+        <& formatrecord, message = error.message(), lead_rec = records[0].original, records = records, friendly = False &>
+%
+% else:
+    <& formatrecord, message = error.message(), lead_rec = records[0], records = records, friendly = False &>
+%   
+</body>
+</html>
+
+<%def formatrecord>
+<%args>
+    message
+    lead_rec
+    records
+    friendly
+</%args>
+
+    <table>
+    <tr><td class="bold">Error:</td>
+    <td><% message |h %></td>
+    <tr><td class="bold">File:</td>
+    <td><% lead_rec.file %> line <% lead_rec.codeline %></td>
+    </tr>
+    <tr>
+    <td class="bold" valign="top">Context:</td>
+    <td>
+    <& formatlines, lines = lead_rec.get_lines(), highlight = lead_rec.codeline &>
+    </td>
+    </tr>
+    
+    <td class="bold" valign="top">Traceback:</td>
+    <td>
+    <& formattraceback, records = records, friendly = friendly &>
+    </td>
+    </tr>
+    </table>
+</%def>
+
+<%def formatlines>
+<%args>
+lines
+highlight
+</%args>
+
+% for line in lines:
+%   code = m.apply_escapes( line.line.expandtabs(), 'h' )
+%   code = code.replace(' ','&nbsp;')
+%   if line.linenum == highlight:
+    <span class="red"><% line.linenum %>: <% code %></span><br/>
+%   else:
+    <% line.linenum %>: <% code %><br/>
+%
+</%def>
+
+<%def formattraceback>
+<%args>
+    records
+    friendly
+</%args>
+
+% for rec in records:
+%   if not friendly:
+%       rec = rec.original
+
+%   if not friendly or not rec.is_myghty_lib():
+        <% rec.file %>:<% rec.codeline %><br/>  
+%
+
+</%def>
+""", id='exception')
+
+    
+class Syntax(Error):
+    "invalid syntax in a component"
+    def __init__(self, error, comp_name, source_line, line_number,
+                 source = None,
+                 file = None,
+                 source_encoding = None):
+        self.error = error
+        Error.__init__(self, error)
+        self.lead_rec = Error.SyntaxTraceLine(source_line, line_number,
+                                              comp_name,
+                                              source, file, source_encoding)
+
+class AbortRequest(Exception):
+    "request aborted"
+    pass
+    
+class Abort(AbortRequest):
+    "HTTP abort called by component"
+    def __init__(self, aborted_value, reason):
+        self.aborted_value = aborted_value
+        self.reason = reason
+
+class Redirected(Abort):
+    "redirect called"
+    def __init__(self, path, code=301, reason=None):
+        self.path = path
+        Abort.__init__(self, code, reason)
+
+            
+class Decline(AbortRequest):
+    "decline called by component"
+    def __init__(self, declined_value):
+        self.declined_value = declined_value
+
+class ConfigurationError(Error):
+    "configuration error"
+    pass
+
+class ServerError(Error):
+    "server error (500) "
+    pass
+
+class Request(Error):
+    "request error"
+    pass
+            
+class Compiler(Error):
+    "compiler error"
+    pass
+
+class Interpreter(Error):
+    "interpreter error"
+    pass
+
+class MethodNotFound(Error):
+    "couldnt find method"
+    pass
+        
+class ComponentNotFound(Error):
+    "couldnt find component"
+    def __init__(self, msg, resolution_detail, silent = False):
+        Error.__init__(self, msg)
+        self.resolution_detail = resolution_detail
+        self.silent = silent
+        
+    def message(self):
+        if self.resolution_detail is not None:
+            return self.msg + " (" + string.join(self.resolution_detail, ', ') + ")"
+        else:
+            return self.msg
+
+    def create_toplevel(self):
+        """converts this ComponentNotFound into a TopLevelNotFound exception, which 
+        is used by HTTPHandlers to return a 404 return code."""
+        return TopLevelNotFound(self.msg, self.resolution_detail, self.silent)
+        
+class PathIsDirectory(ComponentNotFound):
+    "the specified component path is a directory"
+    pass
+
+class TopLevelNotFound(ComponentNotFound):
+    "couldnt find top level component"
+    pass
+
+class MissingArgument(Error):
+    "a required argument was missing from a component call"
+    pass
+    
+class IncompatibleCompiler(Error):
+    "wrong compiler"
+    pass
+
+################################################################
+
+import codecs, parser
+
+# Regexp to match python magic encoding line
+_PYTHON_MAGIC_COMMENT_re = re.compile(
+    r'[ \t\f]* \# .* coding[=:][ \t]*([-\w.]+)',
+    re.VERBOSE)
+
+def _parse_encoding(fp): 
+    """Deduce the encoding of a source file from magic comment. 
+	 
+    It does this in the same way as the `Python interpreter`__ 
+	 
+    .. __: http://docs.python.org/ref/encodings.html 
+	 
+    The ``fp`` argument should be a seekable file object.
+    """
+    pos = fp.tell()
+    fp.seek(0)
+    try:
+        line1 = fp.readline()
+        has_bom = line1.startswith(codecs.BOM_UTF8)
+        if has_bom:
+            line1 = line1[len(codecs.BOM_UTF8):]
+
+        m = _PYTHON_MAGIC_COMMENT_re.match(line1)
+        if not m:
+            try:
+                parser.suite(line1)
+            except SyntaxError:
+                # Either it's a real syntax error, in which case the source
+                # is not valid python source, or line2 is a continuation of
+                # line1, in which case we don't want to scan line2 for a magic
+                # comment.
+                pass
+            else:
+                line2 = fp.readline()
+                m = _PYTHON_MAGIC_COMMENT_re.match(line2)
+
+        if has_bom:
+            if m:
+                raise SyntaxError, \
+                      "python refuses to compile code with both a UTF8" \
+                      " byte-order-mark and a magic encoding comment"
+            return 'utf_8'
+        elif m:
+            return m.group(1)
+        else:
+            return None
+    finally:
+        fp.seek(pos)
+                
+
+class _EncodedLine(object):
+    def __init__(self, line, encoding=None):
+        if encoding is None:
+            encoding = sys.getdefaultencoding()
+        self.line = line
+        self.encoding = encoding
+
+    def __str__(self):
+        if isinstance(self.line, str):
+            return self.line
+        return self.line.encode('ascii', 'replace')
+
+    def __unicode__(self):
+        if isinstance(self.line, unicode):
+            return self.line
+        return self.line.decode(self.encoding, 'replace')
+
+    def expandtabs(self, tabsize=8):
+        return _EncodedLine(self.line.expandtabs(tabsize), self.encoding)
+    
