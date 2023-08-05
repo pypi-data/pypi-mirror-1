@@ -1,0 +1,122 @@
+Tick
+====
+
+Nothing to notify::
+
+  >>> from iw.subscriber.browser.tick import Tick
+  >>> view = Tick(portal, TestRequest())
+  >>> [k for k in view.getContents().keys()]
+  []
+
+Set correct types for testing::
+
+  >>> from iw.subscriber import interfaces
+  >>> sm = zope.component.getSiteManager(portal)
+  >>> utility = sm.getUtility(interfaces.ISubscriberUtility)
+  >>> utility.subscribed_types = ['Folder', 'Document', 'Large Plone Folder']
+  >>> portal.email_from_adress = 'gael@ingeniweb.com'
+
+Add a document::
+
+  >>> self.loginAsPortalOwner()
+  >>> portal.invokeFactory(type_name='Document', id='test_document')
+  'test_document'
+  >>> portal.test_document.update(title='Test document')
+
+Subscribe to it::
+
+  >>> from iw.subscriber.interfaces import ISubscriberStorage
+  >>> adapter = ISubscriberStorage(portal.test_document)
+  >>> adapter.get().add('gael@ingeniweb.com')
+  >>> publish(portal.test_document)
+
+Then check for contents to notify::
+
+  >>> view = Tick(portal, TestRequest())
+  >>> view.util.next_notification = view.now - datetime.timedelta(.01)
+  >>> contents = view.getContents()
+
+Check that email is in keys::
+
+  >>> [v for v in contents.keys()]
+  ['gael@ingeniweb.com']
+
+And `test_document` in brains to notify::
+
+  >>> brains = contents.get('gael@ingeniweb.com')
+  >>> [b.getPath() for b in brains]
+  ['/plone/test_document']
+
+
+Ok, now try to add more stuff::
+
+  >>> createContents(portal)
+
+Now subscribe to a folder::
+
+  >>> subscribe_to(portal.level1_folder2, 'level1_folder2@ingeniweb.com')
+  >>> view = Tick(portal, TestRequest())
+  >>> contents = view.getContents()
+  >>> len(contents.keys())
+  2
+  >>> len([b for b in contents.get('level1_folder2@ingeniweb.com').values()[0]])
+  2
+  >>> [b.getPath() for b in contents.get('level1_folder2@ingeniweb.com').values()[0]]
+  ['/plone/level1_folder2/level1_document1', '/plone/level1_folder2/level1_document2']
+
+Real notification::
+
+  >>> view.util.next_notification = view.now
+  >>> code = view(view.now)
+  Content-Type: multipart/related; charset="iso-8859-1";
+  ...
+  To: gael@ingeniweb.com
+  ...
+  ...<a href=3D"http://nohost/plone/test_document">Test document</a>
+  ...
+  Content-Type: multipart/related; charset="iso-8859-1";
+  ...
+  To: level1_folder2@ingeniweb.com
+  ...
+  ...<a href=3D"http://nohost/plone/level1_folder2">Folder 2</a>
+  ...
+
+Two notification is sent::
+
+  >>> print code
+  2 OK
+
+Re-notify when nothing is modified::
+
+  >>> view.util.next_notification = view.now
+  >>> print view(view.now)
+  NOTHING TO DO
+
+Now modify a content in folder 2::
+
+  >>> document = portal.level1_folder2.level1_document1
+  >>> document.update(title='Title have changed')
+  >>> publish(document, creation_date=DateTime()-1)
+
+And fake last notification for testing::
+
+  >>> view.util.last_notification = view.now - datetime.timedelta(1.5)
+  >>> view.util.next_notification = view.now
+
+Then re-notify again::
+
+  >>> code = view(view.now)
+  Content-Type: multipart/related; charset="iso-8859-1";
+  ...
+  To: level1_folder2@ingeniweb.com
+  ...
+  Subject: =?iso-8859-1?q?Site_notification?=
+  ...
+  ...>Title have changed<...
+  ...
+
+Only one notification is sent::
+
+  >>> print code
+  1 OK
+
