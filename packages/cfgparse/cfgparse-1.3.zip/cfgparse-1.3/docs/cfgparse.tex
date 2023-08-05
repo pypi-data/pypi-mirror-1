@@ -1,0 +1,2055 @@
+\documentclass{howto}
+
+\setcounter{secnumdepth}{5}
+\title{cfgparse --- python configuration file parser module}
+\author{Dan Gass (dan.gass@gmail.com)}
+
+
+\begin{document}
+\maketitle
+
+\begin{center}
+Version 1.2
+
+Download Source and Documentation:
+\url{https://sourceforge.net/projects/cfgparse}
+
+\textit{Requires Python 2.3 -or- Python 2.2 and textwrap module from 2.3}
+\end{center}
+
+\module{cfgparse} is a more convenient, flexible, and powerful module for parsing 
+configuration files than the standard library \module{ConfigParser} module.  
+\module{cfgparse} uses a more declarative style modelled after the popular \module{optparse} 
+standard library module.  
+
+\module{cfgparse} can optionally cooperate with the \module{optparse} module to provide
+coordination between command line and configuration file options.  In addition, the 
+cooperation can be used to allow the user to control features of the parser from the command line.
+
+If you like this module and want to see it in the standard Python distribution, 
+please take the time and add your comments to the Python Configuration File 
+Parser Shootout wiki: \url{http://www.python.org/moin/ConfigParserShootout}.
+
+\paragraph*{Standard Features}
+
+\begin{itemize}
+\item Simple \code{ini} style configuration syntax
+\item Type checking with error handling and help messages
+\item Help summary modelled after that in \module{optparse}
+\item Round trip - read, modify, write configuration files with comment retention
+\item Cooperates with \module{optparse} for configuration file options that 
+    should be overridden by command line options
+\end{itemize}
+
+\paragraph*{Advanced Features}
+
+\begin{itemize}
+\item Supports heirarchically organized option settings
+    \begin{itemize}
+    \item User may store multiple option settings in a arbitrarily deep keyed dictionary. 
+    \item Application uses a key list to walk into the dictionary to obtain a setting.
+    \item User controls key list with setting in configuration file.
+    \item Supports adding keys to the list through a command line option or from environment variables.
+    \end{itemize}
+\item Supports allowing user control of configuration files used.
+    \begin{itemize}
+    \item Environment variables may be used to allow user to specify a default configuration file.
+    \item Command line options to specify configuration file supported.
+    \item Configuration files may include other configuration files where where sections are read in parallel.
+    \item Configuration files may be nested heirarchically by including configuration files from within a section or subsection.
+    \end{itemize}
+\item Configuration files may alternatively be written in Python.
+    \begin{itemize}
+    \item full power and flexibility of Python available for creation of option settings
+    \item allows options settings to be real Python objects
+    \item this feature is NOT enabled by default
+    \end{itemize}
+\item May be extended to support syntax such as XML.
+\end{itemize}
+
+For example:
+
+% <file name='intro.ini'>
+\begin{verbatim}
+# file: intro.ini
+retries = 10
+\end{verbatim}
+% </file>
+
+And script:
+
+% <file name='intro.py'>
+\begin{verbatim}
+# file: intro.py
+import cfgparse
+c = cfgparse.ConfigParser()
+c.add_option('retries', type='int')
+c.add_file('intro.ini')
+opts = c.parse()
+print 'Number of retries:',opts.retries
+\end{verbatim}
+% </file>
+
+Results in:
+
+% <cline id="intro">
+\begin{verbatim}
+$ python intro.py
+Number of retries: 10
+\end{verbatim}
+% </cline>
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\pagebreak
+% \tableofcontents
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Public interface summary}
+
+The following classes, methods, and objects are intended to be used directly
+it is unlikely the interface will change.
+The module also contains other publicly available classes, methods, and 
+objects.  It is intended that these will be available for advanced users 
+for use in subclassing the configuration parser.  Since this module is 
+relatively new it is not recommended that these are used at this time since
+implementation details of this module may change.
+
+\begin{itemize}
+\item class \code{ConfigParser}
+    \begin{itemize} 
+    \item \code{__init__}([\var{description}][,\var{allow_py}]
+        [,\var{formatter}][,\var{exception}])~~<\ref{cfgparse-create-parser}>
+    \item \code{add_file}([\var{cfgfile}][,\var{content}][,\var{type}]
+        [,\var{keys}][,\var{parent}])~~<\ref{cfgparse-adding-files}>
+    \item \code{add_env_file}(\var{var})~~<\ref{cfgparse-adding-files}>
+    \item \code{add_option}(\var{name}[,\var{help}][, \var{type}]
+        [, \var{choices}][, \var{dest}][, \var{metavar}][, \var{default}]
+        [, \var{check}][, \var{keys}])~~<\ref{cfgparse-adding-options}>
+    \item \code{add_option_group}(\var{title}
+        [,\var{description}])~~<\ref{cfgparse-groups}>
+    \item \code{parse}([\var{optparser}][,\var{args}])~~<\ref{cfgparse-parsing}>
+    \item \code{add_optparse_help_option}(\var{option_group}[,\var{switches}]
+        [,\var{dest}][,\var{help}])~~<\ref{cfgparse-coop-help}>
+    \item \code{add_optparse_keys_option}(\var{option_group}[,\var{switches}]
+        [,\var{dest}][,\var{help}])~~<\ref{cfgparse-coop-keys}>
+    \item \code{add_optparse_files_option}(\var{option_group}[,\var{switches}]
+        [,\var{dest}][,\var{help}])~~<\ref{cfgparse-coop-files}>
+    \item \code{print_help}([\var{file}])~~<\ref{cfgparse-printing-help}>
+    \item \code{add_note}(\var{note})~~<\ref{cfgparse-help-notes}>
+    \end{itemize}
+
+\item class \code{ConfigFileIni}~~<\ref{cfgparse-adding-files}>
+    \begin{itemize} 
+    \item \code{get_filename}()
+    \item \code{set_option}(\var{name},\var{value}[,\var{keys}]
+        [,\var{help}])~~<\ref{cfgparse-round-trip-set-option}>
+    \item \code{write}(\var{outfile})~~<\ref{cfgparse-round-trip-write}>
+    \end{itemize}
+
+\item class \code{ConfigFilePy}~~<\ref{cfgparse-adding-files}>
+    \begin{itemize} 
+    \item \code{get_filename}()
+    \end{itemize}
+    
+\item class \code{Option}~~<\ref{cfgparse-adding-options}>
+    \begin{itemize} 
+    \item \code{get}([keys][,errors])~~<\ref{cfgparse-parsing}>
+    \item \code{set}(\var{value}[,\var{cfgfile}][,\var{keys}])~~<\ref{cfgparse-round-trip-set}>
+    \item \code{add_note}(\var{note})~~<\ref{cfgparse-help-notes}>
+    \end{itemize}
+    
+\item class \code{OptionGroup}~~<\ref{cfgparse-groups}>
+    \begin{itemize} 
+    \item \code{add_option}(\var{name}[,\var{help}][, \var{type}]
+        [, \var{choices}][, \var{dest}][, \var{metavar}][, \var{default}]
+        [, \var{check}][, \var{keys}])~~<\ref{cfgparse-adding-options}>
+    \end{itemize}
+
+\item class \code{IndentedHelpFormatter}~~<\ref{cfgparse-create-parser}>
+\item class \code{TitledHelpFormatter}~~<\ref{cfgparse-create-parser}>
+\item \code{SUPPRESS_HELP}~~<\ref{cfgparse-option-help}>
+\end{itemize}
+            
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Basics}
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Creating the parser\label{cfgparse-create-parser}}
+
+\begin{classdesc*}{ConfigParser}
+  This class can be used to parse options from user configuration files.  
+  A single instance of this class is typically created.  This single instance
+  may be used to parse multiple configuration files and obtain multiple
+  configuration options.
+  
+  The constructor for this class is:
+
+  \begin{funcdesc}{ConfigParser}{\optional{description}\optional{,
+    allow_py}\optional{, formatter}\optional{, exception}}
+
+    \var{description} is an optional string keyword argument and controls
+        the introductory text placed above configuration option help text.
+        See "Option Help" (section \ref{cfgparse-option-help}).
+        
+    \var{allow_py} is an optional boolean keyword argument and when set to
+        \code{True}, allows Python based configuraton files to be read
+        (executed).  The default is \code{False}.  Enabling this feature
+        poses a potential security hole for your application.
+    
+    \var{formatter} is an optional keyword argument and controls 
+        the configuration option help text style.  Set to either the 
+        \class{IndentedHelpFormatter} or \class{TitledHelpFormatter} class
+        in the \module{cfgparse} module (or a subclass of either).
+    
+    \var{exception} is an optional keyword argument and controls 
+        the how user errors are handled by the parser.  If set to 
+        \code{False} or omitted, errors are written to \code{sys.stderr} and
+        \code{sys.exit()} is called.  If set to \code{True}, the
+        \code{ConfigParserUserError} exception is raised.  Otherwise set
+        this argument to the custom exception class that should be raised.
+  \end{funcdesc}
+
+\end{classdesc*}
+
+In many applications the defaults for constructing an instance of 
+\class{ConfigParser} are sufficient.
+
+For example:
+
+% <file name="construct.ini">
+\begin{verbatim}
+# file: construct.ini
+retries = 10
+\end{verbatim}
+% </file>
+
+% <file name="construct.py">
+\begin{verbatim}
+# file: construct.py
+import cfgparse
+c = cfgparse.ConfigParser()
+c.add_option('retries', type='int')
+c.add_file('construct.ini')
+opts = c.parse()
+print 'Number of retries:',opts.retries
+\end{verbatim}
+% </file>
+
+Results in:
+% <cline id="construct">
+\begin{verbatim}
+$ python construct.py
+Number of retries: 10
+\end{verbatim}
+% </cline>
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Adding Files\label{cfgparse-adding-files}}
+    
+The \code{add_file()} method of \class{ConfigParser} is used to add configuration 
+files to the parser.  It returns an object which may be used for modifying
+option settings in the file and writing the changed file contents.
+
+  \begin{funcdesc}{add_file}{\optional{cfgfile}\optional{,content}\optional{,
+    type}\optional{, underkeys}}
+
+    \var{cfgfile} is an optional keyword argument and is used to pass a file
+        name string or a file stream.  This argument defaults to \code{None}.
+        See table below for details.
+        
+    \var{content} is an optional keyword argument and is used to pass a file
+        contents string or a file stream.  This argument defaults to 
+        \code{None}.  See table below for details.
+        
+    \var{type} is an optional keyword argument used to control the parser
+        used to read the configuration file.  Argument may be set to either
+        \code{'ini'}, \code{'py'}, or \code{None} (default).  When set to 
+        \code{None}, file name extension is used to determine type.  
+        \code{'py'} causes the file to be read (executed) as Python code 
+        otherwise the \code{'ini'} syntax is assumed.
+    
+    \var{keys} is an optional keyword argument.  When omitted, \code{None} 
+        or an empty list, options read from this file will be
+        read and stored using the sections as specified in the configuration
+        file.  Any keys passed in are used to extend the section names in the
+        configuration file when the file is read and stored.  Note, file is
+        only read and parsed if keys used to obtain option settings contain 
+        all the keys in this list.  See "Keys" (section 
+        \ref{cfgparse-keys}) for more details.
+  \end{funcdesc}
+
+The following table summarizes the legal combinations \var{cfgfile} and
+\var{content} arguments and the resulting \strong{file name} and 
+\strong{file contents} utilized.
+
+\begin{tableiv}{l|l|l|l}{textrm}{\var{cfgfile}}{\var{content}}{file name}{file contents}
+\lineiv{filename}    {\code{None}} {\var{cfgfile}} {file is opened and read}
+\lineiv{stream}      {\code{None}} {stream.name}   {stream is read}
+\lineiv{filename}    {stream}      {\var{cfgfile}} {stream is read}
+\lineiv{\code{None}} {stream}      {'stream'}      {stream is read}
+\lineiv{filename}    {string}      {\var{cfgfile}} {\var{content}}
+\lineiv{\code{None}} {string}      {'heredoc'}     {\var{content}}
+\end{tableiv}
+
+The \code{add_env_file()} method of \class{ConfigParser} is used to read a
+configuration file specified by an environment variable and returns
+an object which may be used for modifying option settings in the 
+file and writing the changed file contents.  For \code{ini} configuration 
+files the returned object is an instance of \code{ConfigFileIni}.  If the
+environment variable does not exist, \code{None} will be returned.
+  
+  \begin{funcdesc}{add_env_file}{var\optional{,keys}}
+
+    \var{var} is a required positional argument and is the name of the 
+        environment variable that contains the configuration filename to
+        add.  
+    \var{keys} is an optional keyword argument.  When omitted, \code{None} 
+        or an empty list, options read from this file will be
+        read and stored using the sections as specified in the configuration
+        file.  Any keys passed in are used to extend the section names in the
+        configuration file when the file is read and stored.  Note, file is
+        only read and parsed if keys used to obtain option settings contain 
+        all the keys in this list.  See "Keys" (section 
+        \ref{cfgparse-keys}) for more details.
+  \end{funcdesc}
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Adding Options\label{cfgparse-adding-options}}
+
+The \code{add_option()} method of \class{ConfigParser} is used to add configuration 
+options to the parser.  This is the same concept as adding options with the
+\module{optparse} module and shares many of the same arguments (please bring any
+inconsistencies to the attention of the author).  Defining the 
+options in the configuration parser serves the following purposes:
+
+\begin{itemize}
+\item automatic type and value checking 
+\item default values can be defined
+\item help can be automatically generated in a consistent format
+\end{itemize}
+
+Options must be added to the parser before the \code{parse()} method is called.
+Options may be added before or after files are added to the parser.  
+The following is the \code{add_option()} method prototype:
+
+  \begin{funcdesc}{add_option}{name
+      \optional{, help}
+      \optional{, type}
+      \optional{, choices}
+      \optional{, dest}
+      \optional{, metavar}
+      \optional{, default}
+      \optional{, check}
+      \optional{, keys}
+      }
+
+    \var{name} is a positional string argument and is the exact name of the 
+        configuration option as it is to appear in the configuration file.
+        
+    \var{help} is an optional string keyword argument and controls the help
+        text associated with this option displayed when configuration help 
+        is written.  Defaults to \code{None} which displays no additional
+        help text beyond the option name and metavar.  This may be set to
+        \code{cfgparse.SUPPRESS_HELP} to completely eliminate the option 
+        from the help text.  See "Option help" (section 
+        \ref{cfgparse-option-help}) details.
+        If using \module{optparse} and \module{cfgparse} in cooperation, 
+        \var{help} may be omitted here and will automatically be picked 
+        up from the \module{optparse} option.  See "Option cooperation" 
+        (section \ref{cfgparse-coop-option}) for more details.
+
+    \var{type} is an optional string keyword argument and describes the type
+        which the configuration option is to be converted into.  See 
+        "Option type" (section \ref{cfgparse-option-type}) for details.
+        If using \module{optparse} and \module{cfgparse} in cooperation, 
+        \var{type} may be omitted here and will automatically be picked 
+        up from the \module{optparse} option.  See "Option cooperation" 
+        (section \ref{cfgparse-coop-option}) for more details.
+        
+    \var{choices} is an optional list keyword argument and is used to pass in the
+        possible choices when \var{type} is set to \code{'choice'}.  See 
+        "Option type" (section \ref{cfgparse-option-type}) for details.
+        If using \module{optparse} and \module{cfgparse} in cooperation, 
+        \var{choices} may be omitted here and will automatically be picked 
+        up from the \module{optparse} option.  See "Option cooperation" 
+        (section \ref{cfgparse-coop-option}) for more details.
+                    
+    \var{dest} is an optional string keyword argument and controls the 
+        attribute name that the value of this option will be stored in
+        when the \code{parse()} method creates an options object.  This
+        must be a unique value for every added option.  Default is \code{None}
+        which will cause the \var{name} argument to be used as the
+        destination attribute.  See "Name and destination" (section 
+        \ref{cfgparse-option-name}) for more details.
+        If using \module{optparse} and \module{cfgparse} in cooperation, 
+        \var{dest} must exactly match between the two options.  
+        See "Option cooperation" (section \ref{cfgparse-coop-option}) for more details.
+
+    \var{metavar} is an optional string keyword argument and is used control the
+        help text associated with this option.  Specifically, this text
+        string is used directly after the \code('=') sign in the option=VALUE.
+        By default the \var{dest} argument in all upper case is used.
+        If using \module{optparse} and \module{cfgparse} in cooperation, 
+        \var{metavar} may be omitted here and will automatically be picked 
+        up from the \module{optparse} option.  See "Option cooperation" (section 
+        \ref{cfgparse-coop-option}) for more details.
+
+    \var{default} is an optional keyword argument and is used control the
+        configuration option default value when the configuration option cannot
+        be found.  Omitting this option will cause an exception to be raised
+        when the option cannot be found.
+        If using \module{optparse} and \module{cfgparse} in cooperation, 
+        \var{default} should NOT be set when adding the \module{optparse} option.
+        See "Option cooperation" (section \ref{cfgparse-coop-option}) for more details.
+  
+    \var{check} is an optional keyword argument and is used to pass in a
+        function to validate (and possibly convert) the configuration option.
+        Function interface requirements are defined in "Option check" (section
+        \ref{cfgparse-option-check}).
+
+    \var{keys} is an optional argument and is used to pass in the section 
+        keys to obtain the option.  Typically this is set to the section
+        name where the setting is expected to be (the [DEFAULT] section 
+        will also be searched as a last resort).   Default is \code{None} 
+        which will cause the parser only obtain the option setting from the
+        [DEFAULT] section.  See "Keys" (section \ref{cfgparse-keys})
+        for more details.
+
+\end{funcdesc}
+
+%  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %
+\subsubsection{Name and Destination\label{cfgparse-option-name}}
+
+The \var{name} string argument of the \code{add_option()} method is used to specify
+the name of the option setting to be obtained from the configuration file.
+\var{name} is required and is case sensitive, the option name in the configuration 
+file must exactly match the \var{name} argument.
+
+The \code{parse()} method returns an object with attributes set to the option
+settings specified using the \code{add_option()} method.  The \var{dest} string
+argument is used to control the name of the attribute.  If \var{dest} argument
+is not present, the \var{name} is used as the attribute name.  Each option
+added must have a unique destination attribute name.
+
+For example:
+
+% <file name='name_dest.ini'>
+\begin{verbatim}
+# file: name_dest.ini
+mail_server =  192.168.0.0
+proxy_server = 192.168.0.100
+\end{verbatim}
+% </file>
+
+And script:
+
+% <file name='name_dest.py'>
+\begin{verbatim}
+# file: name_dest.py
+import cfgparse
+c = cfgparse.ConfigParser()
+c.add_file('name_dest.ini')
+c.add_option('mail_server')
+c.add_option('proxy_server', dest='proxy')
+opts = c.parse()
+print 'Mail Server IP Address =',opts.mail_server
+print 'Proxy Server IP Address =',opts.proxy
+\end{verbatim}
+% </file>
+
+Results in:
+
+% <cline id="name_dest">
+\begin{verbatim}
+$ python name_dest.py
+Mail Server IP Address = 192.168.0.0
+Proxy Server IP Address = 192.168.0.100
+\end{verbatim}
+% </cline>
+ 
+%  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %
+\subsubsection{Option type\label{cfgparse-option-type}}
+
+The \var{type} string argument of the \code{add_option()} method is used to specify
+the convert the option setting obtained from a configuration file into the 
+desired type.  If the configuration option setting cannot be converted to the
+desired type appropriate help text will be made available (either an exception 
+is raised or \code{sys.exit()} is called dependent on \code{exception} argument
+when instantiating \code{ConfigParser}).  The following table shows the legal values:
+
+\begin{tableii}{l|l}{textrm}{value}{result}
+\lineii{\code{None}}      {no conversion (default)*}
+\lineii{\code{'choice'}}  {verifies option setting is a valid choice**}
+\lineii{\code{'complex'}} {converts to complex number}
+\lineii{\code{'float'}}   {converts to floating point number}
+\lineii{\code{'int'}}     {converts to an integer}
+\lineii{\code{'long'}}    {converts to a long integer}
+\lineii{\code{'string'}}  {converts to a string}
+\end{tableii}
+
+Notes:
+
+*   When parsed, \code{ini} style configuration files automatically return
+    strings as the option setting and no conversion is necessary.  Python
+    based configuration files return objects.  Omitting the \var{type}
+    argument (or setting \var{type} to \var{None}) allows the option setting 
+    object to remain as is.    
+
+**  When \var{type} is set to \code{'choice'}, the \var{choices} argument
+    must also be present and must be a list of strings of valid choices.
+
+For example:
+
+% <file name='type.ini'>
+\begin{verbatim}
+# file: type.ini
+int_option = 10
+float_option = 1.5
+choice_option = APPLE 
+\end{verbatim}
+% </file>
+
+And script:
+
+% <file name='type.py'>
+\begin{verbatim}
+# file: type.py
+import cfgparse
+c = cfgparse.ConfigParser()
+c.add_file('type.ini')
+c.add_option('int_option', type='int')
+c.add_option('float_option', type='float')
+c.add_option('choice_option', type='choice', choices=['APPLE','ORANGE'])
+opts = c.parse()
+print opts.int_option*2
+print opts.float_option*3
+print opts.choice_option
+\end{verbatim}
+% </file>
+
+Results in:
+% <cline id="type">
+\begin{verbatim}
+$ python type.py
+20
+4.5
+APPLE
+\end{verbatim}
+% </cline>
+ 
+%  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %
+\subsubsection{Option check\label{cfgparse-option-check}}
+ 
+The \var{check} argument of the \code{add_option()} method is used to provide
+a function to check the option setting.  In addition the function may also
+do any further conversions, but it is recommended that the \var{type}
+argument be used when possible.  The \var{check} function must accept a single
+argument, the option setting.  The function must return a tuple containing
+the option setting and an error message.  If no error, the error message 
+should be set to \code{None}.
+
+For example:
+
+% <file name='check.ini'>
+\begin{verbatim}
+# file: check.ini
+timeout  = 10  # seconds
+timeout2 = 101 # invalid
+\end{verbatim}
+% </file>
+
+And script:
+
+% <file name='check.py'>
+\begin{verbatim}
+# file: check.py
+
+def in_range(value):
+    error = None
+    if (value <= 0) or (value >= 100):
+        error = "'%d' not valid.  Must be between 0 and 100 seconds." % value        
+    value = value * 1000 # convert to milliseconds
+    return value,error
+    
+import cfgparse
+c = cfgparse.ConfigParser()
+c.add_file('check.ini')
+c.add_option('timeout', type='int', check=in_range)
+opts = c.parse()
+print "Valid timeout:",opts.timeout
+
+c.add_option('timeout2', type='int', check=in_range)
+opts = c.parse()
+\end{verbatim}
+% </file>
+
+Results in:
+% <cline id="check">
+\begin{verbatim}
+$ python check.py
+Valid timeout: 10000
+ERROR: Configuration File Parser
+
+Option: timeout2
+File: [CWD]/check.ini
+Section: [DEFAULT]
+Line: 3
+'101' not valid.  Must be between 0 and 100 seconds.
+\end{verbatim}
+% </cline>
+ 
+%  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %
+\subsubsection{Option Help\label{cfgparse-option-help}}
+
+The \var{help} and \var{metavar} arguments of the \code{add_option()} method 
+are used to control the configuration option help text automatically generated 
+by the \code{print_help()} method.
+
+For example:
+
+% <file name='help.py'>
+\begin{verbatim}
+# file: help.py
+import cfgparse
+c = cfgparse.ConfigParser(description='Description of the option '
+    'configuration.')
+c.add_option('retries', type='int', help='Maximum number of retries.')
+c.add_option('timeout', type='int', metavar='#SEC', 
+             help='Seconds between retries.')
+c.print_help()
+\end{verbatim}
+% </file>
+
+Results in:
+% <cline id="help">
+\begin{verbatim}
+$ python help.py
+Description of the option configuration.
+
+Configuration file options:
+  retries=RETRIES  Maximum number of retries.
+  timeout=#SEC     Seconds between retries.
+\end{verbatim}
+% </cline>
+
+\var{metavar} controls the setting representation on the right side of the 
+option/setting pair in the help text.  If \var{metavar} is not specified or
+set to \code{None} the destination attribute name (in upper case) is used.
+The destination attribute name is controlled by the \var{name} and 
+\var{dest} arguments.
+
+%  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %  %
+\subsubsection{Sections}
+
+Configuration files may be organized in sections with each section containing
+option/value pairs.  The \var{keys} argument of the \code{add_option()} method
+can be used to select which section to obtain the option setting from.
+
+For example:
+
+% <file name='sections.ini'>
+\begin{verbatim}
+# file: sections.ini
+[DEFAULT]
+# all devices use the same driver type
+driver = ethernet
+
+[DEV0]
+# path to device #0
+path = 192.168.0.0
+
+[DEV1]
+# path to device #1
+path = 192.168.0.1
+\end{verbatim}
+% </file>
+
+And script:
+
+% <file name='sections.py'>
+\begin{verbatim}
+# file: sections.py
+import cfgparse
+c = cfgparse.ConfigParser()
+c.add_option('driver', dest='driver0', keys='DEV0')
+c.add_option('driver', dest='driver1', keys='DEV1')
+c.add_option('path', dest='path0', keys='DEV0')
+c.add_option('path', dest='path1', keys='DEV1')
+c.add_file('sections.ini')
+opts = c.parse()
+print "DEV0:",opts.driver0,opts.path0
+print "DEV1:",opts.driver1,opts.path1
+\end{verbatim}
+% </file>
+
+Results in:
+% <cline id="section">
+\begin{verbatim}
+$ python sections.py
+DEV0: ethernet 192.168.0.0
+DEV1: ethernet 192.168.0.1
+\end{verbatim}
+% </cline>
+
+The \code{[DEFAULT]} section is special.  If an option setting cannot be found
+in a section specified by \var{keys}, the option is obtained from the 
+\code{[DEFAULT]} section.  This section is also utilized if \var{keys} is not
+specified.  Note, use of \code{[DEFAULT]} is optional.  If omitted, option/setting
+pairs specified before any section declarations are considered part of the
+\code{[DEFAULT]} section.  Although not advisable, multiple sections of the
+same name may exist and are treated as one section without error.
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Groups\label{cfgparse-groups}}
+
+The \code{add_option_group()} method can be used to create groups of options.  
+The purpose of grouping options is strictly for organizing the help text
+to make it more presentable to the user.
+
+  \begin{funcdesc}{add_option_group}{title\optional{ ,description}}
+
+    \var{title} is a required positional string argument and generally is
+        a few words used to label the configuration option group.
+        
+    \var{description} is an optional keyword argument and can be used to
+       provide a more lengthy description of the configuration option group.
+  
+  \end{funcdesc}
+
+\code{add_option_group()} returns an instance of the \code{OptionGroup} class
+which has the same \code{add_option()} method as the parser.
+  
+For example:
+
+% <file name='groups.py'>
+\begin{verbatim}
+import cfgparse
+c = cfgparse.ConfigParser()
+c.add_option('opt0', help='Help for opt0')
+
+group = c.add_option_group('Group 1')
+group.add_option('opt1', help='Help for opt1')
+
+group = c.add_option_group('Group 2','Some long winded discussion about '
+    'group 2 that will not fit all on a single line if that single line '
+    'is not extremely wide.')
+group.add_option('opt2', help='Help for opt2')
+
+c.print_help()
+\end{verbatim}
+% </file>
+
+Results in:
+
+% <cline id="groups">
+\begin{verbatim}
+$ python groups.py
+Configuration file options:
+  opt0=OPT0    Help for opt0
+
+  Group 1:
+    opt1=OPT1  Help for opt1
+
+  Group 2:
+    Some long winded discussion about group 2 that will not fit all on a
+    single line if that single line is not extremely wide.
+
+    opt2=OPT2  Help for opt2
+\end{verbatim}
+% </cline>
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Parsing and Obtaining Options\label{cfgparse-parsing}}
+
+Configuration file options settings may be obtained either all at once or one
+at a time.  The \code{parse()} method may be used for obtaining all the option
+settings all at once and returns the options bundled in a single object as
+attributes.  If errors are found, appropriate help text will be made available 
+(either an exception is raised or \code{sys.exit()} is called dependent on 
+\code{exception} argument when instantiating \code{ConfigParser}).  This allows 
+errors to be reported to the user up front.
+
+  \begin{funcdesc}{parse}{\optional{optparser}\optional{, args}}
+
+    \var{optparse} is an optional keyword argument and is used to pass in an
+        instance of a command line option parser with which the configuration
+        option parser is to cooperate with.  Omitting this argument or 
+        setting to \code{None} avoids interfacing to a command line option parser.
+        When used, the \code{parse()} method will return a tuple of the bundled
+        options object and the command line arguments.  The bundled options
+        object will contain the options from both the command line parser and
+        the configuration files.  Presence of this option will also allow
+        enable the use of other cooperation features documented in 
+        "Command line cooperation" (section \ref{cfgparse-cmd-line-coop}).
+    
+    \var{args} is an optional keyword argument and are the arguments to be
+        parsed by the command line option parser.  Omitting this argument or
+        setting to \code{None} causes arguments in \code{sys.argv} (from the 
+        command line) to be utilized.
+  
+  \end{funcdesc}
+
+An alternative method is to get the options as they are needed using the
+\code{get()} method of the object returned by the \code{add_option()} method.
+
+  \begin{funcdesc}{get}{\optional{keys}\optional{, errors}}
+
+    \var{keys} is an optional keyword argument and is used to pass in 
+        additional keys to use obtain the option setting.  
+        See "Keys" (section \ref{cfgparse-keys}) for more information.
+    
+    \var{errors} is an optional keyword argument.  If omitted or set to
+        \code{None} any errors will cause appropriate help text will be 
+        made available (either an exception is raised or 
+        \code{sys.exit()} is called dependent on \code{exception} 
+        argument when instantiating \code{ConfigParser}).  Otherwise 
+        pass a list and help text describing the error will appended 
+        into the list.
+  \end{funcdesc}
+
+For example:
+
+% <file name='parsing.ini'>
+\begin{verbatim}
+# file: parsing.ini
+retries = 10
+\end{verbatim}
+% </file>
+
+And script:
+
+% <file name='parsing.py'>
+\begin{verbatim}
+# file: parsing.py
+import cfgparse
+c = cfgparse.ConfigParser()
+c.add_file('parsing.ini')
+
+retries = c.add_option('retries', type='int')
+print retries.get()
+
+timeout = c.add_option('timeout', type='int')
+print timeout.get()
+\end{verbatim}
+% </file>
+
+Results in:
+
+% <cline id="parsing">
+\begin{verbatim}
+$ python parsing.py
+10
+ERROR: Configuration File Parser
+
+Option: timeout
+No valid default found.
+keys=DEFAULT
+\end{verbatim}
+% </cline>
+  
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Command line cooperation\label{cfgparse-cmd-line-coop}}
+
+The \var{optparser} and \var{args} arguments of the \code{parse()} method are
+utilized to enable cooperation between the configuation option parser and an
+instance of the \module{optparse}.\code{OptionParser} class.
+
+When cooperation is enabled the options object created by the \code{parse()}
+method contains attributes for options from both the command line option 
+parser and the configuration file parser.  If the destination attribute
+name is the same for an option in both the command line and configuration
+file option parsers, the parsers will cooperate with one another as 
+documented in "Option cooperation" (section \ref{cfgparse-coop-option}). 
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Help switch\label{cfgparse-coop-help}}
+        
+The \code{add_optparse_help_option()} method is used to set up the cooperation
+between the command line and configuration file parsers to automatically
+generate configuration file help text using a command line switch.
+ 
+  \begin{funcdesc}{add_optparse_help_option}{option_group\optional{, switches}
+          \optional{, dest}\optional{, help}}
+    
+    \var{option_group} is a required positional argument and must be set to 
+        an instance of the \module{optparse} module's \code{OptionParser} 
+        class or an option group of that class.  The \code{OptionParser} 
+        instance must also be passed into the \code{parse()} method.
+        
+    \var{switches} is an optional keyword argument and is used to set
+        the command line switches the user can use to invoke the configuration
+        file help printout.  \var{switches} must be a tuple and defaults to
+        \code{('--cfghelp',)} when \var{switches} is omitted.
+        
+    \var{dest} is an optional string keyword argument and is used set the 
+        name of the destination attribute of the options object returned
+        by the command line option parser.  When omitted, \var{dest} defaults
+        to \code{'cfgparse_help'}.
+        
+    \var{help} is an optional string keyword argument and is used to set
+        the command line switch help string.  When omitted a reasonable 
+        default help string is utilized.
+  
+  \end{funcdesc}
+
+For example:
+
+% <file name='coop_help.py'>
+\begin{verbatim}
+# file: coop_help.py
+import optparse, cfgparse
+o = optparse.OptionParser()
+c = cfgparse.ConfigParser()
+
+c.add_optparse_help_option(o)
+c.add_option('retries', type='int', help='Maximum number of retries.')
+c.add_option('timeout', type='int', metavar='#SEC', 
+             help='Seconds between retries.')
+(opts,args) = c.parse(o)
+
+print "Should not get here if command line help switch present"
+\end{verbatim}
+% </file>
+
+Results in:
+% <cline id="coop_help">
+\begin{verbatim}
+$ python coop_help.py --help
+usage: coop_help.py [options]
+
+options:
+  -h, --help  show this help message and exit
+  --cfghelp   Show configuration file help and exit.
+
+$ python coop_help.py --cfghelp
+Configuration file options:
+  retries=RETRIES  Maximum number of retries.
+  timeout=#SEC     Seconds between retries.
+\end{verbatim}
+% </cline>
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Option cooperation\label{cfgparse-coop-option}}
+
+When the \var{optparser} argument of the \code{parse()} method is specified,
+the same option may be controlled by command line switches or configuration 
+file settings.  To enable the cooperation of an option, the destination 
+attribute name must be the same for both the command line parser option and 
+the configuration parser option.
+
+The cooperation is designed so that command line switches have priority
+over configuration file settings.  \strong{IMPORTANT:} when adding
+options to the command line parser using the \code{add_option()} method,
+omit the \var{default} argument.  If it is not omitted the 
+configuration file setting will never be used!
+
+Many of the arguments of the configuration file parser \code{add_option()}
+method may be omitted if they were specified when the option was added to 
+the command line parser.  When the \code{parse()} method of the configuration
+file parser is invoked they will be copied from the command line parser options
+to the configuration file parser options.  Sharing of arguments in the \code{add_option()} 
+method is not bidirectional.  The following is a list of arguments
+which may be shared:
+
+\begin{itemize}
+\item \var{help}
+\item \var{type}
+\item \var{choices}
+\item \var{metavar}
+\end{itemize}
+
+Option cooperation cross reference information is added to the help text 
+associated with both the command line and configuration file parsers.  In the 
+case of the command line option help, the information states the existance
+of the configuration file option.  In the case of the configuration file option 
+help, the information states the existance of the associated command line 
+option.
+
+For example:
+
+% <file name='coop_opt.ini'>
+\begin{verbatim}
+# file: coop_opt.ini
+timeout = 10
+\end{verbatim}
+% </file>
+
+And script:
+
+% <file name='coop_opt.py'>
+\begin{verbatim}
+import optparse, cfgparse
+o = optparse.OptionParser()
+c = cfgparse.ConfigParser()
+
+c.add_optparse_help_option(o)
+o.add_option('--timeout', type='int', 
+             help='Time between retries in seconds.')
+c.add_option('timeout')
+c.add_file('coop_opt.ini')
+
+(opts,args) = c.parse(o)
+
+print "timeout:",opts.timeout
+\end{verbatim}
+% </file>
+
+Results in:
+% <cline id="coop_opt">
+\begin{verbatim}
+$ python coop_opt.py
+timeout: 10
+
+$ python coop_opt.py --timeout=5
+timeout: 5
+
+$ python coop_opt.py --help
+usage: coop_opt.py [options]
+
+options:
+  -h, --help         show this help message and exit
+  --cfghelp          Show configuration file help and exit.
+  --timeout=TIMEOUT  Time between retries in seconds.  See also 'timeout'
+                     option in configuration file help.
+
+$ python coop_opt.py --cfghelp
+Configuration file options:
+  timeout=TIMEOUT  Time between retries in seconds.  See also '--timeout'
+                   command line switch.
+\end{verbatim}
+% </cline>
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Keys switch\label{cfgparse-coop-keys}}
+        
+The \code{add_optparse_keys_option()} method 
+is used to set up the cooperation between the command line and configuration 
+file parsers to allow the user to specify a keys list from the command line
+to control the keys used to obtain option settings from the configuration file.
+For more information on how command line keys are used to obtain option settings
+see "Keys" (section \ref{cfgparse-keys}).
+ 
+  \begin{funcdesc}{add_optparse_keys_option}{
+          option_group
+          \optional{, switches}
+          \optional{, dest}
+          \optional{, help}
+          }
+
+    \var{option_group} is a required positional argument and must be set to 
+        an instance of the \module{optparse} module's \code{OptionParser} 
+        class or an option group of that class.  The \code{OptionParser} 
+        instance must also be passed into the \code{parse()} method.
+        
+    \var{switches} is an optional keyword argument and is used to set
+        the command line switches the user can use to specify section keys
+        to be used by the parser for finding option settings.
+        \var{switches} must be a tuple and defaults to
+        \code{('-k','--keys',)} when \var{switches} is omitted.
+        
+    \var{dest} is an optional string keyword argument and is used set the 
+        name of the destination attribute of the options object returned
+        by the command line option parser.  When omitted, \var{dest} defaults
+        to \code{'cfgparse_keys'}.
+        
+    \var{help} is an optional string keyword argument and is used to set
+        the command line switch help string.  When omitted a reasonable 
+        default help string is utilized.
+  
+  \end{funcdesc}
+
+For example:
+
+% <file name='coop_keys.ini'>
+\begin{verbatim}
+# file: coop_keys.ini
+[DEV0]
+# path to device #0
+path = 192.168.0.0
+
+[DEV1]
+# path to device #1
+path = 192.168.0.1
+\end{verbatim}
+% </file>
+
+And script:
+
+% <file name='coop_keys.py'>
+\begin{verbatim}
+# file: coop_keys.py
+import optparse
+import cfgparse
+o = optparse.OptionParser()
+c = cfgparse.ConfigParser()
+c.add_optparse_keys_option(o)
+c.add_option('path')
+c.add_file('coop_keys.ini')
+(opts,args) = c.parse(o)
+print "Path:",opts.path
+\end{verbatim}
+% </file>
+
+Results in:
+
+% <cline id="coop_keys">
+\begin{verbatim}
+$ python coop_keys.py
+ERROR: Configuration File Parser
+
+Option: path
+No valid default found.
+keys=DEFAULT
+
+$ python coop_keys.py --keys=DEV0
+Path: 192.168.0.0
+\end{verbatim}
+% </cline>
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Files switch\label{cfgparse-coop-files}}
+        
+The \code{add_optparse_files_option()}
+method is used to set up cooperation between the command line and 
+configuration file parsers to automatically add configuration files
+to the configuration file parser that were specified using a command
+line switch (the files are added when the \code{parse()} method is called).
+
+  \begin{funcdesc}{add_optparse_files_option}{
+          option_group
+          \optional{, switches}
+          \optional{, dest}
+          \optional{, help}
+          }
+
+    \var{option_group} is a required positional argument and must be set to 
+        an instance of the \module{optparse} module's \code{OptionParser} 
+        class or an option group of that class.  The \code{OptionParser} 
+        instance must also be passed into the \code{parse()} method.
+        
+    \var{switches} is an optional keyword argument and is used to set
+        the command line switches the user can use to specify configuration 
+        files to be added to the parser.  \var{switches} must be a tuple and 
+        defaults to \code{('--cfgfiles',)} when \var{switches} is omitted.
+        
+    \var{dest} is an optional string keyword argument and is used set the 
+        name of the destination attribute of the options object returned
+        by the command line option parser.  When omitted, \var{dest} defaults
+        to \code{'cfgparse_files'}.
+        
+    \var{help} is an optional string keyword argument and is used to set
+        the command line switch help string.  When omitted a reasonable 
+        default help string is utilized.
+  
+  \end{funcdesc}
+
+For example:
+
+% <file name='coop_files.ini'>
+\begin{verbatim}
+# file: coop_files.ini
+path = 192.168.0.0
+\end{verbatim}
+% </file>
+
+And script:
+
+% <file name='coop_files.py'>
+\begin{verbatim}
+# file: coop_files.py
+import optparse
+import cfgparse
+o = optparse.OptionParser()
+c = cfgparse.ConfigParser()
+c.add_optparse_files_option(o)
+c.add_option('path')
+(opts,args) = c.parse(o)
+print "Path:",opts.path
+\end{verbatim}
+% </file>
+
+Results in:
+
+% <cline id="coop_files">
+\begin{verbatim}
+$ python coop_files.py
+ERROR: Configuration File Parser
+
+Option: path
+No valid default found.
+keys=DEFAULT
+
+$ python coop_files.py --cfgfiles=coop_files.ini
+Path: 192.168.0.0
+\end{verbatim}
+% </cline>
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Round Trip}
+
+This module supports read/modify/write of \code{ini} style configuration files
+with comment retention.  Two methods exist for modifying configuration file
+option settings.  The first is the \code{set()} method of the object returned 
+from the \code{ConfigParser} class \code{add_option()} method.  The second
+is the \code{set_option()} method of the object returned from the 
+\code{ConfigParser} class \code{add_file()} method.  The \code{write()} method
+of the object returned from the \code{add_file()} and \code{set()} methods can be
+used to write the modified file contents.  The following subsections provide
+more detail.
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{set method\label{cfgparse-round-trip-set}}
+
+The \code{set()} method of the object returned from the \code{add_option()} method
+of the \code{ConfigParser} class can be used to modify an option setting in
+a configuration file.
+
+  \begin{funcdesc}{set}{value,\optional{, cfgfile}\optional{, keys}}
+
+    \var{value} is a required positional argument and is the new option
+        value.
+        
+    \var{cfgfile} is an optional keyword argument.  If omitted or set to
+        \code{None} the configuration file will be found.  Otherwise
+        the object returned by the \code{add_file()} method may be passed
+        in to modify or add a setting to a specific file.
+        
+    \var{keys} is an optional string keyword argument.  Use of this
+        argument is dependent on the \var{cfgfile} argument and is
+        discussed further below.
+  
+  \end{funcdesc}
+
+If \var{cfgfile} argument is omitted or set to \code{None} the \var{keys}
+argument will be used to first get the current option setting.  The
+\var{keys} are used in the same way as they are in the \code{get()} method.
+If a setting cannot be found in any of the configuration files added,
+\code{OptionNotFound} will be raised.  If the setting is found it will 
+be modified and the originating (modified) file object will be returned.  
+Note, if the option is defined in multiple locations, this method will
+only modify the one found.
+
+If \var{cfgfile} argument is set, its \code{set_option()} method is called
+using \var{value}.  The \var{name}, \var{help}, and \var{keys} arguments
+of the \code{add_option()} method that created the object \code{set()} was 
+invoked on are passed on to \code{set_option()}.  If \var{keys} of the
+\code{set()} method was not omitted those keys are used instead.
+
+For example:
+
+% <file name="set.ini">
+\begin{verbatim}
+[DEFAULT]
+# this section applies to all devices
+timeout = 10 # in seconds
+retries = 3
+
+[DEV0]
+# this section if for settings specific to device #0
+retries = 5 # overrides default
+\end{verbatim}
+% </file>
+
+And script:
+
+% <file name="set1.py">
+\begin{verbatim}
+import cfgparse,sys
+c = cfgparse.ConfigParser()
+f = c.add_file('set.ini')
+r = c.add_option('retries',type='int',keys='DEV0')
+t = c.add_option('timeout',type='int',keys='DEV0',
+                 help='Time between retries in seconds.')
+r.set(7)
+t.set(20)
+f.write(sys.stdout)
+\end{verbatim}
+% </file>
+
+Results in:
+% <cline id="set1">
+\begin{verbatim}
+$ python set1.py
+[DEFAULT]
+# this section applies to all devices
+timeout = 20 # in seconds
+retries = 3
+
+[DEV0]
+# this section if for settings specific to device #0
+retries = 7 # overrides default
+\end{verbatim}
+% </cline>
+
+The \code{timeout} option in the \code{[DEFAULT]} section was modified.  
+This is due to \var{cfgfile} not being specified.  The option setting
+was located using the same methodology as the \code{get()} method and that
+option was modified.  If this behavior is not desired, use the 
+\var{cfgfile} argument.
+
+For example:
+
+% <file name="set2.py">
+\begin{verbatim}
+import cfgparse,sys
+c = cfgparse.ConfigParser()
+f = c.add_file('set.ini')
+r = c.add_option('retries',type='int',keys='DEV1',
+                 help='Number of times to try again.')
+t = c.add_option('timeout',type='int',keys='DEV0',
+                 help='Time between retries in seconds.')
+r.set(7,f)
+t.set(20,f)
+f.write(sys.stdout)
+\end{verbatim}
+% </file>
+
+Results in:
+% <cline id="set2">
+\begin{verbatim}
+$ python set2.py
+[DEFAULT]
+# this section applies to all devices
+timeout = 10 # in seconds
+retries = 3
+
+[DEV0]
+# this section if for settings specific to device #0
+retries = 5 # overrides default
+
+# Time between retries in seconds.
+timeout = 20
+
+[DEV1]
+
+# Number of times to try again.
+retries = 7
+\end{verbatim}
+% </cline>
+
+The above example also demonstrates the creation of new sections as 
+necessary by modifying the \code{retries} option with the \code{DEV1}
+key.
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{set_option method\label{cfgparse-round-trip-set-option}}
+
+The \code{set_option()} method of the object returned from the \code{add_file()} 
+method of the \code{ConfigParser} class can be used to modify an option setting 
+in a specific configuration file.  This method offers more direct control of 
+which section the option to be set is located in.  If the option is not in the 
+section specified, the option will be added to that section.  If multiple copies 
+of the option exist in the desired section, all copies will be updated.  This 
+method does not return anything.
+
+  \begin{funcdesc}{set_option}{name, value\optional{, keys}\optional{, help}}
+
+    \var{name} is a required positional argument and is the name of the
+        option to set the value of.
+        
+    \var{value} is a required positional argument and is the new option
+        value.
+        
+    \var{keys} is an optional keyword argument.  This key list identifies
+        the configuration file section where option is located or to be
+        added.
+  
+    \var{help} is an optional string keyword argument.  This string is
+        placed ahead of an option setting if it is necessary to add the
+        option to a section.
+        
+  \end{funcdesc}
+
+For example:
+
+% <file name="set_option.ini">
+\begin{verbatim}
+[DEFAULT]
+
+# this section applies to all devices
+timeout = 10 # in seconds
+retries = 3
+
+
+[DEV0]
+
+# this section if for settings specific to device #0
+retries = 5 # overrides default
+\end{verbatim}
+% </file>
+
+And script:
+
+% <file name="set_option.py">
+\begin{verbatim}
+import cfgparse,sys
+c = cfgparse.ConfigParser()
+f = c.add_file('set_option.ini')
+f.set_option('retries',6)
+f.set_option('retries',10,keys='DEV0')
+f.set_option('retries',100,keys='DEV1',help='In new section')
+f.write(sys.stdout)
+\end{verbatim}
+% </file>
+
+Results in:
+% <cline id="set_option">
+\begin{verbatim}
+$ python set_option.py
+[DEFAULT]
+
+# this section applies to all devices
+timeout = 10 # in seconds
+retries = 6
+
+
+[DEV0]
+
+# this section if for settings specific to device #0
+retries = 10 # overrides default
+
+
+[DEV1]
+
+# In new section
+retries = 100
+\end{verbatim}
+% </cline>
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{write method\label{cfgparse-round-trip-write}}
+
+A \code{write()} method can be used to write the reconstructed file contents
+with the new settings, options, and potentially sections.  This write method
+is available in the file object that is returned by the \code{add_file()} 
+method of the \code{ConfigParser} or the \code{set()} method of an option 
+object.
+  
+  \begin{funcdesc}{write}{file}
+    \var{file} is a required positional argument.  If \var{file} is a file 
+        object, the reconstructed file contents will be written using the 
+        file object's \code{write()} method.  Otherwise it is expected that 
+        \var{file} is a file name string and the file will be opened and 
+        written to.
+  \end{funcdesc}
+
+The two previous sections show example uses of this method.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{INI Syntax Summary}
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Comments}
+
+Comments in the configuration file should start with the '\#' character and
+continue until the end of that line.  Comments may be placed anywhere
+within the file including on same lines as section names or option settings.
+
+Although not recommended, lines of text without an '=' sign are ignored and
+can be considered comments.
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Option settings}
+
+Lines containing an '=' sign are interpretted to be option settings.  The
+line is stripped of comments and split on the first '='.  Both the option
+name and setting are stripped of leading and trailing white space.
+
+Multiline settings may exist with the use of XML notation to encapsulate
+the setting.  The \code{<b>} and \code{<v>} tags are available for this 
+purpose.  The \code{<b>} tag is short for "block" and is useful for most
+purposes.  The \code{<v>} tag is short for "verbatim" and is the same
+as block except that text encapsulated is not subjected to the 
+text substitution algorithms described in "Text Substitution" 
+(section \ref{cfgparse-text-sub}).  The \code{<b>} and \code{<v>} tags
+may not be nested within themselves.  \code{<v>} takes precedence over
+\code{<b>}.
+
+Option names are case sensitive and may not contain the \code{[ ] =} 
+characters nor use the <b> or <v> tags.
+
+For example:
+
+\begin{verbatim}
+opt1 = simple # comment
+opt2=simple # same 
+
+opt3 = <b> # not a comment (actually line 0 of setting)
+Line 1 of a multi-line setting
+Line 2 of a multi-line setting
+</b> # comment can go here
+\end{verbatim}
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Sections\label{cfgparse-sections}}
+
+A configuration file may contain one or more sections to store
+multiple settings of the same option.  A section is started with a 
+line that contains a section name enclosed in [ ] and all option settings
+that follow are part of that section until the next section is reached.  
+If the file contains no section names all settings are deposited into
+the \code{[DEFAULT]} section.  If options settings exist before the first
+section in a file, those option settings are a part of the \code{[DEFAULT]}
+section.  Simple section names can be considered as keys into a dictionary.
+
+For example:
+
+\begin{verbatim}
+[DEFAULT]
+opt1 = v_default
+
+[section1]
+opt1 = v_section1
+\end{verbatim}
+
+Can be thought of as:
+
+\begin{verbatim}
+opt1 = { 'DEFAULT' : 'v_default',
+         'section1' : 'v_section1' }
+\end{verbatim}
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Section keys\label{cfgparse-section-keys}}
+
+Section names may consist of one or more keys.  Commas and periods in a
+section name are used to split the section name into its component keys.
+If a period or a comma is not to be treated as a key split point,
+encapsulate the section components with single
+or double quotes.  If one component is encapsulated, all must be
+encapsulated.  Keys within the section name can be considered as
+keys into a dictionary.
+
+For example:
+
+\begin{verbatim}
+path = 192.168.0.99
+
+[rack0.dev0]
+path = 192.168.0.0
+
+[rack0.dev1]
+path = 192.168.0.1
+
+['lab1.rack0','dev0']
+path = 192.168.0.2
+
+['lab1.rack0','dev1']
+path = 192.168.0.3
+\end{verbatim}
+
+Can be thought of as:
+
+\begin{verbatim}
+path = { 'DEFAULT' : '192.168.0.99',
+         'rack0' : {
+            'dev0' : '192.168.0.0',
+            'dev1' : '192.168.0.1' },
+         'lab1.rack0' : {
+             'dev0' : '192.168.0.2',
+             'dev1' : '192.168.0.3' } }
+\end{verbatim}
+
+But syntax is available to extend the section keys with the section name
+notation immediately following the option name so that the above example
+could have been written as:
+
+\begin{verbatim}
+path = 192.168.0.99
+
+[rack0]
+path[dev0] = 192.168.0.0
+path[dev1] = 192.168.0.1
+
+['lab1.rack0']
+path[dev0] = 192.168.0.2
+path[dev1] = 192.168.0.3
+\end{verbatim}
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Text substitution\label{cfgparse-text-sub}}
+Text in an option setting may include text from other option settings.
+String substitutions are implemented using Python's mapped key string
+formatting style.  The name of the option to use to substitute text 
+is containted within the string formatting code.
+
+For example:
+\begin{verbatim}
+path = %(base)s\site-packages
+base = C:\Python24\lib
+\end{verbatim}
+
+Is equivalent to:
+\begin{verbatim}
+path = C:\Python24\lib\site-packages
+\end{verbatim}
+
+The text substitution option must exist in the same section or in the 
+\code{[DEFAULT]} section.  
+
+For example, this works:
+\begin{verbatim}
+[DEFAULT]
+base = C:\Python24\lib
+[SECTION1]
+path = %(base)s\site-packages
+\end{verbatim}
+
+But this does not:
+\begin{verbatim}
+[SECTION0]
+base = C:\Python24\lib
+[SECTION1]
+path = %(base)s\site-packages
+\end{verbatim}
+
+Nesting is only allowed up to 10 levels deep in order to prevent endless 
+loops.
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Including Files}
+
+Configuration files may include other configuration files.  The format
+is the same as an option/setting pair except a special \code{<include>} 
+option name is used.
+
+For example:
+
+\begin{verbatim}
+# file1.ini
+[DEFAULT]
+<include> = file2.ini
+retries = 3
+\end{verbatim}
+
+\begin{verbatim}
+# file2.ini
+[DEFAULT]
+timeout = 10
+\end{verbatim}
+
+Is equivalent to:
+
+\begin{verbatim}
+# file1.ini
+[DEFAULT]
+timeout = 10
+retries = 3
+\end{verbatim}
+
+Inclusion of configuration files from within a section is the same as if
+the settings in the included file were defined within that section.  If the
+included file contains sections, those section names are extended.
+
+For example:
+
+\begin{verbatim}
+# system.ini
+[RACK0]
+<include> = rack0.ini
+\end{verbatim}
+
+\begin{verbatim}
+# rack0.ini
+[DEFAULT]
+desc = 'main rack'
+[DEV0]
+path = 192.168.0.0
+[DEV1]
+path = 192.168.0.1
+\end{verbatim}
+
+Is equivalent to:
+
+\begin{verbatim}
+# system.ini
+[RACK0]
+desc = 'main rack'
+[RACK0.DEV0]
+path = 192.168.0.0
+[RACK0.DEV1]
+path = 192.168.0.1
+\end{verbatim}
+
+The extended section key syntax may also be used with the \code{<include>}
+special option.  For example, using rack0.ini from the last example:
+
+\begin{verbatim}
+# system.ini
+[DEFAULT]
+<include>[RACK0] = rack0.ini
+\end{verbatim}
+
+Is equivalent to:
+
+\begin{verbatim}
+# system.ini
+[RACK0]
+desc = 'main rack'
+path[DEV0] = 192.168.0.0
+path[DEV1] = 192.168.0.1
+\end{verbatim}
+
+Configuration files included within sections are not necessarily read
+immediately (or ever).  The included files are added to a pending list
+and are only read if all the section keys that it is associated with 
+are in the active key list for a particular option being requested
+when the \code{parse()} or \code{get()} methods are called.
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Default keys\label{cfgparse-default-keys}}
+
+The \code{[DEFAULT]} section may contain a special \code{<keys>} option/setting
+pair that can be used to provide a default list of section keys to use to 
+obtain options.  \code{<keys>} found in sections other than \code{[DEFAULT]} 
+are ignored.
+
+For example:
+
+\begin{verbatim}
+# system.ini
+[DEFAULT]
+<keys> = RACK0,DEV1
+desc = 'default description'
+[RACK0]
+desc = 'main rack'
+path[DEV0] = 192.168.0.0
+path[DEV1] = 192.168.0.1
+\end{verbatim}
+
+Is equivalent to:
+
+\begin{verbatim}
+# system.ini
+[DEFAULT]
+path = 192.168.0.1
+desc = 'main rack'
+[RACK0]
+desc = 'main rack'
+path[DEV0] = 192.168.0.0
+path[DEV1] = 192.168.0.1
+\end{verbatim}
+
+This provides a convenient mechanism for the user to quickly make default 
+selections without needing to reorganize or copy sections of the configuration
+file.  The \code{<keys>} keys list may contain many keys and need not
+be an exact section name.  Order is important but in the example above 
+it could have been reversed with no ill effect.  See "Keys" (section 
+\ref{cfgparse-keys}) for more information.
+
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Environment keys\label{cfgparse-env-keys}}
+
+The \code{[DEFAULT]} section may contain a special \code{<keys_variable>} 
+option/setting pair that can be used to specify an environment variable
+name to be used to provide a default list of section keys to use to obtain 
+options.  \code{<keys_variable>} found in sections other than \code{[DEFAULT]} 
+are ignored.
+
+For example, setting the keys environment variable from the command line:
+\begin{verbatim}
+Linux: $ export keys=RACK0,DEV1
+DOS:   C:\> set keys=RACK0,DEV1
+\end{verbatim}
+
+Makes:
+
+\begin{verbatim}
+# system.ini
+[DEFAULT]
+<keys_variable> = keys
+desc = 'default description'
+[RACK0]
+desc = 'main rack'
+path[DEV0] = 192.168.0.0
+path[DEV1] = 192.168.0.1
+\end{verbatim}
+
+Equivalent to:
+
+\begin{verbatim}
+# system.ini
+[DEFAULT]
+path = 192.168.0.1
+desc = 'main rack'
+[RACK0]
+desc = 'main rack'
+path[DEV0] = 192.168.0.0
+path[DEV1] = 192.168.0.1
+\end{verbatim}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Keys\label{cfgparse-keys}}
+
+When configuration files are read, all option settings are merged together in
+a master dictionary that is heirarchically organized using the section keys
+as keys in the dictionary.  The "Sections" (section \ref{cfgparse-sections}) 
+and "Section keys" (section~\ref{cfgparse-section-keys}) examples may help
+visualize this concept.  When duplicate options exist at the same level,
+either in the same file or different files, the last one in wins.
+
+When the \code{parse()} method is called or when an option \code{get()} method
+is called a list of keys is constructed to walk through the dictionary
+of settings.  The key list is constructed in the following order with the
+keys with top priority listed first
+
+\begin{itemize}
+\item \code{get()} \var{keys} argument 
+      (see section \ref{cfgparse-parsing} "Parsing")
+\item \code{add_option()} \var{keys} argument
+      (see section \ref{cfgparse-adding-options} "Adding options")
+\item command line keys
+      (see section \ref{cfgparse-cmd-line-coop} "Command line cooperation")
+\item environment keys
+      (see section \ref{cfgparse-env-keys} "Environment keys")
+\item configuration file keys
+      (see section \ref{cfgparse-default-keys} "Default keys")
+\item \code{'DEFAULT'} key
+\end{itemize}
+
+The algorithm for obtaining a setting from the dictionary of heirarchically 
+organized settings is:
+
+\begin{verbatim}
+    start at top of option dictionary
+    start at top of key list  <-----------------------
+    get next key <-------------------------------     |                               
+        no keys left) DONE - no setting found    |    |
+    is key in dictionary?                        |    |
+        no)  ------------------------------------     |
+        yes) is setting a dictionary?                 |
+            yes) proceed to next level  --------------
+            no) DONE - setting found
+\end{verbatim}
+
+This implementation allows the user to store multiple settings 
+in the configuration file and provides great flexibility for 
+controlling which settings get used.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Python configuration files\label{cfgparse-python}}
+
+Python based configuration files may be used in place of or in combination 
+with \code{ini} configuration files.  Since this may introduce a security
+hole in your application, this feature must be enabled using the \var{allow_py}
+argument when creating an instance of the \code{ConfigParser}.
+
+Use of Python to construct option settings allows the greatest flexibility
+but also requires a bit more sophisticated user as the configuration file
+is truly a Python script and is executed.  One significant advantage of
+a Python based configuration file is that settings may be Python objects.
+For example in an application where files need to be located it may be 
+tempting to ask the user to provide a string which contains a list of paths to 
+scan.  What happens if the user wants a set of text files that contains lists 
+of files (such as Visual Studio project files) scanned instead?  It would be 
+better to provide a base class that is your best guess as to what most users 
+need.  Most users could then make the settting an instance of that class passing 
+in the string of paths into the constructor.  Advanced users can would be able 
+to subclass it, maintaining the interface, but changing the implementation to 
+their particular needs.
+
+Another significant advantage is that users can construct settings on the fly
+with the full power and flexibility of Python.  There are no special text 
+substitution techniques like the \code{ini} syntax since the user can use
+Python to do it.
+
+\textbf{Default Keys}
+
+\code{KEYS} is used instead of \code{<keys>}.  For example:
+
+\begin{verbatim}
+KEYS = 'RACK0,DEV0'
+\end{verbatim}
+Ie equivalent to:
+\begin{verbatim}
+[DEFAULT]
+<keys> = RACK0,DEV0
+\end{verbatim}
+
+\textbf{Environment keys}
+
+\code{KEYS_VARIABLE} is used instead of \code{<keys_variable>}.  For example:
+
+\begin{verbatim}
+KEYS_VARIABLE = 'keys'
+\end{verbatim}
+Ie equivalent to:
+\begin{verbatim}
+[DEFAULT]
+<keys_variable> = keys
+\end{verbatim}
+
+\textbf{Includes}
+
+\code{CONFIG_FILES} is used instead of \code{<include>}.  For example:
+
+\begin{verbatim}
+CONFIG_FILES = 'file1.ini'
+\end{verbatim}
+Is equivalent to:
+\begin{verbatim}
+[DEFAULT]
+<include> = file1.ini
+\end{verbatim}
+
+And:
+
+\begin{verbatim}
+CONFIG_FILES = ['file2.ini','file3.py']
+\end{verbatim}
+Is equivalent to:
+\begin{verbatim}
+[DEFAULT]
+<include> = file2.ini
+<include> = file3.ini
+\end{verbatim}
+
+And:
+
+\begin{verbatim}
+CONFIG_FILES = { 'DEFAULT' : 'rack0.ini',
+                 'RACK1' : 'rack1.ini', 
+                 'RACK2' : 'rack2.ini' }
+\end{verbatim}
+Is equivalent to:
+\begin{verbatim}
+[DEFAULT]
+<include> = rack0.ini
+[RACK1]
+<include> = rack1.ini
+[RACK2]
+<include> = rack2.ini
+\end{verbatim}
+
+\textbf{Settings}
+
+After execution of the configuration file all remaining options found that 
+do not begin with an underscore (_) are considered to be an option setting.  
+To avoid polluting the settings dictionary the configuration files should 
+either clean up after itself or name intermediate variables with an underscore.  
+For example:
+
+\begin{verbatim}
+# import with leading underscore to avoid cleanup later
+import os as _os
+
+for x in range(10):
+    pass # do something
+del x # clean up so don't need leading _
+\end{verbatim}
+
+\begin{verbatim}
+driver = 'ethernet'
+path = { 'DEFAULT' : '192.168.0.99',
+         'DEV0'    : '192.168.0.0',
+         'DEV1'    : '192.168.0.1' }
+\end{verbatim}
+Ie equivalent to:
+\begin{verbatim}
+[DEFAULT]
+driver = 'ethernet'
+path = 192.168.0.99
+[DEV0]
+path = 192.168.0.0
+[DEV1]
+path = 192.168.0.1
+\end{verbatim}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{misc}
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Printing help\label{cfgparse-printing-help}}
+
+The \code{print_help} method can automatically generate help information for 
+all the added options just like the \module{optparse} command line parser
+\code{print_help} method.
+
+  \begin{funcdesc}{print_help}{\optional{file}}
+    \var{file} is an optional keyword argument.  If omitted, the
+        generated help will be written to \code{sys.stdout}.
+        Otherwise \var{file} is a expected to be a file object and the 
+        generated help will be written using the file object's \code{write()}
+        method.
+  \end{funcdesc}
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{Help Notes\label{cfgparse-help-notes}}
+
+The \code{add_note} method of the \code{ConfigParser} may be used to append
+preformatted text to the help text.
+
+  \begin{funcdesc}{add_note}{note}
+    \var{note} is a positional string argument and is the preformatted text
+        to be appended to the end of the generated help text.
+  \end{funcdesc}
+
+The \code{add_note} method of instances of an option object returned by the
+\code{add_option} method (same prototype) performs the same action but also
+causes the preformatted text to be printed if an error occurs when option is
+retrieved.  Also the preformatted text is inserted as a comment above option 
+settings added to configuration files.
+
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+\subsection{History}
+
+The roots of this module began with a different configuration parser written
+by the same author (\url{http://sourceforge.net/projects/config-py}).  This 
+module contained some of the core design blending option settings from multiple
+files and the use of section keys for flexible option storage and retrieval.
+Since that time a need for coordination between the command line and 
+configuration file option parsers caused an evolution of the interface to be 
+modelled after the \module{optparse} module.  Perhaps modelled is a bit weak of 
+an acknowledgment because all of the help formatting code was borrowed almost 
+verbatim from that module.  The \code{ini} syntax was added so that the module 
+would be a viable candidate in the ConfigParserShootout activity 
+(\url{http://www.python.org/moin/ConfigParserShootout}) which hopes to produce a 
+new configuration parser module for inclusion in the standard library of a 
+future Python release.
+
+\end{document}
+
