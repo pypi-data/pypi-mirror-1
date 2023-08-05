@@ -1,0 +1,215 @@
+Info file: pyastre.info,    -*-Text-*-
+produced by `texinfo-format-buffer'
+from file `pyastre.texi'
+using `texinfmt.el' version 2.38 of 3 July 1998.
+
+
+
+
+START-INFO-DIR-ENTRY
+*  Pyastre  module for  Asterisk  (pyastre).         A  Python in  the
+Dialplan.
+END-INFO-DIR-ENTRY
+
+
+
+
+File: pyastre.info, Node: Top, Next: Introduction, Prev: (dir), Up: (dir)
+
+* Menu:
+
+* Introduction:: What is Pyastre and what is it good for?
+* Building::     How to compile Pyastre and get Asterisk to load it.
+* Scripts::      How  to  write  scripts   in  Python  to  extend  the
+                 capabilities of the Asterisk PBX
+* Extending::    How to add new Python hooks to call C functions.
+* Your Rights::  Terms and Conditions.
+
+
+
+File: pyastre.info, Node: Introduction, Next: Building, Prev: Top, Up: Top
+
+Introduction
+************
+
+Pyastre is a module written in C and some helper classes in Python for
+the Asterisk  PBX. It  allows one to  run a persistent  python process
+within Asterisk, as well as to run python scripts from the dialplan.
+
+Pyastre  started   out  with  frustration  at   the  Asterisk  Manager
+Interface. The  AMI is a  TCP protocol that  makes it possible  to get
+status   information  out  of   and  to   send  control   messages  to
+Asterisk. The authors  of the AMI were, it  seems, more concerned with
+making the  PBX part of Asterisk  working right than  with designing a
+proper remote  procedure protocol, so  they made it very  simple: some
+key-value pairs  separated by newlines.  It is  a simplistic protocol,
+sometimes ambiguous, but most of the time it works.
+
+However there are several RPC protocols out there that are implemented
+in a  variety of languages  that are much  more flexible. XMLRPC  is a
+good example. Wouldn't it be nice to easily and painlessly make XMLRPC
+calls to control Asterisk?
+
+The particular  task at hand  was to implement  a "Summon" macro  on a
+MoinMoin Wiki. The  macro would take two user  supplied arguments: two
+telephone numbers. When a button is pressed on the web page, those two
+phones ring  and get  bridged together. This  could be done  using the
+AMI, but at  the time there was no Python library  for doing this, and
+writing  such a  library  for an  underdesigned  protocol wasn't  very
+interesting.
+
+Browsing through  the Asterisk source code revealed  a function called
+ast_originate that  did pretty much what  was needed. In  fact the AMI
+uses this function under the hood.  But how to expose this to the Wiki
+code most expediently?
+
+And so PyAsterisk was written  to provide a persistent python process,
+and this process  would run an XMLRPC server  and expose ast_originate
+over the network. It is, of  course, trivial to write an XMLRPC server
+in Python. Doing the same thing  in C is quite a bit more complicated,
+and, it turns out, quite a lot less reuseable.
+
+After running  this for a while, the  need came to store  more data in
+call detail  records than  is available in  the standard  ones. Rather
+than hack the  cdr_pgsql.c handler, and have to  keep applying patches
+to new  releases of Asterisk,  better to write a  programmable handler
+that can  get information from wherever  it wants and stuff  it in the
+database? So a CDR handler was written that passes off the information
+to a python function for processing.
+
+It was about this time that it started making sense to use the Twisted
+framework. Twisted  is a bunch  of python modules for  running servers
+and talking to databases. It also does so asynchronously -- which is a
+big bonus since you don't want your python scripts tieing up resources
+unnecessarily or, worse, causing  something important with Asterisk to
+block.
+
+Now we  had two entry points  into the Python  interpreter, running in
+different  threads:  the  outside   world  via  whatever  servers  the
+persistent  process was  running,  and via  the  CDR handler.   Adding
+another,  to make  the  Python interpreter  accessible  from the  call
+processing logic in the  dialplan was then straightforward. This makes
+it easy to do things  like make complicated routing decisions based on
+information in one (or even several!) databases without having to fork
+a new process and make a fresh database connection as is the case with
+the Application Gateway Interface or AGI, or do complicated operations
+in C where the bottleneck is not processing speed.
+
+So there are three main  parts to Pyastre: the Persistant Process, the
+Call Detail  Record Handler and  the Dialplan Application, as  well as
+some  convenient   helper  modules   implemented  along  the   way  in
+Python. Respectively, these allow  one to expose internal Asterisk API
+functions  to  3rd party  applications  over  the  network and  manage
+database  connections, flexibly  process and  store state  and logging
+information,  and script  the  call processing  behaviour of  Asterisk
+itself.
+
+
+
+File: pyastre.info, Node: Building, Next: Preparing Asterisk, Prev: Introduction, Up: Top
+
+Building and Installing Pyastre
+*******************************
+
+To build  Pyastre, Python is  required. 2.4 is recommended,  though it
+can be made  to work (with undocumented modifications)  with 2.3. SWIG
+is also required. Installing the Twisted Framework is suggested.
+
+* Menu:
+
+* Preparing Asterisk::
+* Building Pyastre::
+* Loading Pyastre::
+
+
+
+File: pyastre.info, Node: Preparing Asterisk, Next: Building Pyastre, Prev: Building, Up: Building
+
+Preparing Asterisk
+==================
+
+Unfortunately,  since in  Python parlance  we are  both  extending and
+embedding the interpreter, the module that this produces, _pyastre.so,
+is not  linked with libpython. The standard  build infrastructure does
+not support doing this very  easily. The workaround, so that the basic
+Python  interpreter  is made  available  to  the  module, is  to  link
+Asterisk with libpython. This  involves changing the Asterisk Makefile
+and rebuilding it. The easiest way to do this is to find the line that
+looks like this:
+
+     LIBS+=-lssl
+
+and change it to read:
+
+     LIBS+=-lssl -lpython2.4
+
+according to your Python version.
+
+
+
+File: pyastre.info, Node: Building Pyastre, Next: Loading Pyastre, Prev: Preparing Asterisk, Up: Building
+
+Building Pyastre
+================
+
+Once you  have the  source distribution of  Pyastre, uncompress  it as
+usual.   The main installation  step is  the same  as for  most Python
+programs and modules:
+
+     % python setup.py install
+
+
+
+File: pyastre.info, Node: Loading Pyastre, Next: Scripts, Prev: Building Pyastre, Up: Building
+
+Loading Pyastre
+===============
+
+The previous step will have produced a C module in
+
+     ${PYTHON_LIBDIR}/site-python/_pyastre.so
+
+This is the Asterisk module. Asterisk has to be told to load it. There
+are two ways  to do this. One is  to add a line with the  full path to
+/etc/asterisk/modules.conf as in
+
+     load => ${PYTHON_LIBDIR}/site-python/_pyastre.so
+
+The   other    is   to    make   a   symlink    to   this    file   in
+/usr/lib/asterisk/modules,  but  this  will  only  work  if  you  have
+"autoload" set to "yes" in modules.conf.
+
+
+
+File: pyastre.info, Node: Scripts, Next: Extending, Prev: Building, Up: Top
+
+Writing Scripts for Pyastre
+***************************
+
+
+
+File: pyastre.info, Node: Extending, Next: Your Rights, Prev: Scripts, Up: Top
+
+Extending Pyastre
+*****************
+
+
+
+File: pyastre.info, Node: Your Rights, Prev: Extending, Up: Top
+
+Your Rights
+***********
+
+
+Tag table:
+Node: Top280
+Node: Introduction721
+Node: Building4863
+Node: Preparing Asterisk5304
+Node: Building Pyastre6068
+Node: Loading Pyastre6410
+Node: Scripts7056
+Node: Extending7193
+Node: Your Rights7313
+
+End tag table
