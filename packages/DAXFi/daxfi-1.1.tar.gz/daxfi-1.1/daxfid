@@ -1,0 +1,757 @@
+#!/usr/bin/env python
+
+"""
+DAXFi - Dynamic XML Firewall.
+
+daxfid is a Python script that helps configure several different kinds
+of firewalls in a consistent way.
+It's intended to be used in dial-up systems.
+
+It can run as daemon to adapt its behavior to external conditions; rules
+can be described with XML files, XML strings, or generated directly
+by the code; the program can be configured and extended with a sort of
+plug-ins written in Python.
+
+  Copyright 2001-2007 Davide Alberani <alberanid@libero.it>
+
+email:        alberanid@libero.it
+DAXFi pages:  http://daxfi.sourceforge.net
+homepage:     http://erlug.linux.it/~da/
+ICQ UIN:      83641305
+PGP KeyID:    0x465BFD47
+
+This code is released under the GPL license.
+"""
+
+
+# Import standard modules.
+import  os, sys, types, commands, \
+        imp, ConfigParser, getopt, signal, time, syslog, \
+        fcntl, struct
+
+try:
+    from daxfi import Firewall, DetectFirewallError, \
+                        sl_print_info, sl_print_warning, sl_print_error
+    from daxfi.RuleBuilder import transf_ip, RemoveOptionError
+except ImportError:
+    sys.stderr.write('Unable to load daxfi modules; read the documentation!\n')
+    sys.exit(1)
+
+# Check Python version.
+if (not sys.__dict__.get('version_info')) or (sys.version_info[0] != 2):
+    sys.stderr.write('Python version 2.0 or greater is needed.\n')
+    sys.exit(2)
+
+
+# Some infos.
+APP_NAME = 'daxfid'
+VERSION = '0.9'
+
+MY_NAME = 'Davide Alberani'
+MY_EMAIL = 'alberanid@libero.it'
+
+CALL_NAME = os.path.basename(sys.argv[0])
+
+HELP = """%s Version %s
+Usage: %s [OPTIONS]
+Options:
+    -c conf_file    Read configuration from conf_file.
+    -L runlevel     Run in level 'runlevel'.
+    -f firewall     Force daxfid to use a given firewall; Use -f list
+                    for a list of available firewalls.
+
+    -l ip           Set the local IP.
+    -r ip           Set the remote IP.
+    -i if           Set the active interface.
+
+    -p              Don't execute commands (just print via stdout)
+    -d (yes|no|auto)    To run or not to run in daemon mode?
+    -k              Kill a running daxfid daemon.
+
+    -V              Print version and license informations and exit.
+    -h              Print this help and exit.
+
+Send bug reports to %s <%s>
+""" % (APP_NAME, VERSION, CALL_NAME, MY_NAME, MY_EMAIL)
+
+# Set the the version for this program.
+__version__ = VERSION
+
+
+LICENSE="""%s Version %s
+
+  Copyright 2001, 2002 %s <%s>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+""" % (APP_NAME, VERSION, MY_NAME, MY_EMAIL)
+
+
+# -- Configuration and options gathering
+
+# Turn on debug mode.
+# Do not use, please. :-)
+DEBUG = 0
+
+# The name of the lock file.
+LOCK_FILE = '/var/run/daxfid.pid'
+# The lock file.
+lock_f = None
+
+# The directory with the rules to run.
+RULES_DIR = ''
+
+# The used firewall.
+FIREWALL = ''
+
+# Net's infos.
+REMOTE_IP = 'auto'
+LOCAL_IP = 'auto'
+INTERFACE = 'auto'
+
+# Don't execute any commands.
+PRINT_ONLY = 0
+
+# Some actions don't need to lock.
+DONT_LOCK = 0
+
+# Directory containing the XML rules.
+XMLRULES_DIR = '/etc/daxfid/xmlrules.d/'
+
+# The configuration file.
+CONF_FILE = '/etc/daxfid/daxfid.conf'
+
+# Configuration dir.
+CONF_DIR = '/etc/daxfid/'
+
+# Runlevel executed.
+RUNLEVEL = ''
+
+# To run or not to run in background?
+DAEMON_MODE = 'auto'
+
+
+# --- Misc functions
+
+def perror(mex):
+    """Print an error message via standard error."""
+    sys.stderr.write('%s: %s.\n' % (CALL_NAME, mex))
+
+
+def good_bye(signum, frame):
+    """Catch the SIGTERM signal."""
+    if DAEMON_MODE == 'no':
+        perror('terminated!')
+    sl_print_info('execution stopped (signal %s).' % signum)
+    sys.exit(0)
+
+def interrupted(signum, frame):
+    """Catch the SIGINT signal."""
+    if DAEMON_MODE == 'no':
+        perror('terminated by the user!')
+    sl_print_info('terminated by the user')
+    sys.exit(0)
+
+def create_lock():
+    """Gain lock over the lock file."""
+    global lock_f
+    if DONT_LOCK:
+        return
+    try:
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except IOError:
+        try:
+            PID = lock_f.read()
+        except IOError:
+            perror('unable to read lock file ' + LOCK_FILE)
+            sys.exit(3)
+        perror('another daxfid is running with pid ' + PID)
+        sys.exit(4)
+    lock_f.seek(0)
+    lock_f.truncate(0)
+    lock_f.write(str(os.getpid()))
+    lock_f.flush()
+
+
+# Read user options.
+try:
+    optlist, args = getopt.getopt(sys.argv[1:], 'c:L:l:r:i:d:f:pkhV')
+except getopt.error, p:
+    perror(p)
+    print HELP
+    sys.exit(5)
+
+if len(args) != 0:
+    perror('no arguments required')
+    print HELP
+    sys.exit(5)
+
+for opt in optlist:
+    # User defined configuration file.
+    if opt[0] == '-c':
+        CONF_FILE = opt[1]
+    if opt[0] == '-V':
+        print LICENSE
+        sys.exit(0)
+    if opt[0] == '-h':
+        print HELP
+        sys.exit(0)
+    if opt[0] == '-p':
+        PRINT_ONLY = 1
+        DONT_LOCK = 1
+    if opt[0] == '-L':
+        RUNLEVEL = opt[1]
+    # Kill daxfid.
+    if opt[0] == '-k':
+        try:
+            lock_f = open(LOCK_FILE, 'r')
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except IOError:
+            try:
+                PID = lock_f.read()
+                os.kill(int(PID), signal.SIGTERM)
+            except (os.error, ValueError):
+                perror('unable to get the PID or to kill process number ' + PID)
+                sys.exit(4)
+            except IOError:
+                perror('unable to read lock file ' + LOCK_FILE)
+                sys.exit(3)
+            perror('process ' + PID + ' terminated')
+            sys.exit(0)
+        perror('it seems that daxfid is not running')
+        sys.exit(0)
+  
+
+# --- Things to do at the start
+
+# Add the signal handler for SIGTERM and sigint.
+signal.signal(signal.SIGTERM, good_bye)
+signal.signal(signal.SIGINT, interrupted)
+
+
+# Configuration defaults.
+config_defaults = {
+    'daemon':           'auto',
+    'remote_ip':        'auto',
+    'local_ip':         'auto',
+    'interface':        'auto',
+    'conf_dir':         '/etc/daxfid/',
+    'firewall':         'auto',
+    'xmlrules_dir':     '/etc/daxfid/xmlrules.d/',
+    'runlevel':         'default'
+}
+
+configuration = ConfigParser.ConfigParser(config_defaults)
+
+if not os.path.isfile(CONF_FILE):
+    perror(CONF_FILE + ' is not a file')
+    print HELP
+    sys.exit(6)
+
+try:
+    configuration.read(CONF_FILE)
+except ConfigParser.ParsingError:
+    perror('error parsing configuration file, using defaults')
+except ConfigParser.MissingSectionHeaderError:
+    perror('missing section reading configuration file, using defaults')
+
+if configuration.defaults().has_key('conf_dir'):
+    CONF_DIR = os.path.normpath(configuration.defaults()['conf_dir'])
+
+if not RUNLEVEL and configuration.defaults().has_key('runlevel'):
+    RUNLEVEL = configuration.defaults()['runlevel']
+
+if not RUNLEVEL:
+    perror('no runlevel defined')
+    print HELP
+    sys.exit(10)
+
+RULES_DIR = CONF_DIR + os.sep + \
+                RUNLEVEL + '.d' + os.sep
+
+if not os.path.isdir(RULES_DIR):
+    perror(RULES_DIR + ' is not a directory')
+    print HELP
+    sys.exit(6)
+
+if configuration.defaults().has_key('firewall'):
+    FIREWALL = configuration.defaults()['firewall']
+
+if configuration.defaults().has_key('local_ip'):
+    ip = configuration.defaults()['local_ip']
+    if ip != 'auto':
+        LOCAL_IP = ip
+
+if configuration.defaults().has_key('remote_ip'):
+    ip = configuration.defaults()['remote_ip']
+    if ip != 'auto':
+        REMOTE_IP = ip
+
+if configuration.defaults().has_key('interface'):
+    iface = configuration.defaults()['interface']
+    if iface != 'auto':
+        INTERFACE = iface
+
+if configuration.defaults().has_key('xmlrules_dir'):
+    xml_dir = configuration.defaults()['xmlrules_dir']
+    if xml_dir[:1] != os.sep:
+        xml_dir = xml_dir + os.sep
+    XMLRULES_DIR = xml_dir
+
+# Reading some options relative only to the selected runlevel.
+if configuration.has_section(RUNLEVEL):
+    opts = configuration.options(RUNLEVEL)
+    if 'daemon' in opts:
+        DAEMON_MODE = configuration.get(RUNLEVEL, 'daemon')
+    if 'remote_ip' in opts:
+        REMOTE_IP = configuration.get(RUNLEVEL, 'remote_ip')
+    if 'local_ip' in opts:
+        LOCAL_IP = configuration.get(RUNLEVEL, 'local_ip')
+    if 'interface' in opts:
+        INTERFACE = configuration.get(RUNLEVEL, 'interface')
+    if 'xmlrules_dir' in opts:
+        XMLRULES_DIR = configuration.get(RUNLEVEL, 'xmlrules_dir')
+        if XMLRULES_DIR[:1] != os.sep:
+            XMLRULES_DIR = XMLRULES_DIR + os.sep
+
+
+# Second stage in reading the user options.
+# These options can override the config file.
+for opt in optlist:
+    if opt[0] == '-l':
+        LOCAL_IP = opt[1]
+    if opt[0] == '-r':
+        REMOTE_IP = opt[1]
+    if opt[0] == '-i':
+        INTERFACE = opt[1]
+    if opt[0] == '-d':
+        if opt[1] in ('yes', 'no', 'auto'):
+            DAEMON_MODE = opt[1]
+        else:
+            perror("-d option requires one of 'auto', 'yes' or 'no'")
+            print HELP
+            sys.exit(5)
+    if opt[0] == '-f':
+        FIREWALL = opt[1]
+        if FIREWALL == 'list':
+            # So that daxfid will not use the lock file...
+            DONT_LOCK = 1
+            print 'Available firewalls:'
+            try:
+                from daxfi import firewalls, listAvailableFirewalls
+            except ImportError:
+                perror('unable to load daxfi.firewalls module; ' +
+                        'read INSTALL.txt')
+                print HELP
+                sys.exit(1)
+            for i in firewalls.__all__:
+                print '\t' + i
+            print 'Detected active firewall (can be none, if you are not root):'
+            for i in listAvailableFirewalls():
+                print '\t' + i
+            sys.exit(0)
+
+
+if REMOTE_IP == 'auto':
+    ip = os.environ.get('PPP_REMOTE')
+    if ip:
+        REMOTE_IP = ip
+    else:
+        ip = os.environ.get('REMOTE_IP')
+        if ip:
+            REMOTE_IP = ip
+        else:
+            perror('cannot guess REMOTE_IP')
+            print HELP
+            sys.exit(10)
+
+try:
+    REMOTE_IP = transf_ip(REMOTE_IP)
+except RemoveOptionError:
+    pass
+
+if LOCAL_IP == 'auto':
+    ip = os.environ.get('PPP_LOCAL')
+    if ip:
+        LOCAL_IP = ip
+    else:
+        ip = os.environ.get('LOCAL_IP')
+        if ip:
+            LOCAL_IP = ip
+        else:
+            perror('cannot guess LOCAL_IP')
+            print HELP
+            sys.exit(10)
+
+try:
+    LOCAL_IP = transf_ip(LOCAL_IP)
+except RemoveOptionError:
+    pass
+
+
+if INTERFACE == 'auto':
+    liface = os.environ.get('PPP_IFACE')
+    if liface:
+        INTERFACE = liface
+    else:
+        liface = os.environ.get('INTERFACE')
+        if liface:
+            INTERFACE = liface
+        else:
+            perror('cannot guess INTERFACE')
+            print HELP
+            sys.exit(10)
+
+if DEBUG:
+    print 'REMOTE_IP: ', REMOTE_IP
+    print 'LOCAL_IP', LOCAL_IP
+    print 'INTERFACE', INTERFACE
+
+if not DONT_LOCK:
+    if not os.path.isfile(LOCK_FILE):
+        try:
+            lock_f = open(LOCK_FILE, 'w')
+            lock_f.close()
+        except IOError:
+            perror('unable to create lock file ' + LOCK_FILE)
+            sys.exit(3)
+    try:
+        lock_f = open(LOCK_FILE, 'r+')
+    except IOError:
+        perror('unable to open lock file ' + LOCK_FILE + ' for reading')
+        sys.exit(3)
+
+
+create_lock()
+
+
+# --- Create main objects
+
+# The dictionary of strings to be substituted in the XML files and strings.
+substitution_dict = {
+    '%REMOTE_IP':    REMOTE_IP,
+    '%LOCAL_IP':     LOCAL_IP,
+    '%INTERFACE':    INTERFACE,
+}
+
+if FIREWALL == 'auto':
+    FIREWALL = None
+
+# The Firewall object.
+try:
+    firewall = Firewall(firewallBrand=FIREWALL,
+                        substitutionDict=substitution_dict)
+except DetectFirewallError:
+    perror('unable to detect or load the firewall')
+    print HELP
+    sys.exit(11)
+
+
+# Inside this list, tuples like ('/path/to/filename.py', seconds)
+background_rules_list = []
+
+# How long daxfid will sleep between two background runs.
+SLEEP_TIME = 1
+
+# XXX: ugly!
+GLOBAL_COUNTER = 1L
+
+
+def _gcd(m, n):
+    """Given two numbers, return the greatest common divisor."""
+    if m % n == 0:
+        return n
+    else:
+        return _gcd(n, m%n)
+
+def _gcd_list(t):
+    """Return the greatest common divisor for a list of numbers."""
+    if not t:
+        return 1
+    if len(t) == 1:
+        return t[0]
+
+    l = []
+    x = 0
+    for i in t:
+        for j in t[x+1:]:
+            l.append((t[x], j))
+        x = x + 1
+
+    actual_gcd = t[0]
+    for i in l:
+        g = _gcd(i[0], i[1])
+        if g == 1:
+            return 1
+        if actual_gcd > g:
+            actual_gcd = g
+    return actual_gcd
+
+
+def _init_queue():
+    """Initialize and run the queue for persistent items."""
+    global SLEEP_TIME, background_rules_list
+    SLEEP_TIME = _gcd_list([x[1] for x in background_rules_list])
+    _run_queue()
+
+
+def _run_queue():
+    """Run items in the persistent list."""
+    global SLEEP_TIME, background_rules_list, GLOBAL_COUNTER
+    for item in background_rules_list:
+        file_name = item[0]
+        repeat_time = item[1]
+        if ((SLEEP_TIME * GLOBAL_COUNTER) % repeat_time) == 0:
+            run_plugin(file_name)
+    time.sleep(SLEEP_TIME)
+    GLOBAL_COUNTER += 1
+    _run_queue()
+
+
+def _put_rules_in_queue(rule, repeat):
+    """Add a rule (only the file name) in the queue for later execution."""
+    background_rules_list.append((rule, repeat))
+
+
+def processXMLFile(filename):
+    """Execute a rule."""
+    if PRINT_ONLY:
+        for i in firewall.getRuleCommands(firewall.newRulesFromXMLFile(filename)):
+            print i
+    else:
+        processRules(firewall.newRulesFromXMLFile(filename))
+
+def processXMLString(s):
+    """Read and execute a XML string."""
+    if PRINT_ONLY:
+        for i in firewall.getRuleCommands(firewall.newRulesFromXMLString(s)):
+            print i
+    else:
+        processRules(firewall.newRulesFromXMLString(s))
+
+def processRules(rules):
+    """Execute one or more Rule objects."""
+    if PRINT_ONLY:
+        for i in firewall.getRuleCommands(rules):
+            print i
+    else:
+        return firewall.runRules(rules)
+
+
+class DataStore:
+    """Objects derived from this class can be used by plug-ins to
+    store some data."""
+    __stored_data = {}
+    __actual_file = ''
+    def put(self, sect, data):
+        """Store a value with a given name."""
+        s = self.__stored_data.get(self.__actual_file)
+        if not s:
+            self.__stored_data.update({self.__actual_file: {}})
+            s = self.__stored_data.get(self.__actual_file)
+        s.update({sect: data})
+    def get(self, sect):
+        """Return a given datum."""
+        s = self.__stored_data.get(self.__actual_file)
+        if s:
+            return s.get(sect)
+        return None
+    def set_actual_file(self, f):
+        """Set the file we're working with."""
+        self.__actual_file = f
+
+
+storage = DataStore()
+
+def storeData(sect, data):
+    """Store the given data for private use of this plug-in."""
+    storage.put(sect, data)
+
+def loadData(sect):
+    """Return some data."""
+    return storage.get(sect)
+
+
+def is_daemon():
+    """Return true if running as a daemon."""
+    if DAEMON_MODE == 'yes':
+        return 1
+    return 0
+
+
+# --- Execution
+
+def check_for_persistent(file_name):
+    """Create the list of plug-ins that need to run in background."""
+    try:
+        fo = open(file_name, 'r')
+        try:
+            plugin = imp.load_source('plugin', file_name, fo)
+        except SyntaxError, e:
+            sl_print_error('I think that ' + file_name +
+                            ' is not a Python script; ' + str(e))
+            return 0
+        fo.close()
+    except IOError:
+        sl_print_error('unable to read file ' + file_name)
+        return 0
+
+    actual_file = plugin.__file__
+    if actual_file[-4:] == '.pyc' or actual_file[-4:] == '.pyo':
+        actual_file = actual_file[:-1]
+
+    if plugin.__dict__.has_key('PERSISTENT'):
+        if type(plugin.PERSISTENT) is types.IntType and \
+                plugin.PERSISTENT > 0:
+            f_list = []
+            for item in background_rules_list:
+                f_list.append(item[0])
+            if file_name not in f_list:
+                _put_rules_in_queue(actual_file, plugin.PERSISTENT)
+                if DEBUG:
+                    print actual_file + ' wants to run in background.'
+        del plugin.PERSISTENT
+    del plugin.run_this
+
+
+def run_plugin(file_name):
+    """Run the run_this() function in the given file."""
+    try:
+        fo = open(file_name, 'r')
+        try:
+            plugin = imp.load_source('plugin', file_name, fo)
+        except SyntaxError, e:
+            sl_print_error('I think that ' + file_name +
+                            ' is not a Python script; ' + str(e))
+            return 0
+        fo.close()
+    except IOError:
+        sl_print_error('unable to read file ' + file_name)
+        return 0
+    if DEBUG:
+        print 'running plug-in ' + file_name
+    actual_file = plugin.__file__
+    if actual_file[-4:] == '.pyc' or actual_file[-4:] == '.pyo':
+        actual_file = actual_file[:-1]
+        storage.set_actual_file(actual_file)
+    try:
+        try:
+            if not plugin.__dict__.has_key('run_this'):
+                sl_print_error('Cannot find run_this() function in file ' +
+                                file_name)
+                return 0
+            if type(plugin.run_this) is not types.FunctionType:
+                sl_print_error('I think that run_this in file ' +
+                                file_name + ' is not a function')
+                return 0
+            eval(plugin.run_this.func_code)
+            del plugin.run_this
+        except NameError, strn:
+            sl_print_error(str(strn) +
+                    ' in the restricted environment')
+    except SystemExit:
+        sys.exit(0)
+    except Exception, p:
+        # Catch any exception raised by the plug-in code.
+        import traceback
+        traceb = traceback.extract_tb(sys.exc_info()[2])[-1:][0]
+        fname = traceb[0]
+        linenum = traceb[1]
+        funname = traceb[2]
+        instruct = traceb[3]
+        sl_print_error('serious troubles in file ' + str(fname) + ' ' +
+                            repr(p) +  ': ' + str(p) + ' at line ' +
+                            str(linenum) +  '; within function "' +
+                            str(funname) +  '"; instruction: ' + str(instruct))
+
+
+def run_plugins_in_dir(dir, funct):
+    """Run every "S*.py" files in the given directory."""
+    flist = os.listdir(dir)
+    flist.sort()
+    for f in flist:
+        f = os.path.normpath(f)
+        if f[-3:] != '.py' or f[0] != 'S' or \
+                not os.path.isfile(dir + f):
+            continue
+        funct(dir + f)
+
+
+def run_daemon():
+    """Detach from terminal and stay resident."""
+    if PRINT_ONLY:
+        run_plugins_in_dir(RULES_DIR, run_plugin)
+        _init_queue()
+    # XXX: ugly, but file locks aren't inherited by the child.
+    fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+    #unlock()
+    if os.fork() == 0:
+        # The child.
+        #create_lock()
+        try:
+            create_lock()
+        except IOError:
+            perror('trying to run in background, cannot set the lock file')
+            sys.exit(5)
+        #write_pid()
+        os.setsid()
+        try:
+            sys.stdin.close()
+            sys.stdout.close()
+            sys.stderr.close()
+        except IOError:
+            pass
+        os.chdir(os.sep)
+        os.umask(0)
+        # Run every plug-in.
+        run_plugins_in_dir(RULES_DIR, run_plugin)
+        # Start rotating.
+        _init_queue()
+    sys.exit(0)
+
+
+# --- Running the program (in background or foreground)
+
+# Before we run...
+sys.stderr.write('Running ' + APP_NAME + '... \n')
+syslog.syslog(syslog.LOG_INFO | syslog.LOG_DAEMON, APP_NAME +
+                ' started in level "' + RUNLEVEL + '"')
+
+run_plugins_in_dir(RULES_DIR, check_for_persistent)
+
+# Evaluate what to do now.
+if DAEMON_MODE == 'auto':
+    if background_rules_list:
+        DAEMON_MODE = 'yes'
+    else:
+        DAEMON_MODE = 'no'
+
+# Never enter in background mode, if we're doing debug.
+if DEBUG:
+    DAEMON_MODE = 'no'
+
+if DAEMON_MODE == 'yes':
+    if not background_rules_list:
+        sl_print_info("in daemon mode even if there aren't rules to run")
+    run_daemon()
+elif DAEMON_MODE == 'no':
+    run_plugins_in_dir(RULES_DIR, run_plugin)
+    sys.exit(0)
+else:
+    perror("option 'daemon' must be one of 'auto', 'yes', 'no'")
+    sys.exit(5)
+
+# Mario manda tutti a nanna e poi chiude il bar.
+sys.exit(0)
+

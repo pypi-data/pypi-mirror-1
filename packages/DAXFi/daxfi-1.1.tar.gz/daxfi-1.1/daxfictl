@@ -1,0 +1,148 @@
+#!/usr/bin/env python
+
+"""
+daxfictl.
+
+Execute firewall commands.
+
+  Copyright 2001, 2002 Davide Alberani <alberanid@libero.it>
+
+This code is released under the GPL license.
+"""
+
+import sys, os, getopt, commands
+try:
+    from daxfi import Firewall, DetectFirewallError
+except ImportError:
+    sys.stderr.write('unable to import DAXFi\'s modules.\n')
+    sys.exit(1)
+
+try:
+    firewall = Firewall()
+except DetectFirewallError:
+    sys.stderr.write('The daxfi module is not able to detect the running firewall\n')
+    sys.exit(11)
+
+# Mother-in-law mode.
+VERBOSE = 1
+
+PRINT_ONLY = 0
+
+CALL_NAME = os.path.basename(sys.argv[0])
+
+HELP = """
+Usage:
+daxfictl [-p] command IP
+
+    command: one of 'grantnet' , 'blocknet', 'delrule'
+    IP: an host name or IP number (with or without a netmask)
+    With the -p switch, daxfictl just print the rules,
+    without running them.
+
+"""
+
+
+def perror(mex):
+    """Print an error message via standard error."""
+    sys.stderr.write('%s: %s.\n' % (CALL_NAME, mex))
+
+def check_rule(r):
+    """Return true if the rule is already in the current pool."""
+    if firewall.checkRule(r) == -1 or PRINT_ONLY:
+        return 0
+    return 1
+
+def runRules(r):
+    if not PRINT_ONLY:
+        return firewall.runRules(r)
+
+def exec_rule(ip, cmd):
+    """Execute a command."""
+    if cmd == 'delrule':
+        ar = firewall.createNewRules(action='delete', target='accept',
+                                        source=ip)[0]
+        dr = firewall.createNewRules(action='delete', target='drop',
+                                        source=ip)[0]
+        if check_rule(dr):
+            runRules(dr)
+            if VERBOSE:
+                print dr
+        elif check_rule(ar):
+            runRules(ar)
+            if VERBOSE:
+                print ar
+        else:
+            if PRINT_ONLY:
+                print ar
+            else:
+                print 'It seems that this rule isn\'t running...'
+        return
+    # The 'drop' rule.
+    dr = firewall.createNewRules(action='insert', pos='1', target='drop',
+                                    source=ip)[0]
+    # The 'accept' rule.
+    ar = firewall.createNewRules(action='insert', pos='1', target='accept',
+                                    source=ip)[0]
+    # We've to grant access to a given IP.
+    if cmd == 'grantnet':
+        if check_rule(dr):
+            r = firewall.createNewRules(action='delete', target='drop',
+                                        source=ip)[0]
+            runRules(r)
+            runRules(ar)
+            if VERBOSE:
+                print r
+                print ar
+        elif check_rule(ar):
+            print 'This rule is already running'
+        else:
+            runRules(ar)
+            if VERBOSE:
+                print ar
+    # Block this IP.
+    elif cmd == 'blocknet':
+        if check_rule(ar):
+            r = firewall.createNewRules(action='delete', target='accept',
+                                        source=ip)[0]
+            runRules(r)
+            runRules(dr)
+            if VERBOSE:
+                print r
+                print dr
+        elif check_rule(dr):
+            print 'This rule is already running'
+        else:
+            runRules(dr)
+            if VERBOSE:
+                print dr
+
+
+# Read the command line options.
+try:
+    optlist, args = getopt.getopt(sys.argv[1:], 'p')
+except getopt.error, p:
+    perror(p)
+    print HELP
+    sys.exit(5)
+
+for opt in optlist:
+    if opt[0] == '-p':
+        PRINT_ONLY = 1
+
+if len(args) != 2:
+    perror('not enough parameters')
+    print HELP
+    sys.exit(5)
+
+IP = args[1]
+
+if args[0] == 'grantnet' or args[0] == 'blocknet' or args[0] == 'delrule':
+    exec_rule(IP, args[0])
+else:
+    perror('unknown command: ' + args[0])
+    print HELP
+    sys.exit(5)
+
+
+sys.exit(0)
+

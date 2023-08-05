@@ -1,0 +1,1087 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<HTML>
+<HEAD>
+ <META NAME="GENERATOR" CONTENT="LinuxDoc-Tools 0.9.21">
+ <TITLE>How to write XML rules for DAXFi</TITLE>
+</HEAD>
+<BODY>
+<H1>How to write XML rules for DAXFi</H1>
+
+<H2>Davide Alberani &lt;alberanid@libero.it&gt;</H2>September, 06 2002
+<HR>
+<EM>Here you can learn how to write a XML file useful to describe
+ a firewall rule.</EM>
+<HR>
+<H2><A NAME="s1">1. Introduction</A></H2>
+
+<P>DAXFi is a Python package useful to configure and manage several
+different kinds of firewalls in a consistent way, without the need
+to worry about firewall-dependent issues. To stay firewall-independent,
+DAXFi defines a common way to describe firewalls rules: it uses a
+XML representation.</P>
+<P>Fortunately, DAXFi doesn't require you to rewrite all your rules
+in XML from scratch: if you already have a firewall with your rules
+running, you can use the <EM>daxfidump</EM> script to get a set of XML files
+with your rules. Obviously, it's possible that you want to modify
+these rules, so keep reading this how-to.</P>
+<H2><A NAME="s2">2. XML headers, syntax and terminology</A></H2>
+
+<H2><A NAME="ss2.1">2.1 Prolog and Document Type Declaration</A>
+</H2>
+
+<P>If you want to write a XML rule for DAXFi, in a file or directly
+in a Python script, you <B>have to</B> begin with the XML prolog:</P>
+<P>
+<BLOCKQUOTE>
+&lt;?xml version='1.0'?&gt;
+</BLOCKQUOTE>
+</P>
+<P>It must be at the very begin of the file or string (no white
+spaces, tabs or newlines are allowed before this line).</P>
+<P>Now you can point, optionally, to a DTD with a line like:</P>
+<P>
+<BLOCKQUOTE>
+&lt;!DOCTYPE ruleset SYSTEM '/etc/daxfid/dtd.d/daxfifw_0.5.dtd'&gt;
+</BLOCKQUOTE>
+</P>
+<P>where the string after 'SYSTEM' must point to the DTD file and
+the string after 'DOCTYPE' ('ruleset', in this example) is the name
+of the main tag.</P>
+<H2><A NAME="ss2.2">2.2 Syntax</A>
+</H2>
+
+<P>A XML document looks like a SGML or HTML file: there are normal
+tags, empty tags and they can have attributes. Some things you must
+remember to write a valid XML:</P>
+<P>
+<UL>
+<LI>normal tags always have an open tag (like '&lt;tag&gt;') and
+a close tag (like '&lt;/tag&gt;').</LI>
+<LI>tag, attribute names and values are case sensitive.</LI>
+<LI>an empty tag doesn't allow other tag inside of it, and its syntax
+is: &lt;empty-tag /&gt;</LI>
+<LI>tags can be nested, but not overlapped; &lt;tag1&gt;...&lt;tag2&gt;...&lt;/tag2&gt;...&lt;/tag1&gt;
+is allowed, while &lt;tag1&gt;...&lt;tag2&gt;...&lt;/tag1&gt;...&lt;/tag2&gt;
+is not.</LI>
+<LI>attribute values <B>must be</B> enclosed in single or double quotes,
+e.g.: &lt;tag attributeName='attributeValue'&gt;...&lt;/tag&gt;</LI>
+<LI>every document <B>must have</B> a single 'main tag', which encloses
+any other tag.</LI>
+</UL>
+</P>
+<H2><A NAME="ss2.3">2.3 DAXFi specific syntax</A>
+</H2>
+
+<P>In the next sections, DAXFi specific tags and attributes are
+described; some notes for attribute values:</P>
+<P>
+<UL>
+<LI>values are case sensitive.</LI>
+<LI>attributes marked as 'boolean' can only take 'yes' or 'no' as
+value.</LI>
+<LI>almost every attribute value can be negated, prepending a '!
+' to the value. E.g.: source-port='! 1024' means every source port
+except 1024.</LI>
+</UL>
+</P>
+<H2><A NAME="s3">3. One or more rules?</A></H2>
+
+<P>Within a XML file or string, you may decide to put one or more
+rule definition.</P>
+<P>If you want to have the same action applied to one or more rules,
+you can begin with an 'action tag' as described in the next chapter;
+example:</P>
+<P>
+<HR>
+<PRE>
+&lt;action&gt;
+    &lt;rule1 /&gt;
+    &lt;rule2 /&gt;
+    ...
+&lt;/action&gt;
+</PRE>
+<HR>
+</P>
+<P>If you want to have different actions (applied to different rules),
+you have to use 'ruleset' as the main tag (wrapping many action tags)
+, as:</P>
+<P>
+<HR>
+<PRE>
+&lt;ruleset&gt;
+    &lt;action1&gt;
+        &lt;rule1a /&gt;
+        &lt;rule1b /&gt;
+        ...
+    &lt;/action1&gt;
+    &lt;action2&gt;
+        &lt;rule2a /&gt;
+        &lt;rule2b /&gt;
+        ...
+    &lt;/action2&gt;
+    ...
+&lt;/ruleset&gt;
+</PRE>
+<HR>
+</P>
+<H2><A NAME="s4">4. Define an action</A></H2>
+
+<P>Every rule or set of rules must be enclosed in what I call an
+'action tag'; this is one of the valid actions enumerated below and
+are used to tell DAXFi what to do with this rule (e.g.: append this
+rule at the end of a chain, purge a chain, delete a given rule and
+so on).</P>
+<P>Inside the action tag there must be one or more rules. The action
+is applied to these rules.</P>
+<H2><A NAME="ss4.1">4.1 Action tags</A>
+</H2>
+
+<P>
+<UL>
+<LI><B>append</B>: append this rule to the end of the given chain.</LI>
+<LI><B>delete</B>: remove the defined rule (or it can be specified with
+a 'rule-number' attribute).</LI>
+<LI><B>replace</B>: replace a rule pointed to with 'rule-number' attribute
+with the defined one.</LI>
+<LI><B>insert</B>: insert the defined rule in the position specified with
+the 'rule-number' attribute.</LI>
+<LI><B>flush</B>: flush the given chain.</LI>
+</UL>
+</P>
+<P>Examples of valid action tags are:</P>
+<P>
+<BLOCKQUOTE>
+&lt;append&gt;...&lt;/append&gt;
+</BLOCKQUOTE>
+</P>
+<P>And:</P>
+<P>
+<BLOCKQUOTE>
+&lt;insert rule-number='5'&gt;...&lt;/insert&gt;
+</BLOCKQUOTE>
+</P>
+<H2><A NAME="ss4.2">4.2 Action tags attributes</A>
+</H2>
+
+<P>
+<UL>
+<LI><B>rule-number</B>: used in the 'delete', 'insert' and 'replace' rules
+to specify the position of the rule within a chain.</LI>
+</UL>
+</P>
+<H2><A NAME="s5">5. The rule tag</A></H2>
+
+<P>In the 'rule' tag are included the attributes that belongs to
+every IP packets (e.g.: the source and destination addresses, the
+interface name, if we must consider only fragments, etc. etc.)</P>
+<H2><A NAME="ss5.1">5.1 rule tag attributes</A>
+</H2>
+
+<P>
+<UL>
+<LI><B>source-ip</B>: the source IP of packets; it can be a host name, a
+numeric address (dotted notation, hexadecimal, etc.) with or without
+a net mask.</LI>
+<LI><B>destination-ip</B>: the destination address.</LI>
+<LI><B>direction</B>: the direction can be one of 'in' (the incoming packets:
+these rules are put in the 'input chain' of the firewall) or 'out'
+(outgoing packets: these rules are put in the 'output chain'). The
+direction attribute is <EM>always</EM> required (exception: in a NAT rule).</LI>
+<LI><B>interface</B>: the interface where the packets are from/go to.</LI>
+<LI><B>fragment-only</B>: a boolean (the value must be 'yes' or 'no', or
+it can be omitted). If 'yes', matches only second and further fragments
+of fragmented packets; if 'no' the rules is applied only to the first
+fragment of fragmented packets.</LI>
+</UL>
+</P>
+<P>Examples; match entering packets from the 127.0.0.1/8 subnet
+on interface ppp0:</P>
+<P>
+<HR>
+<PRE>
+&lt;rule direction='in' source-ip='127.0.0.1/8' interface='ppp0'&gt;
+    ...
+&lt;/rule&gt;
+</PRE>
+<HR>
+</P>
+<P>Match only the first fragment of fragmented outgoing packets
+from 127.0.0.1 directed to 4.5.6.0/24:</P>
+<P>
+<HR>
+<PRE>
+&lt;rule direction='out' source-ip='127.0.0.1' destination-ip='4.5.6.0/24' fragment-only='yes'&gt;
+      ...
+&lt;/rule&gt;
+</PRE>
+<HR>
+</P>
+<H2><A NAME="s6">6. Protocol</A></H2>
+
+<P>Inside a rule tag, you can put an empty tag with the name of
+one of the main protocols (TCP, UDP and ICMP) or a 'protocol' tag
+with a 'protocol' attribute. E.g., for matching only tcp packets:</P>
+<P>
+<BLOCKQUOTE>
+&lt;tcp /&gt;
+</BLOCKQUOTE>
+</P>
+<P>For udp:</P>
+<P>
+<BLOCKQUOTE>
+&lt;udp /&gt;
+</BLOCKQUOTE>
+</P>
+<P>And for icmp:</P>
+<P>
+<BLOCKQUOTE>
+&lt;icmp /&gt;
+</BLOCKQUOTE>
+</P>
+<P>If you want to match against a different protocol:</P>
+<P>
+<BLOCKQUOTE>
+&lt;protocol protocol='igmp' /&gt;
+</BLOCKQUOTE>
+</P>
+<H2><A NAME="ss6.1">6.1 Protocol tags attributes</A>
+</H2>
+
+<P>
+<UL>
+<LI><B>source-port</B>: only for tcp and udp, specify the source port. Can
+be a numeric value, or a string as defined in /etc/services. Port
+ranges can be defined with the notation m:n (e.g.: 6000:6010).</LI>
+<LI><B>destination-port</B>: only for tcp and udp, guess what...</LI>
+<LI><B>syn-only</B>: only for tcp, it's a boolean. If set, only matches
+packets with the TCP flag SYN set and ACK and FIN flags not set.
+If 'no' matches only the TCP packets that are not the very first
+step of a connection.</LI>
+<LI><B>tcp-flags</B>: only for tcp, a list of comma separated tcp flags
+that must be set and an optional slash separated mask of flags. E.g.:
+tcp-flags='syn/syn,rst,ack' is equivalent to the 'syn-only' attribute.
+Valid flags are: 'fin', 'syn', 'rst', 'push', 'ack', 'urg', 'ecn',
+'cwr'.</LI>
+<LI><B>icmp</B>-<B>type</B>: only for icmp, specify the ICMP type and (optionally)
+the ICMP code to match. The type can be one string - see the _rulesutils.py
+file for allowed values) or a numeric code; if a code is needed,
+you must split type and code with a slash.</LI>
+<LI><B>state</B>: the state to consider in a rule with connection tracking
+(stateful inspection); must be 'related' (any packets associated
+with an existing connection) or 'new' (the packet has started a new
+connection).</LI>
+<LI><B>protocol</B>: used only in the 'protocol' tag, can be a number or
+a name defined in /etc/protocols.</LI>
+</UL>
+</P>
+<P>Examples; match TCP packets from the 1234 port:</P>
+<P>
+<BLOCKQUOTE>
+&lt;tcp source-port='1234' /&gt;
+</BLOCKQUOTE>
+</P>
+<P>Match UDP to the identd daemon:</P>
+<P>
+<BLOCKQUOTE>
+&lt;udp destination-port='auth' /&gt;
+</BLOCKQUOTE>
+</P>
+<P>Match the first packets of a connection to any UDP except the
+range 100-200:</P>
+<P>
+<BLOCKQUOTE>
+&lt;udp syn-only='yes' destination-port='! 100:200' /&gt;
+</BLOCKQUOTE>
+</P>
+<P>Match 'host-redirect' ICMP packets:</P>
+<P>
+<BLOCKQUOTE>
+&lt;icmp icmp-type='host-redirect' /&gt;
+</BLOCKQUOTE>
+</P>
+<P>The same, using ICMP type/code:</P>
+<P>
+<BLOCKQUOTE>
+&lt;icmp icmp-type='5/1' /&gt;
+</BLOCKQUOTE>
+</P>
+<H2><A NAME="s7">7. Target</A></H2>
+
+<P>Now you want to tell DAXFi what to do with the matched packets.
+You can use an empty tag named 'accept', 'reject' or 'drop', or you
+can use a 'target' tag with a 'target' attribute. The target tag
+<B>must be</B> omitted writing a NAT rule.</P>
+<P>Examples; accept the patched packets (the packets will pass through
+the firewall):</P>
+<P>
+<BLOCKQUOTE>
+&lt;accept /&gt;
+</BLOCKQUOTE>
+</P>
+<P>Drop packets (they will be silently discarded):</P>
+<P>
+<BLOCKQUOTE>
+&lt;drop /&gt;
+</BLOCKQUOTE>
+</P>
+<P>Reject packets (packets will be dropped, and an ICMP error code
+sent back):</P>
+<P>
+<BLOCKQUOTE>
+&lt;reject /&gt;
+</BLOCKQUOTE>
+</P>
+<P>It's equivalent to:</P>
+<P>
+<BLOCKQUOTE>
+&lt;target target='reject' /&gt;
+</BLOCKQUOTE>
+</P>
+<H2><A NAME="ss7.1">7.1 Target tags attributes</A>
+</H2>
+
+<P>
+<UL>
+<LI><B>target</B>: only valid inside a 'target' tag, specify what to do
+with matched packets.</LI>
+<LI><B>reject-with</B>: only for reject, what kind of ICMP to return. It
+can be an ICMP name, an ICMP type or an ICMP 'type/code' couple.</LI>
+</UL>
+</P>
+<P>Example; reject packets sending back a 'network-prohibited' ICMP:</P>
+<P>
+<BLOCKQUOTE>
+&lt;reject reject-with='network-prohibited' /&gt;
+</BLOCKQUOTE>
+</P>
+<H2><A NAME="s8">8. NAT</A></H2>
+
+<P>With this empty tag, you set up a rule to do Network Address
+Translation.</P>
+<P>Sometimes you need to mangle the source or destination of a packet;
+we define, with empty tags, four operation: with '<B>snat</B>' you alter
+the source address of matched packets; you have to specify the new
+source IP address and optionally a port or range of ports. The '<B>dnat</B>'
+tag is used when you need to redirect a packet directed to a given
+IP address to another one; you have to specify the new destination
+address and, optionally, a new port or range of ports. '<B>masq</B>' is
+a special case of 'snat', useful with dial-up: you don't have to
+specify the new source IP since the one of the outgoing interface
+is used; optionally you can specify a port or range of ports. '<B>redirect</B>'
+is a special case of 'dnat': the matched packets are sent to the
+local machine (IP 12.7.0.0.1); optionally it's possible to specify
+a new destination port. The generic '<B>nat</B>' tag can also be used, and
+requires a 'nat' attribute to specify the type of NAT you need.</P>
+<H2><A NAME="ss8.1">8.1 NAT tag attributes</A>
+</H2>
+
+<P>
+<UL>
+<LI><B>nat</B>: only for 'nat' tag; the value must be one in 'snat', 'dnat',
+'masq', 'redirect'.</LI>
+<LI><B>to-address</B>: the IP address (or range of addresses) used as new
+destination or source.</LI>
+<LI><B>to-port</B>: the new destination port or range of ports.</LI>
+</UL>
+</P>
+<P>Examples; TCP packets from 1.2.3.4 are NATed as they are coming
+from 5.6.7.8 on interface 'le1' with a new port, in the range 1-1024:</P>
+<P>
+<HR>
+<PRE>
+&lt;rule source-ip='1.2.3.4' interface='le1'&gt;
+    &lt;tcp /&gt;
+    &lt;snat to-address='5.6.7.8' to-port='1:1024' /&gt;
+&lt;/rule&gt;
+</PRE>
+<HR>
+</P>
+<P>Packets directed to IP address 7.7.7.7 are redirected to one
+IP in the range from 1.1.1.1 to 3.3.3.3:</P>
+<P>
+<HR>
+<PRE>
+&lt;rule destination-ip'7.7.7.7'&gt;
+    &lt;dnat to-address='1.1.1.1:3.3.3.3' /&gt;
+&lt;/rule&gt;
+</PRE>
+<HR>
+</P>
+<P>TCP packets from 1.2.3.0/24 tcp port 80 are redirected to the
+local port 8080:</P>
+<P>
+<HR>
+<PRE>
+&lt;rule source-ip='1.2.3.0/24'&gt;
+    &lt;tcp source-port='80' /&gt;
+    &lt;redirect to-port='8080' /&gt;
+&lt;/rule&gt;
+</PRE>
+<HR>
+</P>
+<P>Packets from 192.168.1.0/24 will be rewritten as they are coming
+from the address of the 'ppp0' interface:</P>
+<P>
+<HR>
+<PRE>
+&lt;rule source-ip='192.16.1.0/24' interface='ppp0'&gt;
+    &lt;masq /&gt;
+&lt;/rule&gt;
+</PRE>
+<HR>
+</P>
+<H2><A NAME="s9">9. Log</A></H2>
+
+<P>Sometimes you need to leave a message in the system logs when
+a given packets is received.</P>
+<P>A 'log' empty tag can be used.</P>
+<H2><A NAME="ss9.1">9.1 Log tag attributes</A>
+</H2>
+
+<P>
+<UL>
+<LI><B>priority</B>: the priority to use; one of 'debug', 'info', 'notice',
+'warning', 'err', 'crit', 'alert', 'emerg'.</LI>
+<LI><B>facility</B>: the priority of the log messages; can be 'auth', 'authpriv',
+'cron', 'daemon', 'kern', 'lpr', 'mail', 'news', 'syslog', 'user',
+'uucp', 'ftp' or a level from 'local1' to 'local7'.</LI>
+</UL>
+</P>
+<P>Examples; log with priority 'info' and with facility 'local1':</P>
+<P>
+<BLOCKQUOTE>
+&lt;log facility='local1' priority='info' /&gt;
+</BLOCKQUOTE>
+</P>
+<H2><A NAME="s10">10. Limit</A></H2>
+
+<P>Actually, this empty tag is supported only by the iptables firewall
+and it's safely ignored by others. It set limits for matched packets.</P>
+<H2><A NAME="ss10.1">10.1 Limit tag attributes</A>
+</H2>
+
+<P>
+<UL>
+<LI><B>rate</B>: maximum average matching rate (can be a number with an
+optional time unit, like '/s', '/m', '/h' or '/d').</LI>
+<LI><B>burst</B>: maximum initial number of packets to match.</LI>
+</UL>
+</P>
+<P>Example; match three packets in an hour, with a burst of 10:</P>
+<P>
+<BLOCKQUOTE>
+&lt;limit rate='3/h' burst='10' /&gt;
+</BLOCKQUOTE>
+</P>
+<H2><A NAME="s11">11. Processing instruction</A></H2>
+
+<P>Sometimes you need to give special instructions to the XML parser.
+You can add a processing instruction right below the XML prolog,
+with the syntax:</P>
+<P>
+<BLOCKQUOTE>
+&lt;?daxfi-process attributeName='attributeValue'?&gt;
+</BLOCKQUOTE>
+</P>
+<P>Valid attributes are:</P>
+<P>
+<UL>
+<LI><B>only-for</B>: a comma separated list of firewalls that can use this
+rule or list of rules.</LI>
+<LI><B>not-for</B>: a comma separated list of firewall names that ignores
+these rules.</LI>
+</UL>
+</P>
+<P>Example; a set of rules to be executed only if the firewall is
+not iptables or ipfilter:</P>
+<P>
+<HR>
+<PRE>
+&lt;?xml version='1.0'?&gt;
+&lt;?daxfi-process not-for='iptables,ipfilter'?&gt;
+&lt;ruleset&gt;
+    ...
+&lt;/ruleset&gt;
+</PRE>
+<HR>
+</P>
+<H2><A NAME="s12">12. Parameter substitution</A></H2>
+
+<P>If you're using a dial-up connection normally you don't know
+what IP address will be assigned to you by the provider and the name
+of the network interface used by the pppd daemon. Using a DAXFi-based
+program you can leave in your XML files some placeholders and tell
+the program to substitute these strings with other data.</P>
+<P>The Firewall class in the daxfi Python package takes as constructor
+parameter the 'substitutionDict' keyword, that must be a Python dictionary
+in the form {'placeHolder1': 'value1', 'placeHolder2': 'value2',
+...}. Before any operation on XML files or strings, the Firewall
+object will replace the strings 'placeHolder1', 'placeHolder2' and
+so on with 'value1', 'value2', etc.</P>
+<P>As example, the <EM>daxfid</EM> script will search for '%REMOTE_IP',
+'%LOCAL_IP' and '%INTERFACE', replacing these strings
+with the remote IP, the local assigned IP and the interface of the
+connection.</P>
+<H2><A NAME="s13">13. Examples</A></H2>
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>Accept any incoming TCP packet from the network 192.196.1.0/24, to the port 80.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;append&gt;
+  &lt;rule source-ip='192.196.1.0/24' direction='in'&gt;
+    &lt;tcp destination-port='80' /&gt;
+    &lt;accept /&gt;
+  &lt;/rule&gt;
+&lt;/append&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -A INPUT -p 6 -j ACCEPT --destination-port 80 --source 192.196.1.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipchains -A input -j ACCEPT --destination-port 80 -p 6 --source 192.196.1.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipfwadm -a accept -I -S 192.196.1.0/255.255.255.0  -D 0.0.0.0/0.0.0.0 80 -P tcp</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr>pass in quick proto 6 from 192.196.1.0/255.255.255.0 to 0.0.0.0/0.0.0.0 port = 80</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>Example of more than one rule in a single file. Note the use of the boolean 'fragment-only' option in the second rule.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;ruleset&gt;
+  &lt;append&gt;
+    &lt;rule direction='in'
+          source-ip='192.168.1.0/24'&gt;
+      &lt;tcp /&gt;
+      &lt;accept /&gt;
+    &lt;/rule&gt;
+
+    &lt;rule direction='out'
+          fragment-only='yes'
+          destination-ip='192.168.1.0/24'&gt;
+      &lt;tcp /&gt;
+      &lt;accept /&gt;
+    &lt;/rule&gt;
+
+  &lt;/append&gt;
+
+  &lt;flush&gt;
+    &lt;rule direction='out' /&gt;
+  &lt;/flush&gt;
+
+&lt;/ruleset&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -A INPUT -p 6 -j ACCEPT --source 192.168.1.0/255.255.255.0<br>
+iptables -A OUTPUT -p 6 -j ACCEPT --destination 192.168.1.0/255.255.255.0 --fragment<br>
+iptables -F OUTPUT </nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipchains -A input -j ACCEPT -p 6 --source 192.168.1.0/255.255.255.0<br>
+ipchains -A output -j ACCEPT -p 6 --destination 192.168.1.0/255.255.255.0 --fragment<br>
+ipchains -F output</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipfwadm -a accept -I -S 192.168.1.0/255.255.255.0  -P tcp<br>
+ # This rule can't be generated for this firewall.<br>
+ipfwadm -f -O </nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr>pass in quick proto 6 from 192.168.1.0/255.255.255.0 to 0.0.0.0/0.0.0.0<br>
+pass out quick proto 6 from 0.0.0.0/0.0.0.0 to 192.168.1.0/255.255.255.0 with frag<br>
+# Execute the command: ipf -Fo</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>Insert a rule in the third position of the 'input chain'.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;insert rule-number='3'&gt;
+  &lt;rule source-ip='192.196.1.0/24'
+        destination-ip='1.2.3.4'
+        interface='ppp0'
+        direction='in'&gt;
+    &lt;accept /&gt;
+  &lt;/rule&gt;
+&lt;/insert&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -I INPUT 3 -j ACCEPT --in-interface ppp0 --destination 1.2.3.4/255.255.255.255 --source 192.196.1.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipchains -I input 3 -j ACCEPT --interface ppp0 --destination 1.2.3.4/255.255.255.255 --source 192.196.1.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipfwadm -i accept -I -W ppp0 -D 1.2.3.4/255.255.255.255 -S 192.196.1.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr>@3 pass in quick on ppp0 from 192.196.1.0/255.255.255.0 to 1.2.3.4/255.255.255.255</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>Flush the 'output chain'.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;flush&gt;
+  &lt;rule direction='out' /&gt;
+&lt;/flush&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -F OUTPUT </nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipchains -F output</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipfwadm -f -O </nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr># Execute the command: ipf -Fo</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>This rule replaces the one in the second position of the 'input chain'.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;replace rule-number='2'&gt;
+  &lt;rule source-ip='1.2.3.4' direction='in'&gt;
+    &lt;udp /&gt;
+    &lt;accept /&gt;
+  &lt;/rule&gt;
+&lt;/replace&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -R INPUT 2 -p 17 -j ACCEPT --source 1.2.3.4/255.255.255.255</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipchains -R input 2 -j ACCEPT -p 17 --source 1.2.3.4/255.255.255.255</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr> # This rule can't be generated for this firewall.</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr> # This rule can't be generated for this firewall.</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>Delete the seventh rule in the 'output chain'.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;delete rule-number='7'&gt;
+  &lt;rule direction='out' /&gt;
+&lt;/delete&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -D OUTPUT 7 </nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipchains -D output 7 </nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr> # This rule can't be generated for this firewall.</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr> # This rule can't be generated for this firewall.</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>Remove the defined rule.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;delete&gt;
+  &lt;rule direction='out' source-ip='192.168.2.0/24'&gt;
+    &lt;tcp /&gt;
+    &lt;accept /&gt;
+  &lt;/rule&gt;
+&lt;/delete&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -D OUTPUT -p 6 -j ACCEPT --source 192.168.2.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipchains -D output -j ACCEPT -p 6 --source 192.168.2.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipfwadm -d accept -O -S 192.168.2.0/255.255.255.0  -P tcp</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr># Remove the rule: "pass out quick proto 6 from 192.168.2.0/255.255.255.0 to 0.0.0.0/0.0.0.0"</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>Some rules using icmp.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;append&gt;
+  &lt;rule direction='in'&gt;
+    &lt;tcp syn-only='no' source-port='!123:239' /&gt;
+    &lt;reject reject-with='network-prohibited' /&gt;
+  &lt;/rule&gt;
+
+  &lt;rule direction='in'&gt;
+    &lt;icmp icmp-type='host-redirect'/&gt;
+    &lt;drop /&gt;
+  &lt;/rule&gt;
+
+  &lt;rule direction='in'&gt;
+    &lt;icmp icmp-type='3/2'/&gt;
+    &lt;drop /&gt;
+  &lt;/rule&gt;
+
+&lt;/append&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -A INPUT -p 6 -j REJECT --source-port ! 123:239 ! --syn --reject-with icmp-net-prohibited<br>
+iptables -A INPUT -p 1 -j DROP --icmp-type 5/1<br>
+iptables -A INPUT -p 1 -j DROP --icmp-type 3/2</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipchains -A input -j REJECT --source-port ! 123:239 -p 6 ! --syn<br>
+ipchains -A input -j DENY --source 0.0.0.0/0.0.0.0 5 --destination 0.0.0.0/0.0.0.0 1 -p 1<br>
+ipchains -A input -j DENY --source 0.0.0.0/0.0.0.0 3 --destination 0.0.0.0/0.0.0.0 2 -p 1</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr> # This rule can't be generated for this firewall.<br>
+ipfwadm -a deny -I -S 0.0.0.0/0.0.0.0 5 -P icmp<br>
+ipfwadm -a deny -I -S 0.0.0.0/0.0.0.0 3 -P icmp</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr>block return-icmp(9) in quick proto 6 from 0.0.0.0/0.0.0.0 port 123 &lt;&gt; 239 to 0.0.0.0/0.0.0.0 flags SA<br>
+block in quick proto 1 from 0.0.0.0/0.0.0.0 to 0.0.0.0/0.0.0.0 icmp-type 5 code 1<br>
+block in quick proto 1 from 0.0.0.0/0.0.0.0 to 0.0.0.0/0.0.0.0 icmp-type 3 code 2</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>Any packet from IPs in '192.168.3.0/24' on interface 'le1' have the source IP modified to '5.6.7.8' and a new source port in the range between 1 and 1024.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;append&gt;
+  &lt;rule direction='in' source-ip='192.168.3.0/24' interface='le1'&gt;
+    &lt;snat to-address='5.6.7.8' to-port='1:1024' /&gt;
+  &lt;/rule&gt;
+&lt;/append&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -A POSTROUTING -p 6 -t nat -j SNAT --to-source 5.6.7.8:1-1024 --out-interface le1 --source 192.168.3.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr> # This rule can't be generated for this firewall.</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr> # This rule can't be generated for this firewall.</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr>map le1 from 192.168.3.0/255.255.255.0 to 0.0.0.0/0.0.0.0 -&gt; 5.6.7.8/255.255.255.255 portmap tcp 1:1024</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>Masquerade every packet from '192.16.1.0/24' on 'ppp0' interface as they are coming from the local machine.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;append&gt;
+  &lt;rule source-ip='192.16.1.0/24' interface='ppp0'&gt;
+    &lt;masq /&gt;
+  &lt;/rule&gt;
+&lt;/append&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -A POSTROUTING -t nat -j MASQUERADE --out-interface ppp0 --source 192.16.1.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipchains -A forward -j MASQ --interface ppp0 --source 192.16.1.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipfwadm -a masquerade -F -W ppp0 -S 192.16.1.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr>map ppp0 from 192.16.1.0/255.255.255.0 to 0.0.0.0/0.0.0.0 -&gt; 0/32</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>Any TCP packet from IPs in '1.2.3.0/24' on interface 'le2', to port '80' are redirected to the local machine, port 8080.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;append&gt;
+  &lt;rule source-ip='1.2.3.0/24' interface='le2'&gt;
+    &lt;tcp source-port='80' /&gt;
+    &lt;redirect to-port='8080' /&gt;
+  &lt;/rule&gt;
+&lt;/append&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -A OUTPUT -p 6 -t nat -j REDIRECT --to-ports 8080 --source-port 80 --out-interface le2 --source 1.2.3.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipchains -A input -j REDIRECT 8080 --source-port 80 -p 6 --interface le2 --source 1.2.3.0/255.255.255.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipfwadm -a accept -I -r 8080 -S 1.2.3.0/255.255.255.0 80 -P tcp -W le2</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr>rdr le2 from 1.2.3.0/255.255.255.0 port = 80 to 0.0.0.0/0.0.0.0 -&gt; 127.0.0.1 port 8080 tcp</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>Write a log for matching packets.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;append&gt;
+  &lt;rule direction='in' interface='ppp0' destination-ip='127.0.0.1/8'&gt;
+    &lt;drop /&gt;
+    &lt;log priority='warn' facility='local2' /&gt;
+  &lt;/rule&gt;
+&lt;/append&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -A INPUT -j LOG --log-level warn --in-interface ppp0 --destination 127.0.0.0/255.0.0.0<br>
+iptables -A INPUT -j DROP --in-interface ppp0 --destination 127.0.0.0/255.0.0.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipchains -A input -j DENY -l --interface ppp0 --destination 127.0.0.0/255.0.0.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipfwadm -a deny -I -W ppp0 -D 127.0.0.0/255.0.0.0</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr>block in log level local2.warn quick on ppp0 from 0.0.0.0/0.0.0.0 to 127.0.0.0/255.0.0.0</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+	<td width="15%" valign="top" align="right"><i>Packets incoming on interface 'ppp0' to address '127.0.0.1/8 are accepted only if part of an already established connection.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;append&gt;
+  &lt;rule direction='in'&gt;
+    &lt;tcp state='related'/&gt;
+    &lt;accept /&gt;
+  &lt;/rule&gt;
+&lt;/append&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr>iptables -A INPUT -p 6 -m state -j ACCEPT --state ESTABLISHED,RELATED</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr> # This rule can't be generated for this firewall.</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr> # This rule can't be generated for this firewall.</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr>pass out quick proto 6 from 0.0.0.0/0.0.0.0 to 0.0.0.0/0.0.0.0 keep state</nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<table cellpadding="2" cellspacing="2" border="1">
+
+<tr>
+  <td width="15%" valign="top" align="right"><i>Use of processing instructions: the defined rule is valid only for firewalls that are not 'iptables' or 'ipfilter'.</i></td>
+  <td valign="top"><pre>&lt;?xml version='1.0'?&gt;
+
+&lt;?daxfi-process not-for='iptables,ipfilter'?&gt;
+
+&lt;append&gt;
+  &lt;rule direction='out' destination-ip='127.0.0.1' fragment-only='no'&gt;
+    &lt;drop /&gt;
+  &lt;/rule&gt;
+&lt;/append&gt;</pre></td>
+</tr>
+<tr>
+  <td width="15%" valign="center" align="right"><b>iptables</b></td>
+      <td valign="center"><code><font size="-1"><nobr></nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipchains</b></td>
+      <td valign="center"><code><font size="-1"><nobr>ipchains -A output -j DENY --destination 127.0.0.1/255.255.255.255 ! --fragment</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfwadm</b></td>
+      <td valign="center"><code><font size="-1"><nobr> # This rule can't be generated for this firewall.</nobr></font></code></td>
+    </tr>
+    <tr>
+      <td width="15%" valign="center" align="right"><b>ipfilter</b></td>
+      <td valign="center"><code><font size="-1"><nobr></nobr></font></code></td>
+    </tr>
+</table>
+
+<p>
+
+
+
+<H2><A NAME="s14">14. Copyright</A></H2>
+
+<P>Copyright 2001, 2002 Davide Alberani &lt;alberanid@libero.it&gt;</P>
+<P>Redistribution and use in source (SGML DocBook) and 'compiled'
+forms (SGML, HTML, PDF, PostScript, RTF and so forth) with or without
+modification, are permitted provided that the following conditions
+are met:</P>
+<P>
+<OL>
+<LI>Redistributions of source code (SGML DocBook) must retain the
+above copyright notice, this list of conditions and the following
+disclaimer as the first lines of this file unmodified.</LI>
+<LI>Redistributions in compiled form (transformed to other DTDs,
+converted to PDF, PostScript, RTF and other formats) must reproduce
+the above copyright notice, this list of conditions and the following
+disclaimer in the documentation and/or other materials provided with
+the distribution.</LI>
+</OL>
+</P>
+<P><B>Important</B>: THIS DOCUMENTATION IS PROVIDED BY THE AUTHOR 'AS IS'
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+IN ANY WAY OUT OF THE USE OF THIS DOCUMENTATION, EVEN IF ADVISED
+OF THE POSSIBILITY OF SUCH DAMAGE.</P>
+</BODY>
+</HTML>

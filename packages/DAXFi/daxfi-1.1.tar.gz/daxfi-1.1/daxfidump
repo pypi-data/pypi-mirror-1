@@ -1,0 +1,106 @@
+#!/usr/bin/env python
+
+"""
+daxfidump.
+
+Dump rules from a running firewall.
+
+  Copyright 2001, 2002 Davide Alberani <alberanid@libero.it>
+
+This code is released under the GPL license.
+"""
+
+
+import sys, string
+
+try:
+    from daxfi import Firewall, DetectFirewallError
+except ImportError:
+    sys.stderr.write('unable to import DAXFi\'s modules.\n')
+    sys.exit(1)
+
+try:
+    firewall = Firewall()
+except DetectFirewallError:
+    sys.stderr.write('The daxfi module is not able to detect the running firewall\n')
+    sys.exit(11)
+
+
+HELP = """
+Usage:
+daxfidump [-s]
+
+Options:
+    -s      a single file named "daxfiRules.xml" is created.
+
+Simply execute daxfidump; in the current directory
+many files named daxfiXML_XX.xml will be created.
+
+If you specify the "-s" option, a single file named
+"daxfiRules.xml" is created.
+"""
+
+if len(sys.argv[1:]) > 1:
+    print HELP
+    sys.exit(5)
+
+SINGLE = 0
+if len(sys.argv[1:]) == 1:
+    if sys.argv[1] == '-s':
+        SINGLE = 1
+    else:
+        print HELP
+        sys.exit(5)
+
+chains_number = 0
+rules_number = 0
+rules = []
+
+WARN_RETURN = 0
+
+for chain in ('in', 'out', 'nat'):
+    rc = firewall.dumpRulesUDC(chain)
+    rules += rc
+    rules_number += len(rc)
+    if len(rc) > 0:
+        chains_number += 1
+
+for rule in rules:
+    if rule.getTarget().lower() == 'return':
+        WARN_RETURN = 1
+
+if not SINGLE:
+    for index in xrange(0, rules_number):
+        try:
+            fname = 'daxfiXML_' + string.zfill(str(index+1), 2) + '.xml'
+            f = open(fname, 'w')
+            f.write(rules[index].getXML())
+            f.close()
+        except IOError, ie:
+            print str(ie)
+            sys.exit(10)
+else:
+    try:
+        f = open('daxfiRules.xml', 'w')
+        f.write('<?xml version="1.0"?>\n\n<append>')
+        for rule in rules:
+            f.write('\n')
+            for line in rule.getBareXML().splitlines():
+                f.write('  ' + line + '\n')
+        f.write('</append>')
+        f.close()
+    except IOError, ie:
+        print str(ie)
+        sys.exit(10)
+            
+
+print 'Dumped ' + str(rules_number) + ' rule(s) in ' + str(chains_number) + \
+        ' chain(s).'
+
+if WARN_RETURN:
+    print '\nWARNING: detected one or more rules with the "return" target;\n'+\
+            '         probably you have to manually correct the dumped rules.'
+
+sys.exit(0)
+
+
