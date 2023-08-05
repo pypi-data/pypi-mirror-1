@@ -1,0 +1,178 @@
+Paste WebKit
+============
+
+:author: Ian Bicking <ianb@colorstudy.com>
+:revision: $Rev: 3287 $
+:date: $LastChangedDate: 2005-09-26 12:08:24 -0500 (Mon, 26 Sep 2005) $
+
+.. contents::
+
+Introduction
+------------
+
+This is a basic description of how to get Paste WebKit installed and
+working.  It is not a tutorial (see the `Todo Tutorial
+<http://pythonpaste.org/docs/TodoTutorial.html>`_ for now -- but note
+the installation instructions here differ from that document).
+
+Installation
+------------
+
+To install, first get `easy_install
+<http://peak.telecommunity.com/DevCenter/EasyInstall>`_.  Currently,
+as not all prerequisites are fully packaged, do::
+
+    $ easy_install.py http://svn.pythonpaste.org/Paste/branches/mainline-refactor
+    $ easy_install.py http://svn.pythonpaste.org/Paste/WebKit/trunk
+
+You may need to run these as root.  The second command should install
+`Paste Deployment <http://pythonpaste.org/deploy/paste-deploy.html>`_
+on its own.
+
+Configuration
+-------------
+
+This uses Paste Deploy, so to configure your application write a .ini
+file like::
+
+    [app:main]
+    use = egg:PasteWebKit
+    package_name = mypackage
+    myconfig_var = foo1
+
+There are several configuration keys WebKit uses.  The first are to
+find your application; you can use *one* of these:
+
+``servlet_directory``:
+
+    The directory where you've put your servlets.  You can use
+    ``%(here)s`` to refer to the directory that contains the
+    configuration file.
+
+``package_name``:
+
+    The package for your application.  Servlets are expected in a
+    ``web`` subpackage.  So if you give ``mypackage`` it will look in
+    ``mypackage.web`` for the servlets.
+
+The other keys configure various filters/middleware:
+
+``complete_stack`` (default true):
+
+    If false, then none of the middleware will be installed.  This may
+    be useful if you are nesting one WebKit app inside another (and
+    don't want to duplicate the stack).
+
+``debug`` (default false):
+
+    This controls a number of settings.  Mostly errors will be
+    displayed in the browser with this on.  It is also picked up from
+    the global ``debug`` setting if not given.
+
+    Also, with this on, the ``printdebug`` filter will be installed,
+    which catches all print statements and shows them in a ``<pre>``
+    in each response page.
+
+``cookie_name`` (default ``_SID_`` -- for session):
+
+    The cookie name the session will use.
+
+``session_file_path`` (default ``/tmp``):
+
+    Where the session files are kept.
+
+``error_email`` (default: none):
+
+    Any email addresses that should be used when reporting errors.
+    Adding emails here will enable this feature.  Use spaces to
+    separate multiple addresses.
+
+    If you don't give this in the application section, the keys
+    ``error_email`` or ``sysadmin_email`` (in that order) will be
+    pulled from te global configuration (``[DEFAULTS]``).
+
+``error_log`` (default: none):
+
+    A file to append to with error reports.
+
+``show_exceptions_in_wsgi_errors`` (default: not debug):
+
+    If true then errors will show up in the server error logs.  Where
+    this goes depends on the server.  If debug is on, this defaults to
+    off, and vice versa.
+
+``from_address`` (default: ``errors@localhost``):
+
+    What address errors appear to come from.
+
+``smtp_server`` (default: ``localhost``):
+
+    The SMTP server (for sending errors).
+
+``error_subject_prefix`` (default: ``[app_name]``):
+
+    The prefix to put on error email subjects.  If an ``app_name`` is
+    given (globally or locally) then that will be used.
+
+``error_message`` (default: none):
+
+    Extra text to use in error messages presented to users (when debug
+    mode is off)
+
+``profile`` (default: false):
+
+    If on, then all requests will be profiled.  This slows down the
+    app considerable, so *absolutely* don't use it except in
+    development.
+
+``profile_limit`` (default: 40):
+
+    Show the top N slowest parts of the system.
+
+All other configuration keys will be sent to the application.  So in
+the example ``myconfig_var`` would be application configuration.
+
+Applications can access this information like::
+
+    from paste.deploy import CONFIG
+    
+    def my_routine():
+        var = CONFIG['myconfig_var']
+
+The ``CONFIG`` variable dispatches to the configuration for the
+*current request*, whatever that request might be.  This means you
+can't use it at the module-level, because modules are loaded once,
+before any per-request configuration is available.
+
+Deploying an Application
+------------------------
+
+Once you've configured your application, you use Paste Deploy to
+create a WSGI application.  WSGI applications can be used by many
+servers.
+
+To get an application you do::
+
+    from paste.deploy import loadapp
+
+    wsgi_app = loadapp('config:myconfig_file.ini',
+                       relative_to=config_dir)
+
+This loads the app described by ``app:main`` from the configuration
+file.  You can give ``config:/absolute_path``, or use ``relative_to``
+to allow relative paths.
+
+You can also run the server with `PasteScript
+<http://svn.pythonpaste.org/Paste/Script/trunk>`_.  Add a
+``[server:main]`` section to your configuration, like::
+
+    [server:main]
+    # this is a good testing server:
+    use = egg:PasteScript#wsgiutils
+    host = 127.0.0.1
+    port = 8080
+
+And then use ``paster serve --reload path/to/conf.ini``.  The
+``--reload`` option causes the server to restart when files are edited
+(this is kind of expensive, so should only be used during
+development).
