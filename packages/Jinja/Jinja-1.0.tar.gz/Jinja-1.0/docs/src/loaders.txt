@@ -1,0 +1,91 @@
+================
+Template Loaders
+================
+
+This part of the documentation explains how to use and write a template loader.
+
+Builtin Loaders
+===============
+
+[[list_of_loaders]]
+
+Developing Loaders
+==================
+
+Template loaders are just normal Python classes that have to provide some
+functions used to load and translate templates. Because some of the tasks
+a loader has to do are redundant there are some classes that make loader
+development easier.
+
+Here the implementation of a simple loader based on the `BaseLoader` from
+`jinja.loaders`:
+
+.. sourcecode:: python
+
+    import codecs
+    from os.path import join
+    from jinja.loaders import BaseLoader
+    from jinja.exceptions import TemplateNotFound
+
+    class SimpleLoader(BaseLoader):
+        
+        def __init__(self, path):
+            self.path = path
+
+        def get_source(self, environment, name, parent):
+            filename = join(self.path, name)
+            if not path.exists(filename):
+                raise TemplateNotFound(name)
+            f = codecs.open(filename, 'r', environment.template_charset)
+            try:
+                return f.read()
+            finally:
+                f.close()
+
+The functions `load` and `parse` which are a requirement for a loader are
+added automatically by the `BaseLoader`.
+
+Additionally to the `BaseLoader` there is a mixin class called
+`CachedLoaderMixin` that implements memory and disk caching of templates.
+Note that you have to give it a higher priority in the MRO than the
+`BaseLoader` which means that's the first base class when inheriting from it:
+
+.. sourcecode:: python
+
+    import codecs
+    from os.path import join, getmtime, exists
+    from jinja.loaders import BaseLoaderCachedLoaderMixin
+    from jinja.exceptions import TemplateNotFound
+
+    class CachedLoader(CachedLoaderMixin, BaseLoader):
+        
+        def __init__(self, path):
+            self.path = path
+            CachedLoaderMixin.__init__(
+                True,       # use memory caching
+                40,         # for up to 40 templates
+                '/tmp',     # additionally save the compiled templates in /tmp
+                True        # and reload cached templates automatically if changed
+            )
+
+        def get_source(self, environment, name, parent):
+            filename = join(self.path, name)
+            if not path.exists(filename):
+                raise TemplateNotFound(name)
+            f = codecs.open(filename, 'r', environment.template_charset)
+            try:
+                return f.read()
+            finally:
+                f.close()
+
+        def check_source_changed(self, environment, name):
+            fn = join(self.path, name)
+            if exists(fn):
+                return getmtime(fn)
+            return -1
+
+You don't have to provide the `check_source_changed` method. If it doesn't
+exist the option `auto_reload` won't have an effect. Also note that the
+`check_source_changed` method must not raise an exception if the template
+does not exist but return ``-1``. The return value ``-1`` is considered
+"always reload" whereas ``0`` means "do not reload".
