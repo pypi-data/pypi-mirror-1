@@ -1,0 +1,1 @@
+from pxd2 cimport MyStruct
