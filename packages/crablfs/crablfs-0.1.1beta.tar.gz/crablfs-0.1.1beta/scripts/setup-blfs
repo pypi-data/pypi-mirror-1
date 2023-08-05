@@ -1,0 +1,131 @@
+#!/bin/sh
+
+# Author: 周鹏(Chowroc)
+# Email: chowroc.z@gmail.com
+# Date: 2006-12-01
+
+# Build python-2.4.1, pexpect-2.1(optional), crablfs-0.1.1 tools 
+#	chian for BLFS
+# The future version of this script will read configurations from the
+#	profiles directly.
+# And I will build a project to do those configurations read/write
+#	especially.
+
+tmpd="/opt"
+PATH=$PATH:/usr/local/bin:/opt/bin
+export PYTHONPATH="$tmpd/lib/python2.4/site-packages"
+
+python_archive=""
+python_patches=""
+python_buildir=""
+pexpect_archive=""
+pexpect_buildir=""
+crablfs_archive=""
+crablfs_buildir=""
+profiles=""
+SCWD=`dirname $0`
+CRWD="$SCWD/.."
+
+echo "Building python-2.4.1, pexpect-2.1(optional), crablfs-0.1.1 tools chian for BLFS..."
+
+function usage() {
+	echo "setup-blfs -py \$archive -cr \$archive [-ex \$archive] \$profiles-dir
+	-py \$python_archive
+	-cr \$crablfs_archive
+	-ex \$pexpect_archive"
+}
+
+while [ $# -gt 0 ]; do
+	case $1 in
+	-py)  python_archive=$2; shift
+	;;
+	-ex)  pexpect_archive=$2; shift
+	;;
+	-cr)  crablfs_archive=$2; shift
+	;;
+	-h)   usage; exit 0
+	;;
+	*)    profiles=$1
+	;;
+	esac
+	shift
+done
+
+function filetype() {
+	archive=$1
+	type=`file $archive | awk '{print $2}'`
+	if [ $type == "bzip2" ]; then
+		echo "j"
+	elif [ $type == "gzip" ]; then
+		echo "z"
+	fi
+}
+
+if [ -z "$python_archive" ]; then
+	echo "No python source archive is specified." >&2
+	usage
+	exit 1
+elif [ -z "$crablfs_archive" ]; then
+	echo "No crablfs source archive is specified." >&2
+	usage
+	exit 1
+elif [ -z "$profiles" ]; then
+	echo "No direcotry the profiles locates is specified." >&2
+	usage
+	exit 1
+fi
+
+echo "[32mInstalling temparay python ...[00m"
+x=`filetype "$python_archive"`
+python_buildir=`tar tf$x $python_archive | sort | sed -n '1p'`
+tar xf$x $python_archive
+cd $python_buildir
+./configure --prefix=/opt --enable-shared
+make && make install
+cd ..
+rm -rf $python_buildir
+ldconfig
+
+# Optional
+if [ -n "$pexpect_archive" ]; then
+	echo "[32minstalling temparay pexpect ...[00m"
+	x=`filetype "$pexpect_archive"`
+	pexpect_buildir=`tar tf$x $pexpect_archive | sort | sed -n '1p'`
+	tar xf$x $pexpect_archive
+	cd $pexpect_buildir
+	$tmpd/bin/python setup.py install --prefix=/opt
+	cd ..
+	rm -rf $pexpect_buildir
+fi
+
+echo "[32minstalling temparay crablfs ...[00m"
+cd $CRWD
+cp userpack.dirs.blfs -f userpack.dirs
+# x=`filetype "$crablfs_archive"`
+# crablfs_buildir=`tar xf$x $crablfs_archive | sort | sed -n '1p'`
+# tar xf$x $crablfs_archive
+# cd $crablfs_buildir
+$tmpd/bin/python setup.py install --prefix=/opt
+# cd ..
+# rm -rf $pexpect_buildir
+
+$tmpd/bin/userpack init
+echo "[32minstalling python ...[00m"
+$tmpd/bin/userpack install -af $python_archive -p scripts/patches/python-2.4.1-gdbm-1.patch python-2.4.1 -c $profiles/python
+echo "[32minstalling crablfs ...[00m"
+$tmpd/bin/userpack install -af $crablfs_archive crablfs-0.1.1 -c $profiles/crablfs
+if [ -n "$pexpect_archive" ]; then
+	echo "[32minstalling pexpect ...[00m"
+	userpack install -af $pexpect_archive pexpect-2.1 -c $profiles/pexpect
+fi
+unset PYTHONPATH
+# userpack packs
+
+xlib="/usr/X11R6/lib"
+if ! grep "$xlib" /etc/ld.so.conf >/dev/null; then
+	echo "$xlib" >>/etc/ld.so.conf
+fi
+
+mv /bin/hostname /bin/hostname.coreutils
+# groupadd -g 34 mail
+# chgrp -v mail /var/mail
