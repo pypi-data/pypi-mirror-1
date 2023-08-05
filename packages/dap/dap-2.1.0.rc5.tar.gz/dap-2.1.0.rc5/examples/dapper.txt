@@ -1,0 +1,156 @@
+An example session of accessing a Dapper dataset. First we connect to a dataset and check its DDS:
+
+    >>> from dap.client import open
+    >>> from dap.responses import dds
+    >>> dataset = open("http://www.epic.noaa.gov:10100/dods/epic/race_beringsea_prof_mbt.cdp")
+    >>> print ''.join(dds.build(dataset))
+    Dataset {
+        Sequence {
+            Float32 lat;
+            Float32 lon;
+            Float64 time;
+            Int32 _id;
+            Sequence {
+                Float32 depth;
+                Float32 T_20;
+            } profile;
+            Structure {
+                String CREATION_DATE;
+                String CRUISE;
+                String CAST;
+                String INST_TYPE;
+                String DATA_TYPE;
+                String COORD_SYSTEM;
+                String DATA_ORIGIN;
+                String STATION_NAME;
+                String DATA_SUBTYPE;
+                String Conventions;
+                String VESSEL;
+                String REGION;
+                String BOTTLE;
+                String WATER_DEPTH;
+            } attributes;
+            Structure {
+                Structure {
+                    Float32 valid_range[valid_range = 2];
+                } depth;
+            } variable_attributes;
+        } location;
+        Structure {
+            Float32 lon_range[lon_range = 2];
+            Float32 lat_range[lat_range = 2];
+            Float32 depth_range[depth_range = 2];
+            Float64 time_range[time_range = 2];
+        } constrained_ranges;
+    } race_beringsea_prof_mbt;
+    <BLANKLINE>
+    
+The object 'dataset' emulates a dictionary:
+
+    >>> print dataset.keys()
+    ['location', 'constrained_ranges']
+    >>> location = dataset['location']
+
+Here, 'location' is a sequence. We can access variables stored in the sequence also using a dict syntax:
+
+    >>> lat = location['lat']
+
+Objects inside sequences can't be indexed; we must retrieve everything:
+
+    >>> latdata = lat[:]
+    >>> print len(latdata)
+    1000
+    >>> for v in latdata[:10]:
+    ...     print v
+    57.3300018311
+    57.0
+    57.6500015259
+    57.3300018311
+    58.0
+    57.6699981689
+    58.3400001526
+    57.9799995422
+    58.0099983215
+    57.6699981689
+
+We can also filter the sequence, say, where the latitude is between 59.9 and 60.0:
+
+    >>> print lat.id
+    location.lat
+    >>> seq = location.filter('location.lat>59.9')
+    >>> seq = seq.filter('location.lat<60')
+    >>> latdata = seq['lat'][:]
+    >>> print len(latdata)
+    26
+    >>> londata = seq['lon'][:]
+    >>> print len(latdata)
+    26
+    >>> for y,x in zip(latdata,londata):
+    ...     print 'lat: %2.2f  lon: %2.2f' % (y,x)
+    lat: 59.97  lon: 190.68
+    lat: 59.99  lon: 189.39
+    lat: 59.97  lon: 184.08
+    lat: 59.98  lon: 183.29
+    lat: 59.99  lon: 190.03
+    lat: 59.99  lon: 189.37
+    lat: 59.98  lon: 186.05
+    lat: 59.98  lon: 192.02
+    lat: 59.99  lon: 191.37
+    lat: 59.98  lon: 188.70
+    lat: 59.98  lon: 189.38
+    lat: 59.99  lon: 185.39
+    lat: 59.99  lon: 190.68
+    lat: 59.98  lon: 191.35
+    lat: 59.99  lon: 188.04
+    lat: 59.99  lon: 188.70
+    lat: 59.99  lon: 184.73
+    lat: 59.99  lon: 185.43
+    lat: 59.98  lon: 184.08
+    lat: 59.99  lon: 192.04
+    lat: 59.99  lon: 186.03
+    lat: 59.99  lon: 192.02
+    lat: 59.99  lon: 190.03
+    lat: 59.97  lon: 186.64
+    lat: 59.99  lon: 185.44
+    lat: 59.98  lon: 183.25
+
+We can go deeper in the hierarchy:
+
+    >>> vessel = dataset['location']['attributes']['VESSEL']
+    >>> vesseldata = vessel[:]
+    >>> print vesseldata[0]
+    88
+
+The dap module implements functions to convert between COARDS time units and datetime objects:
+
+    >>> time = dataset['location']['time']
+    >>> timedata = time[:][:5]
+    >>> print timedata
+    [802251600000.0, 802247100000.0, 802262340000.0, 802260060000.0, 802271760000.0]
+
+These values don't make much sense, right? We can convert them to datetime objects because the time units are specified; the units should be stored in time.attributes['units'], but since this Dapper server uses an older syntax for the DAS it's actually located in dataset.attributes['location.time']['units']:
+
+    >>> units = dataset.attributes['location.time']['units']
+    >>> print units
+    ['msec since 1970-01-01 00:00:00 GMT']
+
+Unfortunately this unit specification seems to be invalid; the timezone must be a time offset from GMT. A quick fix:
+
+    >>> units = units[0].replace('GMT', '00:00')
+
+Also, 'msec' is not a valid unit according to the COARDS specification. We simply convert it to seconds:
+
+    >>> units = units.replace('msec', 'sec')
+    >>> timedata = [i * 1e-3 for i in timedata]
+
+And now for the magic part:
+
+    >>> from dap.util.coards import parseUdunits
+    >>> timedata = [parseUdunits(i, units) for i in timedata]
+    >>> for td in timedata:
+    ...     print td
+    1995-06-04 07:40:00+00:00
+    1995-06-04 06:25:00+00:00
+    1995-06-04 10:39:00+00:00
+    1995-06-04 10:01:00+00:00
+    1995-06-04 13:16:00+00:00
