@@ -1,0 +1,242 @@
+User Tutorial
+=============
+
+This is the user tutorial for RhubarbTart. This tutorial goes through the steps
+of making a simple application in RhubarbTart, showing off all the major
+features of it and how to develop your own applications in it.
+
+Step 1: Setting up RhubarbTart
+++++++++++++++++++++++++++++++
+
+The first step for getting a application started with RhubarbTart is to instal
+it and all of it's dependencies. Using EasyInstall_ makes this just a few
+commands you type into the command prompt. These commands install the Cheetah_
+templating language, RhubarbTart itself, and Paste_ which is a collection of
+tools for making webapps easier. To install all of these tools and any
+dependencies that might be missing would be::
+
+  easy_install http://cheeseshop.python.org/packages/source/C/Cheetah/Cheetah-1.0.tar.gz
+  easy_install -f http://rhubarbtart.org RhubarbTart PasteScript==dev
+
+While you installed Cheetah_ as a dependency, RhubarbTart makes no preference
+for any particular templating language.
+
+The developers would also highly recommend setting up a `virtual python`__
+to make installing additional dependencies and development of your application
+or other dependencies easier. It would be best to do this before you install
+RhubarbTart and the dependencies just so EasyInstall_ is managing everything for
+your Python libraries.
+
+.. __: http://peak.telecommunity.com/DevCenter/EasyInstall#creating-a-virtual-python
+
+.. _EasyInstall: http://peak.telecommunity.com/DevCenter/EasyInstall
+.. _Paste: http://pythonpaste.org
+.. _Cheetah: http://cheetahtemplate.org
+
+
+Step 2: Starting your first application
++++++++++++++++++++++++++++++++++++++++
+
+Once RhubarbTart is instaled, you have to create an application instance. The
+paster tool distributed with PasteScript_ is the perferred way to do this. To
+create your application, the command is::
+
+  paster create --template=rhubarbtart <application name>
+
+This command should be run in the directory you wish to work in as it does
+create a directory named <application name> there.
+
+This tutorial will now show you how to make a simple todo list application with
+simple session based storage.
+
+.. _PasteScript: http://pythonpaste.org/script
+
+To create the todo list application, run the following command::
+
+  paster create --template=rhubarbtart todolist
+
+This command will prompt you a few time for replacing files. This is not a
+problem as the only files it is replacing are the ones you are creating. You
+should just answer Y to all the following prompts and you will get a new
+directory called todolist in your current directory with the following
+structure:
+
+* todolist
+
+  * docs
+
+    * devel_config.ini
+
+  * setup.cfg
+  * setup.py
+
+  * tests
+
+    * conftest.py
+    * fixture.py
+    * test_app.py
+
+  * todolist
+
+    * __init__.py
+    * webroot.py
+    * wsgiapp.py
+
+  * todolist.egg-info
+
+This generated code is a "Hello World" application already. To see it, change
+into the todolist directory and run ``docs/devel_config.ini``. This will start a
+HTTP server on your machine on port 8080. On Windows, you must run ``paster
+serve --reload docs/devel_config.ini`` instead. To see the results of this, send your browser
+to `<http://localhost:8080>`_
+
+Step 3: Setting up the front page
++++++++++++++++++++++++++++++++++
+
+One of the nice feature of Paste_ is the autoreloader. You can now leave the
+server running the entire time and whenever any of the files change, it restarts
+the server for you. So just keep the server running as you follow the rest of
+the steps.
+
+Inside of todolist/webroot.py there will be the following::
+
+  """
+  This is the root of your application.
+  """
+  from todolist import *
+
+  class Root(object):
+
+      def index(self):
+          return 'Hello world!'
+      expose(index)
+
+  root = Root()
+
+This sets up the root object of your application. Every object that you want
+visible is this application should be attached to the root object here. Each
+object should have a ``index`` method, that is the method called when the URL ends
+there. So in this example ``root.index`` is called when the user is at the path
+``/``.
+
+The ``expose`` function is there to make that function accessible as a URL.
+If a function does not have the expose method called on it, you will get a Not
+Found message.
+
+The first thing we are going to do then is create a form on the front page to
+start the application.
+
+So inside of the ``Root`` class change the index method to the following::
+
+  def index(self):
+      return """
+      <html>
+          <head>
+              <title>Todo list</title>
+          </head>
+          <body>
+          <form action="add" method="post">
+              <input type="text" name="item">
+              <button type="submit">Add Item</button>
+          </form>
+          </body>
+      </html>"""
+
+The return value of the function is sent to the browser. When the server
+restarts, you can see the output of that HTML at `<http://localhost:8080/>`_.
+
+Step 4: Making your application do something
+++++++++++++++++++++++++++++++++++++++++++++
+
+Now if you clicked on the button on the add page, you will have seen an very
+pretty error message explaining where things went wrong. One of the benefits of
+RhubarbTart is that all the POST and GET variables get passed into the function
+as keyword variables. To fix the problem, make an add function with::
+
+  def add(self, item=None):
+        return "Adding item %s" % item
+  expose(add)
+
+Now when you visit the page `<http://localhost:8080/>`_ you can then type a
+todo item in there, click the button, and get a dynamic response.
+
+Step 5: Adding data to the session
+++++++++++++++++++++++++++++++++++
+
+RhubarbTart comes with some very simple file based session support from the
+Paste_ middleware. By default it is enabled and it is fairly simple to use.
+Inside of the WSGI_ environ dictionary is a key that generates the session. The
+way to get to it would be to run::
+
+  session = request.environ['paste.session.factory']()
+
+(Note: In the next release, sessions will have an API)
+
+The ``request`` variable stores all of the information about the request sent to
+the object. This includes attributes like the mount location of the application
+and others.
+
+Now that we have a session object we can add keys to it to store various
+information. Here is how to modify the the add function again to support that::
+
+  def add(self, item=None):
+      session = request.environ['paste.session.factory']()
+      todolist = session.get('todolist', [])
+      todolist.append(item)
+      session['todolist'] = todolist
+      return "Adding item: %s Current items: %s" % (item, str(todolist))
+
+Now as you send items you will see the list after "Current items" begin to
+expand.
+
+.. _WSGI: http://python.org/peps/pep-0333.html
+
+Step 6: Clean everything up
++++++++++++++++++++++++++++
+
+The last few things to take care of is making the front page show the list and
+add a couple links around.
+
+First on the index page, we can put a real list of the items up on there before
+the form. This can be done by replacing the index method as::
+
+  def index(self):
+      session = request.environ['paste.session.factory']()
+      todolist = session.get('todolist', [])
+      body = """
+      <html>
+          <head>
+              <title>Todo list</title>
+          </head>
+          <body>
+          <ul>"""
+      for item in todolist:
+          body += "<li>%s</li>" % item
+      body += """
+      </ul>
+      <form action="add" method="post">
+          <input type="text" name="item">
+          <button type="submit">Add Item</button>
+      </form>
+      </body>
+      </html>"""
+      return body
+
+Then we'll clean up the add page and add a link back to the homepage on it::
+
+  def add(self, item=None):
+      session = request.environ['paste.session.factory']()
+      todolist = session.get('todolist', [])
+      todolist.append(item)
+      session['todolist'] = todolist
+      return ("""<html><head><title>Added to todo list</title></head><body>
+      <span>Added item %s</span><a href="/">View list</a></body></html>""" %
+      item)
+
+This tutorial should have got you well on your way towards making an
+application. There are many other parts not covered like the request and
+response variables, but those are covered in the source documentation__.
+
+.. __: module-rhubarbtart.httpobjects.html
+
+Enjoy your RhubarbTart!
