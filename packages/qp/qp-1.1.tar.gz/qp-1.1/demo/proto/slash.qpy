@@ -1,0 +1,198 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/qp/demo/proto/proto.ptl $
+$Id: proto.ptl 26691 2005-04-26 14:25:58Z dbinger $
+"""
+from qp.pub.publish import Publisher
+from qp.pub.common import get_publisher, get_path, get_site
+from qp.pub.common import get_request, header, footer, page
+from qp.pub.common import get_session, get_user, redirect
+from qp.pub.common import get_response
+from qp.fill.directory import Directory
+from qp.fill.durus_directory import DurusDirectory
+from qp.fill.static import StaticFile
+from qp.fill.html import href
+from pprint import pformat
+from os.path import join
+
+
+class SitePublisher (Publisher):
+
+    configuration = dict(
+        durus_address=('localhost', 7002),
+        http_address=('', 8002),
+        as_https_address=('localhost', 9002),
+        https_address=('localhost', 10002),
+        )
+
+    def display_exceptions(self):
+        return True
+
+    def ensure_signed_in(self, **kwargs):
+        self.ensure_signed_in_using_digest()
+
+    def header [html] (self, title, style=None, meta=None,
+                       **kwargs):
+        '<!DOCTYPE html PUBLIC '
+        '"-//W3C//DTD XHTML 1.0 Transitional//EN" '
+        '"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">'
+        '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">'
+        '<head>'
+        '<link rel="stylesheet" href="%s%s" ' % (
+            get_request().get_script_name(), '/all.css')
+        'media="all" type="text/css" />'
+        '<link rel="icon" href="%s%s" ' % (
+            get_request().get_script_name(), '/favicon.png')
+        'type="image/png" />'
+        if meta:
+            meta
+        '<title>%s</title>' % title
+        if style:
+            '\n<style media="all" type="text/css">%s</style>' % style
+        '</head>'
+        '\n<body>'
+        '<div class="body_top">'
+        title
+        '</div>'
+        '<div class="body_middle">'
+
+    def footer [html] (self, **kwargs):
+        format_sessions()
+        '</div>' # body_middle
+        '<div class="body_bottom">'
+        get_request().get_url()
+        if get_user():
+            href('%s/sign_out' % get_request().get_script_name(),
+                 'Sign %s out.' % get_user().get_id(),
+                 style="float:right")
+        '</div>'
+        href('%s/restricted' % get_request().get_script_name(),
+             "Ban %s" % get_request().get_remote_address())
+        '</body></html>'
+
+
+class SiteRootDirectory (Directory):
+    """
+    This site demonstrates authentication, sessions, static files, and exception
+    reporting.
+    """
+
+    def __init__(self):
+        self.all_css = StaticFile(
+            join(get_site().get_static_directory(), 'all.css'),
+            mime_type='text/css',
+            cache_time=1)
+        self.favicon_png = StaticFile(
+            join(get_site().get_static_directory(), 'favicon.png'),
+            mime_type="image/png",
+            cache_time=300)
+
+    def get_exports(self):
+        yield ('', 'index', 'Home', 'The Home page of this site.')
+        yield ('exception', 'exception', 'Exception',
+               'Raise an exception')
+        yield ('request', 'request', 'Request', 'HTTP Request')
+        yield ('all.css', 'all_css', None, None)
+        yield ('favicon.png', 'favicon_png', None, None)
+        yield ('sign_out', 'sign_out', None, None)
+        yield ('restricted', 'ban', None, None)
+        yield ('robots.txt', 'robots', None, None)
+        yield ('database', 'database', 'Database', 'Browse Database')
+
+    database = DurusDirectory()
+
+    def robots [plain] (self):
+        get_response().set_content_type('text/plain')
+        # Directions for robots.  See this URL:
+        # http://info.webcrawler.com/mak/projects/robots/norobots.html
+        # for a description of the file format.
+        # Some areas aren't worth crawling
+        'User-agent: *\n'
+        'Disallow: /restricted\n'
+
+    def ban(self):
+        publisher = get_publisher()
+        site = publisher.get_site()
+        banned = site.get_banned()
+        if not banned:
+            redirect('.')
+        session_cookie = get_request().get_cookie(site.get_name())
+        if session_cookie in get_publisher().get_sessions() :
+            redirect('.')
+        banned_addresses = open(banned, 'a')
+        banned_addresses.write(' %s\n' % get_request().get_remote_address())
+        banned_addresses.close()
+        get_publisher().send_to_administrator(
+            'Banned: %s\nTo remove, edit the following file:\n%s\n' % (
+            get_request().get_remote_address(),
+            banned))
+        return page(
+            'Banned',
+            'You (or your software) is not being friendly to this site. '
+            'To protect the site, we are no longer answering you. '
+            'If you need to be un-banned, please contact us directly. ')
+
+    def exception(self):
+        raise Exception('This is an exception.')
+
+    def sign_out(self):
+        get_publisher().sign_out('/')
+
+    def format_menu [html] (self):
+        '<ul class="menu">'
+        path_end = get_path().split(str('/'))[-1]
+        for component, name, crumb, title in self.get_exports():
+            if crumb:
+                if component == path_end:
+                    '<li class="selected">'
+                else:
+                    '<li>'
+                href('./' + component, crumb, title=title)
+                '</li>'
+        '</ul>'
+
+    def index [html] (self):
+        header(get_site().get_name())
+        self.format_menu()
+        footer()
+
+    def request [html] (self):
+        get_publisher().ensure_signed_in()
+        header('HTTP Request')
+        self.format_menu()
+        '<dl class="dict">'
+        items = get_request().__dict__.items()
+        items.sort()
+        for key, value in items:
+            '<dt>%s</dt>' % key
+            '<dd>%s</dd>' % pformat(value)
+        '</dl>'
+        footer()
+
+def format_sessions [html] ():
+    session_items = get_publisher().get_sessions().items()
+    if not session_items:
+        '<p>No sessions.</p>'
+    else:
+        session_items.sort()
+        '<table>'
+        '<caption>Saved Sessions</caption>'
+        ('<tr>'
+         '<th>session key</th>'
+         '<th>owner</th>'
+         '<th>effective_user</th>'
+         '<th>authentication_time</th>'
+         '<th>remote_address</th>'
+         '</tr>')
+        for id, session in session_items:
+            if get_session() is session:
+                '<tr class="current">'
+            else:
+                '<tr>'
+            '<td>%s</td>' % id
+            '<td>%s</td>' % session.get_owner().get_id()
+            '<td>%s</td>' % session.get_effective_user().get_id()
+            '<td>%s</td>' % session.get_authentication_time()
+            '<td>%s</td>' % session.get_remote_address()
+            '</tr>'
+        '</table>'
+

@@ -1,0 +1,175 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/qp/fill/static.qpy $
+$Id: static.qpy 26986 2005-06-29 19:34:21Z dbinger $
+
+The original versions of StaticFile and StaticDirectory
+were contributed to Quixote by Hamish Lawson.
+"""
+from qp.fill.directory import Directory
+from qp.fill.html import href
+from qp.http.response import Stream
+from qp.pub.common import get_request, get_response, get_path, not_found
+from qp.pub.common import header, footer
+from rfc822 import formatdate
+import mimetypes
+import os
+
+class FileStream(Stream):
+
+    CHUNK_SIZE = 20000
+
+    def __init__(self, fp, size=None):
+        self.fp = fp
+        self.length = size
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        chunk = self.fp.read(self.CHUNK_SIZE)
+        if not chunk:
+            raise StopIteration
+        return chunk
+
+
+class StaticFile:
+
+    """
+    Wrapper for a static file on the filesystem.
+    """
+
+    def __init__(self, path, mime_type=None, encoding=None, cache_time=None,
+                 charset='iso-8859-1'):
+        """
+        If omitted, the MIME type will be guessed, defaulting to text/plain.
+
+        If a non-None cache_time value is provided, it will be
+        used to set an Expires header in the response.
+        """
+        if not os.path.isabs(path):
+            raise ValueError, "Path %r is not absolute" % path
+        if os.path.islink(path):
+            print "Path %r is a symlink" % path
+            not_found()
+        self.path = path
+        guess_mime, guess_enc = mimetypes.guess_type(
+            os.path.basename(path), strict=False)
+        self.mime_type = mime_type or guess_mime or 'text/plain'
+        self.encoding = encoding or guess_enc or None
+        self.cache_time = cache_time
+        self.charset = charset
+
+    def __call__(self):
+        if self.cache_time is None:
+            get_response().set_expires(None) # don't set the Expires header
+        else:
+            # explicitly allow client to cache page by setting the Expires
+            # header, this is even more efficient than the using
+            # Last-Modified/If-Modified-Since since the browser does not need
+            # to contact the server
+            get_response().set_expires(seconds=self.cache_time)
+
+        stat = os.stat(self.path)
+        last_modified = formatdate(stat.st_mtime)
+
+        if last_modified == get_request().get_header('If-Modified-Since'):
+            # handle exact match of If-Modified-Since header
+            get_response().set_status(304)
+            return ''
+
+        get_response().set_header('Last-Modified', last_modified)
+
+        get_response().set_content_type(self.mime_type, self.charset)
+        if self.encoding:
+            get_response().set_header("Content-Encoding", self.encoding)
+
+        return FileStream(open(self.path, 'rb'), stat.st_size)
+
+
+class StaticDirectory(Directory):
+
+    """
+    Wrap a filesystem directory containing static files.
+    """
+    file_class = StaticFile
+
+    def __init__(self, path, list_directory=False,
+                 cache_time=None, index_filenames=None):
+        """(path:string, list_directory:bool,
+            cache_time:int,
+            index_filenames:[string])
+
+        Initialize instance with the absolute path to the file.
+        If 'list_directory' is true, users can request a directory listing.
+
+        Optional parameter cache_time allows setting of Expires header in
+        response object (see note for StaticFile for more detail).
+
+        Optional parameter 'index_filenames' specifies a list of
+        filenames to be used as index files in the directory. First
+        file found searching left to right is returned.
+        """
+        if not os.path.isabs(path):
+            raise ValueError, "Path %r is not absolute" % path
+        self.path = path
+        self.list_directory = list_directory
+        self.cache_time = cache_time
+        self.index_filenames = index_filenames
+
+    def get_exports(self):
+        if self.list_directory:
+            yield ('', '_q_index', self.path, None)
+        files = os.listdir(self.path)
+        files.sort()
+        for name in files:
+            file_path = os.path.join(self.path, name)
+            if os.path.islink(file_path):
+                continue
+            if os.path.isdir(file_path):
+                yield (name, None, name + '/', None)
+            else:
+                yield (name, None, name, None)
+
+    def get_static_index(self):
+        for name in self.index_filenames or []:
+            obj = self._q_lookup(name)
+            if not isinstance(obj, StaticDirectory) and callable(obj):
+                return obj()
+        return None
+
+    def _q_index [html] (self):
+        index = self.get_static_index()
+        if index:
+            return index
+        header(get_path())
+        '<h1 style="font-size:large">%s</h1>' % get_path()
+        br = '<br />'
+        if len(get_path()) > 1:
+            href("..", "..") + br
+        for export, name, crumb, title in self.get_exports():
+            if not export:
+                continue
+            href(export, crumb)
+            br
+        footer()
+
+    def _q_lookup(self, name):
+        """
+        Get a file from the filesystem directory and return the StaticFile
+        or StaticDirectory wrapper of it; use caching if that is in use.
+        """
+        if name in ('.', '..'):
+            print "Attempt to use %r" % name
+            return None
+        item_filepath = os.path.join(self.path, name)
+        if os.path.islink(item_filepath):
+            return None
+        if os.path.isdir(item_filepath):
+            return self.__class__(
+                item_filepath,
+                list_directory=self.list_directory,
+                cache_time=self.cache_time,
+                index_filenames=self.index_filenames)
+        elif os.path.isfile(item_filepath):
+            return self.file_class(item_filepath, cache_time=self.cache_time)
+        return None

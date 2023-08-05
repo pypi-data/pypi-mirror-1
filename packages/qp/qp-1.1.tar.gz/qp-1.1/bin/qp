@@ -1,0 +1,108 @@
+#!/usr/bin/env python
+"""
+$URL$
+$Id$
+"""
+from qp.lib.site import Site
+from sets import Set
+import sys
+
+all_sites = Site.get_sites()
+
+from optparse import OptionParser
+
+parser = OptionParser()
+parser.set_usage("qp [options] [start|stop|restart]")
+parser.set_description('''\
+Control the servers for the sites in your qp installation.
+No options is the same as "--status".
+"stop" is the same as "--stop".
+"start" is the same as "--start".
+"restart" is the same as "--stop --start".
+
+If "--stop" and "--start" are both present and the durus server
+is already running, only the web server is restarted.
+''')
+
+parser.add_option(
+    '-u', '--start', dest='start', default=False, action='store_true',
+    help="Start the durus and web servers.")
+parser.add_option(
+    '-d', '--stop', dest='stop', default=False, action='store_true',
+    help="Stop the durus and web servers.")
+parser.add_option(
+    '-v', '--status', dest='status', default=False, action='store_true',
+    help='Show the current status of the durus and web servers.')
+parser.add_option(
+    '-c', '--configuration', dest='show', default=False, action='store_true',
+    help='Show the site configuration.')
+parser.add_option(
+    '-l', '--log', dest='site_log', action='store',
+    type='choice',
+    choices=all_sites.keys(),
+    help='tail -f the log for the named site.')
+parser.add_option(
+    '-i', '--interact', dest='site_interact', action='store',
+    type='choice',
+    choices=all_sites.keys(),
+    help='Open an interactive session with the named site.')
+parser.add_option(
+    '-s', '--site', dest='site', default=[], action='append',
+    type='choice',
+    choices=all_sites.keys(),
+    help=("Start and/or stop only the named site.  "
+          "Default is all sites: "
+          "[%s]" % ', '.join(all_sites.keys())))
+parser.add_option(
+    '--build', dest='build', default=False, action='store_true',
+    help=('Compile cgi2scgi executable(s).  '
+          'You can use these with any cgi-supporting web server. '
+          'This prints config lines for Apache.'))
+
+(options, args) = parser.parse_args()
+
+if 'start' in args:
+    options.start = True
+if 'stop' in args:
+    options.stop = True
+if 'restart' in args:
+    options.start = True
+    options.stop = True
+
+if options.site:
+    sites = [v for k, v in all_sites.items() if k in options.site]
+else:
+    sites = all_sites.values()
+
+
+for site in sites:
+    if options.stop:
+        site.stop_web()
+        if not options.start:
+            site.stop_durus() # try not to restart durus server
+    if options.start:
+        site.start_durus()
+        site.start_web()
+
+if options.build:
+    for site in sites:
+        site.build()
+
+if options.show:
+    for site in sites:
+        site.show()
+
+if options.site_log:
+    all_sites[options.site_log].log_tail()
+
+if options.site_interact:
+    all_sites[options.site_interact].interaction()
+
+if (options.status or not (options.stop or
+                           options.start or
+                           options.build or
+                           options.site_log or
+                           options.site_interact or
+                           options.show)):
+    for site in sites:
+        site.status()
