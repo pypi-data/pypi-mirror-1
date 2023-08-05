@@ -1,0 +1,44 @@
+=========================
+iw.recipe.fetcher package
+=========================
+
+.. contents::
+
+What is iw.recipe.fetcher ?
+===========================
+
+Download an url to a local directory.
+
+How to use iw.recipe.fetcher ?
+==============================
+
+We need some buildout vars::
+
+  >>> data_dir = join(test_dir, 'data')
+  >>> buildout = {'instance': {'location': test_dir},
+  ...             'buildout': {'directory': test_dir,
+  ...             'install-from-cache': 'false',
+  ...             'download-cache':'false',
+  ...            }}
+  >>> name = 'utilities'
+
+
+Now we can fetch some urls::
+
+  >>> options = {
+  ...   'urls':'http://garr.dl.sourceforge.net/sourceforge/mingw/MinGW-5.1.3.exe',
+  ...   'base_url':'http://switch.dl.sourceforge.net/sourceforge',
+  ...   'files':'''
+  ...             pyodbc/pyodbc-2.0.39.win32-py2.4.zip
+  ... '''}
+  >>> from iw.recipe.fetcher import Recipe
+  >>> recipe = Recipe(buildout, name, options)
+  >>> recipe.install()
+
+It works::
+
+  >>> ls(os.path.join(test_dir, name))
+  MinGW-5.1.3.exe
+  pyodbc-2.0.39.win32-py2.4.zip
+
+
