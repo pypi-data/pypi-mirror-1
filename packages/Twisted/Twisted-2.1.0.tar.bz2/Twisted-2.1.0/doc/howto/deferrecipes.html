@@ -1,0 +1,75 @@
+<?xml version="1.0"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><title>Twisted Documentation: Asynchronous Recipes</title><link href="../howto/stylesheet.css" type="text/css" rel="stylesheet" /></head><body bgcolor="white"><h1 class="title">Asynchronous Recipes</h1><div class="toc"><ol><li><a href="#auto0">Assumed knowledge</a></li><li><a href="#auto1">Setting timeouts</a></li></ol></div><div class="content"><span></span><p>This document contains a series of 'recipes' or accepted ways to use
+<code base="twisted.internet.defer" class="API">Deferred</code> objects and related
+ideas in Twisted
+code.</p><h2>Assumed knowledge<a name="auto0"></a></h2><p>This document assumes that you are familiar with the basic principle that
+the Twisted framework is structured around: asynchronous, callback-based
+programming, where instead of having blocking code in your program or using
+threads to run blocking code, you have functions that return immediately and
+then begin a callback chain when data is available.</p><p>It also assumes that you are familiar with creating and calling back 
+Deferred objects.</p><p>See these documents for more information:</p><ul><li><a href="async.html">Asynchronous Programming with Twisted</a></li></ul><h2>Setting timeouts<a name="auto1"></a></h2><p>
+In some cases, you will want to regard an asynchronous operation as having
+failed after a certain amount of time has passed. The standard way to set such
+a timeout is to explicitly use <code base="twisted.internet" class="API">reactor.callLater</code> to set up your timeout:
+</p><pre class="python">
+<span class="py-src-keyword">from</span> <span class="py-src-variable">__future__</span> <span class="py-src-keyword">import</span> <span class="py-src-variable">nested_scopes</span>
+<span class="py-src-keyword">from</span> <span class="py-src-variable">twisted</span>.<span class="py-src-variable">internet</span> <span class="py-src-keyword">import</span> <span class="py-src-variable">defer</span>, <span class="py-src-variable">reactor</span>
+
+<span class="py-src-keyword">def</span> <span class="py-src-identifier">getDummyDeferred</span>():
+    <span class="py-src-string">&quot;&quot;&quot;
+    This function is a dummy: a stand in for whatever function you're
+    calling to generate your Deferred
+    &quot;&quot;&quot;</span>
+    <span class="py-src-variable">d</span> = <span class="py-src-variable">defer</span>.<span class="py-src-variable">Deferred</span>()
+    <span class="py-src-comment"># simulates delaying the result somewhat, this figure won't trigger
+</span>    <span class="py-src-comment"># the timeout handler below
+</span>    <span class="py-src-variable">DUMMYTIME</span> = <span class="py-src-number">3</span>
+    <span class="py-src-variable">reactor</span>.<span class="py-src-variable">callLater</span>(<span class="py-src-variable">DUMMYTIME</span>, <span class="py-src-variable">d</span>.<span class="py-src-variable">callback</span>, <span class="py-src-string">&quot;RESULT&quot;</span>)
+    
+<span class="py-src-keyword">def</span> <span class="py-src-identifier">timeoutHandler</span>():
+    <span class="py-src-string">&quot;&quot;&quot;
+    This is the function that gets called when your predetermined timeout
+    passes.
+
+    The implementation will be dependent on the task you're performing.
+    Most likely you should have some way to end the task
+    dummyDeferredGeneratingFunction set up here -- perhaps end a connection to
+    a remote server or send a &quot;never mind&quot; message to it. You may also have
+    local tasks that need doing: perhaps you need to tell your user that their
+    request has timed out, or raise some kind of alarm
+    &quot;&quot;&quot;</span>
+    <span class="py-src-comment">#replace with implementation!
+</span>    <span class="py-src-keyword">print</span> <span class="py-src-string">&quot;Timeout occured&quot;</span>
+
+<span class="py-src-keyword">def</span> <span class="py-src-identifier">getTimeoutCancelFunction</span>(<span class="py-src-parameter">delayedCall</span>):
+    <span class="py-src-string">&quot;&quot;&quot;
+    Return a function which will cancel the delayedCall
+    &quot;&quot;&quot;</span>
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">cancelTimeout</span>(<span class="py-src-parameter">deferredResult</span>):
+        <span class="py-src-keyword">if</span> <span class="py-src-variable">delayedCall</span>.<span class="py-src-variable">active</span>():
+            <span class="py-src-variable">delayedCall</span>.<span class="py-src-variable">cancel</span>()
+        <span class="py-src-comment"># return the deferredResult for processing by further
+</span>        <span class="py-src-comment"># callbacks/errbacks
+</span>        <span class="py-src-keyword">return</span> <span class="py-src-variable">deferredResult</span>
+
+    <span class="py-src-keyword">return</span> <span class="py-src-variable">cancelTimeout</span>
+
+<span class="py-src-keyword">def</span> <span class="py-src-identifier">timeoutSetter</span>():
+    <span class="py-src-string">&quot;&quot;&quot;
+    This is your application function that gets the Deferred, sets up the
+    timeout and the callbacks
+    &quot;&quot;&quot;</span>
+    <span class="py-src-comment"># get our deferred
+</span>    <span class="py-src-variable">d</span> = <span class="py-src-variable">getDummyDeferred</span>()
+
+    <span class="py-src-comment"># tell the reactor to call our timeout function after TIMEOUT seconds have
+</span>    <span class="py-src-comment"># passed
+</span>    <span class="py-src-variable">TIMEOUT</span> = <span class="py-src-number">10</span>
+    <span class="py-src-variable">delayedCall</span> = <span class="py-src-variable">reactor</span>.<span class="py-src-variable">callLater</span>(<span class="py-src-variable">TIMEOUT</span>, <span class="py-src-variable">timeoutHandler</span>)
+
+    <span class="py-src-comment"># make sure the timeout gets cancelled as soon as the deferred fires,
+</span>    <span class="py-src-comment"># either with an error or with a successful result
+</span>    <span class="py-src-variable">d</span>.<span class="py-src-variable">addBoth</span>(<span class="py-src-variable">getTimeoutCancelFunction</span>())
+    <span class="py-src-comment"># add further callbacks and errbacks to d here
+</span>    <span class="py-src-comment"># ...
+</span></pre></div><p><a href="../howto/index.html">Index</a></p><span class="version">Version: 2.1.0</span></body></html>
