@@ -1,0 +1,2172 @@
+#LyX 1.3 created this file. For more info see http://www.lyx.org/
+\lyxformat 221
+\textclass amsart
+\language english
+\inputencoding auto
+\fontscheme default
+\graphics default
+\paperfontsize default
+\spacing single 
+\papersize Default
+\paperpackage a4
+\use_geometry 0
+\use_amsmath 0
+\use_natbib 0
+\use_numerical_citations 0
+\paperorientation portrait
+\secnumdepth 3
+\tocdepth 3
+\paragraph_separation indent
+\defskip medskip
+\quotes_language english
+\quotes_times 2
+\papercolumns 1
+\papersides 1
+\paperpagestyle default
+
+\layout Title
+
+Orchid: A Malicious Website Detection System
+\layout Author
+
+Eugene Vahlis
+\layout Address
+
+Dept.
+ Computer Science, University of Toronto, 6 King's College Rd., Toronto,
+ Ontario, M5S 3G4, CANADA
+\layout Email
+
+evahlis@cs.toronto.edu
+\layout Author
+
+Li Yan
+\layout Address
+
+Dept.
+ Computer Science, University of Toronto, 6 King's College Rd., Toronto,
+ Ontario, M5S 3G4, CANADA
+\layout Email
+
+liyan@cs.toronto.edu
+\layout Abstract
+
+With the web becoming the dominant platform for information distribution
+ and retrieval came a new information security threat in the form of online
+ exploits.
+ These are made in attempts to gather private information or gaining control
+ over machines connected to the internet.
+ 
+\noun on 
+Orchid 
+\noun default 
+is an open source system implemented in python for finding and classifying
+ malicious pages on the web.
+ In this paper we describe orchid's architecture, the algorithms used and
+ several examples of usage for detecting malicious pages.
+\layout Section
+
+Introduction
+\layout Standard
+
+If we look at the WebSense security alerts page
+\begin_inset LatexCommand \cite{websense}
+
+\end_inset 
+
+ we can see that new web based exploits are found almost every day.
+ These exploits range from simple social engineering to complex use of bugs
+ in the client's browser software.
+ One example of this is the JS/Wonka technique (which we explore in more
+ detail in section 
+\begin_inset LatexCommand \ref{sec:Examples-Of-Rules}
+
+\end_inset 
+
+) which allows attackers to obfuscate their malicious code on a compromised
+ site thereby reducing the chance of the code being detected.
+\layout Standard
+
+Our system consists of three components: a crawler (which is described in
+ section 
+\begin_inset LatexCommand \ref{sec:The-Crawler}
+
+\end_inset 
+
+) , an analyzer (section 
+\begin_inset LatexCommand \ref{sec:The-Analyzer}
+
+\end_inset 
+
+) and rules (section 
+\begin_inset LatexCommand \ref{sec:Examples-Of-Rules}
+
+\end_inset 
+
+).
+ The three components work together in a multi threaded environment to detect
+ and classify web pages that we think may contain malicious code.
+\layout Standard
+
+A simplistic description of the system's operation would be: 
+\layout Enumerate
+
+The user feeds the controller a list of URLs which act as a 
+\begin_inset Quotes eld
+\end_inset 
+
+seed
+\begin_inset Quotes erd
+\end_inset 
+
+ for the crawler.
+\layout Enumerate
+
+The crawler extracts the links from the URLs in the queue and passes them
+ to the analyzer.
+\layout Enumerate
+
+The analyzer performs analysis on the pages extracted by the crawler, catalogs
+ the results (i.e.
+ if an exploit was discovered) and adds the links that appeared in the page
+ to the crawler's queue.
+\layout Standard
+
+As we will show in the following sections, the system is extremely easy
+ to use and extend and is very flexible.
+ For our experiments we used one machine on which we ran the crawler (using
+ 5 threads).
+ The fact that only one machine was used severly limited the portion of
+ the web that we were able to crawl.
+ We believe that if the enhancements described in section 
+\begin_inset LatexCommand \ref{sec:Possible-extensions}
+
+\end_inset 
+
+ are introduced the performance and results of the system will improve significa
+ntly.
+\layout Standard
+
+The work is organized as follows: in section 
+\begin_inset LatexCommand \ref{sec:Related-Work}
+
+\end_inset 
+
+ we describe the origin of our idea and a project by Microsoft called 
+\begin_inset Quotes eld
+\end_inset 
+
+Honey Monkey
+\begin_inset Quotes erd
+\end_inset 
+
+ with a similar goal but a different approach, in section 
+\begin_inset LatexCommand \ref{sec:The-Crawler}
+
+\end_inset 
+
+ we describe the design and algorithms of our crawling engine 
+\begin_inset Quotes eld
+\end_inset 
+
+Orchid
+\begin_inset Quotes erd
+\end_inset 
+
+, in section 
+\begin_inset LatexCommand \ref{sec:The-Analyzer}
+
+\end_inset 
+
+ we describe how the system processes acquired URLs and how to extend it,
+ in section 
+\begin_inset LatexCommand \ref{sec:Examples-Of-Rules}
+
+\end_inset 
+
+ we give some real-world examples of online exploits and introduce the rules
+ by which our system can identify pages containing them and in section 
+\begin_inset LatexCommand \ref{sec:Possible-extensions}
+
+\end_inset 
+
+ we describe several possible improvements to our system which we believe
+ can improve it's performance and results.
+\layout Section
+
+Related Work
+\begin_inset LatexCommand \label{sec:Related-Work}
+
+\end_inset 
+
+
+\layout Standard
+
+The idea for our project was initiated by the Honey Monkey project 
+\begin_inset LatexCommand \cite{honeymonkey}
+
+\end_inset 
+
+ by Microsoft which aims to discover malicious websites by running several
+ virtual machines on each of which an instance of the Microsoft Internet
+ Explorer software was running.
+ The virtual machines were controlled in such a way as to simulate a 
+\begin_inset Quotes eld
+\end_inset 
+
+real person
+\begin_inset Quotes erd
+\end_inset 
+
+ browsing the web.
+\layout Standard
+
+The way Honey Monkey discovered malicious sites was by recording every action
+ performed on the system and analyzing the collected data.
+ The browsers are the only active programs running on every virtual machine
+ and so any modification done to the system is done by the browser.
+ When a 
+\begin_inset Quotes eld
+\end_inset 
+
+serious
+\begin_inset Quotes erd
+\end_inset 
+
+ modification was detected the system signalled an exploit.
+ This approach allows for detection of zero-day vulnerabilities as well
+ as existing ones without the need for creation of a database of signatures
+ to identify the exploits.
+\layout Standard
+
+Our approach is different.
+ Our system crawls the web using a lightweight robot and analyses the contents
+ of each page in static mode.
+ The fact that we are doing a static analysis of the web removes the need
+ for a virtual machine to run the system because no execution of remotely
+ supplied code is performed.
+\layout Standard
+
+While Honey Monkey's goals were to identify exploits that compromise the
+ system, our goal is more extensive.
+ While our system supports detection of known exploits we also believe that
+ web sites that host other, potentially non-malicious, code such as the
+ 
+\begin_inset Quotes eld
+\end_inset 
+
+pop-under
+\begin_inset Quotes erd
+\end_inset 
+
+ javascript which is described in section 
+\begin_inset LatexCommand \ref{sec:Examples-Of-Rules}
+
+\end_inset 
+
+ are likely to host malware as well.
+ These sites attempt to manipulate the client and the browser software to
+ view content which the client did not intend to and therefore clearly do
+ not have good intentions.
+\layout Standard
+
+The only requirement to run our software is a python interpreter.
+ Therefore, it is very easy to scale and can be used, if parallelized, to
+ scan large portions of the web quickly, while the Honey Monkey project
+ would require much more resources and probably dedicated machines because
+ Virtual Machine software has a very high resource consumption.
+\layout Section
+
+The Crawler
+\begin_inset LatexCommand \label{sec:The-Crawler}
+
+\end_inset 
+
+
+\layout Subsection
+
+Introduction And The State Of The Art
+\layout Standard
+
+There are many 
+\begin_inset Quotes eld
+\end_inset 
+
+crawlers
+\begin_inset Quotes erd
+\end_inset 
+
+ or, as they sometimes referred to, 
+\begin_inset Quotes eld
+\end_inset 
+
+robots
+\begin_inset Quotes erd
+\end_inset 
+
+ publicly available on the web, the most popular ones being Nutch 
+\begin_inset LatexCommand \cite{nutch}
+
+\end_inset 
+
+ and Harvest Man 
+\begin_inset LatexCommand \cite{harvestman}
+
+\end_inset 
+
+.
+ However, we discovered that most of the crawlers are specialized in some
+ aspect of data mining, poorly documented or both.
+\layout Standard
+
+When writing the crawler our goal was to create a generic, well documented
+ and easy to use piece of software which can be used to collect any taxonomy
+ on the internet that can be implemented in python.
+ The Orchid crawler is released under the MIT License 
+\begin_inset LatexCommand \cite{mitlicense}
+
+\end_inset 
+
+ and can be used in the ways described there.
+\layout Standard
+
+There are many difficult points in writing a crawler: load balancing, being
+ friendly to innocent web servers, broken HTML and many other technical
+ issues.
+ To overcome all these problems we followed the guides 
+\begin_inset LatexCommand \cite{crawl1}
+
+\end_inset 
+
+ and 
+\begin_inset LatexCommand \cite{crawl2}
+
+\end_inset 
+
+.
+\layout Standard
+
+One major decision in writing a robot is whether to use a single or multiple
+ threads for fetching page contents.
+ We decided to use multiple threads.
+ Our main reason for choosing multiple threads was that many web servers
+ have high latency and while one thread is waiting for a slow server another
+ free fetcher can fetch several other pages, therefore increasing the crawling
+ speed significantly.
+\layout Subsection
+
+Architecture
+\layout Standard
+
+The Orchid crawler consists of three programs: controller, fetchers and
+ analyzer, and three databanks: The 
+\emph on 
+linksToFetch
+\emph default 
+ queue, the 
+\emph on 
+sites
+\emph default 
+ queue and the database of analyzed data (we will referr to it as the 
+\emph on 
+db
+\emph default 
+ from now on).
+ The following is a description of the roles of each part and data structure,
+ the control and data flow are visualized in figure 
+\begin_inset LatexCommand \ref{cap:Orchid-Control-and}
+
+\end_inset 
+
+.
+ 
+\layout Standard
+
+
+\begin_inset Float figure
+wide false
+collapsed true
+
+\layout Caption
+
+
+\begin_inset LatexCommand \label{cap:Orchid-Control-and}
+
+\end_inset 
+
+Orchid Control and Data Flow
+\layout Standard
+
+
+\begin_inset Graphics
+	filename orchid.png
+	scale 30
+
+\end_inset 
+
+
+\end_inset 
+
+
+\layout Subsubsection*
+
+Controller
+\layout Standard
+
+The controller is a single thread which is responsible for controlling the
+ fetchers by selecting a URL to crawl (using the analyzers' 
+\emph on 
+selectNextUrl
+\emph default 
+ method, finding a free fetcher thread and assigning the selected URL to
+ the fetcher.
+ Here is a pseudo-code describing the controllers' action: 
+\layout Algorithm
+
+Controller pseudo-code
+\layout LyX-Code
+
+
+\series bold 
+while
+\series default 
+ (number of pages crawled < limit):
+\layout LyX-Code
+
+    url = select the next url to crawl
+\layout LyX-Code
+
+    fetcher = null
+\layout LyX-Code
+
+    
+\series bold 
+for
+\series default 
+ f 
+\series bold 
+in
+\series default 
+ fetchers:
+\layout LyX-Code
+
+        
+\series bold 
+if
+\series default 
+ f is free:
+\layout LyX-Code
+
+            fetcher = f
+\layout LyX-Code
+
+    assign url to 
+\emph on 
+fetcher
+\layout LyX-Code
+
+    wake fetcher
+\layout LyX-Code
+
+    
+\layout Subsubsection*
+
+Fetchers
+\layout Standard
+
+The fecthers are a set of threads responsible for retrieving a URL's contents
+ and extracting the hyperlinks from the contents.
+ The fetcher uses two other components for it's operation: 
+\emph on 
+UrlHandler, 
+\emph default 
+which retrieves the contents of a URL and 
+\emph on 
+OrchidExtractor
+\emph default 
+ which extracts the links and contents of the retrieved page.
+
+\emph on 
+ 
+\emph default 
+Each fetcher processes one URL at a time.
+ Every time a URL is assigned to it by the controller the fetcher uses the
+ 
+\emph on 
+UrlHandler
+\emph default 
+ class to download the contents of the page and the uses 
+\emph on 
+OrchidExtractor 
+\emph default 
+to process these contents and create a 
+\emph on 
+Site
+\emph default 
+ object.
+ The 
+\emph on 
+Site
+\emph default 
+ object is inserted into the 
+\emph on 
+sites
+\emph default 
+ queue and the analyzer is awoken.
+ Here is a pseudo-code describing these actions:
+\layout Algorithm
+
+Fetcher pseudo-code
+\layout LyX-Code
+
+url is assigned by the controller
+\layout LyX-Code
+
+contentsStream
+\emph on 
+ = 
+\emph default 
+urlHandler.processUrl(
+\emph on 
+url
+\emph default 
+)
+\layout LyX-Code
+
+extractor.setSite(contentsStream)
+\layout LyX-Code
+
+extractor.extract()
+\layout LyX-Code
+
+processedInfo is the information generated by the extractor
+\layout LyX-Code
+
+site = Site(processedInfo)
+\layout LyX-Code
+
+add site to the site queue
+\layout LyX-Code
+
+wake the analyzer
+\layout Subsubsection*
+
+Analyzer
+\layout Standard
+
+The analyzer is the main data mining module of the system.
+ The Orchid crawler contains a naive analyzer which only adds links to the
+ 
+\emph on 
+to fetch queue
+\emph default 
+ without processing them at all.
+ To use the Orchid crawler one would have to subclass 
+\emph on 
+NaiveAnalyzer
+\emph default 
+ and implement the following three methods: 
+\emph on 
+analyzeSite, addSiteToFetchQueue 
+\emph default 
+and
+\emph on 
+ selectNextUrl
+\emph default 
+.
+ All the synchronization is done in the 
+\emph on 
+run
+\emph default 
+ method and therefore knowledge of multi-threaded programming is not necessary
+ to use Orchid.
+\layout Standard
+
+The roles of the above methods are as follows:
+\layout Itemize
+
+
+\emph on 
+analyzeSite
+\emph default 
+: This action is invoked on a site from the 
+\emph on 
+site 
+\emph default 
+queue.
+ In this method should be all the processing of the site and the separation
+ of the links that should be followed some time in the future from those
+ that should never be followed.
+ The links that should be followed should be stored in some datamember of
+ the analyze instance.
+\newline 
+The naive implementation simply marks the URL of the site as visited and
+ puts all the new links in the list of links to be added to the crawl list.
+\layout Itemize
+
+
+\emph on 
+addSiteToFetchQueue
+\emph default 
+:
+\emph on 
+ 
+\emph default 
+This action is invoked on the 
+\emph on 
+links to fetch queue
+\emph default 
+ and should be relatively fast
+\begin_inset Foot
+collapsed true
+
+\layout Standard
+
+The reason for having two separate methods is for future extensions.
+ If some analyzer implementation will require a long time to process a site
+ there is no need to lock the queue and prevent the controller from assigning
+ URLs to fetchers.
+\end_inset 
+
+.
+ Here should be the code that adds the links that should be followed to
+ the 
+\emph on 
+links to fetch queue
+\emph default 
+.
+\newline 
+The naive implementation classifies each link by the URL of it's sever and
+ adds them all the the queue, which in this case is a map of 
+\emph on 
+server url
+\emph default 
+ 
+\begin_inset Formula $\rightarrow$
+\end_inset 
+
+ 
+\emph on 
+queue of links
+\emph default 
+.
+\layout Itemize
+
+
+\emph on 
+selectNextUrl
+\emph default 
+: This action is invoked by the Controller (as opposed to the other two
+ which are invoked by the analyzer's 
+\emph on 
+run
+\emph default 
+ method) and should contain the code for choosing the next URL to crawl.
+ It should always return one string URL.
+\newline 
+The naive implementation chooses a random server and then takes a URL from
+ it's associated queue.
+ This approach is described in more detail in section 
+\begin_inset LatexCommand \ref{sec:The-Analyzer}
+
+\end_inset 
+
+.
+\layout Standard
+
+The main method of the analyzer performs the following actions: waits until
+ a site is inserted into the 
+\emph on 
+site
+\emph default 
+ queue, calls 
+\emph on 
+analyzeSite
+\emph default 
+ to performs the necessary data mining logic, calls 
+\emph on 
+addSiteToFetchQueue
+\emph default 
+ to update the 
+\emph on 
+to fetch queue
+\emph default 
+ and loops.
+ Here is a pseudo-code describing the operation of the analyzer's 
+\emph on 
+run
+\emph default 
+ method:
+\layout Algorithm
+
+Analyzer pseudo-code
+\layout LyX-Code
+
+
+\series bold 
+while
+\series default 
+ (there are more sites to crawl):
+\layout LyX-Code
+
+    fetch site from site queue
+\layout LyX-Code
+
+    call analyzeSite
+\layout LyX-Code
+
+    call addSiteToFetchQueue
+\layout Standard
+
+Our extended security-based content analyzer (called 
+\emph on 
+malcontent
+\emph default 
+) is described in greater detail in the following section.
+\layout Section
+
+The Malicious Content Analyzer
+\begin_inset LatexCommand \label{sec:The-Analyzer}
+
+\end_inset 
+
+
+\layout Subsection
+
+General description
+\layout Standard
+
+The section deals with the way our security based content analyzer is designed
+ and how to use and extend it.
+ The goal of our analyzer is to identify and classify web pages containing
+ 
+\emph on 
+malicious code
+\emph default 
+.
+ The definition of 
+\emph on 
+malicious code
+\emph default 
+ may vary and is defined completely by the set of 
+\emph on 
+Rules
+\emph default 
+ specified to the analyzer at it's construction.
+\layout Standard
+
+The information available to the analyzer during runtime is, for every web
+ page, it's URL, links and content (if of mime type either 
+\emph on 
+text/html
+\emph default 
+ or 
+\emph on 
+application/javascript
+\emph default 
+), therefore, anything that can be inferred using python code and this informati
+on can be inferred during the analysis step of the analyzer's main loop.
+\layout Standard
+
+The classification and identification of malicious content is done by applying
+ 
+\emph on 
+rules
+\emph default 
+ to the currently processed page.
+ The rules are descussed in more detail in the following item.
+ In general, each rule identifies a certain class of vulnerabilities, for
+ example: a rule which matches a regular expression against the pointer
+ of a certain type links.
+\layout Subsection
+
+What are rules?
+\layout Standard
+
+Rules are the core of the Orchid malicious content detection system.
+ The rules are divided into classes that can be analyzed by a generic piece
+ of code.
+ The malicious content analyzer applies all the rules to every page it encounter
+s.
+ Each rule analyzes the site in it's own way and determines whether it contains
+ malicious content.
+ If the page is determined to be malicious the information is stored and
+ various statistics are updated.
+ We have defined an abstract class called 
+\emph on 
+Rule
+\emph default 
+ from which all the concrete rule classes should inherit.
+ 
+\layout Standard
+
+The abstract rule class defines three levels of 
+\begin_inset Quotes eld
+\end_inset 
+
+maliciousness
+\begin_inset Quotes erd
+\end_inset 
+
+ of pages: 
+\noun on 
+Good
+\noun default 
+, 
+\noun on 
+Maybe Evil
+\noun default 
+ and 
+\noun on 
+Evil
+\noun default 
+.
+ Each site is initially assigned the tag 
+\noun on 
+Good.
+ 
+\noun default 
+Every time a rule is applied to the site and matches, the rule's associated
+ level is checked against the current level of the site and if it is more
+ severe the site's level is updated to the rule's level, this is described
+ by the following pseudo-code:
+\layout Algorithm
+
+Malcontent application of rules to sites
+\layout LyX-Code
+
+s is the site currently being processed
+\layout LyX-Code
+
+
+\series bold 
+for
+\series default 
+ rule 
+\series bold 
+in
+\series default 
+ rules:
+\layout LyX-Code
+
+    
+\series bold 
+if
+\series default 
+ rule(s) > s.level
+\noun on 
+:
+\layout LyX-Code
+
+        update the site's maliciousness level
+\layout Standard
+
+The three defined levels can be roughly described as follows: 
+\noun on 
+Good
+\noun default 
+ refers to pages which do not contain any malicious code that we care about.
+ 
+\noun on 
+Maybe Evil
+\noun default 
+ refers to pages which contain code which, under most circumstances, will
+ result in an undesired behaviour of the browser or may signify the presence
+ of a serious exploit.
+ 
+\noun on 
+Evil
+\noun default 
+ refers to pages which most definitely are malicious and contain a specific
+ exploit which we can identify.
+\layout Standard
+
+In the following items we will describe several rule classes we created
+ for our experiments and how one would approach writing new classes of rules.
+\layout Subsection
+
+Existing classes of rules and how to write new ones
+\layout Standard
+
+In order to be able to perform the experiments described in section 
+\begin_inset LatexCommand \ref{sec:Examples-Of-Rules}
+
+\end_inset 
+
+ we defined three classes of rules: Link rules, Content rules and External
+ IFRAME rules.
+ The rule creation aspects of these rules is described below and the exploits
+ they are targeted at are described in more detail in section
+\begin_inset LatexCommand \ref{sec:Examples-Of-Rules}
+
+\end_inset 
+
+.
+\layout Standard
+
+Each rule class implements the python meta-method __call__(self, site)
+\emph on 
+ 
+\emph default 
+where all the processing occurs.
+ Implementing the __call__ meta method allows for the rules being applied
+ to sites (rule(site)).
+ This is an implementation of the 
+\noun on 
+Command
+\noun default 
+ design pattern.
+\layout Standard
+
+The type of processing done in the __call__ method is entirely up the the
+ developer.
+ For example: in the LinksRule class the constructor is supplied with a
+ map 
+\begin_inset Formula $re\rightarrow($
+\end_inset 
+
+exploit name, link types, level
+\begin_inset Formula $)$
+\end_inset 
+
+.
+ The regular expression is compiled and the modified map is stored as a
+ data member.
+ During the execution of the rule we iterate over the link types supported
+ by this instance of LinksRule, try to match their URL to the regular expression
+ and if a match is found we update the level of the site to the maximum
+ between the site's level and the rule's level.
+\layout Standard
+
+In the ContentRule class the definitions of exploits are much more general
+ and therefore more powerful but also more difficult to define in a correct
+ way.
+ In this type of rules a regular expression map is supplied in the constructor,
+ like in the LinksRule class.
+ However, during execution, the regular expression is matched against the
+ raw text of the web page rather then against specific elements.
+\layout Standard
+
+The ExternalIframeRule class is an example of a case where the sought exploit
+ cannot be identified by merely matching a regular expression against a
+ part of the page.
+ In this case we are trying to detect IFRAME elements in the page which
+ load content from another domain (the reasons for this are described in
+ more detail in section 
+\begin_inset LatexCommand \ref{sec:Examples-Of-Rules}
+
+\end_inset 
+
+).
+ This class of rules identifies only one exploit (as opposed to the other
+ two which can be used to identify a very broad set of exploits), but it
+ demonstrates that Orchid can be used to detect malicious content which
+ requires a more powerful logic than just regular expressions.
+\layout Subsection
+
+Crawling strategy
+\layout Standard
+
+The decision to which URL to crawl next is highly important.
+ If we simply crawled in a FIFO manner we would send many request sequncially
+ to the same server.
+ The server would detect this, suspect an attempted denial of service attack
+ and block us.
+ One possible way to reduce the load on individual servers is to choose
+ a random domain from the URL queue and crawl one of it's pages.
+ This approach results in a very low frequency of requests to every server
+ and, in addition, in a very fast growth in the number of servers we have
+ to choose from.
+ The Malcontent analyzer uses this approach.
+\layout Standard
+
+Another approach that we tried was selecting a random server but giving
+ higher priority to servers on which we previously found a malicious page.
+ This approach did not perform well during our experiment.
+ We believe that the reason for the poor performance was that most bad pages
+ will contain malicious code on their 
+\begin_inset Quotes eld
+\end_inset 
+
+primary
+\begin_inset Quotes erd
+\end_inset 
+
+ page (the page that everyone links to) because this page will attract most
+ of the visitors.
+ 
+\layout Section
+
+Examples Of Rules And Exploits
+\begin_inset LatexCommand \label{sec:Examples-Of-Rules}
+
+\end_inset 
+
+
+\layout Standard
+
+In this section we will present three web exploits of different classes,
+ we will discuss with some detail the vulnerabilities targeted by each exploit.
+ We will also describe our way of identifying these exploits and the rules
+ we created to do so.
+ Finally, we will present the experiments we performed and the results we
+ got.
+\layout Subsection
+
+The
+\noun on 
+ JS/Wonka 
+\noun default 
+obfuscation technique
+\layout Subsubsection
+
+The exploit
+\layout Standard
+
+JS/Wonka is a fairly new technique which becamse very popular during October
+ 2005.
+ This is not an exploit in itself but rather a way of obfuscating malicious
+ code so that it will be more difficult to identify.
+\layout Standard
+
+The obfuscation is done using the javascript 
+\emph on 
+escape
+\emph default 
+ and 
+\emph on 
+unescape
+\emph default 
+ functions.
+ The malicious code is encoded using 
+\emph on 
+escape, 
+\emph default 
+then, the encoding along with a call to 
+\emph on 
+unescape
+\emph default 
+ is placed on the compromised website.
+ Here is an example:
+\newline 
+Suppose that the code we want to place on the page without being detected
+ is:
+\layout LyX-Code
+
+<iframe src="http://www.XXXXXX.com" width=0 border=0 height=0></iframe>
+\layout Standard
+
+then, we encode it using 
+\emph on 
+escape
+\emph default 
+:
+\layout LyX-Code
+
+%3C%69%66%72%61%6D%65%20%73%72%63%3D%22%68%74%74%70%3A%2F%2F%77%77%77%2E%58%
+\layout LyX-Code
+
+58%58%58%58%58%58%2E%63%6F%6D%22%20%77%69%64%74%68%3D%30%20%62%6F%72%64%65%7
+\layout LyX-Code
+
+2%3D%30%20%68%65%69%67%68%74%3D%30%3E%3C%2F%69%66%72%61%6D%65%3E
+\layout Standard
+
+and place the following javascript on the compromised website:
+\layout LyX-Code
+
+<Script Language='Javascript'> 
+\layout LyX-Code
+
+<!--
+\layout LyX-Code
+
+document.write(unescape('%3C%69%66%72%61%6D%65%20%73%72%63%3D%22%68%74%74%70
+\layout LyX-Code
+
+%3A%2F%2F%77%77%77%2E%58%58%58%58%58%58%58%2E%63%6F%6D%22%20%77%69%64%74%68%
+\layout LyX-Code
+
+3D%30%20%62%6F%72%64%65%72%3D%30%20%68%65%69%67%68%74%3D%30%3E%3C%2F%69%66%7
+\layout LyX-Code
+
+2%61%6D%65%3E')); 
+\layout LyX-Code
+
+//--> 
+\layout LyX-Code
+
+</Script>
+\layout Standard
+
+Now, if someone opens our site an IFRAME of size 0x0 will be created in
+ which a malicious page is loaded.
+ More details about JS/Wonka are available in 
+\begin_inset LatexCommand \cite{wonka}
+
+\end_inset 
+
+.
+\layout Subsubsection
+
+The detection rule
+\layout Standard
+
+To detect this exploit we used the ContentRule class.
+ We classified every page which matched the regular expression
+\layout LyX-Code
+
+unescape
+\backslash 
+s*
+\backslash 
+(
+\backslash 
+s*'[^']*
+\backslash 
+%3C
+\backslash 
+%69
+\backslash 
+%66
+\backslash 
+%72
+\backslash 
+%61
+\backslash 
+%6D
+\backslash 
+%65[^']*'
+\backslash 
+s*
+\backslash 
+)
+\layout Standard
+
+This regular expression would match any page which tries to unescape some
+ sequence containing an IFRAME element.
+ Although it is possible that someone will try to do that without malicious
+ intent, we think it is highly unlikely.
+\layout Subsection
+
+Cross Site Scripting
+\layout Subsubsection
+
+The exploit
+\layout Standard
+
+Cross site scripting is a well known web exploit.
+ It is based on the fact that many web pages display parameters they receive
+ in requests without 
+\begin_inset Quotes eld
+\end_inset 
+
+sanitizing
+\begin_inset Quotes erd
+\end_inset 
+
+ them.
+ For example if we have a page that receives a parameter 
+\emph on 
+name
+\emph default 
+ and displays 
+\begin_inset Quotes eld
+\end_inset 
+
+hello 
+\emph on 
+name
+\emph default 
+
+\begin_inset Quotes erd
+\end_inset 
+
+ then if a <script> tag is passed as the name the script will loaded and
+ executed by the browser.
+ Cross site scripting (or XSS) is discussed in much more detail in 
+\begin_inset LatexCommand \cite{xss1}
+
+\end_inset 
+
+ and 
+\begin_inset LatexCommand \cite{xss2}
+
+\end_inset 
+
+.
+ One way to use XSS is to place a link on a malicious web site, which will
+ direct the use to a vulnerable page with a malicious script as one of the
+ parameters, for example:
+\layout LyX-Code
+
+<a href=
+\begin_inset Quotes erd
+\end_inset 
+
+http://www.vulnerable.com/?name=<script>send cookies to
+\layout LyX-Code
+
+attacker</script>
+\begin_inset Quotes erd
+\end_inset 
+
+>A very nice site</a>
+\layout Subsubsection
+
+The detection rule
+\layout Standard
+
+We used the LinksRule class and the regular expressions provided at 
+\begin_inset LatexCommand \cite{xss2}
+
+\end_inset 
+
+ to detect the type of XSS which appears on malicious pages.
+ In order to find XSS attempts we scanned A, IMG and IFRAME elements for
+ pointers matching one of the following regular expressions:
+\layout LyX-Code
+
+((
+\backslash 
+%3C)|<)((
+\backslash 
+%2F)|
+\backslash 
+/)*[a-z0-9
+\backslash 
+%]+((
+\backslash 
+%3E)|>)
+\layout Standard
+
+or
+\layout LyX-Code
+
+((
+\backslash 
+%3C)|<)((
+\backslash 
+%69)|i|(
+\backslash 
+%49))((
+\backslash 
+%6D)|m|(
+\backslash 
+%4D))((
+\backslash 
+%67)|g|(
+\backslash 
+%47))[^
+\backslash 
+n]+((
+\backslash 
+%3E)|>)
+\layout Standard
+
+The first expression matches <script> tags and the second expression matches
+ <img> tags which contain javascript in their src attribute.
+\layout Subsection
+
+External IFRAME spyware and adware
+\layout Subsubsection
+
+The exploit
+\layout Standard
+
+IFRAME is an HTML element which can be placed inside a page and have external
+ content loaded into it, these elements are usually used for advertisement.
+ By External IFRAME we refer to IFRAME elements which load data from a domain
+ different from the domain of the current page.
+ The reason we chose to identify external IFRAMEs is because they are very
+ often used to collect information on an internet user's browsing habits
+ (i.e.
+ spyware) and are also used by most exploits (like the JS/Wonka example
+ we gave above).
+\layout Standard
+
+When a browser sends a request to a web server the server can record the
+ IP address of the browser.
+ If some server owner (like an advertiser) manages to place IFRAME advertisement
+s in many pages around the web he can collect information about which IP
+ addresses visit which pages.
+\layout Standard
+
+Another malicious use of IFRAMEs is when an attacker manages to compromise
+ a web page but does not wish to insert big amounts of code to the page
+ to avoid detection.
+ The attacker can instead create a single 0x0 sized IFRAME element pointing
+ to his own page which contains all the malicious code he needs.
+ In this case it is almost certain that the IFRAME pointer will point to
+ some other domain on which the attacker hosted his malicious page.
+\layout Subsubsection
+
+The detection rule
+\layout Standard
+
+To detect external IFRAMEs we wrote a separate rule class ExternalIframeRule.
+ When applied to a web page this rule iterates over all the IFRAME elements
+ and compares the domain of the pointer to the domain of the page currently
+ being analyzed.
+ If the domains are different the rule matches.
+\layout Standard
+
+This rule is quite simple but it demonstrates but it demonstrates Orchid's
+ support for detection of exploits which cannot be discovered by simply
+ matching regular expressions.
+\layout Subsection
+
+Pop under windows
+\layout Subsubsection
+
+The exploit
+\layout Standard
+
+
+\begin_inset Quotes eld
+\end_inset 
+
+Pop under
+\begin_inset Quotes erd
+\end_inset 
+
+ windows is a technique commonly used by 
+\begin_inset Quotes eld
+\end_inset 
+
+seedy
+\begin_inset Quotes erd
+\end_inset 
+
+ websites to open pop up windows without the user noticing them.
+ The technique can be used to display advertisements as well as to exlpoit
+ browser vulnerabilities.
+ Pop under windows are windows which appear beneath the current broswer
+ window.
+ Here is an example of opening a pop under window:
+\layout LyX-Code
+
+window.open('http://www.seedysite.com');window.focus()
+\layout Standard
+
+This opens seedysite.com in a new window and returns the focus to the current
+ window.
+\layout Subsubsection
+
+The detection rule
+\layout Standard
+
+For detecting pop under windows we used the ContentRule class.
+ We scanned every page for the following regular expression:
+\layout LyX-Code
+
+window
+\backslash 
+s*
+\backslash 
+.
+\backslash 
+s*open.+window
+\backslash 
+s*
+\backslash 
+.
+\backslash 
+s*focus
+\layout Standard
+
+This will detect sequences of opening a new browser window and returning
+ the focus to the original window.
+\layout Subsection
+
+Experiments
+\layout Standard
+
+To demonstrate the abilities of our system we performed several experiments
+ of malicious website detection.
+\layout Subsubsection
+
+Set up
+\layout Standard
+
+In our experiment we used all the rules described above to scan 14000 web
+ pages for malicious code.
+ Our 
+\begin_inset Quotes eld
+\end_inset 
+
+seed
+\begin_inset Quotes erd
+\end_inset 
+
+ (initial URL list) was several porn sites which we found on Google.
+ 
+\layout Standard
+
+Before running the experiments we tested Orchid on sites which we know to
+ contain each of the exploits described above.
+ For example: www.free-daily-jigsaw-puzzles.com is known to contain the JS/Wonka
+ exlpoit (Warning: do not try to load this site as your system may be compromise
+d as a result).
+ Orchid was succesful in identifying everyone of the exploits during the
+ testing phase.
+\layout Standard
+
+During the experiments themselves we discovered that a very large portion
+ of the sites that we scanned contained external IFRAMES and pop under windows.
+ This is to be expected because these techniques do not necessarily harm
+ the user but simply annoy him or covertly collect data on him.
+\layout Standard
+
+To run the experiments we used the following parameters:
+\layout Itemize
+
+Maximal number of pages: 14000
+\layout Itemize
+
+Number of fetcher threads: 5
+\layout Itemize
+
+Socket timeout: 15 seconds
+\layout Itemize
+
+Delay between URLs being assigned to fetchers: 2 seconds
+\layout Subsubsection
+
+Difficulties we encountered
+\layout Standard
+
+Our initial version of the crawler didn't select a random domain to crawl
+ to but rather crawled on a first-in-first-out basis.
+ This approach was not succesful because the frequency of requests to each
+ server was too high.
+ This problem was resolved by the approachs described in section 
+\begin_inset LatexCommand \ref{sec:The-Analyzer}
+
+\end_inset 
+
+.
+\layout Standard
+
+Another problem which we encountered was that, altough we reduced the request
+ frequency to each server, the requests to the DNS server were still coming
+ too fast which caused the DNS server to block us.
+ This was resolved by reducing the crawling speed.
+\layout Subsubsection
+
+Results
+\layout Standard
+
+Here are the results that we got after crawling 14000 pages:
+\layout Itemize
+
+Number of pages succesfully scanned: 12659
+\layout Itemize
+
+Maliciousness level breakdown:
+\newline 
+
+\begin_inset  Tabular
+<lyxtabular version="3" rows="4" columns="3">
+<features>
+<column alignment="center" valignment="top" leftline="true" width="0">
+<column alignment="center" valignment="top" leftline="true" width="0">
+<column alignment="center" valignment="top" leftline="true" rightline="true" width="0">
+<row topline="true" bottomline="true">
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+Total count
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" rightline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+Portion of scanned pages
+\end_inset 
+</cell>
+</row>
+<row topline="true">
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+Good
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+11782
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" rightline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+0.931
+\end_inset 
+</cell>
+</row>
+<row topline="true">
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+Maybe Evil
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+853
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" rightline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+0.067
+\end_inset 
+</cell>
+</row>
+<row topline="true" bottomline="true">
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+Evil
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+24
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" rightline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+0.002
+\end_inset 
+</cell>
+</row>
+</lyxtabular>
+
+\end_inset 
+
+
+\layout Itemize
+
+Specific rule match count:
+\newline 
+
+\begin_inset  Tabular
+<lyxtabular version="3" rows="6" columns="3">
+<features>
+<column alignment="center" valignment="top" leftline="true" width="0">
+<column alignment="center" valignment="top" leftline="true" width="0">
+<column alignment="center" valignment="top" leftline="true" rightline="true" width="0">
+<row topline="true" bottomline="true">
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+Total count
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" rightline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+Portion of scanned pages
+\end_inset 
+</cell>
+</row>
+<row topline="true">
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+
+\family roman 
+\series medium 
+\shape up 
+\size normal 
+\emph off 
+\bar no 
+\noun off 
+\color none
+External IFRAME
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+
+\family roman 
+\series medium 
+\shape up 
+\size normal 
+\emph off 
+\bar no 
+\noun off 
+\color none
+2092
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" rightline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+0.165
+\end_inset 
+</cell>
+</row>
+<row topline="true">
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+
+\family roman 
+\series medium 
+\shape up 
+\size normal 
+\emph off 
+\bar no 
+\noun off 
+\color none
+Pop under window
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+
+\family roman 
+\series medium 
+\shape up 
+\size normal 
+\emph off 
+\bar no 
+\noun off 
+\color none
+151
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" rightline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+0.012
+\end_inset 
+</cell>
+</row>
+<row topline="true">
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+
+\family roman 
+\series medium 
+\shape up 
+\size normal 
+\emph off 
+\bar no 
+\noun off 
+\color none
+XSS
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+
+\family roman 
+\series medium 
+\shape up 
+\size normal 
+\emph off 
+\bar no 
+\noun off 
+\color none
+29
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" rightline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+0.002
+\end_inset 
+</cell>
+</row>
+<row topline="true">
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+
+\family roman 
+\series medium 
+\shape up 
+\size normal 
+\emph off 
+\bar no 
+\noun off 
+\color none
+XSS with IMG
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+
+\family roman 
+\series medium 
+\shape up 
+\size normal 
+\emph off 
+\bar no 
+\noun off 
+\color none
+3
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" rightline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+0.00024
+\end_inset 
+</cell>
+</row>
+<row topline="true" bottomline="true">
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+
+\family roman 
+\series medium 
+\shape up 
+\size normal 
+\emph off 
+\bar no 
+\noun off 
+\color none
+JS/Wonka
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+
+\family roman 
+\series medium 
+\shape up 
+\size normal 
+\emph off 
+\bar no 
+\noun off 
+\color none
+2
+\end_inset 
+</cell>
+<cell alignment="center" valignment="top" topline="true" leftline="true" rightline="true" usebox="none">
+\begin_inset Text
+
+\layout Standard
+
+0.00016
+\end_inset 
+</cell>
+</row>
+</lyxtabular>
+
+\end_inset 
+
+
+\layout Itemize
+
+Time required to perform scans: Approximately 20 hours.
+\layout Subsubsection
+
+Analysis of results
+\layout Standard
+
+Te results we got were what we expected.
+ As previously mentioned, we used a number of pornography sites as our initial
+ seed.
+ As expected, those sites contained many external IFRAME elements (mostly
+ advertising other sites of similar content).
+ 
+\layout Standard
+
+The second most prevalent rule match was for the pop under windows.
+ This is also expected as this technique is very easy to use and does not
+ require knowledge of browser vulnerabilities.
+ Most of the pop under windows are simply advertisements meant to force
+ the user to continue using a certain site, but quite a few of them attempt
+ to install software on the user's machine using methods such as ActiveX
+ controls which are enabled in old versions of Internet Explorer.
+\layout Standard
+
+The number of XSS matches was higher than we expected.
+ We believe this is partially due to some false positives.
+ 
+\layout Standard
+
+An interesting results of the experiment was that the vast majority of the
+ crawled pages contained adult content.
+ This is due to the fact that websites of such nature tend to contain a
+ large amounts of links to other such sites and have a very strong lack
+ of diversity in content.
+\layout Standard
+
+Unfortunately, we were not able to discover any new sites containing the
+ JS/Wonka exploit (the two matches above are for sites that we found and
+ inserted into the seed list.
+ We believe that if the number of pages to crawl was increased and if websites
+ of other content types were included in the seed list the results would
+ be better.
+\layout Section
+
+Possible Extensions
+\begin_inset LatexCommand \label{sec:Possible-extensions}
+
+\end_inset 
+
+
+\layout Subsection
+
+Parallelization
+\layout Standard
+
+One of the factors that most limits Orchid's crawling rate is the number
+ of requests it sends per minute.
+ At it's current state Orchid runs on a single machine (with a single IP)
+ and therefore the maximal crawling speed is quite slow.
+ If we tried to crawl faster servers would block our requests to reduce
+ their load.
+\layout Standard
+
+One good way to solve this problem and siginificantly increase the crawling
+ speed of Orchid is to parallelize it's operation.
+ Writing parallel algorithms is quite difficult and there are many resources
+ on the web on how to do it correctly (
+\begin_inset LatexCommand \cite{parallel}
+
+\end_inset 
+
+ and 
+\begin_inset LatexCommand \cite{parallel2}
+
+\end_inset 
+
+ are good examples).
+ If parallelized Orchid could be used for large scale web analysis.
+\layout Subsection
+
+Improved detection heuristics
+\layout Standard
+
+The current set of rule classes in Orchid supports only direct analysis
+ of a web page.
+ We believe (without justification) that there are some web page parameters
+ which have non-zero correlation with the page's 
+\begin_inset Quotes eld
+\end_inset 
+
+maliciousness
+\begin_inset Quotes erd
+\end_inset 
+
+.
+ For example: it is not unreasonable to assume that a certain page's backlinks
+ (links that link to that page) and it's contents can indicate whether it
+ contains a certain exploit.
+\layout Standard
+
+If such a correlation indeed exists a machine learning model can be trained
+ on the data collected by the direct rules and then used to identify new
+ exploits.
+ One model which may be suitable for this task is the Support Vector Machine
+\begin_inset LatexCommand \cite{svm1,svm2}
+
+\end_inset 
+
+ model.
+\layout Section
+
+The Orchid Software Package
+\begin_inset LatexCommand \label{sec:The-Orchid-Software}
+
+\end_inset 
+
+
+\layout Standard
+
+The Orchid system comes as tarred and gzipped file called 
+\begin_inset Quotes eld
+\end_inset 
+
+orchid.tgz
+\begin_inset Quotes erd
+\end_inset 
+
+.
+ To use the package first go to some directory and extract it:
+\layout LyX-Code
+
+cd my_useless_stuff
+\layout LyX-Code
+
+tar xvzf orchid.tgz
+\layout Standard
+
+Now, there are several important files: 
+\begin_inset Quotes eld
+\end_inset 
+
+orchid/orchid.py
+\begin_inset Quotes erd
+\end_inset 
+
+, 
+\begin_inset Quotes eld
+\end_inset 
+
+orchid/malcontent.py
+\begin_inset Quotes erd
+\end_inset 
+
+ and 
+\begin_inset Quotes eld
+\end_inset 
+
+orchid/documentation/index.html
+\begin_inset Quotes erd
+\end_inset 
+
+.
+ The documentation is very pleasant and well formatted HTML which resembles
+ Javadoc.
+ It was generated by the excellent epydoc
+\begin_inset LatexCommand \cite{epydoc}
+
+\end_inset 
+
+ package.
+\layout Standard
+
+To run our experiment you should do:
+\layout LyX-Code
+
+cd orchid
+\layout LyX-Code
+
+python experiment.py
+\layout Standard
+
+Please note that our initial seed list may contain URLs with offensive words
+ due to the nature of such sites.
+\layout Section
+
+Conclusion
+\layout Standard
+
+Browsers have become one of the most important category of programs for
+ computer users and therefore it is highly important to make them secure.
+ We hope that our system can demonstrate one way of finding what to fix
+ or improve in browsers and what to be careful of.
+\layout Bibliography
+\bibitem {websense}
+
+
+\begin_inset LatexCommand \htmlurl[WebSense security alerts]{http://www.websensesecuritylabs.com/alerts/}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {honeymonkey}
+
+
+\begin_inset LatexCommand \htmlurl[Honey Monkey, Microsoft]{ftp://ftp.research.microsoft.com/pub/tr/TR-2005-72.pdf}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {harvestman}
+
+
+\begin_inset LatexCommand \htmlurl[HarvestMan Web Spider]{http://harvestman.freezope.org/}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {nutch}
+
+
+\begin_inset LatexCommand \htmlurl[Nutch Web Spider]{http://lucene.apache.org/nutch/index.html}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {mitlicense}
+
+
+\begin_inset LatexCommand \htmlurl[MIT License]{http://www.opensource.org/licenses/mit-license.php}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {crawl1}
+
+
+\begin_inset LatexCommand \htmlurl[Sriram Krishnan's guide to writing crawlers]{http://dotnetjunkies.com/WebLog/sriram/archive/2004/10/10/28253.aspx}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {crawl2}
+
+
+\begin_inset LatexCommand \htmlurl[SearchTools crawler checklist]{http://www.searchtools.com/robots/robot-checklist.html}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {wonka}
+
+
+\begin_inset LatexCommand \htmlurl[WebSense security analysis of JS/Wonka]{http://www.websensesecuritylabs.com/resource/pdf/wslabs_wonka_analysis_oct05.pdf}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {xss1}
+
+
+\begin_inset LatexCommand \htmlurl[Cross site scripting explained, Amit Klein]{http://crypto.stanford.edu/cs155/CSS.pdf}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {xss2}
+
+
+\begin_inset LatexCommand \htmlurl[Detection of SQL Injection and Cross-site Scripting Attacks]{http://www.securityfocus.com/infocus/1768}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {parallel}
+
+
+\begin_inset LatexCommand \htmlurl[Parallel Algorithm Design]{http://www.dcs.ed.ac.uk/home/stg/pub/P/par_alg.html}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {parallel2}
+
+
+\begin_inset LatexCommand \htmlurl[Designing Parallel Algorithms]{http://www-unix.mcs.anl.gov/dbpp/text/node14.html}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {svm1}
+
+
+\begin_inset LatexCommand \htmlurl[Support Vector Machine, Wikipedia]{http://en.wikipedia.org/wiki/Support_Vector_Machine}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {svm2}
+
+
+\begin_inset LatexCommand \htmlurl[Learning to Classify Text using Support Vector Machines, Thorsten Joachims]{http://www.cs.cornell.edu/People/tj/svmtcatbook/}
+
+\end_inset 
+
+
+\layout Bibliography
+\bibitem {epydoc}
+
+
+\begin_inset LatexCommand \htmlurl[Epydoc]{http://epydoc.sourceforge.net}
+
+\end_inset 
+
+
+\the_end
