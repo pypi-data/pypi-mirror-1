@@ -1,0 +1,9 @@
+This package contains an alternate implementation of the ``Recipe``
+content type for the World Cookery application, the demo application
+for Philipp von Weitershausen's book "Web Component Development with
+Zope 3" (http://worldcookery.com).  Instead of persisting its data in
+the Zope's object database (ZODB), this implementation saves it to an
+RDMBS using SQLAlchemy_ and z3c.zalchemy_.
+
+.. _SQLAlchemy: http://www.sqlalchemy.org/
+.. _z3c.zalchemy: http://cheeseshop.python.org/pypi/z3c.zalchemy
