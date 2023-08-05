@@ -1,0 +1,119 @@
+import os
+from cgi import escape
+
+from plone.app.form.validators import null_validator
+from plone.fieldsets.form import FieldsetsEditForm
+from zope.component import adapts
+from zope.component import getUtility
+from zope.formlib import form
+from zope.interface import Interface
+from zope.interface import implements
+from zope.schema import Int
+
+from Acquisition import aq_inner
+from Products.CMFCore.interfaces import IPropertiesTool
+from Products.CMFDefault.formlib.schema import SchemaAdapterBase
+from Products.CMFPlone.interfaces import IMigrationTool
+from Products.CMFPlone import PloneMessageFactory as _
+from Products.CMFPlone.interfaces import IPloneSiteRoot
+from Products.CMFQuickInstallerTool.interfaces import IQuickInstallerTool
+from Products.Five.browser.pagetemplatefile import ZopeTwoPageTemplateFile
+
+from plone.app.controlpanel.interfaces import IPloneControlPanelForm
+
+
+class IMaintenanceSchema(Interface):
+
+    days = Int(title=_(u"Number of days to keep"),
+        description=_(u"The Zope Database keeps deleted and previous versions "
+                       "of objects. Packing the database will actually delete "
+                       "these to a certain point in time and free diskspace."),
+        default=7,
+        required=True)
+
+
+class MaintenanceControlPanelAdapter(SchemaAdapterBase):
+
+    adapts(IPloneSiteRoot)
+    implements(IMaintenanceSchema)
+
+    def __init__(self, context):
+        pprop = getUtility(IPropertiesTool)
+        self.context = pprop.site_properties
+
+    def get_days(self):
+        return self.context.number_of_days_to_keep
+
+    def set_days(self, value):
+        if isinstance(value, basestring):
+            value = int(value)
+        self.context.number_of_days_to_keep = value
+
+    days = property(get_days, set_days)
+
+
+class MaintenanceControlPanel(FieldsetsEditForm):
+    """A simple form to pack the databases."""
+
+    implements(IPloneControlPanelForm)
+
+    template = ZopeTwoPageTemplateFile('maintenance.pt')
+    form_fields = form.FormFields(IMaintenanceSchema)
+    label = _(u'Maintenance')
+    description = _(u"Zope server and site maintenance options.")
+    form_name = _(u'Zope Database')
+
+    @form.action(_(u'Pack'))
+    def handle_edit_action(self, action, data):
+        form.applyChanges(self.context, self.form_fields, data, self.adapters)
+        value = data.get('days', None)
+        # skip the actual pack method in tests
+        if value is not None and isinstance(value, int) and value >= 0:
+            context = aq_inner(self.context)
+            cpanel = context.unrestrictedTraverse('/Control_Panel')
+            cpanel.manage_pack(days=value, REQUEST=None)
+        self.status = _(u'Packed the database.')
+
+    @form.action(_(u'Shutdown'), validator=null_validator)
+    def handle_shutdown_action(self, action, data):
+        context = aq_inner(self.context)
+        cpanel = context.unrestrictedTraverse('/Control_Panel')
+        result = cpanel.manage_shutdown()
+        return result
+
+    @form.action(_(u'Restart'), validator=null_validator)
+    def handle_restart_action(self, action, data):
+        context = aq_inner(self.context)
+        cpanel = context.unrestrictedTraverse('/Control_Panel')
+        url = self.request.get('URL')
+        result = cpanel.manage_restart(url)
+        return """<html>
+        <head><meta HTTP-EQUIV=REFRESH CONTENT="10; URL=%s">
+        </head>
+        <body>Zope is restarting</body></html>
+        """ % escape(url, 1)
+
+    def isRestartable(self):
+        if os.environ.has_key('ZMANAGED'):
+            return True
+        return False
+
+    def isDevelopmentMode(self):
+        qi = getUtility(IQuickInstallerTool)
+        return qi.isDevelopmentMode()
+
+    def coreVersions(self):
+        mt = getUtility(IMigrationTool)
+        versions = mt.coreVersions()
+        versions['Instance'] = versions['Plone Instance']
+        return versions
+
+    def processTime(self):
+        context = aq_inner(self.context)
+        cpanel = context.unrestrictedTraverse('/Control_Panel')
+        return cpanel.process_time()
+
+    def dbSize(self):
+        context = aq_inner(self.context)
+        cpanel = context.unrestrictedTraverse('/Control_Panel')
+        return cpanel.db_size()
