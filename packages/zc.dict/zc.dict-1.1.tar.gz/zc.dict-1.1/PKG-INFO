@@ -1,0 +1,241 @@
+Metadata-Version: 1.0
+Name: zc.dict
+Version: 1.1
+Summary: BTree-based persistent dict-like objects (regular dict and ordered) that can be
+used as base classes.
+
+This is a bit of a heavyweight solution, as every zc.dict.Dict (and
+zc.dict.OrderedDict) is at least 3 persistent objects.  Keep this in mind if you
+intend to create lots and lots of these.
+
+Home-page: UNKNOWN
+Author: Zope Corporation
+Author-email: zope3-dev@zope.org
+License: ZPL 2.1
+Description: An efficient, persistent and subclassable dict
+        ==============================================
+        
+        PersistentDict is very inefficient if it contains more than a couple
+        of values, and BTrees are not recommended to inherit from.
+        
+        This class is a simple wrapper over a BTree.  It retains the
+        efficiency of BTrees and is safe to use as a base class.  Also, it
+        implements the full Python dict interface.
+        
+        >>> from zc.dict import Dict
+        >>> d = Dict()
+        >>> d
+        <zc.dict.dict.Dict object at ...>
+        
+        >>> d['foo'] = 'bar'
+        >>> len(d)
+        1
+        
+        >>> d['bar'] = 'baz'
+        >>> len(d)
+        2
+        
+        Length is maintained separately, because len on a BTree is
+        inefficient, as it has to walk the whole tree.
+        
+        >>> d._len
+        <BTrees.Length.Length object at ...>
+        >>> d._len()
+        2
+        
+        In order to keep updates efficient for small changes, we unroll them
+        as a series of setitems.
+        
+        >>> d.update({'bar': 'moo', 'ding': 'dong', 'beep': 'beep'})
+        >>> len(d)
+        4
+        
+        keys and values, and items return normal Python lists:
+        
+        >>> d.keys()
+        ['bar', 'beep', 'ding', 'foo']
+        
+        >>> d.values()
+        ['moo', 'beep', 'dong', 'bar']
+        
+        >>> d.items()
+        [('bar', 'moo'), ('beep', 'beep'), ('ding', 'dong'), ('foo', 'bar')]
+        
+        However, efficient BTree iterators are available via the iter methods:
+        
+        >>> iter(d)
+        <OO-iterator object at ...>
+        >>> d.iterkeys()
+        <OO-iterator object at ...>
+        
+        >>> d.iteritems()
+        <OO-iterator object at ...>
+        
+        >>> d.itervalues()
+        <OO-iterator object at ...>
+        
+        The rest of the dict methods are delegated to the underlying BTree:
+        
+        >>> d.has_key('bar')
+        True
+        >>> 'BAR' in d
+        False
+        
+        >>> d.pop('bar')
+        'moo'
+        
+        >>> d.get('nonexistent', 'default')
+        'default'
+        
+        >>> d.setdefault('newly created', 'value')
+        >>> d['newly created']
+        'value'
+        >>> d.setdefault('newly created', 'other')
+        >>> d['newly created']
+        'value'
+        
+        popitem removes from the dict and returns a key-value pair:
+        
+        >>> len(d)
+        4
+        
+        >>> d.popitem()
+        ('beep', 'beep')
+        
+        >>> len(d)
+        3
+        
+        The copy method creates a copy of a Dict:
+        
+        >>> c = d.copy()
+        >>> c.items() == d.items()
+        True
+        
+        However we don't support comparison because of cowardice:
+        
+        >>> c == d
+        False
+        >>> Dict() == {}
+        False
+        
+        clear removes all the keys from the dict:
+        
+        >>> d.clear()
+        >>> d.keys()
+        []
+        >>> len(d)
+        0
+        
+        
+        Regression tests
+        ----------------
+        
+        When setting an item that's already in the dict, the length is not
+        increased:
+        
+        >>> d.clear()
+        >>> d['foo'] = 'bar'
+        >>> d['foo'] = 'baz'
+        >>> len(d)
+        1
+        
+        
+        Ordered Dict: An persistent container that maintains order
+        ==========================================================
+        
+        An OrderedDict provides most of the functionality of a Dict, with the
+        additional feature that it remembers the order in which items were added.
+        It also provides the API to reorder the items.
+        
+        >>> from zc.dict import OrderedDict
+        >>> d = OrderedDict()
+        >>> d
+        <zc.dict.ordered.OrderedDict object at ...>
+        
+        Let us add a couple of items
+        
+        >>> d['one'] = 'One'
+        >>> len(d)
+        1
+        
+        >>> d['two'] = 'Two'
+        >>> len(d)
+        2
+        
+        >>> d.keys()
+        ['one', 'two']
+        
+        >>> d.values()
+        ['One', 'Two']
+        
+        The order can be changed easily
+        
+        >>> d.updateOrder(['two', 'one'])
+        >>> d.keys()
+        ['two', 'one']
+        
+        >>> d.values()
+        ['Two', 'One']
+        
+        
+        `updateOrder` expects the entire list of keys in the new order
+        
+        >>> d.updateOrder(['two'])
+        Traceback (most recent call last):
+        ...
+        ValueError: Incompatible key set.
+        
+        
+        Length is implemented in the same way as a Dict
+        
+        >>> d._len
+        <BTrees.Length.Length object at ...>
+        >>> d._len()
+        2
+        
+        
+        OrderedDict also provides API that return iterators of the above methods.
+        
+        >>> iter(d)
+        <iterator object at ...>
+        >>> d.iterkeys()
+        <iterator object at ...>
+        
+        >>> d.iteritems()
+        <listiterator object at ...>
+        
+        >>> d.itervalues()
+        <listiterator object at ...>
+        
+        
+        OrderedDict also provides a copy method
+        
+        >>> c = d.copy()
+        >>> c.items() == d.items()
+        True
+        
+        The `update` method is also provided. If it is provided with an OrderedDict,
+        then the new elements are added in the same order as in the argument.
+        
+        >>> d2 = OrderedDict()
+        >>> d2['five'] = 'Five'
+        >>> d2['six'] = 'Six'
+        >>> d.update(d2)
+        >>> d.items()
+        [('two', 'Two'), ('one', 'One'), ('five', 'Five'), ('six', 'Six')]
+        
+        
+        But if the argument is a regular Dict, then the order of the newly added
+        elements in the resulting OrderedDict object cannot be guaranteed.
+        
+        clear removes all the keys from the dict:
+        
+        >>> d.clear()
+        >>> d.keys()
+        []
+        >>> len(d)
+        0
+        
+        
+Keywords: zope zope3
+Platform: UNKNOWN
