@@ -1,0 +1,136 @@
+=============================
+collective.recipe.ant package
+=============================
+
+.. contents::
+
+What is collective.recipe.ant ?
+===============================
+
+Collective.recipie.ant executes an ant build. It assumes java, and and ant 
+is installed on the system.
+
+Supported options:
+
+ant 
+    Specify the location of the ant application. This option is optional.
+    If not used the application is looked up in the default path.
+
+ant-home
+    If ant is not located in your default ``PATH`` -environment variable
+    you can specify the location here.
+
+ant-options
+    Specify the options ant should be called with. You may change the
+    buildfile with the ``-buildfile`` option for example.
+
+classpath
+    Give some extra location for including java libraries.
+    I.e. junit, ...
+
+You can debug the ant output by increasing the verbosity of buildout.
+
+Simple example
+==============
+
+    >>> write(sample_buildout, 'buildout.cfg',
+    ... """
+    ... [buildout]
+    ... parts = javaproject
+    ...
+    ... [javaproject]
+    ... recipe = collective.recipe.ant
+    ... """)
+
+Ok, let's run the buildout:
+  
+    >>> print system(buildout)
+    Installing javaproject.
+    Build failed
+    While:
+      Installing javaproject.
+    Error: System error: Buildfile: build.xml does not exist!
+    <BLANKLINE>
+    <BLANKLINE>
+
+This one failed. We didn't specify any options. Let's do that.
+
+    >>> from os.path import join, dirname
+    >>> buildfile = join(dirname(__file__), 'testdata', 'echo.xml')
+    >>> write(sample_buildout, 'buildout.cfg',
+    ... """
+    ... [buildout]
+    ... parts = javaproject
+    ...
+    ... [javaproject]
+    ... recipe = collective.recipe.ant
+    ... ant-options =
+    ...     echo 
+    ...     -buildfile %s 
+    ... 
+    ... """ % buildfile)
+
+Fetch the output of the ant process, when being extra verbose
+
+    >>> print system(buildout + ' -v')
+    Installing ...
+    <BLANKLINE>
+    echo:
+         [echo] Foo Bar
+    <BLANKLINE>
+    BUILD SUCCESSFUL
+    Total time: 0 seconds
+    <BLANKLINE>
+    javaproject: Build successful
+    <BLANKLINE>
+
+
+Let's see if the classpath verification works
+
+    >>> write(sample_buildout, 'buildout.cfg',
+    ... """
+    ... [buildout]
+    ... parts = javaproject
+    ...
+    ... [javaproject]
+    ... recipe = collective.recipe.ant
+    ... classpath = %s %s
+    ... ant-options =
+    ...     echo 
+    ...     -buildfile %s 
+    ... 
+    ... """ % (join(dirname(__file__), 'testdata'),
+    ...        tmpdir('foo'),
+    ...        buildfile))
+
+    >>> print system(buildout)
+    Uninstalling javaproject.
+    Installing javaproject.
+    javaproject: Build successful
+    <BLANKLINE>
+
+Now we try to reference a (hopefully) nonexisting directory
+
+    >>> write(sample_buildout, 'buildout.cfg',
+    ... """
+    ... [buildout]
+    ... parts = javaproject
+    ...
+    ... [javaproject]
+    ... recipe = collective.recipe.ant
+    ... classpath = %s
+    ... ant-options =
+    ...     echo 
+    ...     -buildfile %s 
+    ... 
+    ... """ % (join(dirname(__file__), '__bogus__dir__'),
+    ...        buildfile))
+
+    >>> print system(buildout)
+    Uninstalling javaproject.
+    Installing javaproject.
+    While:
+      Installing javaproject.
+    Error: Classpath .../__bogus__dir__ does not exist.
+    <BLANKLINE>
+
