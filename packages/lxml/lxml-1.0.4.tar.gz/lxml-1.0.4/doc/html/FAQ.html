@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils 0.4: http://docutils.sourceforge.net/" />
+<title>Frequently Asked Questions</title>
+<link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+<body>
+<div class="document" id="frequently-asked-questions">
+<h1 class="title">Frequently Asked Questions</h1>
+<p>See also the notes on <a class="reference" href="compatibility.html">compatibility</a> to <a class="reference" href="http://effbot.org/zone/element-index.htm">ElementTree</a>.</p>
+<ol class="arabic">
+<li><p class="first">Is there a tutorial?</p>
+<p>There is a <a class="reference" href="http://effbot.org/zone/element.htm">tutorial for ElementTree</a> which also works for lxml.etree.
+The <a class="reference" href="api.html">API documentation</a> also contains many examples.</p>
+</li>
+<li><p class="first">Where can I find more documentation about lxml?</p>
+<p>There is a lot of documentation as lxml implements the well-known
+<a class="reference" href="http://effbot.org/zone/element-index.htm">ElementTree API</a> and tries to follow its documentation as closely as
+possible.  There are a couple of issues where lxml cannot keep up
+compatibility.  They are described in the <a class="reference" href="compatibility.html">compatibility</a> documentation.
+The lxml specific extensions to the API are described by individual files
+in the <tt class="docutils literal"><span class="pre">doc</span></tt> directory of the distribution and on <a class="reference" href="http://codespeak.net/lxml/#documentation">the web page</a>.</p>
+</li>
+<li><p class="first">My application crashes! Why does lxml.etree do that?</p>
+<p>One of the goals of lxml is &quot;no segfaults&quot;, so if there is no clear warning
+in the documentation that you were doing something potentially harmful, you
+have found a bug and we would like to hear about it.  Please report this
+bug to the mailing list.  See the next section on how to do that.</p>
+</li>
+<li><p class="first">I think I have found a bug in lxml. What should I do?</p>
+<ol class="loweralpha simple">
+<li>First, you should look at the <a class="reference" href="http://codespeak.net/svn/lxml/trunk/CHANGES.txt">current developer changelog</a> to see if
+this is a known problem that has already been fixed in the SVN trunk.</li>
+<li>Otherwise, we would really like to hear about it.  Please report it to
+the <a class="reference" href="http://codespeak.net/mailman/listinfo/lxml-dev">mailing list</a> so that we can fix it.  It is very helpful in this
+case if you can come up with a short code snippet that demonstrates your
+problem.  Please also report the version of lxml, libxml2 and libxslt
+that you are using (see the module attributes <tt class="docutils literal"><span class="pre">etree.LXML_VERSION</span></tt>
+etc.).</li>
+</ol>
+</li>
+<li><p class="first">Can I use threads to concurrently access the lxml API?</p>
+<p>Short answer: No.</p>
+<p>Long answer: lxml does not currently release the GIL (Python's global
+interpreter lock) internally, so you will not benefit from any performance
+improvements by using threads.  It is also not trivial to free the GIL, as
+lxml calls back into Python in many places during XML processing: extension
+functions, Python resolvers, error reporting, etc.</p>
+</li>
+<li><p class="first">Why doesn't the <tt class="docutils literal"><span class="pre">pretty_print</span></tt> option reformat my XML output?</p>
+<p>Pretty printing (or formatting) an XML document means adding white space to
+the content.  These modifications are harmless if they only impact elements
+in the document that do not carry (text) data.  They corrupt your data if
+they impact elements that contain data.  If lxml cannot distinguish between
+whitespace and data, it will not alter your data.  Whitespace is therefore
+only added between nodes that do not contain data.  This is always the case
+for trees constructed element-by-element, so no problems should be expected
+here.  For parsed trees, a good way to assure that no conflicting
+whitespace is left in the tree is the <tt class="docutils literal"><span class="pre">remove_blank_text</span></tt> option:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; parser = etree.XMLParser(remove_blank_text=True)
+&gt;&gt;&gt; tree = etree.parse(file, parser)
+</pre>
+<p>This will allow the parser to drop blank text nodes when constructing the
+tree.  If you now call a serialization function to pretty print this tree,
+lxml can add fresh whitespace to the XML tree to indent it.</p>
+</li>
+<li><p class="first">Why can't lxml parse my XML from unicode strings?</p>
+<p>lxml can read Python unicode strings and even tries to support them if
+libxml2 does not.  However, if the unicode string declares an XML encoding
+internally (<tt class="docutils literal"><span class="pre">&lt;?xml</span> <span class="pre">encoding=&quot;...&quot;?&gt;</span></tt>), parsing is bound to fail, as this
+encoding is most likely not the real encoding used in Python unicode.  The
+same is true for HTML unicode strings that contain charset meta tags.  Note
+that Python uses different encodings for unicode on different platforms, so
+even specifying the real internal unicode encoding is not portable between
+Python interpreters.  Don't do it.</p>
+<p>Python unicode strings with XML data or HTML data that carry encoding
+information are broken.  lxml will not parse them.  You must provide
+parsable data in a valid encoding.</p>
+</li>
+<li><p class="first">How can I find out which namespace prefixes are used in a document?</p>
+<p>You can traverse the document (<tt class="docutils literal"><span class="pre">getiterator()</span></tt>) and collect the prefix
+attributes from all Elements into a set.  However, it is unlikely that you
+really want to do that.  You do not need these prefixes, honestly.  You
+only need the namespace URIs.  All namespace comparisons use these, so feel
+free to make up your own prefixes when you use XPath expressions or
+extension functions.</p>
+<p>The only place where you might consider specifying prefixes is the
+serialization of Elements that were created through the API.  Here, you can
+specify a prefix mapping through the <tt class="docutils literal"><span class="pre">nsmap</span></tt> argument when creating the
+root Element.  Its children will then inherit this prefix for
+serialization.</p>
+</li>
+<li><p class="first">How can I specify a default namespace for XPath expressions?</p>
+<p>You can't.  In XPath, there is no such thing as a default namespace.  Just
+use an arbitrary prefix and let the namespace dictionary of the XPath
+evaluators map it to your namespace.  See also the question above.</p>
+</li>
+<li><p class="first">What are the <tt class="docutils literal"><span class="pre">findall()</span></tt> and <tt class="docutils literal"><span class="pre">xpath()</span></tt> methods on Element(Tree)?</p>
+<p><tt class="docutils literal"><span class="pre">findall()</span></tt> is part of the original <a class="reference" href="http://effbot.org/zone/element-index.htm">ElementTree API</a>.  It supports a
+<a class="reference" href="http://effbot.org/zone/element-xpath.htm">simple subset of the XPath language</a>, without predicates, conditions and
+other advanced features.  It is very handy for finding specific tags in a
+tree.  Another important difference is namespace handling, which uses the
+<tt class="docutils literal"><span class="pre">{namespace}tagname</span></tt> notation.  This is not supported by XPath.  The
+findall, find and findtext methods are compatible with other ElementTree
+implementations and allow writing portable code that runs on ElementTree,
+cElementTree and lxml.etree.</p>
+<p><tt class="docutils literal"><span class="pre">xpath()</span></tt>, on the other hand, supports the complete power of the XPath
+language, including predicates, XPath functions and Python extension
+functions.  The syntax is defined by the <a class="reference" href="http://www.w3.org/TR/xpath">XPath specification</a>.  If you
+need the expressiveness and selectivity of XPath, the <tt class="docutils literal"><span class="pre">xpath()</span></tt> method,
+the <tt class="docutils literal"><span class="pre">XPath</span></tt> class and the <tt class="docutils literal"><span class="pre">XPathEvaluator</span></tt> are the best <a class="reference" href="performance.html#xpath">choice</a>.</p>
+</li>
+<li><p class="first">Why doesn't <tt class="docutils literal"><span class="pre">findall()</span></tt> support full XPath expressions?</p>
+<p>It was decided that it is more important to keep compatibility with
+<a class="reference" href="http://effbot.org/zone/element-index.htm">ElementTree</a> to simplify code migration between the libraries.  The main
+difference compared to XPath is the <tt class="docutils literal"><span class="pre">{namespace}tagname</span></tt> notation used in
+<tt class="docutils literal"><span class="pre">findall()</span></tt>, which is not valid XPath.</p>
+<p>ElementTree and lxml.etree use the same implementation, which assures 100%
+compatibility.  Note that <tt class="docutils literal"><span class="pre">findall()</span></tt> is <a class="reference" href="performance.html#tree-traversal">so fast</a> in lxml that a native
+implementation would not bring any performance benefits.</p>
+</li>
+<li><p class="first">What is the difference between str(xslt(doc)) and xslt(doc).write() ?</p>
+<p>The str() implementation of the XSLTResultTree class (a subclass of
+ElementTree) knows about the output method chosen in the stylesheet
+(xsl:output), write() doesn't.  If you call write(), the result will be a
+normal XML tree serialization in the requested encoding.  Calling this
+method may also fail for XSLT results that are not XML trees (e.g. string
+results).</p>
+<p>If you call str(), it will return the serialized result as specified by the
+XSL transform.  This correctly serializes string results to encoded Python
+strings and honours <tt class="docutils literal"><span class="pre">xsl:output</span></tt> options like <tt class="docutils literal"><span class="pre">indent</span></tt>.  This almost
+certainly does what you want, so you should only use <tt class="docutils literal"><span class="pre">write()</span></tt> if you are
+sure that the XSLT result is an XML tree and you want to override the
+encoding and indentation options requested by the stylesheet.</p>
+</li>
+<li><p class="first">Why is my application so slow?</p>
+<p>lxml.etree is a very fast library for processing XML.  There are, however,
+<a class="reference" href="performance.html#the-elementtree-api">a few caveats</a> involved in the mapping of the powerful libxml2 library to
+the simple and convenient ElementTree API.  Not all operations are as fast
+as the simplicity of the API might suggest.  The <a class="reference" href="performance.html">benchmark page</a> has a
+comparison to other ElementTree implementations and a number of tips for
+performance tweaking.</p>
+</li>
+</ol>
+</div>
+</body>
+</html>

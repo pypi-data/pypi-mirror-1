@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils 0.4: http://docutils.sourceforge.net/" />
+<title>Sax support</title>
+<link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+<body>
+<div class="document" id="sax-support">
+<h1 class="title">Sax support</h1>
+<p>In this document we'll describe lxml's SAX support. lxml has support
+for producing SAX events for an ElementTree or Element. lxml can also
+turn SAX events into an ElementTree. The SAX API used by lxml is
+compatible with that in the Python core (xml.sax), so is useful for
+interfacing lxml with code that uses the Python core SAX facilities.</p>
+<div class="contents topic">
+<p class="topic-title first"><a id="contents" name="contents">Contents</a></p>
+<ul class="simple">
+<li><a class="reference" href="#building-a-tree-from-sax-events" id="id1" name="id1">Building a tree from SAX events</a></li>
+<li><a class="reference" href="#producing-sax-events-from-an-elementtree-or-element" id="id2" name="id2">Producing SAX events from an ElementTree or Element</a></li>
+<li><a class="reference" href="#interfacing-with-pulldom-minidom" id="id3" name="id3">Interfacing with pulldom/minidom</a></li>
+</ul>
+</div>
+<!-- 1  Building a tree from SAX events
+2  Producing SAX events from an ElementTree or Element
+3  Interfacing with pulldom/minidom -->
+<div class="section">
+<h1><a class="toc-backref" href="#id1" id="building-a-tree-from-sax-events" name="building-a-tree-from-sax-events">Building a tree from SAX events</a></h1>
+<p>First of all, lxml has support for building a new tree given SAX events.  To
+do this, we use the special SAX content handler defined by lxml named
+<tt class="docutils literal"><span class="pre">lxml.sax.ElementTreeContentHandler</span></tt>:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; import lxml.sax
+&gt;&gt;&gt; handler = lxml.sax.ElementTreeContentHandler()
+</pre>
+<p>Now let's fire some SAX events at it:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; handler.startElementNS((None, 'a'), 'a', {})
+&gt;&gt;&gt; handler.startElementNS((None, 'b'), 'b', {(None, 'foo'): 'bar'})
+&gt;&gt;&gt; handler.characters('Hello world')
+&gt;&gt;&gt; handler.endElementNS((None, 'b'), 'b')
+&gt;&gt;&gt; handler.endElementNS((None, 'a'), 'a')
+</pre>
+<p>This constructs an equivalent tree.  You can access it through the <tt class="docutils literal"><span class="pre">etree</span></tt>
+property of the handler:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; tree = handler.etree
+&gt;&gt;&gt; lxml.etree.tostring(tree.getroot())
+'&lt;a&gt;&lt;b foo=&quot;bar&quot;&gt;Hello world&lt;/b&gt;&lt;/a&gt;'
+</pre>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id2" id="producing-sax-events-from-an-elementtree-or-element" name="producing-sax-events-from-an-elementtree-or-element">Producing SAX events from an ElementTree or Element</a></h1>
+<p>Let's make a tree we can generate SAX events for:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; from StringIO import StringIO
+&gt;&gt;&gt; f = StringIO('&lt;a&gt;&lt;b&gt;Text&lt;/b&gt;&lt;/a&gt;')
+&gt;&gt;&gt; tree = lxml.etree.parse(f)
+</pre>
+<p>To see whether the correct SAX events are produced, we'll write a
+custom content handler:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; from xml.sax.handler import ContentHandler
+&gt;&gt;&gt; class MyContentHandler(ContentHandler):
+...     def __init__(self):
+...         self.a_amount = 0
+...         self.b_amount = 0
+...         self.text = None
+...
+...     def startElementNS(self, name, qname, attributes):
+...         uri, localname = name
+...         if localname == 'a':
+...             self.a_amount += 1
+...         if localname == 'b':
+...             self.b_amount += 1
+...
+...     def characters(self, data):
+...         self.text = data
+</pre>
+<p>Now let's produce some SAX events and handle them with this content
+handler:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; handler = MyContentHandler()
+&gt;&gt;&gt; lxml.sax.saxify(tree, handler)
+</pre>
+<p>This is what we expect:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; handler.a_amount
+1
+&gt;&gt;&gt; handler.b_amount
+1
+&gt;&gt;&gt; handler.text
+'Text'
+</pre>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id3" id="interfacing-with-pulldom-minidom" name="interfacing-with-pulldom-minidom">Interfacing with pulldom/minidom</a></h1>
+<p>lxml.sax is a simple way to interface with the standard XML support in the
+Python library.  Note, however, that this is a one-way solution, as Python's
+DOM implementation connot generate SAX events from a DOM tree.</p>
+<p>You can use xml.dom.pulldom to build a minidom from lxml:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; from xml.dom.pulldom import SAX2DOM
+&gt;&gt;&gt; handler = SAX2DOM()
+&gt;&gt;&gt; lxml.sax.saxify(tree, handler)
+</pre>
+<p>PullDOM makes the result available through the <tt class="docutils literal"><span class="pre">document</span></tt> attribute:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; dom = handler.document
+&gt;&gt;&gt; print dom.firstChild.localName
+a
+</pre>
+</div>
+</div>
+</body>
+</html>

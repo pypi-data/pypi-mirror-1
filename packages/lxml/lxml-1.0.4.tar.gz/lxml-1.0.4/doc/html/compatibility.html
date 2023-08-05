@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils 0.4: http://docutils.sourceforge.net/" />
+<title>lxml.etree versus ElementTree</title>
+<link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+<body>
+<div class="document" id="lxml-etree-versus-elementtree">
+<h1 class="title">lxml.etree versus ElementTree</h1>
+<p>A lot of care has been taken to ensure compatibility between etree and
+ElementTree.  Nonetheless some differences and incompatibilities exist:</p>
+<ul>
+<li><p class="first">Importing etree is obviously different; etree uses a lower case
+package name, while ElementTree a combination of upper-case and
+lower case in imports:</p>
+<pre class="literal-block">
+# etree
+from lxml.etree import Element
+
+# ElementTree
+from elementtree.ElementTree import Element
+
+# ElementTree in the Python 2.5 standard library
+from xml.etree.ElementTree import Element
+</pre>
+<p>When switching over code from ElementTree to lxml.etree, and you're using
+the package name prefix 'ElementTree', you can do the following:</p>
+<pre class="literal-block">
+# instead of
+from elementtree import ElementTree
+# use
+from lxml import etree as ElementTree
+</pre>
+</li>
+<li><p class="first">Some minor parts of the API of ElementTree have not yet been implemented and
+are thus missing in lxml.etree.  Feel free to help out!</p>
+</li>
+<li><p class="first">Then again, lxml.etree offers a lot more functionality, such as
+XPath, XSLT, Relax NG, and XML Schema support, which (c)ElementTree
+does not offer.</p>
+</li>
+<li><p class="first">etree has a different idea about Python unicode strings than ElementTree.
+In most parts of the API, ElementTree uses plain strings and unicode strings
+as what they are.  This includes Element.text, Element.tail and many other
+places.  However, the ElementTree parsers assume by default that any string
+(<cite>str</cite> or <cite>unicode</cite>) contains ASCII data.  They raise an exception if
+strings do not match the expected encoding.</p>
+<p>etree has the same idea about plain strings (<cite>str</cite>) as ElementTree.  For
+unicode strings, however, etree assumes throughout the API that they are
+Python unicode encoded strings rather than byte data.  This includes the
+parsers.  It is therefore perfectly correct to pass XML unicode data into
+the etree parsers in form of Python unicode strings.  It is an error, on the
+other hand, if unicode strings specify an encoding in their XML declaration,
+as this conflicts with the characteristic encoding of Python unicode
+strings.</p>
+</li>
+<li><p class="first">ElementTree allows you to place an Element in two different trees at the
+same time.  Thus, this:</p>
+<pre class="literal-block">
+a = Element('a')
+b = SubElement(a, 'b')
+c = Element('c')
+c.append(b)
+</pre>
+<p>will result in the following tree a:</p>
+<pre class="literal-block">
+&lt;a&gt;&lt;b /&gt;&lt;/a&gt;
+</pre>
+<p>and the following tree c:</p>
+<pre class="literal-block">
+&lt;c&gt;&lt;b /&gt;&lt;/c&gt;
+</pre>
+<p>In lxml, this behavior is different, because lxml is built on top of a tree
+that maintains parent relationships for elements (like W3C DOM).  This means
+an element can only exist in a single tree at the same time.  Adding an
+element in some tree to another tree will cause this element to be moved.</p>
+<p>So, for tree a we will get:</p>
+<pre class="literal-block">
+&lt;a&gt;&lt;/a&gt;
+</pre>
+<p>and for tree c we will get:</p>
+<pre class="literal-block">
+&lt;c&gt;&lt;b/&gt;&lt;/c&gt;
+</pre>
+<p>Unfortunately this is a rather fundamental difference in behavior, which
+will be hard to solve.  It won't affect some applications, but if you want
+to port code you must unfortunately make sure that it doesn't.</p>
+</li>
+<li><p class="first">When trying to set a subelement using __setitem__ that is in fact not an
+Element but some other object, etree raises a TypeError, and ElementTree
+raises an AssertionError.  This also applies to some other places of the
+API. In general, etree tries to avoid AssertionErrors in favour of being
+more specific about the reason for the exception.</p>
+</li>
+<li><p class="first">ElementTree has a bug when serializing an empty Comment (no text argument
+given) to XML, etree serializes this successfully.</p>
+</li>
+<li><p class="first">ElementTree ignores comments when parsing XML, while etree will read them in
+and treat them as Comment elements.</p>
+</li>
+<li><p class="first">ElementTree adds whitespace around comments on serialization, lxml does
+not.  This means that a comment text &quot;text&quot; that ElementTree serializes as
+&quot;&lt;!-- text --&gt;&quot; will become &quot;&lt;!--text--&gt;&quot; in lxml.</p>
+</li>
+<li><p class="first">Because etree is built on top of libxml2, which is namespace prefix aware,
+etree preserves namespaces declarations and prefixes while ElementTree tends
+to come up with its own prefixes (ns0, ns1, etc).  When no namespace prefix
+is given however, etree creates ElementTree style prefixes as well.</p>
+</li>
+<li><p class="first">etree has a 'prefix' attribute (read-only) on elements giving the Element's
+prefix, if this is known, and None otherwise (in case of no namespace at
+all, or default namespace).</p>
+<p>etree further allows passing an 'nsmap' dictionary to the Element and
+SubElement element factories to explicitly map namespace prefixes to
+namespace URIs.  These will be translated into namespace declarations on
+that element.  This means that in the probably rare case that you need to
+construct an attribute called 'nsmap', you need to be aware that unlike in
+ElementTree, you cannot pass it as a keyword argument to the Element and
+SubElement factories directly.</p>
+</li>
+<li><p class="first">etree elements can be copied using copy.deepcopy() and copy.copy(), just
+like ElementTree's.  copy.copy() however does <em>not</em> create a shallow copy
+where elements are shared between trees, as this makes no sense in the
+context of libxml2 trees.  Note that lxml can deep-copy trees considerably
+faster than ElementTree.</p>
+</li>
+<li><p class="first">etree allows navigation to the parent of a node by the <tt class="docutils literal"><span class="pre">getparent()</span></tt>
+method.  This is not possible in ElementTree as the underlying tree model
+does not have this information.</p>
+</li>
+</ul>
+</div>
+</body>
+</html>
