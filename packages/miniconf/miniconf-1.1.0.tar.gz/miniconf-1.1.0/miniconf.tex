@@ -1,0 +1,196 @@
+\documentclass{howto}
+
+% Crude reformatting of the original module documentation as a standalone howto.
+%
+\title{\module{miniconf} --- Plain text Python built-in objects persistence}
+
+\release{1.1.0}
+
+\author{Sylvain Fourmanoit}
+\authoraddress{\email{syfou@users.sourceforge.net}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+\module{miniconf} is a pure-Python module providing data persistence of a subset
+of built-in objects as plain text. It has been initially submitted as a patch
+against Python 2.5 tree
+(\url{http://sourceforge.net/tracker/?func=detail\&atid=355470\&aid=1527597\&group_id=5470}).
+It is distributed here as a standalone module, in the hope it will be useful to
+the community, as well as to collect feedback. It should work on both Python 2.4
+as well as on Python 2.5.
+\end{abstract}
+
+\tableofcontents
+
+\section{Usage}
+\module{miniconf} provides data persistence of a subset of Python built-in
+objects as plain text. Objects are loaded from, and dumped to valid Python
+source composed of assignment statements of the form
+\code{identifier = value}. Supported objects are:
+
+\begin{itemize}
+\item dictionaries (\code{dict})
+\item lists and tuples (\code{list} and \code{tuple})
+\item integers and floats (\code{int} and \code{float})
+\item plain and unicode strings (\code{str} and \code{unicode})
+\item booleans (\code{bool})
+\item \code{None}
+\end{itemize}
+
+Arbitrarily complex objects composed of these types can be
+handled. \module{miniconf} is restricted to these types because they can be
+easily reconstructed from literal representation in Python, entirely known at
+byte-compilation, without the need to execute the code.
+
+\module{miniconf} aims at providing an easy, elegant way to store (dump) and
+retrieve (load) configurations\footnote{Hence the name, \module{miniconf}. See
+\refmodule{ConfigParser} for a different but more thorough, higher-level
+implementation of configuration file handlers.} and other simple datasets in a
+human-readable, familiar pythonic notation, while preventing unwanted injection
+of external code.
+
+Basically, \module{miniconf} exposes two important functions, \function{load}
+and \function{dump}, as well as one helper function, \function{format_header}:
+
+\begin{funcdesc}{load}{buf\optional{, pedantic=False}}
+Load configuration from string \var{buf}. If \var{pedantic} is \code{True},
+un-loadable elements will raise \exception{TypeError} exceptions instead of
+being silently dropped. On success, return a dictionary containing the parsed
+built-in objects, indexed by assignment names. On error, raise a
+\exception{SyntaxError}, \exception{TypeError} or \exception{ValueError}
+exception.
+\end{funcdesc}
+
+\begin{funcdesc}{dump}{data\optional{, comments=\{\}, pedantic=True, ...}}
+Dump configuration from dictionary \var{data}, prepending string comments from
+corresponding values (i.e. associated to the matching keys in \var{data}) in
+\var{comments}. If \var{pedantic} is \code{True}, a \exception{TypeError}
+exception will be raised if some value in data is a derivate class of an
+otherwise supported type. Return the formatted string on success, or raise a
+\exception{TypeError} or \exception{ValueError} on error. \var{data} dictionary
+is dumped in identifiers' alphabetical order. Valid keywords are optional
+arguments to the low-level \class{PrettyPrinter} object (see the
+\function{pformat} function from the \module{pprint} module).
+
+If every lines in a comment string are already starting with a pound sign thus
+making the string an already valid Python comment, such string is preserved
+untouched in the output. If not, the comment string will be formatted using
+\function{format_header}, using the same width used by the
+\class{PrettyPrinter}. Basically, this means you are free to either have
+comments automatically formatted and wrapped as a single paragraph, or use your
+own layout if you want, as long as the whole string keeps being a valid Python
+comment.
+
+Values associated with special \code{'--top--'} and \code{'--bottom--'} keys, if
+they exist in comments, will be respectively included at the beginning and end
+of the return string; same formatting rules apply to them.
+\end{funcdesc}
+
+\begin{funcdesc}{format_header}{header\optional{, width=80}}
+Turn \var{header} into a valid Python comment by prepending a pound sing
+followed by a space to each line, and wrap it to the given width. Return the
+result as a single, potentially multi-lines string.
+\end{funcdesc}
+
+\section{Example}
+
+Load objects from a textual representation, stored in \var{snippet}:
+
+\begin{verbatim}
+>>> import miniconf
+>>> snippet = 'spam = [ 1, True, ("test", None) ]; egg = -2'
+>>> config = miniconf.load(snippet)
+>>> print config
+{'egg': -2, 'spam': [1, True, ('test', None)]}
+\end{verbatim}
+
+Of course, \var{config} could have been constructed from \var{snippet} as well
+by doing:
+
+\begin{verbatim}
+>>> config = {}
+>>> exec snippet in config
+>>> del config['__builtins__']
+\end{verbatim}
+
+The whole point of using \module{miniconf} instead of the exec statement is that
+it is safer, since no arbitrary code execution ever occurs: the code is only
+parsed, not executed, and the objects are reconstructed from the snippet
+abstract syntax tree. In practice, it makes user access to simple pythonic data
+structure possible without having to fear injection of unwanted third-party
+code.
+
+Finally, let's modify \var{config} a little and dump it back:
+
+\begin{verbatim}
+>>> config['egg'] = u'new_value'
+>>> config['new'] = range(10)
+>>> print miniconf.dump(config)
+egg = u'new_value'
+
+new = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+spam = [1, True, ('test', None)]
+\end{verbatim}
+
+\section{Explanation on pedantry}
+
+\function{load} and \function{dump} have two modes of operation: pedantic and
+non-pedantic.
+
+\begin{itemize}
+\item
+On \function{load}, the pedantic argument indicates whether the function should
+bail out on un-loadable constructs instead or just ignore them. Default is not
+to be pedantic on load.
+
+\item
+On \function{dump}, the pedantic argument indicates if the function should bail
+out when dumping objects that could only be partially restored later on (because
+they belong to a derivate class of a supported type). A successfully dump will
+always be re-loadable anyway regardless of the pedantry. Default is to be
+pedantic on dump.
+\end{itemize}
+
+A non-pedantic load or dump does not ensure that the operation will not raise an
+exception (such as a \exception{SyntaxError} because of an unparsable buffer
+during a load), only that the level of tolerance to the minor problems just
+described will be greater.
+
+\section{Limitations}
+
+\module{miniconf} has a few limitations:
+
+\begin{itemize}
+\item
+It only supports a subset of built-ins types (see above).
+
+\item
+It is strictly string-based: it loads from them, and dumps to them. Potential
+race conditions with the underlying sources and destinations such as real files
+has to be dealt with externally (handling locks, etc.).
+
+\item
+\function{dump} and \function{load} are not inverse functions, because
+\function{load} is not injective; any special content or formatting in the
+source code (comments, un-loadable objects, non-assignments statements, lexical
+format) will be discarded at load time. See for instance:
+
+\begin{verbatim}
+>>> from miniconf import load, dump
+>>> print dump(load('spam = "egg" # this comment will be lost'))
+spam = 'egg'
+\end{verbatim}
+
+Basically, this means that an external agent (user or application)
+cannot add an element such as a comment to a snippet, and have it
+preserved next time the program will have loaded, then dumped it
+back. Of course, one can very well choose not to systematically dump
+the data over the source of the next load, which alleviates this
+limitation.
+\end{itemize}
+
+\end{document}
