@@ -1,0 +1,143 @@
+KSS Commands
+============
+
+The KSS commands system allows you to create a properly formatted KSS
+response. 
+
+Command renderer
+================
+
+The command renderer is the core of the system. This object is responsible
+for create the KSS response. We will now take a look at an example to see it
+in action.
+
+  >>> from kss.base import KSSCommands
+
+The constructor takes no arguments.
+
+  >>> commands = KSSCommands()
+
+We can add commands to the renderer using the `add` method. To do this we
+also need to create a selector. In this case we will use the CSS selector.
+For more information about selectors look at the selector documentation.
+
+  >>> from kss.base.coreselectors import css
+  >>> commands.add('replaceHTML', css('#someid'), html='some value')
+
+Now we have added a command. The first argument is the name of the action
+which will be invoked on the client. Our second argument is the selector.
+Any given keyword arguments become arguments to the client side action.
+
+You can add any number of commands this way. Each command will be executed
+in the order that it is added.
+
+  >>> commands.add('someOtherAction', css('#otherid'), arg='some arg')
+
+Now that we have a few commands we can render them.
+
+  >>> commands.render()
+  '...some value...some arg...'
+
+It is also possible to get a string representation of the
+commandset. This can be used in doctests like this.
+
+  >>> commands = KSSCommands()
+
+By default it does nothing. 
+
+  >>> print commands
+  <BLANKLINE>
+
+It becomes more interesting if we add a command.
+
+  >>> commands.add('replaceHTML', css('#someid'))
+  >>> print commands
+  replaceHTML(css('#someid'))
+
+If you add parameters they are also shown in the string
+representation. Parameters are sorted before display to make them
+stable for testing.
+
+  >>> commands = KSSCommands()
+  >>> commands.add('replaceHTML', css('#someid'), b_arg='some data', a_arg='cheese')
+  >>> print commands
+  replaceHTML(css('#someid'), a_arg='cheese', b_arg='some data')
+
+Multiple commands are put on seperate lines.
+
+  >>> commands.add('otherCommand', css('#something'))
+  >>> print commands
+  replaceHTML(css('#someid'), a_arg='cheese', b_arg='some data')
+  otherCommand(css('#something'))
+
+If we add a parameter with a `None` value it will not be put into the
+response.
+
+  >>> commands.clear()
+  >>> commands.add('parameterCommand', css('#something'),
+  ...              value='Testing', other_value=None)
+  >>> print commands
+  parameterCommand(css('#something'), value='Testing')
+
+You can also use strings instead of a selector instance as a value for
+selector. In this case the string will automatically be converted to a
+CSS selector.
+
+  >>> commands.clear()
+  >>> commands.add('replaceHTML', '#someid', html='some value')
+  >>> print commands
+  replaceHTML(css('#someid'), html='some value')
+
+
+Command sets
+============
+
+A command set wraps the commands system so that you get a highlevel way to
+communicate with the browser. Command sets are responsible for escaping and
+validating data and can provider a nicer api for calling.
+
+We will now take a look at the base class for all commandsets.
+
+  >>> from kss.base.commands import KSSCommandSet
+  >>> commands = KSSCommands()
+  >>> commandset = KSSCommandSet(commands)
+
+All this does is wrap our commands in the command set. We can still access the
+commands directly by using the `commands` attribute.
+
+  >>> commandset.commands
+  <...KSSCommands object at ...>
+
+The thing that makes this interesting is the actual command sets. Take a look
+at the core commands for a better understanding of the usage pattern.
+
+
+Using command sets
+==================
+
+In the previous examples we saw how to load command sets directly. Normally we
+do not need to do this. This is because the command renderer can also look
+them up by name. This is done by using the KSS plugin registry.
+
+We will now demonstrate this in the next example. First we need to load the
+registry.
+
+  >>> from kss.base.corecommands import KSSCoreCommands
+  >>> from kss.base.registry import command_set_registry
+
+Now we can register our command set. For more information about the registry look at the documentation of kss.pluginregistry.
+
+  >>> command_set_registry.register('core', KSSCoreCommands)
+
+To access a command set just need to create our command renderer like we do
+normally.
+
+  >>> commands = KSSCommands()
+
+We can now access the command set. This is done using attribute access.
+
+  >>> commands.core.replaceInnerHTML(css('div'), 'example')
+  >>> print commands
+  replaceInnerHTML(css('div'), html='example')
+  
+  >>> command_set_registry.unregister('core')
