@@ -1,0 +1,231 @@
+============
+KSS Commands
+============
+
+The KSS commands system allows you to create a properly formatted KSS
+response. 
+
+Command renderer
+================
+
+The command renderer is the core of the system. This object is responsible
+for create the KSS response. We will now take a look at an example to see it
+in action.
+
+  >>> from kss.base import KSSCommands
+
+The constructor takes no arguments.
+
+  >>> commands = KSSCommands()
+
+We can add commands to the renderer using the `add` method. To do this we
+also need to create a selector. In this case we will use the CSS selector.
+For more information about selectors look at the selector documentation.
+
+  >>> from kss.base.selectors import css
+  >>> commands.add('replaceHTML', css('#someid'), html='some value')
+
+Now we have added a command. The first argument is the name of the action
+which will be invoked on the client. Our second argument is the selector.
+Any given keyword arguments become arguments to the client side action.
+
+You can add any number of commands this way. Each command will be executed
+in the order that it is added.
+
+  >>> commands.add('someOtherAction', css('#otherid'), arg='some arg')
+
+Now that we have a few commands we can render them.
+
+  >>> commands.render()
+  '...some value...some arg...'
+
+
+Response format
+===============
+
+The response is an XML document.
+
+  >>> from xml.dom import minidom
+  >>> doc = minidom.parseString(commands.render())
+
+In this case there are two commands in the response (because of the
+previous examples). They are represented as command nodes.
+
+  >>> doc.getElementsByTagName('command')
+  [<DOM Element: command at ...>, <DOM Element: command at ...>]
+
+Each parameter is represented by a child node in a command. Their name
+is stored in the attribute and their value is put within text nodes or
+CDATA blocks. Which type of node is used depends on the type of
+the keyword argument given to the command.
+
+Depending on the type the serialisation to XML changes. Strings and
+unicode objects will be send as text nodes. You can also mark data as
+HTML, XML or CDATA blocks. This is used so that these can have special
+escaping rules.
+
+  >>> from kss.base import xmldata, htmldata, cdatadata
+
+Now if we make a command with these types the output will be different.
+
+  >>> commands = KSSCommands()
+  >>> commands.add('htmlAction', css('#someid'), html=htmldata('some value'))
+  >>> commands.add('cdataAction', css('#otherid'), arg=cdatadata('some arg'))
+  >>> commands.add('xmlAction', css('#otherid'), arg=xmldata('some arg'))
+  >>> commands.add('normalAction', css('#otherid'), arg='normal arg')
+  >>> doc = minidom.parseString(commands.render())
+  >>> for command in doc.getElementsByTagName('command'):
+  ...     params = command.getElementsByTagName('param')
+  ...     print params[0].childNodes[0].nodeType == doc.CDATA_SECTION_NODE
+  True
+  True
+  True
+  False
+
+  >>> replace_command = doc.getElementsByTagName('command')[0]
+
+  >>> params = replace_command.getElementsByTagName('param')
+  >>> html_value = params[0]
+  >>> html_value.attributes['name'].nodeValue
+  u'html'
+
+  >>> html_value.childNodes[0].nodeType == doc.CDATA_SECTION_NODE
+  True
+
+  >>> commands.render()
+  '...<![CDATA[some value]]>...'
+
+CDATA nodes are used for serializing XML or HTML. This makes the
+response more readable when looking at it from traffic sniffers or
+other debugging tools.
+
+We have another case where CDATA is used. That is when we serialize a
+normal value larger than 4KB. This is because Firefox chops text nodes
+at 4KB blocks (which makes the client side handling more
+difficult). Using CDATA avoids the chopping.
+
+The example below demonstrates this behaviour.
+
+  >>> commands = KSSCommands()
+  >>> commands.add('smallValueAction', '#test', value='tiny')
+  >>> 'CDATA' in commands.render()
+  False
+
+Now run the example again with a larger value.
+
+  >>> commands = KSSCommands()
+  >>> commands.add('smallLargeAction', '#test', value='huge' * 4096)
+  >>> 'CDATA' in commands.render()
+  True
+
+
+String representation
+=====================
+
+It is also possible to get a string representation of the
+commandset. This can be used in doctests like this.
+
+  >>> commands = KSSCommands()
+
+By default it does nothing. 
+
+  >>> print commands
+  <BLANKLINE>
+
+It becomes more interesting if we add a command.
+
+  >>> commands.add('replaceHTML', css('#someid'))
+  >>> print commands
+  replaceHTML(css('#someid'))
+
+If you add parameters they are also shown in the string
+representation. Parameters are sorted before display to make them
+stable for testing.
+
+  >>> commands = KSSCommands()
+  >>> commands.add('replaceHTML', css('#someid'), b_arg='some data', a_arg='cheese')
+  >>> print commands
+  replaceHTML(css('#someid'), a_arg='cheese', b_arg='some data')
+
+Multiple commands are put on seperate lines.
+
+  >>> commands.add('otherCommand', css('#something'))
+  >>> print commands
+  replaceHTML(css('#someid'), a_arg='cheese', b_arg='some data')
+  otherCommand(css('#something'))
+
+
+Features for working with commands
+==================================
+
+If we add a parameter with a `None` value it will not be put into the
+response.
+
+  >>> commands.clear()
+  >>> commands.add('parameterCommand', css('#something'),
+  ...              value='Testing', other_value=None)
+  >>> print commands
+  parameterCommand(css('#something'), value='Testing')
+
+You can also use strings instead of a selector instance as a value for
+selector. In this case the string will automatically be converted to a
+selector on the client. By default this is the CSS selector.
+
+  >>> commands.clear()
+  >>> commands.add('replaceHTML', '#someid', html='some value')
+  >>> print commands
+  replaceHTML('#someid', html='some value')
+
+
+Command sets
+============
+
+A command set wraps the commands system so that you get a highlevel way to
+communicate with the browser. Command sets are responsible for escaping and
+validating data and can provider a nicer api for calling.
+
+We will now take a look at the base class for all commandsets.
+
+  >>> from kss.base.commands import KSSCommandSet
+  >>> commands = KSSCommands()
+  >>> commandset = KSSCommandSet(commands)
+
+All this does is wrap our commands in the command set. We can still access the
+commands directly by using the `commands` attribute.
+
+  >>> commandset.commands
+  <...KSSCommands object at ...>
+
+The thing that makes this interesting is the actual command sets. Take a look
+at the core commands for a better understanding of the usage pattern.
+
+
+Using command sets
+==================
+
+In the previous examples we saw how to load command sets directly. Normally we
+do not need to do this. This is because the command renderer can also look
+them up by name. This is done by using the KSS plugin registry.
+
+We will now demonstrate this in the next example. First we need to load the
+registry.
+
+  >>> from kss.base.corecommands import KSSCoreCommands
+  >>> from kss.base.registry import command_set_registry
+
+Now we can register our command set. For more information about the registry look at the documentation of kss.pluginregistry.
+
+  >>> command_set_registry.register('core', KSSCoreCommands)
+
+To access a command set just need to create our command renderer like we do
+normally.
+
+  >>> commands = KSSCommands()
+
+We can now access the command set. This is done using attribute access.
+
+  >>> commands.core.replaceInnerHTML(css('div'), 'example')
+  >>> print commands
+  replaceInnerHTML(css('div'), html=htmldata('example'))
+  
+  >>> command_set_registry.unregister('core')
