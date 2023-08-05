@@ -1,0 +1,302 @@
+====================
+A Short Introduction
+====================
+
+Cellulose provides a mechanism for maintaining consistency between highly
+dynamic, inter-dependant values.
+
+You can think of it like a spreadsheet program --  Many cells are are calculated
+from the values of other cells.  When one cell changes, all of the dependant
+cells get updated with new values.
+
+However, cellulose goes quite a ways beyond this.  It guarantees that when a
+value is read, it is consistant with all the values it depends on.  It also is
+lazy (read: efficient.)  Calculating a value is put off till the very last
+possible moment, and only recalculated when absolutely needed.  This allows for
+huge systems of inter-dependant values that scale well.
+
+
+Trivial example
+---------------
+
+>>> from cellulose import InputCell, ComputedCell
+>>> cell_a = InputCell(1)                                  # [1]
+>>> print cell_a.value                                     # [2]
+1
+>>> cell_b = InputCell(2)
+>>> result_cell = ComputedCell(lambda: cell_a.value + cell_b.value)  # [3]
+>>> print result_cell.value                                # [4]
+3
+>>> cell_a.value = 2                                       # [5]
+>>> print result_cell.value                                # [6]
+4
+
+
+[1]  Here we create a new ``InputCell``.  This is a cell that has its value
+explicitly set.  Here we are giving it a starting value of 1.
+
+[2]  You can access the value of a cell through its .value property.
+
+[3]  For a ``ComputedCell``, we pass it a function.  This function is called
+whenever the cell needs to be calculated, and should return the value.  In this
+case, we are simply finding the sum of the other two cells.
+
+[4]  We see that it did in fact give us the correctly calculated value.
+
+[5]  Notice that I said it was a property?  You can set it too.
+
+[6]  The value of result_cell has been updated.
+
+
+OK, so this might seem pointless.  You can do the same thing just as well with
+two variables and a function!  The "big idea" behind cellulose is automatic
+dependency tracking for cached values.  In examples like this, where you only
+have two dependencies and a single cached value (and it would be faster *not* to
+cache that value,) cellulose is extra overhead.  However, when calculations have
+dependency trees too deep to recalculate the value for each access, and the
+dependencies are spread out over too many classes, modules, products, etc. to
+track manually, cellulose can be a huge help.
+
+
+
+Caching Example
+-------------------------------
+
+Let's take a look at how ComputedCell caches results::
+
+    >>> from cellulose import InputCell, ComputedCell, CellList
+
+    >>> numbers = CellList(range(10))              # [1]
+
+    >>> def create_string_description():
+    ...     print "Creating string"                # [2]
+    ...     if len(numbers) == 1:                  # [3]
+    ...         return "The list has 1 number!"
+    ...     else:
+    ...         return "The list has %s numbers!" % len(numbers)
+    >>> message_cell = ComputedCell(create_string_description)
+
+    >>> print message_cell.value               # [4]
+    Creating string
+    The list has 10 numbers!
+    >>> print message_cell.value               # [5]
+    The list has 10 numbers!
+    >>> numbers.append(10)                     # [6]
+    >>> print message_cell.value               # [7]
+    Creating string
+    The list has 11 numbers!
+    >>> numbers[0] = -1
+    >>> print message_cell.value               # [8]
+    The list has 11 numbers!
+
+
+[1]  ``CellList`` is a subclass of ``list`` that will alert cells that depend on
+it when it changes.
+
+[2]  This is just so we can see exactly when the function is called, and when
+the value is cached instead.
+
+[3]  By reading the length of the ``CellList``, ``message_cell`` becomes a
+dependant of the ``CellList``'s length.  This dependency is automatically
+discovered.
+
+[4]  The first time message_cell is accessed, it runs the function as it has no
+cached value.
+
+[5]  This time it is called, the cached value is returned as none of the
+dependencies have changed.
+
+[6]  By changing the length, we trigger ``numbers`` to tell ``message_cell``,
+"I've changed; your cached value is outdated."
+
+[7]  Sure enough, on next access the function is called again to get the value.
+
+[8]  Notice that ``CellList`` is somewhat smart.  Because ``message_cell`` only
+read the *length*, changing the content without changing the length will not
+require the value to be recomputed.
+
+
+In addition to ``CellList``, there is also ``CellDict`` and ``CellSet``.
+
+
+Using classes
+-------------
+
+So far we have been using the cell instances directly.  Most of the time,
+however, you want to use them to store attributes for classes::
+
+    >>> from cellulose import InputCellDescriptor, ComputedCellDescriptor
+
+    >>> class Calculator(object):                      # [1]
+    ...     value_1 = InputCellDescriptor()            # [2]
+    ...     value_2 = InputCellDescriptor()
+    ...     @ComputedCellDescriptor                    # [3]
+    ...     def result(self):
+    ...         return self.value_1 + self.value_2     # [4]
+    ...     def __init__(self):
+    ...         self.value_1 = 1
+    ...         self.value_2 = 1
+
+    >>> c = Calculator()
+    >>> print c.result                             # [5]
+    2
+    >>> c.value_1 = 2
+    >>> print c.result
+    3
+    >>> c._cells                                   # [6]
+    {'value_1': <cellulose.cells.InputCell object at 0x...>,
+    'result': <cellulose.cells.ComputedCell object at 0x...>,
+    'value_2': <cellulose.cells.InputCell object at 0x...>}
+
+
+[1]  Notice that you can use any new style class.  You don't have to subclass
+anything special; no need for metaclasses.  Cellulose is designed to stay out of
+the way as much as possible.
+
+[2]  ``[Input|Computed]CellDescriptor``\s will create a new cell for each class
+instance the first time they are access.
+
+[3]  ``ComputedCellDescriptor`` can conveniently be used as a decorator.
+
+[4]  The cell values can be accessed like any other method attribute.
+
+[5]  Note that ``ComputedCellDescriptor`` does *not* return a function.
+``result`` is used as a read only property.
+
+[6]  The actual cells for an instance are stored in its ``_cells`` attribute.
+This is the only intrusion that cellulose will make on you class namespace.
+Should you need access to the cell, not just its value, this is how you do it.
+
+
+To sum it up, you can easily use cells as attributes in about any class.  The
+only requirements are 1) it's a new style class (so that it supports
+descriptors,) and 2) the ``_cells`` attribute is open for use.
+
+
+Benefits of lazy programming
+----------------------------
+
+In a recent IBM developerWorks article_ named `Lazy programming and lazy
+evaluation`__, Jonathan Bartlett presents a function that takes a data (list)
+of numbers and returns the mean, variance, and standard deviation.  He then goes
+on to describe the problem with doing this all directly:
+
+    Now, let's say that you want the standard deviation only under certain
+    conditions, but this function has already spent a lot of computational power
+    computing it. There are several ways you could solve this. You could have
+    separate functions for calculating the mean, variance, and standard
+    deviation. In that case, however, each function would have to re-do the work
+    of calculating the mean. If you needed all three, you would wind up
+    calculating the mean three times, the variance twice, and the standard
+    deviation once. That's a lot of extra, useless, work. Now, you could also
+    require that the mean be passed to the standard deviation function and force
+    the user to call the mean-calculating function for you. Although possible,
+    it makes a really horrendous API, with the interface reflecting all sorts of
+    implementation-specific pieces.
+
+Jonathan then gives an implementation for doing this lazily in scheme.  Here is
+a similar implementation using a python class with cellulose::
+
+    >>> from cellulose import ComputedCellDescriptor
+    >>> from math import sqrt
+
+    >>> class StatisticsCalculator(object):
+    ...     def __init__(self, data):
+    ...         self.data = data
+    ...
+    ...     @ComputedCellDescriptor
+    ...     def mean(self):
+    ...         return sum(self.data) / float(len(self.data))
+    ...
+    ...     @ComputedCellDescriptor
+    ...     def variance(self):
+    ...         return sum([(x - self.mean)**2 for x in self.data])
+    ...
+    ...     @ComputedCellDescriptor
+    ...     def standard_deviation(self):
+    ...         return sqrt(self.variance)
+
+I can do little better than to again quote Jonathan on the result:
+
+    In this version of calculate-statistics, *nothing happens until a value
+    is needed* and, just as importantly, *nothing is calculated more than once*.
+    If you request the variance first, it will run  and save  the mean first,
+    then it will run and save the variance. If you next ask for the mean, it has
+    already been calculated, so it simply returns the value. If you next ask for
+    the standard deviation, it uses the saved value for the variance, and
+    calculates it from that. Now there is no unnecessary computation performed
+    [...]
+
+Notice that in this example, cellulose provides little more than can be done
+manually (as seen in the Java example Jonathan gives in said article.)  The next
+section will get into the real meat :)
+
+
+.. _article: http://www.ibm.com/developerworks/linux/library/l-lazyprog.html/
+
+__ article_
+
+
+The real power with cellulose
+-----------------------------
+
+Anyone who has done lazy programming with caching has found what can be the
+really difficult part: cache invalidation.  When a value that the cache was
+generated from changes, the cached value is outdated, and shouldn't be used.
+This isn't too difficult to do manually when the dependencies and cached values
+are few in number and in the same class (such as in the StatisticsCalculator
+example,) but what happens when you want to do more than that?  What was once
+well organized code can quickly become a mess as you try to clear caches
+everywhere that a value that they depend on changes.  Mistakes become all too
+easy to make, and all too hard to debug.
+
+Some people resort to clearing *all* caches when *any* value changes.  In some
+cases, such as when many values are changing and most caches would need to be
+recalculated anyway, this works alright.  However, many times only a few values
+change, and recalculating everything is wastefull to say the least.  Wouldn't it
+be nice if every dependency was automatically linked to every cached value that
+uses it, and the caches could be *automatically* invalidated?
+
+This is the exact problem that cellulose was designed to solve.
+
+The cellulose algorithm guarantees that values are only calculated when
+absolutely needed, and that you are *never given an outdated cached value*. --no
+matter how deep the dependencies go.
+
+It's hard to give a good example of this happening, as it requires a big,
+otherwise complicated system to really shine.  However, here is an example that
+should give you a taste.  It shows how the cached value is invalidated, even
+when there are several ``ComputedCell``\s between::
+
+    >>> data = [CellList(range(0, 10)), CellList(range(20, 50)),
+    ...         CellList(range(10, 50)), CellList(range(0, 100, 10))]
+    >>> stats = CellList([StatisticsCalculator(d) for d in data])
+
+    >>> def get_highest_variance():
+    ...     # Find the StatisticsCalculator with the highest variance
+    ...     highest = stats[0]
+    ...     for s in stats[1:]:
+    ...         if s.variance > highest.variance:
+    ...             highest = s
+    ...     return highest
+    >>> highest_variance = ComputedCell(get_highest_variance)
+
+    >>> highest_variance.value.data
+    [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]
+    >>> stats[0].data.append(1000)
+    >>> highest_variance.value.data
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1000]
+
+Most of this should be pretty self-explanatory by now.  Just a few things I want
+to note:
+
+ 1) The second time ``highest_variance.value`` is accessed, only the variance
+    for the first ``StatisticsCalculator`` is recalculated.  None of the others
+    changed, so the cached value was used.
+
+ 2) If you had additional cells that depended on ``highest_variance``, they
+    would only be recalculated if the highest variance *actually changed*.  Yet,
+    *cellulose still guarantees that these cells will never return an outdated
+    value, and ``highest_variance`` will still only be calculated when
+    absolutely needed.*  Check out the algorithm description for more on how
+    this works.
