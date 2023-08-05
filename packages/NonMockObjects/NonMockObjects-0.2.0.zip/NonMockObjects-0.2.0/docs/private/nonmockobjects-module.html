@@ -1,0 +1,701 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+          "DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+  <title>nonmockobjects</title>
+  <link rel="stylesheet" href="epydoc.css" type="text/css"></link>
+</head>
+<body bgcolor="white" text="black" link="blue" vlink="#204080"
+      alink="#204080">
+
+<!-- =========== START OF NAVBAR =========== -->
+<table class="navbar" border="0" width="100%" cellpadding="0" bgcolor="#a0c0ff" cellspacing="0">
+  <tr valign="center">
+    <th bgcolor="#70b0f0" class="navselect">&nbsp;&nbsp;&nbsp;Home&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar">&nbsp;&nbsp;&nbsp;<a class="navbar" href="trees.html">Trees</a>&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar">&nbsp;&nbsp;&nbsp;<a class="navbar" href="indices.html">Index</a>&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar">&nbsp;&nbsp;&nbsp;<a class="navbar" href="help.html">Help</a>&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar" align="right" width="100%">
+      <table border="0" cellpadding="0" cellspacing="0">
+      <tr><th class="navbar" align="center">
+        <p class="nomargin">
+          <a class="navbar" target="_top" href="http://www.jerf.org/programming/nonMockObjects.html">NonMockObjects</a>
+      </p></th></tr></table>
+    </th>
+  </tr>
+</table>
+<table width="100%" cellpadding="0" cellspacing="0">
+  <tr valign="top">
+    <td width="100%">
+      <font size="-1"><b class="breadcrumbs">
+        Module&nbsp;nonmockobjects
+      </b></font></br>
+    </td>
+    <td><table cellpadding="0" cellspacing="0">
+      <tr><td align="right"><font size="-2">[show&nbsp;private&nbsp;|&nbsp;<a href="../public/nonmockobjects-module.html">hide&nbsp;private</a>]</font></td></tr>
+      <tr><td align="right"><font size="-2">[<a href="frames.html"target="_top">frames</a>&nbsp;|&nbsp;<a href="nonmockobjects-module.html" target="_top">no&nbsp;frames</a>]</font></td></tr>
+    </table></td>
+</tr></table>
+
+<!-- =========== START OF MODULE DESCRIPTION =========== -->
+<h2 class="module">Module nonmockobjects</h2>
+
+<h1 class="heading">Summary</h1>
+  <p><b>How to tell if you need this module</b>: You want to run 
+  automated tests on your code, but you have a relatively complicated 
+  data model, perhaps a nicely normalized database. The bulk of your 
+  tests consist of setting up this relatively complicated data model, and 
+  the tests all break whenever you change your model. Constructing the 
+  data has become so difficult (and breaks so often) that you've just 
+  stopped testing entirely.</p>
+  nonmockobjects.py is a framework I built to solve this problem. Some 
+  test systems seem to provide some limited support for very simple 
+  homogenous test data, like some small set of rows in one table, 
+  unrelated to anything else; this module is designed for the rapid 
+  creation of <i>hierarchial, heterogenous</i> (or even graph-oriented) 
+  data at the relevant level of detail for your current test, without 
+  sacrificing the power to reach down four layers and set a certain 
+  setting for your test, and avoiding &quot;mock objects&quot; to the 
+  extent possible in favor of real objects.
+  <h2 class="heading">Example Of The Problem</h2>
+    <p>Suppose we have a standard database application which includes 
+    Users, Accounts, Permissions, and Resources. For simplicity, suppose 
+    Permissions belong to Users, and Users and Resources belong to 
+    Accounts.</p>
+    Suppose the following constraints must hold, and are all tested 
+    upon object creation:
+    <ul>
+      <li>
+        A User must have at least one permission in order to be 
+        valid.
+      </li>
+      <li>
+        An Account must have at least one user to be valid.
+      </li>
+      <li>
+        An Account must have at least one resource to be valid.
+      </li>
+    </ul>
+    <p>Suppose you want to test an Account. In order to create an 
+    Account, you must have created an Resource and a User. In order to 
+    create a User, you must have a Permission.</p>
+    <p>If you write the most obvious test code for your Account, your 
+    tests will have to create a User, a Resource, and a Permission. If 
+    you later change how your Users and Permissions interact, your 
+    Account test will break, because even if the interface to User and/or 
+    Permissions is compatible at the class level, your <i>tests</i> are 
+    still tightly coupled to the entire object tree. (Obviously, in the 
+    real world with real models this problem is even more acute.)</p>
+    <p>If you try to abstract this out into a function, you will, bit by 
+    bit, refactor your way into a model where each level of the object 
+    graph basically has its own function, and you'll eventually refactor 
+    your way into being able to pass arguments down from a high level to 
+    a low-level freely.</p>
+    <p>Then, you can say something like <code>newAccount = 
+    data.newAccount()</code> and get a correctly-configured Account 
+    object, while still being able to change the user's name with 
+    something like: <code>newAccount = Objects.newAccount(use_user: 
+    {'name': 'Bob'})</code>, or so on, even deeper.</p>
+    Or you can skip the incremental refinement and just use this 
+    module.
+<h1 class="heading">How To Use This Module (/Tutorial)</h1>
+  <h2 class="heading">Step 1</h2>
+    <p>First, find a &quot;leaf object&quot; in your code. This is an 
+    object that can exist without reference to any other object.</p>
+    <p>In the example, this would be a Permission; it is the only object 
+    of the four that can exist in isolation.</p>
+    Create a function that can create this leaf object, using whatever 
+    relevant parameters you want. For simplicity, Permissions only take a 
+    'name':
+<pre class="literalblock">
+    def createPermission(data, name = 'testpermission'):
+        return Permission(name)
+</pre>
+    <p>The first parameter is the nonmockobjects.Objects object that you 
+    are using to call this function.</p>
+    Now, register this function with nonmockobjects:
+<pre class="literalblock">
+    from nonmockobjects import register
+    &#64;register
+    def createPermission(name = 'testpermission'):
+        return Permission(name)
+</pre>
+  <h2 class="heading">Step 2</h2>
+    In your test code, create an instance of 
+    nonmockobjects.Objects:
+<pre class="literalblock">
+    data = nonmockobjects.Objects()
+</pre>
+    Now, you can create a permission via the method on data 
+    corresponding to the name of your function:
+<pre class="literalblock">
+    permission = data.createPermission() # is named 'testpermission'
+</pre>
+    You can override the name with either normal or keyword args (note 
+    this will change later):
+<pre class="literalblock">
+    permission = data.createPermission('test2') # is named 'test2'
+    permission = data.createPermission(name='test3') # is name 'test3'
+</pre>
+    At this point, we've done nothing you couldn't already do, of 
+    course.
+  <h2 class="heading">Step 3</h2>
+    <p>This is where it starts to get interesting.</p>
+    Find an object that is the next layer up from your leaf object. In 
+    this example, it is the User object, which <b>must</b> have a 
+    permission, which must be passed in as a list of permissions:
+<pre class="literalblock">
+    &#64;register
+    def createUser(name = 'testuser%(inc)s',
+                   email = lambda: 'email sample', 
+                   permission = createPermission):
+        return User(name, [permission])
+</pre>
+    <p>There are some special services nonmockobjects is providing for 
+    you, as documented in <a href="nonmockobjects-module.html#register" 
+    class="link"><code>register</code></a>. Since <code>email</code> is 
+    callable, it will actually be called each time to generate a default 
+    email, if you don't pass one in. <code>permission = 
+    createPermission</code> indicates that we want to create a new 
+    permission if one isn't passed in, or that we want to use certain 
+    arguments to construct a new permission.</p>
+    Now you can use data.createUser in several ways:
+    <ul>
+      <li>
+        Create a user using a permission you already have in hand 
+        (here bound to 'permIHave'):
+<pre class="literalblock">
+    user = data.createUser(permission = permIHave)
+</pre>
+        Passing in an existing permission causes the user to use 
+        that.
+      </li>
+      <li>
+        Create a user and simultaneously create a permission with 
+        given arguments:
+<pre class="literalblock">
+    user = data.createUser(usePermission = {'name': 'new permission'})
+</pre>
+        This creates a new Permission as if you called 
+        data.createPermission(name = 'new permission'), then creates a 
+        new User with that permission.
+      </li>
+      <li>
+        Finally, just create a new user and let the system take care 
+        of all the necessary Permission creation:
+<pre class="literalblock">
+    user = data.createUser()
+</pre>
+      </li>
+    </ul>
+    <p>Now when you need to test a user, you can create a user with the 
+    necessary level of detail, and no more. If what you are testing has 
+    nothing to do with permissions, you can just create one. If you need 
+    the user to have a certain permission, you can do that too.</p>
+    Note that normal concerns about the mutability of Python keyword 
+    arguments apply.
+  <h2 class="heading">Step 4</h2>
+    <p>Repeat Step 3 as needed for all objects you want to test.</p>
+    If you continuing creating functions, eventually you'll end up 
+    with a function &quot;data.createAccount()&quot;, which creates 
+    multiple objects and ties them together for you, but allows you the 
+    ability to override any part of that process. For instance, to create 
+    a permission with a specific name:
+<pre class="literalblock">
+    account = data.createAccount(useUser = {'usePermission': {'name':
+                                  'specific permission' } } )
+</pre>
+    Feel free to add new creation or manipulation methods as needed. 
+    For instance, if this were an app I would have created an 
+    addUserToAccount method:
+<pre class="literalblock">
+    &#64;register
+    def addUserToAccount(account, user = createUser):
+        account.addUser(user)
+</pre>
+    <p>This allows you to either add a user to an account you already 
+    have in hand, or allow the nonmockobjects system to simply come up 
+    with a new user. (Creating functions that can either use existing 
+    objects or create them on the spot is more useful when you have more 
+    parameters and more complicated functions; the true power of this 
+    approach really can't be demonstrated in sample code.)</p>
+    <p>In the end, you'll end up with a series of functions that match 
+    your system's structure, and you can create tests that depend only on 
+    what you're testing. Thus, if the way Users and Permissions works 
+    changes, your calls to data.createAccount() need not be changed, 
+    except in tests directly affected by the changes. No matter how 
+    complex your object system may get, if you want to test a 
+    &quot;leaf&quot; object, all you have to do is 
+    &quot;objects.leafObject()&quot;.</p>
+    Using this module makes it practical to test very complicated 
+    objects, and to write tests that use data as close to production data 
+    as possible (since this takes the pain out of creating large test 
+    structures).
+<h1 class="heading">How This Works</h1>
+  <p>Functions that you &#64;register are used to create methods on the 
+  nonmockobjects.Objects class. That's why they always take 
+  <code>data</code> as the first argument; in some sense that's actually 
+  <code>self</code>, but that would be deceptive I think. (You can use it 
+  if you like, of course.)</p>
+  As a result, attributes on the Objects object are available to 
+  functions via the data instance. See the <a 
+  href="nonmockobjects.Objects-class.html" 
+  class="link"><code>Objects</code></a> object's documentation for the 
+  details, but as a quick note, the Objects object takes any keyword 
+  arguments and sets them as attributes on itself. Thus, if your test 
+  functions need access to a database connection, you can:
+<pre class="literalblock">
+   data = nonmockobjects.Objects(db_conn=db_conn)
+</pre>
+  <p>and all test creation objects can access the database connection by 
+  getting the db_conn attribute from their first parameter.</p>
+  It is probably a bad idea to use this to communicate amoung creation 
+  functions, but knock yourself out.
+<h1 class="heading">Variations</h1>
+  <p>Sometimes it is useful to test several variations of a given object; 
+  this can be useful to test that invariant hold, that a &quot;real 
+  account&quot; is created for any of several combinations of options, or 
+  other things.</p>
+  <p>NonMockObjects provides a way to quickly generate numerous 
+  combinations of parameters for creating an object using 
+  <code>Choose</code> and <code>ChooseArgs</code>.</p>
+  Consider the following:
+<pre class="literalblock">
+   def permission(data, name = Choose(&quot;perm%(inc)s&quot;, &quot;SpecialPerm&quot;)):
+       return Permission(name)
+</pre>
+  <p>When you call this as <code>data.permission()</code>, NonMockObjects 
+  will automatically take the first choice as the &quot;default&quot; for 
+  the object, resulting in a permission that uses the automatic 
+  incrementer to create a name.</p>
+  <p>However, if you call <code>permissions = 
+  data.variations_permission()</code>, you get an iterator that will 
+  yield a series of Permission objects, created by making calls to the 
+  <code>permission</code> function, using each choice once. In this case, 
+  it will return two permissions, one using the default incrementer, and 
+  one being &quot;SpecialPerm&quot;, which you may want to test for some 
+  reason.</p>
+  <p>(A different method name is used based on <code>variations_*</code>, 
+  because returning an object is fundamentally different than returning 
+  an iterator. Explicit is better than implicit.)</p>
+  <code>ChooseArgs</code> is basically the same as Choose, except that 
+  instead of providing a default value, it provides a series of 
+  sub-argument specifications. For instance:
+<pre class="literalblock">
+   def user(data, name = &quot;User%(inc)s&quot;,
+            permission = ChooseArgs(permission,
+                                    {'name': 'perm1'},
+                                    {'name': 'perm2'})):
+       return User(name, permission)
+</pre>
+  <p>The first argument is the function to use to create the sub-object 
+  (same as specifying the function without ChooseArgs), and the remainder 
+  of the arguments are a series of dicts to use as the sub-object 
+  parameters. In this case, <code>data.variations_user()</code> would 
+  produce two users, one with the <code>perm1</code> Permission and one 
+  with the <code>perm2</code> Permission.</p>
+  You can have more than one <code>Choose</code> or 
+  <code>ChooseArgs</code> in a function definition. In that case, 
+  NonMockObjects will create one object for every combination of 
+  choices:
+<pre class="literalblock">
+   def user(data, name = Choose(&quot;Bob&quot;, &quot;Jane&quot;, &quot;Spock&quot;),
+            permission = ChooseArgs(permission,
+                                    {'name': 'perm1'},
+                                    {'name': 'perm2'})):
+       return User(name, permission)
+</pre>
+  <p>This returns six User objects, using each combination of name and 
+  permissions.</p>
+  <p>Because of the danger of the combinations growing rapidly, this 
+  functionality is not done recursively. If you need that, you should 
+  explicitly create a new top-level function that dispatches arguments as 
+  appropriate.</p>
+  These <code>Choose[Args]</code>-based attributes can be overridden 
+  as normal in a call:
+<pre class="literalblock">
+   users = data.user(name=&quot;Me&quot;)
+</pre>
+  <p>with the previous <code>user</code> function will only return two 
+  User objects, both named Me but one with <code>perm1</code> and one 
+  with <code>perm2</code>.</p>
+  Finally, you can add Choose or ChooseArgs on an ad-hoc basis simply 
+  by passing them in as a parameter. Using the normal:
+<pre class="literalblock">
+   def account(data, name = &quot;Account%(inc)s&quot;, user = user):
+       return Account(name, user)
+</pre>
+  you can call:
+<pre class="literalblock">
+   accountsToTest = data.variations_account(name=Choose('a', 'b'))
+</pre>
+  <p>to an iterator which will produce two accounts, each with a new 
+  user, one named &quot;a&quot; and one named &quot;b&quot;.</p>
+  You can also use this to manually limit a choice of many objects to 
+  a choice of fewer objects, to cut down on the number of choices 
+  generated.
+<h1 class="heading">Why Do This?</h1>
+  <p>Fundamentally, every difference between your production code and 
+  your test harness is a place for bugs to live. Every mock object you 
+  add is a difference between your test harness and your real system, and 
+  is therefore a place where bugs can live.</p>
+  <p>I've been down that road and I didn't like it. It was better than 
+  nothing, but there were too many things I missed. A half-assed 
+  combination of mock objects, mostly to satisfy constraints like those 
+  discussed above, and test-specific hacks to fix a certain test in a way 
+  not used anywhere else in the system, let alone our production code, 
+  was getting on my nerves.</p>
+  <p>This structure allows you to minimize the number of hacks in your 
+  testing code by taking the pain out of constructing <i>real</i> 
+  objects.</p>
+  Mock objects and hacks may still be necessary for performance and 
+  replicability purposes, but I think they ought to be considered a last 
+  resort or a performance optimization, not the first thing you reach for 
+  in a test situation. The exact balance will of course depend on your 
+  situation.
+<h1 class="heading">Hints, Tips, and Tricks</h1>
+  <p>You should create a solid naming style for these test functions. 
+  I've been using &quot;newSomething&quot; for a function that creates 
+  something from scratch, and &quot;addSomething(target)&quot; for a 
+  function that adds a something to the given target, where the target 
+  must be the first argument.</p>
+  It is a common pattern to have a function that just sets the default 
+  parameters for a call to some other function, like so:
+<pre class="literalblock">
+    def createSomething(data, a = 1, b = &quot;test%(inc)s&quot;, c = 4):
+        return Something(a, b, c)
+</pre>
+  As the number of parameters grows and the names get long, it is bad 
+  to have to retype them in the Something call. Consider this 
+  instead:
+<pre class="literalblock">
+    def createSomething(data, a = 1, b = &quot;test%(inc)s&quot;, c = 4):
+        return Something(**all_args())
+</pre>
+  <p>NonMockObjects provides all_args, which is just like 
+  &quot;locals()&quot; except it is smart enough to pop off the first 
+  argument, which is the Objects instance, which you don't need.</p>
+  It is possible to put the creation functions for a class in the 
+  class itself, like:
+<pre class="literalblock">
+    class User(object):
+        def __init__(self): ...
+
+        &#64;register
+        def newUser(data, name):
+            return User(name)
+</pre>
+  <p>But note that at the time the register decorator is run, it has no 
+  way (to my knowledge) to know that newUser is in a class specification; 
+  register recieves a function object, not an unbound method. As a 
+  result, register can not treat the function specially in any way, so it 
+  must act just like any other registered function.</p>
+  <p>On the one hand, it may be convenient to bundle all test creation 
+  functions in with the class specification. On the other hand, while 
+  'newUser' does not really belong to User (it's really a method on 
+  nonmockobjects.Objects), the User class will still end up with a 
+  newUser method, which may screw up introspection, may be confusing if 
+  accidentally called, etc. I don't recommend sticking them in 
+  classes.</p>
+  <p>The reason I went with functions as the final creation mechanism, 
+  and not some metadata specification or an attempt to label a 
+  method/classmethod as the 'creation' technique, or try to introspect 
+  the class itself, is that you will find that in practice, your real 
+  functions will end up more complicated than the deliberately-simple 
+  examples shown here. I use this in a well-normalized-database 
+  environment (in Django), so I do know it does at least some real-world 
+  tasks correctly, even relatively complicated ones.</p>
+  <p>Write powerful functions, but try to minimize their length; anything 
+  that can be moved up into the class probably should be. Even so, the 
+  'core' test code left behind can be surprisingly large. Production code 
+  <i>should not</i> use any nonmockobjects creation functions; if you are 
+  tempted to do so, that means you have functionality to move into a 
+  separate method or function. I find the test code often teaches me what 
+  convenience methods to add to my code early on, when the test code may 
+  do something five times but I've only gotten one 'real' use.</p>
+  If you have many slightly different functions, do not be afraid to 
+  use &quot;register_as&quot; in a loop:
+<pre class="literalblock">
+    for specialName in [...]:
+        def testFunction(arg1, arg2):
+            # do things, do something different based on specialName
+
+        register_as('testFunc%s' % specialName)(testFunction)
+</pre>
+  <p>Repetitiveness in test code is just as evil as it is anywhere 
+  else.</p>
+  <p>To take the names of functions and create the &quot;use_function = 
+  {}&quot; parameter names, nonmockobjects calls 
+  nonmockobjects.use_prefix(methodName). The default function implements 
+  the default Python naming policy, which will change 'permission' into 
+  'use_permission', for instance. Feel free to override that function (as 
+  early as possible) to implement your own local coding standards, 
+  whatever they may be. The best thing to do may be to create a small 
+  module that wraps nonmockobjects and overrides that function, then use 
+  that module instead of nonmockobjects directly.</p>
+  <p>This system helps make it easier to start with a truly fresh test 
+  database, if you've got a database application, as creating test 
+  accounts of any complexity is just a function call.</p>
+  The new Python 2.5 'partial function application' support can be 
+  really useful with the code you'll produce with this module.
+<hr/>
+
+<!-- =========== START OF CLASSES =========== -->
+<table class="summary" border="1" cellpadding="3" cellspacing="0" width="100%" bgcolor="white">
+<tr bgcolor="#70b0f0" class="summary">
+  <th colspan="2">Classes</th></tr>
+<tr><td width="15%">
+  <b><a href="nonmockobjects.Choose-class.html"><code>Choose</code></a></b></td>
+  <td>Implements a selection of choices for a given parameter.</td></tr>
+<tr><td width="15%">
+  <b><a href="nonmockobjects.ChooseArgs-class.html"><code>ChooseArgs</code></a></b></td>
+  <td>Implements a selection of choices to feed to a sub-function.</td></tr>
+<tr><td width="15%">
+  <b><a href="nonmockobjects.Objects-class.html"><code>Objects</code></a></b></td>
+  <td>Objects is the object you instatiate to get access to your creation 
+functions.</td></tr>
+<tr><td width="15%">
+  <b><a href="../private/nonmockobjects.Chooser-class.html"><code>Chooser</code></a></b></td>
+  <td>A superclass for the multiple-choice choosers.</td></tr>
+</table><br />
+
+
+<!-- =========== START OF FUNCTION SUMMARY =========== -->
+<table class="summary" border="1" cellpadding="3" cellspacing="0" width="100%" bgcolor="white">
+<tr bgcolor="#70b0f0" class="summary">
+  <th colspan="2">Function Summary</th></tr>
+<tr><td align="right" valign="top" width="15%"><font size="-1">&nbsp;</font></td>
+  <td><code><span class="summary-sig"><a href="nonmockobjects-module.html#all_args" class="summary-sig-name"><code>all_args</code></a>(<span class="summary-sig-vararg">*exclude</span>)</span></code>
+<br />
+This gets all the local args of the calling stack frame, but filters 
+out the Object instance parameter.</td></tr>
+<tr><td align="right" valign="top" width="15%"><font size="-1">&nbsp;</font></td>
+  <td><code><span class="summary-sig"><a href="nonmockobjects-module.html#call_protect" class="summary-sig-name"><code>call_protect</code></a>(<span class=summary-sig-arg>callable_object</span>)</span></code>
+<br />
+Protects callables that you really want to pass as a function by 
+wrapping it in a function that will return your callable.</td></tr>
+<tr><td align="right" valign="top" width="15%"><font size="-1">&nbsp;</font></td>
+  <td><code><span class="summary-sig"><a href="nonmockobjects-module.html#register" class="summary-sig-name"><code>register</code></a>(<span class=summary-sig-arg>func</span>)</span></code>
+<br />
+Register a function as a non-mock-object creation function.</td></tr>
+<tr><td align="right" valign="top" width="15%"><font size="-1">&nbsp;</font></td>
+  <td><code><span class="summary-sig"><a href="nonmockobjects-module.html#register_as" class="summary-sig-name"><code>register_as</code></a>(<span class=summary-sig-arg>name_override</span>)</span></code>
+<br />
+Longer form of register that takes a name_override to set the Objects 
+name of the registered function to.</td></tr>
+<tr><td align="right" valign="top" width="15%"><font size="-1">&nbsp;</font></td>
+  <td><code><span class="summary-sig"><a href="nonmockobjects-module.html#use_prefix" class="summary-sig-name"><code>use_prefix</code></a>(<span class=summary-sig-arg>name</span>)</span></code>
+<br />
+Standard use_prefix function: Implements 'use_' + name.</td></tr>
+<tr><td align="right" valign="top" width="15%"><font size="-1">&nbsp;</font></td>
+  <td><code><span class="summary-sig"><a href="../private/nonmockobjects-module.html#variations_prefix" class="summary-sig-name"><code>variations_prefix</code></a>(<span class=summary-sig-arg>name</span>)</span></code>
+<br />
+Standard variations_prefix function: Implements 'variations_' + 
+name.</td></tr>
+</table><br />
+
+
+<!-- =========== START OF VARIABLE SUMMARY =========== -->
+<table class="summary" border="1" cellpadding="3" cellspacing="0" width="100%" bgcolor="white">
+<tr bgcolor="#70b0f0" class="summary">
+  <th colspan="2">Variable Summary</th></tr>
+<tr><td align="right" valign="top" width="15%"><font size="-1"><code>count</code></font></td>
+<td><b><a href="../private/nonmockobjects-module.html#INCREMENTER"><code>INCREMENTER</code></a></b> = <span title="count(0)"><code>count(0)                                   </code>
+</span></td></tr>
+</table><br />
+
+
+<!-- =========== START OF FUNCTION DETAILS =========== -->
+<table class="details" border="1" cellpadding="3" cellspacing="0" width="100%" bgcolor="white">
+<tr bgcolor="#70b0f0" class="details">
+  <th colspan="2">Function Details</th></tr>
+</table>
+
+<a name="all_args"></a>
+<table width="100%" class="func-details" bgcolor="#e0e0e0"><tr><td>
+  <h3><span class="sig"><span class="sig-name">all_args</span>(<span class="sig-vararg">*exclude</span>)</span>
+  </h3>
+  This gets all the local args of the calling stack frame, but filters 
+  out the Object instance parameter.
+  <dl><dt></dt><dd>
+  </dd></dl>
+</td></tr></table>
+
+<a name="call_protect"></a>
+<table width="100%" class="func-details" bgcolor="#e0e0e0"><tr><td>
+  <h3><span class="sig"><span class="sig-name">call_protect</span>(<span class=sig-arg>callable_object</span>)</span>
+  </h3>
+  Protects callables that you really want to pass as a function by 
+  wrapping it in a function that will return your callable.
+  <dl><dt></dt><dd>
+    <dl><dt><b>Parameters:</b></dt>
+      <dd><code><b>callable_object</b></code> -
+         The callable object to protect.
+      </dd>
+    </dl>
+  </dd></dl>
+</td></tr></table>
+
+<a name="register"></a>
+<table width="100%" class="func-details" bgcolor="#e0e0e0"><tr><td>
+  <h3><span class="sig"><span class="sig-name">register</span>(<span class=sig-arg>func</span>=<span class=sig-default>None</span>)</span>
+  </h3>
+  <p>Register a function as a non-mock-object creation function. Can be 
+  used as a decorator.</p>
+  register examines the default arguments you provide for the given 
+  function by using Python introspection, and performs the following 
+  manipulations when calling your function:
+  <ul>
+    <li>
+      If default value is a string containing '%(inc)s', which you'll 
+      note uses the Python string interpolation syntax, a unique number 
+      (across all uses of %(inc)s) will be interpolated into the string 
+      actually passed to the function. This makes it easy to create 
+      unique ids as needed.
+    </li>
+    <li>
+      If the default value is callable, and you don't provide a value 
+      in your call, the test system will call that value with no 
+      arguments and use the resulting value as the value passed into the 
+      function. Note you can use this with closures or callable objects 
+      to implement any default behavior you like.
+    </li>
+    <li>
+      As a <i>very</i> special value, as in the example in the module 
+      documentation, if the callable is actually the function reference 
+      of a previously-registered creation function, we get very special 
+      behavior. If the function is called without this parameter, the 
+      Objects class will be asked to create a brand new instance of the 
+      object. If the function is called with 
+      nonmockobjects.use_prefix(func.func_name) (usually <code>'use_' + 
+      func_name</code>, unless you override), the value is expected to be 
+      a dict which can be **'ed into arguments for the relevant Objects 
+      creation method. Finally, if the function is called with this 
+      parameter, the value will be used without any creation; see module 
+      documentation for examples.
+    </li>
+  </ul>
+  If you need to use a callable object as a default argument, and you 
+  do not want the nonmockobject framework to call it, protect it with the 
+  <code>call_protect</code> function:
+<pre class="literalblock">
+   &#64;register
+   def call_func(function: call_protect(lambda x: x + 1)):
+       return function(44)
+</pre>
+  <dl><dt></dt><dd>
+    <dl><dt><b>Parameters:</b></dt>
+      <dd><code><b>func</b></code> -
+         The func to register.
+      </dd>
+    </dl>
+  </dd></dl>
+</td></tr></table>
+
+<a name="register_as"></a>
+<table width="100%" class="func-details" bgcolor="#e0e0e0"><tr><td>
+  <h3><span class="sig"><span class="sig-name">register_as</span>(<span class=sig-arg>name_override</span>=<span class=sig-default>None</span>)</span>
+  </h3>
+  <p>Longer form of register that takes a name_override to set the 
+  Objects name of the registered function to.</p>
+  (This can be necessary when the name you want for the method 
+  conflicts with another object by the same name; just create a function 
+  with a throwaway name, and pass in a name_override to 
+  register_as.).
+  <dl><dt></dt><dd>
+    <dl><dt><b>Parameters:</b></dt>
+      <dd><code><b>name_override</b></code> -
+         The name to use on the Objects object.
+      </dd>
+    </dl>
+  </dd></dl>
+</td></tr></table>
+
+<a name="use_prefix"></a>
+<table width="100%" class="func-details" bgcolor="#e0e0e0"><tr><td>
+  <h3><span class="sig"><span class="sig-name">use_prefix</span>(<span class=sig-arg>name</span>)</span>
+  </h3>
+  Standard use_prefix function: Implements 'use_' + name.
+  <dl><dt></dt><dd>
+    <dl><dt><b>Parameters:</b></dt>
+      <dd><code><b>name</b></code> -
+         The original name as a string, to be convert to the parameter 
+        name.
+      </dd>
+    </dl>
+  </dd></dl>
+</td></tr></table>
+
+<a name="variations_prefix"></a>
+<table width="100%" class="func-details" bgcolor="#e0e0e0"><tr><td>
+  <h3><span class="sig"><span class="sig-name">variations_prefix</span>(<span class=sig-arg>name</span>)</span>
+  </h3>
+  Standard variations_prefix function: Implements 'variations_' + 
+  name.
+  <dl><dt></dt><dd>
+    <dl><dt><b>Parameters:</b></dt>
+      <dd><code><b>name</b></code> -
+         The original name as a string, to be converted to the 
+        parameter name.
+      </dd>
+    </dl>
+  </dd></dl>
+</td></tr></table>
+<br />
+
+
+<!-- =========== START OF VARIABLE DETAILS =========== -->
+<table class="details" border="1" cellpadding="3" cellspacing="0" width="100%" bgcolor="white">
+<tr bgcolor="#70b0f0" class="details">
+  <th colspan="2">Variable Details</th></tr>
+</table>
+<table width="100%" class="var-details" bgcolor="#e0e0e0"><tr><td>
+<a name="INCREMENTER"></a>
+<h3>INCREMENTER</h3>
+<dl>
+  <dt></dt>
+  <dd>
+    <dl>
+      <dt><b>Type:</b></dt>
+      <dd>
+          <code>count</code>
+
+      </dd>
+<span title="count(0)">      <dt><b>Value:</b></dt>
+      <dd><table><tr><td>
+<pre class="variable">
+count(0)                                                               </pre>
+        </td></tr></table></dd>
+</span>    </dl>
+  </dd>
+</dl></td></tr></table>
+<br />
+
+
+<!-- =========== START OF NAVBAR =========== -->
+<table class="navbar" border="0" width="100%" cellpadding="0" bgcolor="#a0c0ff" cellspacing="0">
+  <tr valign="center">
+    <th bgcolor="#70b0f0" class="navselect">&nbsp;&nbsp;&nbsp;Home&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar">&nbsp;&nbsp;&nbsp;<a class="navbar" href="trees.html">Trees</a>&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar">&nbsp;&nbsp;&nbsp;<a class="navbar" href="indices.html">Index</a>&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar">&nbsp;&nbsp;&nbsp;<a class="navbar" href="help.html">Help</a>&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar" align="right" width="100%">
+      <table border="0" cellpadding="0" cellspacing="0">
+      <tr><th class="navbar" align="center">
+        <p class="nomargin">
+          <a class="navbar" target="_top" href="http://www.jerf.org/programming/nonMockObjects.html">NonMockObjects</a>
+      </p></th></tr></table>
+    </th>
+  </tr>
+</table>
+
+<table border="0" cellpadding="0" cellspacing="0" width="100%">
+  <tr>
+    <td align="left"><font size="-2">Generated by Epydoc 2.1 on Sun Dec 10 21:59:30 2006</font></td>
+    <td align="right"><a href="http://epydoc.sourceforge.net"
+                      ><font size="-2">http://epydoc.sf.net</font></a></td>
+  </tr>
+</table>
+</body>
+</html>
