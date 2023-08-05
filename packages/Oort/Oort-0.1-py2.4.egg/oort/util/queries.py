@@ -1,0 +1,21 @@
+from rdflib import URIRef, RDF, RDFS
+from oort.rdfview import RdfQuery, one, localized, i18n_dict
+from oort.util.code import Slotted
+
+class HasLabel(RdfQuery):
+    label = localized(RDFS.RDFSNS)
+
+def make_label_query(uriBase, *uriTails):
+    def labels(graph, resource, lang):
+        labelBase = uriBase + "%s"
+        class Labels(Slotted):
+            __slots__ = uriTails
+        return Labels(
+                *[HasLabel(graph, URIRef(labelBase % tail), lang).label
+                        for tail in Labels.__slots__] )
+    return labels
+
+class Lang(RdfQuery):
+    value = one(RDF.RDFNS)
+    label = i18n_dict(RDFS.RDFSNS)
+
