@@ -1,0 +1,39 @@
+==========================
+Context aware Recent Items
+==========================
+
+Overview
+--------
+
+A Plone Portlet which does an adapter lookup to fetch
+the **portal type** to use in the query for recently changed
+portlets.
+
+Rationale
+---------
+
+This is crratching an itch of a customer, which wants to
+display only recent "news" on a news page etc.
+Instead of hard-coding the portal type, we do a adapter lookup.
+
+Usage
+-----
+
+Users then can register adapters like::
+
+    <adapter
+        for="Products.BabpnProducts.browser.search.BabpnSPSearchView"
+        provides="inquant.portlet.contextualrecentitems.interfaces.ITypeNameProvider"
+        factory=".adapters.SPTypeProvider"
+        />
+
+And have the actual adapter look like::
+
+
+    class BizOpTypeProvider(object):
+        def __init__(self, context):
+            pass
+        type = "BusinessOpportunity"
+
+
+
