@@ -1,0 +1,626 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-gb">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>pprocess - Tutorial</title>
+  <link href="styles.css" rel="stylesheet" type="text/css" />
+</head>
+<body>
+
+<h1>pprocess - Tutorial</h1>
+
+<p>The <code>pprocess</code> module provides several mechanisms for running
+Python code concurrently in several processes. The most straightforward way of
+making a program parallel-aware - that is, where the program can take
+advantage of more than one processor to simultaneously process data - is to
+use the <code>pmap</code> function.</p>
+
+<h2>Converting Map-Style Code</h2>
+
+<p>Consider a program using the built-in <code>map</code> function and a sequence of inputs:</p>
+
+<pre>
+    t = time.time()
+
+    # Initialise an array.
+
+    sequence = []
+    for i in range(0, N):
+        for j in range(0, N):
+            sequence.append((i, j))
+
+    # Perform the work.
+
+    results = map(calculate, sequence)
+
+    # Show the results.
+
+    for i in range(0, N):
+        for result in results[i*N:i*N+N]:
+            print result,
+        print
+
+    print "Time taken:", time.time() - t</pre>
+
+<p>(This code in context with <code>import</code> statements and functions is
+found in the <code>examples/simple_map.py</code> file.)</p>
+
+<p>The principal features of this program involve the preparation of an array
+for input purposes, and the use of the <code>map</code> function to iterate
+over the combinations of <code>i</code> and <code>j</code> in the array. Even
+if the <code>calculate</code> function could be invoked independently for each
+input value, we have to wait for each computation to complete before
+initiating a new one. The <code>calculate</code> function may be defined as
+follows:</p>
+
+<pre>
+def calculate(t):
+
+    "A supposedly time-consuming calculation on 't'."
+
+    i, j = t
+    time.sleep(delay)
+    return i * N + j
+</pre>
+
+<p>In order to reduce the processing time - to speed the code up, in other
+words - we can make this code use several processes instead of just one. Here
+is the modified code:</p>
+
+<pre>
+    t = time.time()
+
+    # Initialise an array.
+
+    sequence = []
+    for i in range(0, N):
+        for j in range(0, N):
+            sequence.append((i, j))
+
+    # Perform the work.
+
+    results = <strong>pprocess.pmap</strong>(calculate, sequence<strong>, limit=limit</strong>)
+
+    # Show the results.
+
+    for i in range(0, N):
+        for result in results[i*N:i*N+N]:
+            print result,
+        print
+
+    print "Time taken:", time.time() - t</pre>
+
+<p>(This code in context with <code>import</code> statements and functions is
+found in the <code>examples/simple_pmap.py</code> file.)</p>
+
+<p>By replacing usage of the <code>map</code> function with the
+<code>pprocess.pmap</code> function, and specifying the limit on the number of
+processes to be active at any given time (the value of the <code>limit</code>
+variable is defined elsewhere), several calculations can now be performed in
+parallel.</p>
+
+<h2>Converting Invocations to Parallel Operations</h2>
+
+<p>Although some programs make natural use of the <code>map</code> function,
+others may employ an invocation in a nested loop. This may also be converted
+to a parallel program. Consider the following Python code:</p>
+
+<pre>
+    t = time.time()
+
+    # Initialise an array.
+
+    results = []
+
+    # Perform the work.
+
+    print "Calculating..."
+    for i in range(0, N):
+        for j in range(0, N):
+            results.append(calculate(i, j))
+
+    # Show the results.
+
+    for i in range(0, N):
+        for result in results[i*N:i*N+N]:
+            print result,
+        print
+
+    print "Time taken:", time.time() - t</pre>
+
+<p>(This code in context with <code>import</code> statements and functions is
+found in the <code>examples/simple1.py</code> file.)</p>
+
+<p>Here, a computation in the <code>calculate</code> function is performed for
+each combination of <code>i</code> and <code>j</code> in the nested loop,
+returning a result value. However, we must wait for the completion of this
+function for each element before moving on to the next element, and this means
+that the computations are performed sequentially. Consequently, on a system
+with more than one processor, even if we could call <code>calculate</code> for
+more than one combination of <code>i</code> and <code>j</code><code></code>
+and have the computations executing at the same time, the above program will
+not take advantage of such capabilities.</p>
+
+<p>We use a slightly modified version of <code>calculate</code> which employs
+two parameters instead of one:</p>
+
+<pre>
+def calculate(i, j):
+
+    """
+    A supposedly time-consuming calculation on 'i' and 'j'.
+    """
+
+    time.sleep(delay)
+    return i * N + j
+</pre>
+
+<p>In order to reduce the processing time - to speed the code up, in other
+words - we can make this code use several processes instead of just one. Here
+is the modified code:</p>
+
+<pre id="simple_managed_map">
+    t = time.time()
+
+    # Initialise the results using a map with a limit on the number of
+    # channels/processes.
+
+    <strong>results = pprocess.Map(limit=limit)</strong><code></code>
+
+    # Wrap the calculate function and manage it.
+
+    <strong>calc = results.manage(pprocess.MakeParallel(calculate))</strong>
+
+    # Perform the work.
+
+    print "Calculating..."
+    for i in range(0, N):
+        for j in range(0, N):
+            <strong>calc</strong>(i, j)
+
+    # Show the results.
+
+    for i in range(0, N):
+        for result in results[i*N:i*N+N]:
+            print result,
+        print
+
+    print "Time taken:", time.time() - t</pre>
+
+<p>(This code in context with <code>import</code> statements and functions is
+found in the <code>examples/simple_managed_map.py</code> file.)</p>
+
+<p>The principal changes in the above code involve the use of a
+<code>pprocess.Map</code> object to collect the results, and a version of the
+<code>calculate</code> function which is managed by the <code>Map</code>
+object. What the <code>Map</code> object does is to arrange the results of
+computations such that iterating over the object or accessing the object using
+list operations provides the results in the same order as their corresponding
+inputs.</p>
+
+<h2>Converting Arbitrarily-Ordered Invocations</h2>
+
+<p>In some programs, it is not important to receive the results of
+computations in any particular order, usually because either the order of
+these results is irrelevant, or because the results provide "positional"
+information which let them be handled in an appropriate way. Consider the
+following Python code:</p>
+
+<pre>
+    t = time.time()
+
+    # Initialise an array.
+
+    results = [0] * N * N
+
+    # Perform the work.
+
+    print "Calculating..."
+    for i in range(0, N):
+        for j in range(0, N):
+            i2, j2, result = calculate(i, j)
+            results[i2*N+j2] = result
+
+    # Show the results.
+
+    for i in range(0, N):
+        for result in results[i*N:i*N+N]:
+            print result,
+        print
+
+    print "Time taken:", time.time() - t
+</pre>
+
+<p>(This code in context with <code>import</code> statements and functions is
+found in the <code>examples/simple2.py</code> file.)</p>
+
+<p>Here, a result array is initialised first and each computation is performed
+sequentially. A significant difference to the previous examples is the return
+value of the <code>calculate</code> function: the position details
+corresponding to <code>i</code> and <code>j</code> are returned alongside the
+result. Obviously, this is of limited value in the above code because the
+order of the computations and the reception of results is fixed. However, we
+get no benefit from parallelisation in the above example.</p>
+
+<p>We can bring the benefits of parallel processing to the above program with
+the following code:</p>
+
+<pre>
+    t = time.time()
+
+    # Initialise the communications queue with a limit on the number of
+    # channels/processes.
+
+    <strong>queue = pprocess.Queue(limit=limit)</strong>
+
+    # Initialise an array.
+
+    results = [0] * N * N
+
+    # Wrap the calculate function and manage it.
+
+    <strong>calc = queue.manage(pprocess.MakeParallel(calculate))</strong>
+
+    # Perform the work.
+
+    print "Calculating..."
+    for i in range(0, N):
+        for j in range(0, N):
+            <strong>calc(i, j)</strong>
+
+    # Store the results as they arrive.
+
+    print "Finishing..."
+    <strong>for i, j, result in queue:</strong>
+        <strong>results[i*N+j] = result</strong>
+
+    # Show the results.
+
+    for i in range(0, N):
+        for result in results[i*N:i*N+N]:
+            print result,
+        print
+
+    print "Time taken:", time.time() - t
+</pre>
+
+<p>(This code in context with <code>import</code> statements and functions is
+found in the <code>examples/simple_managed_queue.py</code> file.)</p>
+
+<p>This revised code employs a <code>pprocess.Queue</code> object whose
+purpose is to collect the results of computations and to make them available
+in the order in which they were received. The code collecting results has been
+moved into a separate loop independent of the original computation loop and
+taking advantage of the more relevant "positional" information emerging from
+the queue.</p>
+
+<p>We can take this example further, illustrating some of the mechanisms
+employed by <code>pprocess</code>. Instead of collecting results in a queue,
+we can define a class containing a method which is called when new results
+arrive:</p>
+
+<pre>
+class MyExchange(pprocess.Exchange):
+
+    "Parallel convenience class containing the array assignment operation."
+
+    def store_data(self, ch):
+        i, j, result = ch.receive()
+        self.D[i*N+j] = result
+</pre>
+
+<p>This code exposes the channel paradigm which is used throughout
+<code>pprocess</code> and is available to applications, if desired. The effect
+of the method is the storage of a result received through the channel in an
+attribute of the object. The following code shows how this class can be used,
+with differences to the previous program illustrated:</p>
+
+<pre>
+    t = time.time()
+
+    # Initialise the communications exchange with a limit on the number of
+    # channels/processes.
+
+    <strong>exchange = MyExchange(limit=limit)</strong>
+
+    # Initialise an array - it is stored in the exchange to permit automatic
+    # assignment of values as the data arrives.
+
+    <strong>results = exchange.D = [0] * N * N</strong>
+
+    # Wrap the calculate function and manage it.
+
+    calc = <strong>exchange</strong>.manage(pprocess.MakeParallel(calculate))
+
+    # Perform the work.
+
+    print "Calculating..."
+    for i in range(0, N):
+        for j in range(0, N):
+            calc(i, j)
+
+    # Wait for the results.
+
+    print "Finishing..."
+    <strong>exchange.finish()</strong>
+
+    # Show the results.
+
+    for i in range(0, N):
+        for result in results[i*N:i*N+N]:
+            print result,
+        print
+
+    print "Time taken:", time.time() - t
+</pre>
+
+<p>(This code in context with <code>import</code> statements and functions is
+found in the <code>examples/simple_managed.py</code> file.)</p>
+
+<p>The main visible differences between this and the previous program are the
+storage of the result array in the exchange, the removal of the queue
+consumption code from the main program, placing the act of storing values in
+the exchange's <code>store_data</code> method, and the need to call the
+<code>finish</code> method on the <code>MyExchange</code> object so that we do
+not try and access the results too soon. One underlying benefit not visible in
+the above code is that we no longer need to accumulate results in a queue or
+other structure so that they may be processed and assigned to the correct
+positions in the result array.</p>
+
+<p>For the curious, we may remove some of the remaining conveniences of the
+above program to expose other features of <code>pprocess</code>. First, we
+define a slightly modified version of the <code>calculate</code> function:</p>
+
+<pre>
+def calculate(ch, i, j):
+
+    """
+    A supposedly time-consuming calculation on 'i' and 'j', using 'ch' to
+    communicate with the parent process.
+    """
+
+    time.sleep(delay)
+    ch.send((i, j, i * N + j))
+</pre>
+
+<p>This function accepts a channel, <code>ch</code>, through which results
+will be sent, and through which other values could potentially be received,
+although we choose not to do so here. The program using this function is as
+follows, with differences to the previous program illustrated:</p>
+
+<pre>
+    t = time.time()
+
+    # Initialise the communications exchange with a limit on the number of
+    # channels/processes.
+
+    exchange = MyExchange(limit=limit)
+
+    # Initialise an array - it is stored in the exchange to permit automatic
+    # assignment of values as the data arrives.
+
+    results = exchange.D = [0] * N * N
+
+    # Perform the work.
+
+    print "Calculating..."
+    for i in range(0, N):
+        for j in range(0, N):
+            <strong>exchange.start(calculate, i, j)</strong>
+
+    # Wait for the results.
+
+    print "Finishing..."
+    exchange.finish()
+
+    # Show the results.
+
+    for i in range(0, N):
+        for result in results[i*N:i*N+N]:
+            print result,
+        print
+
+    print "Time taken:", time.time() - t
+</pre>
+
+<p>(This code in context with <code>import</code> statements and functions is
+found in the <code>examples/simple_start.py</code> file.)</p>
+
+<p>Here, we have discarded two conveniences: the wrapping of callables using
+<code>MakeParallel</code>, which lets us use functions without providing any
+channel parameters, and the management of callables using the
+<code>manage</code> method on queues, exchanges, and so on. The
+<code>start</code> method still calls the provided callable, but using a
+different notation from that employed previously.</p>
+
+<h2>Converting Inline Computations</h2>
+
+<p>Although many programs employ functions and other useful abstractions which
+can be treated as parallelisable units, some programs perform computations
+"inline", meaning that the code responsible appears directly within a loop or
+related control-flow construct. Consider the following code:</p>
+
+<pre>
+    t = time.time()
+
+    # Initialise an array.
+
+    results = [0] * N * N
+
+    # Perform the work.
+
+    print "Calculating..."
+    for i in range(0, N):
+        for j in range(0, N):
+            time.sleep(delay)
+            results[i*N+j] = i * N + j
+
+    # Show the results.
+
+    for i in range(0, N):
+        for result in results[i*N:i*N+N]:
+            print result,
+        print
+
+    print "Time taken:", time.time() - t
+</pre>
+
+<p>(This code in context with <code>import</code> statements and functions is
+found in the <code>examples/simple.py</code> file.)</p>
+
+<p>To simulate "work", as in the different versions of the
+<code>calculate</code> function, we use the <code>time.sleep</code> function
+(which does not actually do work, and which will cause a process to be
+descheduled in most cases, but which simulates the delay associated with work
+being done). This inline work, which must be performed sequentially in the
+above program, can be performed in parallel in a somewhat modified version of
+the program:</p>
+
+<pre>
+    t = time.time()
+
+    # Initialise the results using a map with a limit on the number of
+    # channels/processes.
+
+    <strong>results = pprocess.Map(limit=limit)</strong>
+
+    # Perform the work.
+    # NOTE: Could use the with statement in the loop to package the
+    # NOTE: try...finally functionality.
+
+    print "Calculating..."
+    for i in range(0, N):
+        for j in range(0, N):
+            <strong>ch = results.create()</strong>
+            <strong>if ch:</strong>
+                <strong>try: # Calculation work.</strong>
+
+                    time.sleep(delay)
+                    <strong>ch.send(i * N + j)</strong>
+
+                <strong>finally: # Important finalisation.</strong>
+
+                    <strong>pprocess.exit(ch)</strong>
+
+    # Show the results.
+
+    for i in range(0, N):
+        for result in results[i*N:i*N+N]:
+            print result,
+        print
+
+    print "Time taken:", time.time() - t
+</pre>
+
+<p>(This code in context with <code>import</code> statements and functions is
+found in the <code>examples/simple_create_map.py</code> file.)</p>
+
+<p>Although seemingly more complicated, the bulk of the changes in this
+modified program are focused on obtaining a channel object, <code>ch</code>,
+at the point where the computations are performed, and the wrapping of the
+computation code in a <code>try</code>...<code>finally</code> statement which
+ensures that the process associated with the channel exits when the
+computation is complete. In order for the results of these computations to be
+collected, a <code>pprocess.Map</code> object is used, since it will maintain
+the results in the same order as the initiation of the computations which
+produced them.</p>
+
+<h2>Reusing Processes in Parallel Programs</h2>
+
+<p>One notable aspect of the above programs when parallelised is that each
+invocation of a computation in parallel creates a new process in which the
+computation is to be performed, regardless of whether existing processes had
+just finished producing results and could theoretically have been asked to
+perform new computations. In other words, processes were created and destroyed
+instead of being reused.</p>
+
+<p>However, we can request that processes be reused for computations by
+enabling the <code>reuse</code> feature of exchange-like objects and employing
+suitable reusable callables. Consider this modified version of the <a
+href="#simple_managed_map">simple_managed_map</a> program:</p>
+
+<pre>
+    t = time.time()
+
+    # Initialise the results using a map with a limit on the number of
+    # channels/processes.
+
+    results = pprocess.Map(limit=limit<strong>, reuse=1</strong>)
+
+    # Wrap the calculate function and manage it.
+
+    calc = results.manage(pprocess.Make<strong>Reusable</strong>(calculate))
+
+    # Perform the work.
+
+    print "Calculating..."
+    for i in range(0, N):
+        for j in range(0, N):
+            calc(i, j)
+
+    # Show the results.
+
+    for i in range(0, N):
+        for result in results[i*N:i*N+N]:
+            print result,
+        print
+
+    print "Time taken:", time.time() - t
+</pre>
+
+<p>(This code in context with <code>import</code> statements and functions is
+found in the <code>examples/simple_manage_map_reusable.py</code> file.)</p>
+
+<p>By indicating that processes and channels shall be reused, and by wrapping
+the <code>calculate</code> function with the necessary support, the
+computations may be performed in parallel using a pool of processes instead of
+creating a new process for each computation and then discarding it, only to
+create a new process for the next computation.</p>
+
+<h2>Summary</h2>
+
+<p>The following table indicates the features used in converting one
+sequential example program to another parallel program:</p>
+
+<table border="1" cellspacing="0" cellpadding="5">
+  <thead>
+    <tr>
+      <th>Sequential Example</th>
+      <th>Parallel Example</th>
+      <th>Features Used</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>simple_map</td>
+      <td>simple_pmap</td>
+      <td>pmap</td>
+    </tr>
+    <tr>
+      <td>simple1</td>
+      <td>simple_managed_map</td>
+      <td>MakeParallel, Map, manage</td>
+    </tr>
+    <tr>
+      <td rowspan="3">simple2</td>
+      <td>simple_managed_queue</td>
+      <td>MakeParallel, Queue, manage</td>
+    </tr>
+    <tr>
+      <td>simple_managed</td>
+      <td>MakeParallel, Exchange (subclass), manage, finish</td>
+    </tr>
+    <tr>
+      <td>simple_start</td>
+      <td>Channel, Exchange (subclass), start, finish</td>
+    </tr>
+    <tr>
+      <td>simple</td>
+      <td>simple_create_map</td>
+      <td>Channel, Map, create, exit</td>
+    </tr>
+  </tbody>
+</table>
+
+</body>
+</html>
