@@ -1,0 +1,26 @@
+from setuptools import setup, find_packages
+
+setup(name='wc.worldcookeryskin',
+      version='3.9.1',
+      url='http://worldcookery.com/Downloads',
+      description='Zope 3 skin for WorldCookery-like applications',
+      author='Philipp von Weitershausen',
+      author_email='philipp@weitershausen.de',
+      long_description=file('README.txt').read(),
+      classifiers=['Development Status :: 5 - Production/Stable',
+                   'Environment :: Web Environment',
+                   'Framework :: Zope3',
+                   'Intended Audience :: Developers'],
+
+      packages=find_packages(),
+      namespace_packages=['wc',],
+      install_requires=['setuptools',
+                        'zope.interface',
+                        'zope.publisher',
+                        'zope.viewlet',
+                        'zope.app.pagetemplate',
+                        'zope.app.basicskin',
+                        ],
+      include_package_data=True,
+      zip_safe=False,
+      )
