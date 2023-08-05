@@ -1,0 +1,61 @@
+#!/ebi/research/software/Linux/opt/stow/python-2.5.1-shared/bin/python
+# -*- python -*-
+from __future__ import division
+
+__version__ = "$Revision: 1.1 $"
+
+from optparse import make_option, OptionParser
+import os
+import sys
+
+import poly
+
+def WCANTEXECUTE(status):
+    return status == 127
+
+def get_final_args():
+    return sys.stdin.read().split()
+
+def make_exit_status(status):
+    if status == 0:
+        return 0
+    elif 1 < status < 125:
+        return 123
+    elif status == 255:
+        return 124
+    elif os.WIFSIGNALED(status):
+        return 125
+    elif WCANTEXECUTE(status): # never returns 126
+        return 127
+    else:
+        return 1
+
+def main(args):
+    global options
+
+    parser = OptionParser(usage="%prog [OPTION]... COMMAND [ARG]...",
+                          version="%%prog %s" % __version__,
+                          option_list=[
+        make_option("-t", "--verbose",
+                    action="store_true", dest="verbose", default=False,
+                    help="Print the command line on the standard error output before executing it.")
+        ])
+    
+    options, initial_args = parser.parse_args(args)
+    final_args = poly.chunk(poly.superglobal("final_args", get_final_args))
+
+    command_filename = initial_args[0]
+    command_args = initial_args + final_args
+
+    if options.verbose:
+        print >>sys.stderr, " ".join(command_args)
+    
+    status = os.spawnvp(os.P_WAIT, command_filename, command_args)
+
+    if WCANTEXECUTE(status):
+        print >>sys.stderr, "%s: command not found" % command_filename
+
+    return make_exit_status(status)
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

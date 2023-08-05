@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+
+# forced parameters
+export LSFUSER=${FORCE_LSFUSER:-$LSFUSER}
+export LSB_JOBNAME=${FORCE_LSB_JOBNAME:-$LSB_JOBNAME}
+export LSB_JOBINDEX=${FORCE_LSB_JOBINDEX:-$LSB_JOBINDEX}
+export LSB_JOBINDEX_END=${FORCE_LSB_JOBINDEX_END:-$LSB_JOBINDEX_END}
+
+JOB_DESC="poly-${LSFUSER}.${LSB_JOBID}.${LSB_JOBINDEX}"
+
+POLY_SANDBOX_ROOT="/tmp"
+POLY_SANDBOX="${POLY_SANDBOX_ROOT}/${JOB_DESC}"
+POLY_JOBNAME=$(echo $LSB_JOBNAME | sed -e 's/%.*$//')
+
+export POLY_SANDBOX
+
+STDOUT_FILENAME="${JOB_DESC}.stdout"
+STDOUT_FILENAME_ABS="${POLY_SANDBOX_ROOT}/${STDOUT_FILENAME}"
+STDERR_FILENAME="${JOB_DESC}.stderr"
+STDERR_FILENAME_ABS="${POLY_SANDBOX_ROOT}/${STDERR_FILENAME}"
+HOSTINFO_FILENAME="${JOB_DESC}.hostinfo"
+HOSTINFO_FILENAME_ABS="${POLY_SANDBOX_ROOT}/${HOSTINFO_FILENAME}"
+
+TRAPS="15 10 12 2 1"
+
+addfile()
+{
+    if [ -e "$@" ]; then
+        FILES="$FILES $@"
+    fi
+}
+
+polyrcp_if_exists()
+{
+    if [ -e $1 ]; then
+        if [ -s $1 ]; then
+            polyrcp $1 ${POLY_DESTINATION}/${POLY_JOBNAME}/$2/$(printf %04d ${LSB_JOBINDEX}) # theoretical limit: 9999
+        fi
+        FILES="$FILES $1"
+    fi
+}
+
+teardown()
+{
+    set -o noglob
+    rm -rf ${POLY_SANDBOX}/tmp ${POLY_SANDBOX}/r
+
+    command cd ${POLY_SANDBOX_ROOT}
+    rmdir $JOB_DESC 2>/dev/null # make sure it isn't empty...
+    if [ -e $JOB_DESC ]; then
+        tar cf $JOB_DESC.tar $JOB_DESC
+    fi
+
+    polyrcp_if_exists $HOSTINFO_FILENAME_ABS hostinfo
+    polyrcp_if_exists $STDOUT_FILENAME_ABS stdout
+    polyrcp_if_exists $STDERR_FILENAME_ABS stderr
+    polyrcp_if_exists ${POLY_SANDBOX_ROOT}/$JOB_DESC.tar tar
+    addfile $JOB_DESC
+
+    rm -rf $FILES
+    set +o noglob
+}
+
+die()
+{
+    echo "polyjob: received signal; aborting"
+    teardown
+    exit 200 # you know that this came from polyjob
+}
+
+die_SIGTERM()
+{
+    echo "polyjob: received SIGTERM; aborting"
+    teardown
+    exit 215
+}
+
+_IFS=$IFS
+IFS=,
+if [ "$POLY_RUN_ONLY" ]; then
+    for JOBINDEX in $POLY_RUN_ONLY; do
+        if [ $LSB_JOBINDEX == $JOBINDEX ]; then
+            RUN=1
+            break
+        fi
+    done
+else
+    RUN=1
+fi
+
+IFS=$_IFS
+
+if [ "$RUN" ]; then
+    echo "polyjob: started"
+    echo \#\#\# $(hostname) $(uname -srvp) > $HOSTINFO_FILENAME_ABS # don't copy now... you'll overload NFS
+    trap die $TRAPS
+    trap die_SIGTERM SIGTERM
+       "$@" >$STDOUT_FILENAME_ABS 2>$STDERR_FILENAME_ABS
+       _RETVAL=$?
+    trap $TRAPS
+    
+    teardown
+fi
+
+echo "polyjob: completed; return value $_RETVAL"
+exit $_RETVAL
