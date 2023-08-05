@@ -1,0 +1,148 @@
+#!/usr/bin/python
+
+# send_yahoo
+# Copyright (C) 2005 by Richard Harris
+# richardharris@operamail.com 
+# Released under the GNU General Public License
+# (See the included COPYING file)
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# with this program; if not, write to the Free Software Foundation,
+# Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+
+#
+# Usage Notes:
+#
+#  send_yahoo is a sendmail replacement which, like Perl's sendymail,
+#  sends emails through your Yahoo! webmail account.  It expects this
+#  line in ~/.netrc:
+#
+#   machine mail.yahoo.com login your_username password your_password
+#
+#  You can put the following in your ~/.muttrc or ~/.nailrc to use
+#  send_yahoo:
+#
+#              muttrc/nailrc: set sendmail=~/bin/send_yahoo
+#
+#  Then use mutt or nail to send your email as you normally do.
+#
+
+
+DEBUG = 0
+NOCLIENT = 0
+
+import os, sys, time
+
+try:
+	import mechanoid
+except:
+	print ("""
+	send_yahoo requires mechanoid, an Open Source programmatic
+	browser written in Python.  Download is under 200kb.
+	See http://python.org/pypi/mechanoid
+	""")
+	sys.exit()
+
+try:
+	from mechanoid.sites import MailDotYahoo
+except:
+	print ("""
+	Your mechanoid version is too old and does not have the sites
+	package. Update from http://python.org/pypi/mechanoid
+	""")
+	sys.exit()
+
+def __debug_client(hdrs, attachments, From, to, cc, bcc, subject, text):
+	f = open("/tmp/send_yahoo.txt","w")
+	f.write(`hdrs`)
+	f.write("\n")
+	f.write(`attachments`)
+	f.write("\n")
+	f.write(From)
+	f.write("\n")
+	f.write(to)
+	f.write("\n")
+	f.write(cc)
+	f.write("\n")
+	f.write(bcc)
+	f.write("\n")
+	f.write(subject)
+	f.write("\n")
+	f.write(text)
+	f.close()
+	return
+
+def __exit(to, subject):
+	now = time.ctime()
+	f = open(os.path.expandvars("$HOME/yahoo.error"),'a')
+	f.write('send_yahoo: '+to+' "'+subject+'" '+now+'.\n')
+	f.close()
+	return
+
+def __hdr(hdrs, key):
+	for line in hdrs:
+		tmp = line.split(":")
+		if (tmp[0].strip() == key):
+			return tmp[1].strip()
+	return ""
+
+## -------------------
+try:
+
+	if (NOCLIENT):
+		import time
+		subject = "test: "+time.asctime()
+		text = """This is a test
+--
+Richard Harris
+	"""
+		hdrs = ['Date: Sat, 03 Dec 2005 09:28:52 -0700',
+				'From: richardharris@operamail.com',
+				'Reply-To: richardharris@operamail.com',
+				'To: richardharris@operamail.com', 'Subject: test',
+				'Message-ID: <4391c7c4.O2Nv9tYv045oM/+E%richardharris@operamail.com>',
+				'User-Agent: nail 11.24 7/14/05', 'MIME-Version: 1.0',
+				'Content-Type: text/plain; charset=us-ascii', 'Content-Transfer-Encoding: 7bit']
+		to = __hdr(hdrs,"To")
+		cc = __hdr(hdrs,"Cc")
+		bcc = __hdr(hdrs,"Bcc")
+
+	else:
+		msg = sys.stdin.read()
+		msg = msg.replace("\n\t", " ")
+		msg = msg.split("\n")
+		hdrs = msg[:msg.index("")]
+		to = __hdr(hdrs,"To")
+		cc = __hdr(hdrs,"Cc")
+		bcc = __hdr(hdrs,"Bcc")
+		From = __hdr(hdrs,"From")
+		subject = __hdr(hdrs,"Subject")
+		text = msg[msg.index("")+1:]
+		text = "\n".join(text)
+
+
+	if (0):								# DEBUG SWITCH
+		__debug_client(hdrs, attachments, From, to, cc, bcc, subject, text)
+		sys.exit()	
+
+	b = mechanoid.Browser()
+	y = MailDotYahoo(b, DEBUG, NOCLIENT)
+	response = y.go_to()
+	response = y.log_in( From )
+	response = y.compose()
+	response = y.send_mail(to, cc, bcc, subject, text)
+	y.check_response(response)
+		
+except:
+	__exit(to, subject)
+	raise
