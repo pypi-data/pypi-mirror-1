@@ -1,0 +1,134 @@
+.. include:: header.txt
+
+===============
+ Process Pools
+===============
+
+*XXX Experimental -- API is liable to change*
+
+The `processing.pool` module has one public class:
+
+    **class** `Pool(processes=None)`
+        A class representing a pool of worker processes.  
+
+        Tasks can be offloaded to the pool and the results dealt with
+        when they become available.
+
+
+Pool objects
+============
+
+`Pool` has the following public methods:
+
+    `__init__(processes=None)`
+        The constructor creates and starts `processes` worker
+        processes.  If `processes` is `None` then `cpuCount()` is used
+        to find a default or 1 if `cpuCount()` raises `NotImplemented`.
+
+    `apply(func, args, kwds)`
+        Equivalent of the `apply()` builtin function.  It blocks till
+        the result is ready.
+
+    `apply_async(func, args, kwds)`
+        A variant of the `apply()` method which returns a
+        result object --- see `Asynchronous result objects`_.
+
+    `map(func, iterable, chunksize=None)`
+        A parallel equivalent of the `map()` builtin function.  It
+        blocks till the result is ready.  
+
+        This method chops the iterable into a number of chunks which
+        it submits to the process pool as separate tasks.  The
+        (maximum) size of these chunks can be specified by setting
+        `chunksize` to a positive integer.
+
+    `map_async(func, iterable, chunksize=None)`
+        A variant of the `map()` method which returns a result object
+        --- see `Asynchronous result objects`_.
+        
+    `imap(func, iterable)`
+        An equivalent of `itertools.imap()`.
+
+        Note that this treats each element of the iterable as a
+        separate task, so for a long iterable where the function is
+        cheap to evaluate this likely to be **much** slower than using
+        `map()`.
+
+        Also notice that the `next(timeout=None)` method of the
+        iterator returned by the `imap()` method has a timeout
+        parameter.  `next(timeout)` will raise
+        `processing.TimeoutError` if the result cannot be returned
+        with `timeout` seconds.
+
+    `imap_unordered(func, iterable)`
+        The same as `imap()` except that the ordering of the results
+        from the returned iterator should be considered arbitrary.
+        (Only when there is only one worker process is the order
+        guaranteed to be "correct".)
+
+    `shutdown()`
+        Tells the worker processes to shutdown.  Gets called
+        automatically when the pool object is garbage collected or
+        when the process shuts down.
+
+    `join()`
+        Tells the worker processes to shutdown and waits for them to
+        finish.
+
+
+Asynchronous result objects
+===========================
+
+The result objects returns by `apply_async()` and `map_async()` have
+the following public methods:
+
+    `get(timeout=None)`
+        Returns the result when it arrives.  If `timeout` is not
+        `None` and the result does not arrive within `timeout` seconds
+        then `processing.TimeoutError` is raised.  If the remote call
+        raised an exception then that exception will be reraised by `get()`.
+
+    `wait(timeout=None)`
+        Waits until the result is available or until `timeout` seconds
+        pass.
+
+    `ready()`
+        Returns whether the call has completed.
+
+    `successful()`
+        Returns whether the call completed without raising an
+        exception.  Will raise `AssertionError` if the result is not
+        ready.
+
+
+Examples
+========
+
+The following example demonstrates the use of a pool::
+
+    >>> from processing import Pool
+    >>> def square(x): return x*x
+    ... 
+    >>> p = Pool(4)
+    >>> r = p.apply_async(square, [4])
+    >>> r.ready()
+    True
+    >>> r.successful()
+    True
+    >>> r.get()
+    16
+    >>> p.map(square, range(10))
+    [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
+    >>> it = p.imap(square, range(10))
+    >>> it.next(timeout=1)
+    0
+    >>> it.next(timeout=1)
+    1
+
+Note that on windows the example will fail because the worker
+processes are not forks of the original process and they will not know
+about the `square()` function.
+
+.. _Prev: proxy-objects.html
+.. _Up: processing-ref.html
+.. _Next: connection-ref.html
