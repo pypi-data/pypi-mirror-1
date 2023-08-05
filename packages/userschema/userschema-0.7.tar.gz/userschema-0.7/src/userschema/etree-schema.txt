@@ -1,0 +1,134 @@
+Representing Schemas as XML
+===========================
+
+Importing Schema from XML Files
+-------------------------------
+
+It would be useful to have a trivially paresable XML format for defining
+schemas, exposing the full expressiveness of the Zope3 schema model to
+non-programmers (both the CSV and HTML formats are subsests).
+
+I would propose that we create a format based on an objectify-like
+representation of a set of schemas, e.g., something like::
+
+  >>> _SCHEMA_XML = """
+  ... <schemas>
+  ...  <schema name="myschema">
+  ...   <field name="favorite_color" type="TextLine">
+  ...    <title>Favorite Color</title>
+  ...    <description>What is your favorite color?</description>
+  ...    <required>True</required>
+  ...    <readonly>False</readonly>
+  ...   </field>
+  ...   <field name="favorite_number" type="Int">
+  ...    <title>Favorite Number</title>
+  ...    <description>What is your favorite number?</description>
+  ...    <required>False</required>
+  ...    <readonly>False</readonly>
+  ...   </field>
+  ...  </schema>
+  ... </schemas>"""
+
+In order to generate a schema from this, we need to register utilities
+which can convert nodes with a given type into fields::
+
+  >>> from zope.component import provideUtility
+  >>> from userschema.etree import INodeToField
+
+We need one "node converter" for each kind of field.  The etree module
+defines handlers for various "stock" field types::
+
+  >>> from userschema.etree import TextLineHandler
+  >>> from userschema.etree import IntHandler
+  >>> provideUtility(TextLineHandler, INodeToField, 'TextLine')
+  >>> provideUtility(IntHandler, INodeToField, 'Int')
+
+We can then create a schema from the XML document::
+
+  >>> from zope.interface.interface import InterfaceClass
+  >>> from zope.schema import TextLine
+  >>> from userschema.etree import fromXML
+  >>> a_schema = fromXML(_SCHEMA_XML)
+  >>> type(a_schema) is InterfaceClass
+  True
+
+If we don't override it, the __name__ of the generated interface is
+derived from the schema element's name attribute::
+
+  >>> print a_schema.__name__
+  myschema
+
+We can pass the 'element_name' to override::
+
+  >>> a_schema = fromXML(_SCHEMA_XML, name='foobar')
+  >>> print a_schema.__name__
+  foobar
+
+The '__module__' attribute of the generated interface defaults to
+'userschema'::
+
+  >>> print a_schema.__module__
+  userschema
+
+We can override that by passing 'module_name'::
+
+  >>> a_schema = fromXML(_SCHEMA_XML, module_name='somemodule')
+  >>> print a_schema.__module__
+  somemodule
+
+The attributes of the schema correspond to the form widget names::
+
+  >>> names = list(a_schema.names())
+  >>> names.sort()
+  >>> print names
+  ['favorite_color', 'favorite_number']
+
+Configuring this Stuff
+----------------------
+
+We would then add a ZCML directive, e.g.::
+
+  <userschema:xmldefinition
+    target="dotted.path" <!-- optional override -->
+    package="dotted.path" <!-- for relative filenames -->
+    file="filename.xml"
+    schema="myschema"
+    />
+
+We might even get fance, and allow pulling out only some fields:
+
+  <userschema:xmldefinition
+    target="dotted.path" <!-- not optional for field subsets -->
+    package="dotted.path" <!-- for relative filenames -->
+    file="filename.xml"
+    fields="//schema[@id=myschema]/...." <!-- XPath yielding field nodes -->
+    />
+
+Or, for extra bonus points, we could *combine* field sets, e.g.:
+
+  <userschema:xmldefinition
+    target="dotted.path"> <!-- required for this use case -->
+   <userschema:xmlsubset
+    package="dotted.path"
+    file="filename.xml"
+    schema="myschema"
+    />
+   <userschema:xmlsubset
+    package="Products.CMFCore"
+    filename="dublincore.xml"
+    schema="simple_dublin_core"
+    />
+   </userschema:xmldefinition>
+ 
+Note that, as with other forms of reuse, these last two options work
+against the goal of making non-programmers responsible for specifying
+schema definitions.
+
+Emitting XML Representations of Schemas
+---------------------------------------
+
+We would likely need to be able to emit this XML format, too, which would
+make integrating forms based Zope3 schema into Paul's 'agility' work more
+straightforward.
+
+cvs: $Id: etree-schema.txt,v 1.4 2007/01/31 17:52:36 tseaver Exp $:
