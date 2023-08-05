@@ -1,0 +1,64 @@
+plone.recipe.atcontenttypes
+===========================
+
+This recipe generate a custom ATContentTypes configuration file and place it in
+the etc/ folder of your zope instance.
+
+You can use it with a part like this:
+
+  [atcontenttypes-conf]
+  recipe                 = plone.recipe.atcontenttypes
+  zope-instance-location = /home/kevin/instance/etc/
+
+Generally, we use this recipe in combination with a zope instance part. Here is
+an example base on plone.recipe.zope2instance documentation
+( http://pypi.python.org/pypi/plone.recipe.zope2instance ):
+
+  [instance]
+  recipe         = plone.recipe.zope2instance
+  zope2-location = /path/to/zope2/install
+  user           = admin:admin
+  http-address   = 8080
+  eggs           = ${buildout:eggs} my.package
+  products       = ${buildout:directory}/products
+  zcml           = my.package
+
+  [atcontenttypes-conf]
+  recipe                 = plone.recipe.atcontenttypes
+  zope-instance-location = ${instance:location}
+  max-file-size          = ATImage:1mb
+                           ATFile:100mb
+                           ATNewsItem:500kb
+  max-image-dimension    = ATNewsItem:640,400
+                           ATImage:2048,2048
+
+Options
+-------
+
+zope-instance-location
+  The path where your zope instance is installed. If you are also using the
+  plone.recipe.zope2instance recipe (like the second example above), and you
+  have that configured as a part called 'instance' prior to the atcontenttypes
+  part, you can use ${instance:location} for this parameter.
+
+max-file-size (default: no) 
+  This option let you set the maximum file size (in byte, kb or mb). You can
+  specify different file size limit, one for each content type.
+  Example:
+    max-file-size = ATImage:1mb
+                    ATFile:100mb
+                    ATNewsItem:500kb
+
+max-image-dimension (default: 0,0)
+  This option let you set the maximum image dimension ("w, h"). "0,0" means no
+  rescaling of the original image. This option is per-content-type and its
+  syntax is the same as above.
+  Example:
+    max-image-dimension = ATNewsItem:640,400
+                          ATImage:2048,2048
+
+Reporting bugs or asking questions
+----------------------------------
+
+We have a shared bugtracker and help desk on Launchpad:
+https://bugs.launchpad.net/collective.buildout/
