@@ -1,0 +1,160 @@
+Webware's CGI Adapter
+=====================
+
+Copy the Webware/WebKit/Adapters/WebKit.cgi file to your CGI directory (eg.
+/home/httpd/cgi-bin) and ensure that the permissions are appropriate for a CGI
+program.
+
+Configuring in Apache
+---------------------
+
+Add a line like this to your Apache configuration file (eg. httpd.conf):
+
+ScriptAlias /webkit "/home/httpd/cgi-bin/WebKit.cgi"
+
+Configuring in AOLserver
+------------------------
+
+NOTE: AOLserver does not seem to handle "URL encoded" character values
+NOTE: properly when such values appear in the path before the query string.
+
+Ensure the presence of the following lines in your configuration file (eg.
+config.tcl):
+
+ns_section "ns/server/${servername}/module/nscgi"
+ns_param   map "GET  /webkit /home/httpd/cgi-bin/WebKit.cgi" ;# CGI script file dir (GET).
+ns_param   map "POST /webkit /home/httpd/cgi-bin/WebKit.cgi" ;# CGI script file dir (POST).
+ns_param   interps CGIinterps
+
+ns_section "ns/interps/CGIinterps"
+ns_param   .cgi "/usr/bin/python"
+
+See docs/CGI/NOTES.txt for more information on AOLserver and CGI
+configuration.
+
+Patches for CGIAdapter when working with AOLserver
+--------------------------------------------------
+
+AOLserver appears to set empty CONTENT_LENGTH environment variable values. A
+patch for CGIAdapter.py in WebKit can be applied as follows (with a suitable
+relative path to WebStack from Webware/WebKit):
+
+cd Webware/WebKit
+patch -p0 < ../../WebStack/patches/Webware/WebKit/CGIAdapter.py.diff
+
+Authentication/Authorisation in Webware
+=======================================
+
+Since Webware provides some kind of CGI emulation environment, the actual HTTP
+headers involved with authentication/authorisation are not available to the
+WebStack transaction. Therefore, WebStack depends on Webware having access to
+the REMOTE_USER environment variable set by the Web server, and with Apache,
+this variable is only ever set when Apache itself has performed
+authentication. Whilst applications can send the "WWW-Authenticate" header to
+HTTP clients, unless Apache has been instructed to process the resulting
+username/password information, the REMOTE_USER will apparently remain
+undefined.
+
+Consequently, it is recommended that the following kind of definition is added
+to httpd.conf (for Apache) in order to give applications access to
+username/password details:
+
+<Location "/webkit/auth">
+    AuthType Basic
+    AuthName "AuthResource"
+    AuthUserFile /usr/local/apache2/conf/users
+    require valid-user
+</Location>
+
+The details of the application's deployment, including the exact pathname of
+the users file and the appropriate access policy, must obviously be defined
+according to the actual application concerned.
+
+Note that the above example will only apply authentication to either a
+specific context (for Webware releases beyond 0.8.1) and only to a specific
+"region" of possible URLs (for Webware 0.8.1 and earlier).
+
+For Webware Releases Beyond 0.8.1
+=================================
+
+WebStack applications are supported as contexts within WebKit, meaning that a
+certain prefix in the URL determines whether an application is sent a
+particular request.
+
+Each context must be defined in the Webware/WebKit/Configs/Application.config
+file within the 'Contexts' dictionary; for example:
+
+Contexts['simple'] = '/home/paulb/Software/Python/WebStack/examples/Webware/SimpleContext'
+
+Note that the path to the context directory must be absolute, although the
+context directory may reside within WebKit itself such that the path may then
+make use of the special WebKitPath variable.
+
+Note also that the name of the context (eg. 'simple') must not be the same as
+the name of any other package used within the application (and possibly any
+other applications in the application server), with the only reasonable
+exception being the context package name itself (eg. 'SimpleContext').
+Otherwise, the existing package will become overridden by the contents of the
+context itself.  Therefore, given that the Simple package is used to hold the
+actual application code, it is not wise to use 'Simple' as the context name.
+
+Running the application server:
+
+Change into the WebKit directory within Webware. Then, specifying the
+appropriate PYTHONPATH, invoke the application server. For example:
+
+PYTHONPATH=../../WebStack:../../WebStack/examples/Common ./AppServer
+
+The WebStack package must reside on the PYTHONPATH, along with the package
+containing the application itself.
+
+For Webware 0.8.1 or Earlier
+============================
+
+Support for WebStack applications is provided by a Webware plug-in which
+associates Webware resources having certain suffixes with certain WebStack
+applications, regardless of the context within which a resource appears. In
+order to make use of such a scheme, a WebStack application would have its
+resources residing in an arbitrary URL "hierarchy", but with each resource
+having the special suffix to indicate that it belongs to that application.
+
+In the case of an application whose chosen suffix is ".xyz", it would be
+possible, for example, to define resources residing at the following URL
+paths:
+
+  tasks/my-tasks.xyz
+  tasks/outstanding/urgent.xyz
+  agenda/today.xyz
+
+This is somewhat counter-intuitive to typical Webware concepts, and it is
+recommended that Webware releases beyond 0.8.1 are used together with the
+appropriate WebStack context mechanisms instead of using this plug-in scheme.
+
+In order to support such behaviour, some patches must be applied to WebKit
+(with a suitable relative path to WebStack from Webware/WebKit):
+
+cd Webware/WebKit
+patch -p0 < ../../WebStack/patches/Webware/WebKit/Application.py-0.8.1.diff
+patch -p0 < ../../WebStack/patches/Webware/WebKit/HTTPRequest.py-0.8.1.diff
+
+Each plug-in, representing a WebStack application, should be visible in the
+Webware root directory. A symbolic link can be used to make each example
+appear; the Simple application being installed as follows:
+
+cd Webware
+ln -s ../WebStack/examples/Webware/SimpleApp
+
+Configuring the application server:
+
+Ensure that the ExtraPathInfo parameter in WebKit/Configs/Application.config
+is set to 0.
+
+Running the application server:
+
+Change into the WebKit directory within Webware. Then, specifying the
+appropriate PYTHONPATH, invoke the application server. For example:
+
+PYTHONPATH=../../WebStack:../../WebStack/examples/Common ./AppServer
+
+The WebStack package must reside on the PYTHONPATH, along with the package
+containing the application itself.
