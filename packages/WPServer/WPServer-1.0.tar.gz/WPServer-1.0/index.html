@@ -1,0 +1,234 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <link rel="stylesheet" href="http://openlayers.org/api/2.5-rc5/theme/default/style.css" type="text/css" />
+    <style type="text/css">
+        html, body {  
+            height: 98%;
+            font-size: .95em; 
+        }  
+        ul {
+           padding-left: 20px;
+        }   
+        h1 { 
+          font-size: 1.5em;
+          margin-top:0px
+        }
+        #map {
+            width: 70%;
+            height: 95%;
+            border: 1px solid black;
+        }
+        .olControlEditingToolbar  {
+            width: 400px!important;
+        }    
+        .olControlEditingToolbar .olControlSelectFeatureItemActive { 
+          background-image: url("img/select_feature_on.png");
+          background-repeat: no-repeat;
+        }
+        .olControlEditingToolbar .olControlSelectFeatureItemInactive { 
+          background-image: url("img/select_feature_off.png");
+          background-repeat: no-repeat;
+        }
+        .olControlEditingToolbar .olControlModifyFeatureItemActive { 
+          background-image: url("img/move_vertex_on.png");
+          background-repeat: no-repeat;
+        }
+        .olControlEditingToolbar .olControlModifyFeatureItemInactive { 
+          background-image: url("img/move_vertex_off.png");
+          background-repeat: no-repeat;
+        }
+        .olControlEditingToolbar .olControlDragFeatureItemActive { 
+          background-image: url("http://openlayers.org/api/2.5-rc5/theme/default/img/move_feature_on.png");
+          background-repeat: no-repeat;
+        }
+        .olControlEditingToolbar .olControlDragFeatureItemInactive { 
+          background-image: url("http://openlayers.org/api/2.5-rc5/theme/default/img/move_feature_off.png");
+          background-repeat: no-repeat;
+        }
+    </style>
+    <title>WPServer Demo</title>
+    <script src="http://openlayers.org/api/2.5-rc5/OpenLayers.js"></script>
+    <script type="text/javascript">
+        var lon = 5;
+        var lat = 40;
+        var zoom = 5;
+        var request_count = 0;
+        var response_count = 0; 
+        var map, layer, vlayer, modify_feature;
+
+        function init(){
+            OpenLayers.Format.GeoJSON.prototype.parseCoords.point = function (array) { 
+                return new OpenLayers.Geometry.Point(array[0], array[1]); 
+            }
+            OpenLayers.Feature.Vector.style['default']['strokeWidth'] = 3;
+            map = new OpenLayers.Map( 'map', { controls: [], fallThrough: true } );
+            layer = new OpenLayers.Layer.WMS( "OpenLayers WMS", 
+                    "http://labs.metacarta.com/wms/vmap0", {layers: 'basic'} );
+            map.addLayer(layer);
+
+            vlayer = new OpenLayers.Layer.Vector( "Editable" );
+            map.addLayer(vlayer);
+
+            vlayer.preFeatureInsert = function(feature) {
+                for(var i in feature.style) {
+                    if (feature.attributes[i]) {
+                        feature.style[i] = feature.attributes[i];
+                    }
+                }    
+            }
+            map.addControl(new OpenLayers.Control.PanZoomBar());
+            
+            map.setCenter(new OpenLayers.LonLat(lon, lat), zoom);
+             
+            var p = new OpenLayers.Control.EditingToolbar(vlayer);
+            p.addControls(new OpenLayers.Control.DragFeature(vlayer));
+            modify_feature = new OpenLayers.Control.ModifyFeature(vlayer)
+            p.addControls(modify_feature);
+            p.addControls(new OpenLayers.Control.SelectFeature(vlayer, {'multiple':true}));
+            map.addControl(p);
+            p.activateControl(p.controls[3])
+            for(var i = 0; i < p.controls.length; i++) {
+                p.controls[i].panel_div.title = p.controls[i].CLASS_NAME.split(".")[2];
+            }    
+        }
+        function clearFeatures() {
+            vlayer.removeFeatures(vlayer.features);
+            return false;
+        }
+        function request(type, args) {
+            if (modify_feature.feature) {
+                modify_feature.unselectFeature(modify_feature.feature);
+            }    
+            var features = vlayer.features;
+            if (vlayer.selectedFeatures.length) {
+                features = vlayer.selectedFeatures;
+            }
+            featuresToProcess = features;
+            if (!features.length) { return false; }
+            if (type == "dissolve") {
+                for(var i = 0; i < features.length; i++) {
+                    if (features[i].geometry.CLASS_NAME == "OpenLayers.Geometry.Point" || 
+                        features[i].geometry.CLASS_NAME == "OpenLayers.Geometry.LineString") {
+                        updateStatus("You can't dissolve points or lines. Buffer first.", "error");
+                        return false;
+                    }
+                } 
+            } 
+            var paramString = args ? "?" + OpenLayers.Util.getParameterString(args) : "";
+            var geojson = new OpenLayers.Format.GeoJSON();
+            var data = geojson.write(features);
+            new OpenLayers.Ajax.Request("wps.cgi/" +
+                                        type + paramString,
+                         {   method: 'post',
+                             postBody: data,
+                             onComplete: update
+                          }
+                         );
+            request_count++; 
+            updateStatus("Processing...");
+            return false;             
+        }
+        function update(request) {
+            response_count++; 
+            vlayer.removeFeatures(featuresToProcess);
+            var g = new OpenLayers.Format.GeoJSON();
+            var features =  g.read(request.responseText)
+            if (features.length) { 
+                var extent = new OpenLayers.Bounds();
+                vlayer.addFeatures(features);
+                for(var i = 0; i < features.length; i++) {
+                    extent.extend(features[i].geometry.getBounds());
+                }
+                if (!map.getExtent().containsBounds(extent)) {
+                    map.zoomToExtent(extent);
+                }
+                updateStatus("Processing complete.");
+            } else { 
+                updateStatus("Action returned no features.", "error");
+            }    
+        }
+        function updateStatus(statusMessage, type) {
+            var statusElement = OpenLayers.Util.getElement('status');
+            var message = statusMessage + " (" + response_count + "/" + request_count + ")"; 
+            statusElement.innerHTML = message;
+            switch(type) {
+                case "error":
+                    statusElement.style.color = "red";
+                    break;
+                default:
+                    statusElement.style.color = "black";
+            }        
+        }   
+    </script>
+  </head>
+  <body onload="init()">
+    <div style="float:right;width:28%">
+    <h1>WPServer Demo</h1>
+<p>
+    Draw features. Once you're done, choose an action -- it will send a
+    request to the server, and redraw the features.
+</p>
+<p>
+    If you'd like, you can just select a few features, and click the processing
+    button -- if features are selected, they will be processed rather than the
+    whole layer.  
+</p>   
+<p>
+    As always, you can hold down shift to draw 'freehand', in sketch mode. This
+    is especially useful to see the 'simplify' functionality in action. To stop
+    drawing in freehand mode, just let go of the mouse -- in non-freehand mode,
+    double click to stop.
+</p>  
+<p>
+    Powered by OpenLayers and 
+    <a href="http://code.google.com/p/webprocessingserver/">Web Processing Server</a>.
+</p>
+<ul>
+    <li>Multiple Geometry Actions:
+        <ul>
+            <li>
+                <a href="#" onclick="return request('dissolve')">Dissolve</a>
+            </li>
+            <li>
+                <a href="#" onclick="return request('union')">Union</a>
+            </li>
+            <li>
+                <a href="#" onclick="return request('intersect')">Intersection</a>
+            </li>
+            <li>
+                <a href="#" onclick="return request('difference')">Difference</a>
+            </li>
+            <li>
+                <a href="#" onclick="return request('symmetricdifference')">SymmetricDifference</a>
+           </li>
+        </ul>
+    </li>
+    <li>Per Geometry Actions:
+        <ul>
+            <li>
+                <a href="#" onclick="return request('convex')">Convex Hull</a>
+            </li>
+            <li>
+                <a href="#" onclick="return request('centroid')">Centroid</a>
+            </li>
+            <li>
+                <a href="#" onclick="return request('buffer', {'buffer':OpenLayers.Util.getElement('buffer').value})">Buffer</a> Size: <input id="buffer" type="text" size="2" value="2" />
+            </li>
+            <li>
+                <a href="#" onclick="return request('simplify', {'tolerance':OpenLayers.Util.getElement('tolerance').value})">Simplify</a> Tolerance: <input id="tolerance" type="text" size="2" value="1" />
+            </li>
+        </ul>
+    </li>
+    <li>Feature Management: <ul>
+            <li><a href="#" onclick="return clearFeatures()">Clear All Features</a></li>
+        </ul>    
+    </li>
+</ul>
+<div id="status"></div>
+<p>
+</p>  
+</div>
+    <div id="map"></div>
+  </body>
+</html>
