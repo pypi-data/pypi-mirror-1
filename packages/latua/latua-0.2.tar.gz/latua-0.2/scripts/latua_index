@@ -1,0 +1,217 @@
+#!/usr/bin/env python
+# -*- coding:utf-8 -*-
+
+## Copyright (c) 2006, 2007, Joerg Zinke, Jonas Weismueller (team@petunial.com)
+## All rights reserved.
+##
+## Redistribution and use in source and binary forms, with or without
+## modification, are permitted provided that the following conditions
+## are met:
+##
+##  * Redistributions of source code must retain the above copyright
+##    notice, this list of conditions and the following disclaimer.
+##  * Redistributions in binary form must reproduce the above copyright
+##    notice, this list of conditions and the following disclaimer in
+##    the documentation and/or other materials provided with the
+##    distribution.
+##  * Neither the name of the Petunial Team nor the names of its
+##    contributors may be used to endorse or promote products derived
+##    from this software without specific prior written permission.
+##
+## THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+## "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+## LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+## FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+## COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+## INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+## BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+## LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+## CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+## LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+## POSSIBILITY OF SUCH DAMAGE.
+
+"""
+
+latua_index
+
+script for working with latua index
+
+"""
+
+__version__ = "$Revision: 296 $"
+# $URL: http://www.petunial.de/svn/latua/tags/0.2/scripts/latua_index $
+
+## standard modules
+import os
+import time
+import dircache
+import optparse
+
+## latua modules
+import latua
+
+class _Index(latua.Base):
+    """Cleanup and propset svn files files."""
+    def __init__(self):
+        latua.Base.__init__(self)
+        self.__version = latua.Version()
+        self.__index = None
+
+    def __add(self, arguments):
+        """Add directory or file to index."""
+        for path in arguments[1:]:
+            if os.path.isdir(path):
+                ## add whole directory to index
+                start = time.time()
+                for item in dircache.listdir(path):
+                    print ">> adding file to index: %s" % (os.path.join(path, item))
+                    self.__index.file.add(os.path.join(path, item), filetype="text")
+                print ">> index of files took: %s seconds" % (int(time.time() - start))
+            else:
+                ## add single file to index
+                start = time.time()
+                print ">> adding file to index: %s" % (path)
+                self.__index.file.add(path, filetype="text")
+                print ">> index of file took: %s seconds" % (int(time.time() - start))
+
+    def __maintenance(self):
+        """Maintenance index."""
+        start = time.time()
+        print ">> maintenance index"
+        self.__index.database.maintenance()
+        print ">> maintenance took: %s seconds" % (int(time.time() - start))
+
+    def __meta(self, filename):
+        """Print meta data for filename."""
+        start = time.time()
+        print ">> meta data for file in index: %s" % (filename)
+        result = self.__index.file.meta(filename)
+        for key, value in result.iteritems():
+            print ">> %s: %s" % (key, value)
+        print ">> meta data acesss took: %s seconds" % (int(time.time() - start))
+
+    def __remove(self, filename):
+        """Remove single file from index."""
+        start = time.time()
+        print ">> remove file from index: %s" % (filename)
+        self.__index.file.remove(filename)
+        print ">> removal of file took: %s seconds" % (int(time.time() - start))
+
+    def __rename(self, old_filename, new_filename):
+        """Rename filename in index."""
+        start = time.time()
+        print ">> rename file in index: %s to %s" % (old_filename, new_filename)
+        self.__index.file.rename(old_filename, new_filename)
+        print ">> rename of file took: %s seconds" % (int(time.time() - start))
+
+    def __reset(self):
+        """Reset index."""
+        result = raw_input(">> do you really want to reset the index database? (y/N): ")
+        result = result.strip()
+        result = result.lower()
+        if result == "y" or result == "yes":
+            start = time.time()
+            print ">> reset index"
+            self.__index.database._reset()
+            print ">> reset took: %s seconds" % (int(time.time() - start))
+        else:
+            print ">> reset aborted"
+
+    def __search(self, term):
+        """Search for term in index."""
+        start = time.time()
+        print ">> search for term in index: %s" % (term)
+        result = self.__index.search.expression(term)
+        for item in result:
+            print ">> %s (line %s): %s" % (item["filename"], item["linenumber"], item["line"])
+        print ">> search in index took: %s seconds" % (int(time.time() - start))
+
+    def __update(self, arguments):
+        """Update directory or file in index."""
+        for path in arguments[1:]:
+            if os.path.isdir(path):
+                ## add whole directory to index
+                start = time.time()
+                for item in dircache.listdir(path):
+                    print ">> updating file in index: %s" % (os.path.join(path, item))
+                    self.__index.file.update(os.path.join(path, item))
+                print ">> index of files took: %s seconds" % (int(time.time() - start))
+            else:
+                ## add single file to index
+                start = time.time()
+                print ">> updating file in index: %s" % (path)
+                self.__index.file.update(path)
+                print ">> index of file took: %s seconds" % (int(time.time() - start))
+
+    def run(self):
+        """Main function."""
+        ## create an command line option parser
+        options_parser = optparse.OptionParser(usage="%prog [options] action [argument(s)}",
+                                               version="latua_index latua v%s\n%s" %
+                                               (self.__version.latua_version,
+                                                self.__version.copyright))
+        ## set default values
+        options_parser.set_defaults(database="index.db")
+        ## database file
+        options_parser.add_option("-d",
+                                  "--database",
+                                  dest="database",
+                                  metavar="FILE",
+                                  help="use database FILE")
+        (options, arguments) = options_parser.parse_args()
+        ## check given arguments
+        if len(arguments) >= 1:
+            action = arguments[0]
+            ## get index
+            self.__index = latua.Index(options.database)
+            if action == "add":
+                if len(arguments) >= 2:
+                    self.__add(arguments)
+                else:
+                    options_parser.error("incorrect number of arguments for action add")
+            elif action == "maintenance":
+                if len(arguments) == 1:
+                    self.__maintenance()
+                else:
+                    options_parser.error("incorrect number of arguments for action maintenance")
+            elif action == "meta":
+                if len(arguments) == 2:
+                    self.__meta(arguments[1])
+                else:
+                    options_parser.error("incorrect number of arguments for action meta")
+            elif action == "remove":
+                if len(arguments) == 2:
+                    self.__remove(arguments[1])
+                else:
+                    options_parser.error("incorrect number of arguments for action remove")
+            elif action == "rename":
+                if len(arguments) == 3:
+                    self.__rename(arguments[1], arguments[2])
+                else:
+                    options_parser.error("incorrect number of arguments for action rename")
+            elif action == "reset":
+                if len(arguments) == 1:
+                    self.__reset()
+                else:
+                    options_parser.error("incorrect number of arguments for action reset")
+            elif action == "search":
+                if len(arguments) == 2:
+                    self.__search(arguments[1])
+                else:
+                    options_parser.error("incorrect number of arguments for action search")
+            elif action == "update":
+                if len(arguments) >= 2:
+                    self.__update(arguments)
+                else:
+                    options_parser.error("incorrect number of arguments for action update")
+            else:
+                options_parser.error("unknown action")
+        else:
+            options_parser.error("incorrect number of arguments")
+
+## last line but first step
+if __name__ == "__main__":
+    _indexer = _Index()
+    _indexer.run()
+

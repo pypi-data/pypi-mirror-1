@@ -1,0 +1,200 @@
+#!/usr/bin/env python
+# -*- coding:utf-8 -*-
+
+## Copyright (c) 2006, 2007, Joerg Zinke, Jonas Weismueller (team@petunial.com)
+## All rights reserved.
+##
+## Redistribution and use in source and binary forms, with or without
+## modification, are permitted provided that the following conditions
+## are met:
+##
+##  * Redistributions of source code must retain the above copyright
+##    notice, this list of conditions and the following disclaimer.
+##  * Redistributions in binary form must reproduce the above copyright
+##    notice, this list of conditions and the following disclaimer in
+##    the documentation and/or other materials provided with the
+##    distribution.
+##  * Neither the name of the Petunial Team nor the names of its
+##    contributors may be used to endorse or promote products derived
+##    from this software without specific prior written permission.
+##
+## THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+## "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+## LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+## FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+## COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+## INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+## BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+## LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+## CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+## LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+## POSSIBILITY OF SUCH DAMAGE.
+
+"""
+
+latua_translations
+
+script for generating translation files
+
+"""
+
+__version__ = "$Revision: 289 $"
+# $URL: http://www.petunial.de/svn/latua/tags/0.2/scripts/latua_translations $
+
+## standard modules
+import os
+import sys
+import time
+import shutil
+import optparse
+import subprocess
+
+## latua modules
+import latua
+
+class _Translations(latua.Base):
+    """Generate translation files."""
+    def __init__(self):
+        latua.Base.__init__(self)
+        self.__system = latua.System()
+        self.__version = latua.Version()
+
+    def __compile_templates(self, path, templates):
+        """Compile all cheetah templates temporary."""
+        files = self.__system.files.search(path, "file", ".tmpl", absolute=False)
+        ## cheetah-compile
+        command = "cheetah-compile --idir %s --odir %s %s" % (path, os.path.join(path, templates), " ".join(files))
+        print ">> running: %s" % (command)
+        process = subprocess.Popen(command, shell=True)
+        os.waitpid(process.pid, 0)
+
+    def __messages_pot(self, path, application):
+        """Generate messages.pot file from source."""
+        files = self.__system.files.search(path, "file", ".py", absolute=False)
+        ## xgettext
+        command = "xgettext %s -L Python -o -" % (" ".join(files))
+        print ">> running: %s" % (command)
+        process = subprocess.Popen(command, shell=True,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT,
+                                   close_fds=True)
+        ## (over-)write non-unique pot-file
+        file_handle = open(os.path.join(path, "locale", "messages.pot.nonunique"), "w")
+        for line in process.stdout.readlines():
+            line = line.replace("CHARSET", "UTF-8")
+            line = line.replace("SOME DESCRIPTIVE TITLE.", "%s translation" % (application))
+            line = line.replace("YEAR", time.strftime("%Y", time.localtime()))
+            line = line.replace("PACKAGE", application)
+            #line = line.replace("THE PACKAGE'S COPYRIGHT HOLDER", "%s (%s)" % (author, email))
+            line = line.replace("VERSION", "$Id: latua_translations 289 2007-10-12 18:55:14Z umaxx $")
+            #line = line.replace("FIRST AUTHOR", author)
+            #line = line.replace("EMAIL@ADDRESS", email)
+            #line = line.replace("FULL NAME", author)
+            file_handle.write(line)
+        file_handle.close()
+        ## msguniq
+        command = "msguniq %s -o %s" % (os.path.join(path, "locale", "messages.pot.nonunique"),
+                                        os.path.join(path, "locale", "messages.pot"))
+        print ">> running: %s" % (command)
+        process = subprocess.Popen(command, shell=True)
+        os.waitpid(process.pid, 0)
+
+    def __new_language(self, path, language):
+        """Add po file for new not already existing languages."""
+        command = "msginit --no-translator -l %s -i %s -o %s" % (language,
+                                                                 os.path.join(path, "locale", "messages.pot"),
+                                                                 os.path.join(path, "locale", "po", "%s.po" % (language)))
+        print ">> running: %s" % (command)
+        process = subprocess.Popen(command, shell=True,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT,
+                                   close_fds=True)
+        print process.stdout.read()
+        ## generate directory for new language
+        try:
+            os.makedirs(os.path.join(path, "locale", language, "LC_MESSAGES"))
+        except OSError, error:
+            ## directory maybe already exists
+            pass
+
+    def __generate_translation(self, path, language, application):
+        """Generate translation files."""
+        print ">> merging: %s" % (language)
+        ## merge new and old *.po files
+        command = "msgmerge --no-fuzzy-matching %s %s -o %s" % (os.path.join(path, "locale", "po", "%s.po" % (language)),
+                                                                os.path.join(path, "locale", "messages.pot"),
+                                                                os.path.join(path, "locale", language, "LC_MESSAGES", "%s.po" % (application)))
+        print ">> running: %s" % (command)
+        process = subprocess.Popen(command, shell=True,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT,
+                                   close_fds=True)
+        print process.stdout.read()
+        ## generate *.mo files
+        command = "msgfmt -o %s %s" % (os.path.join(path, "locale", language, "LC_MESSAGES", "%s.mo" % (application)),
+                                       os.path.join(path, "locale", language, "LC_MESSAGES", "%s.po" % (application)))
+        print ">> running: %s" % (command)
+        process = subprocess.Popen(command, shell=True,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT,
+                                   close_fds=True)
+        print process.stdout.read()
+
+    def __cleanup(self, path, templates):
+        """Cleanup no longer needed temporary files."""
+        ## cleanup and remove no longer needed compiled templates
+        shutil.rmtree(os.path.join(path, templates))
+        ## remove no longer needed non-unique pot-file
+        os.remove(os.path.join(path, "locale", "messages.pot.nonunique"))
+
+    def run(self):
+        """Main function."""
+        ## create an command line option parser
+        options_parser = optparse.OptionParser(usage="%prog [options] application path",
+                                               version="latua_translation latua v%s\n%s" %
+                                               (self.__version.latua_version,
+                                                self.__version.copyright))
+        ## set default values
+        options_parser.set_defaults(templates="templates_compiled",
+                                    languages=" ".join(self.platform.languages))
+        ## languages for translation
+        options_parser.add_option("-l",
+                                  "--languages",
+                                  dest="languages",
+                                  metavar="LANGUAGES",
+                                  help="create translation for LANGUAGES")
+        ## path to cheetah templates
+        options_parser.add_option("-t",
+                                  "--templates",
+                                  dest="templates",
+                                  metavar="DIR",
+                                  help="compile templates in DIR")
+        (options, arguments) = options_parser.parse_args()
+        ## check given arguments
+        if not len(arguments) == 2:
+            options_parser.error("incorrect number of arguments")
+        application = arguments[0]
+        path = arguments[1]
+        ## compile cheetah templates
+        self.__compile_templates(path, options.templates)
+        ## generate pot file
+        self.__messages_pot(path, application)
+        ## check for new languages and generate po file
+        for item in options.languages.split():
+            ## iterate over all languages
+            if not os.path.isfile(os.path.join(path, "locale", "po", "%s.po" % (item))):
+                self.__new_language(path, item)
+            ## generate translation
+            self.__generate_translation(path, item, application)
+            ## copy new *.po files
+            shutil.copy(os.path.join(path, "locale", item, "LC_MESSAGES", "%s.po" % (application)),
+                        os.path.join(path, "locale", "po", "%s.po" % (item)))
+        ## cleanup temporary files
+        self.__cleanup(path, options.templates)
+        print ">> finished"
+
+## last line but first step
+if __name__ == "__main__":
+    _translator = _Translations()
+    _translator.run()
