@@ -1,0 +1,882 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils 0.4: http://docutils.sourceforge.net/" />
+<title>APIs specific to lxml</title>
+<link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+<body>
+<div class="document" id="apis-specific-to-lxml">
+<h1 class="title">APIs specific to lxml</h1>
+<p>lxml tries to follow established APIs wherever possible.  Sometimes, however,
+the need to expose a feature in an easy way led to the invention of a new API.</p>
+<div class="contents topic">
+<p class="topic-title first"><a id="contents" name="contents">Contents</a></p>
+<ul class="simple">
+<li><a class="reference" href="#lxml-etree" id="id1" name="id1">lxml.etree</a></li>
+<li><a class="reference" href="#other-element-apis" id="id2" name="id2">Other Element APIs</a></li>
+<li><a class="reference" href="#trees-and-documents" id="id3" name="id3">Trees and Documents</a></li>
+<li><a class="reference" href="#iteration" id="id4" name="id4">Iteration</a></li>
+<li><a class="reference" href="#parsers" id="id5" name="id5">Parsers</a></li>
+<li><a class="reference" href="#iterparse-and-iterwalk" id="id6" name="id6">iterparse and iterwalk</a></li>
+<li><a class="reference" href="#error-handling-on-exceptions" id="id7" name="id7">Error handling on exceptions</a></li>
+<li><a class="reference" href="#python-unicode-strings" id="id8" name="id8">Python unicode strings</a></li>
+<li><a class="reference" href="#xpath" id="id9" name="id9">XPath</a></li>
+<li><a class="reference" href="#xslt" id="id10" name="id10">XSLT</a></li>
+<li><a class="reference" href="#relaxng" id="id11" name="id11">RelaxNG</a></li>
+<li><a class="reference" href="#xmlschema" id="id12" name="id12">XMLSchema</a></li>
+<li><a class="reference" href="#xinclude" id="id13" name="id13">xinclude</a></li>
+<li><a class="reference" href="#write-c14n-on-elementtree" id="id14" name="id14">write_c14n on ElementTree</a></li>
+</ul>
+</div>
+<!-- 1   lxml.etree
+2   Other Element APIs
+3   Trees and Documents
+4   Iteration
+5   Parsers
+6   iterparse and iterwalk
+7   Error handling on exceptions
+8   Python unicode strings
+9   XPath
+10  XSLT
+11  RelaxNG
+12  XMLSchema
+13  xinclude
+14  write_c14n on ElementTree -->
+<div class="section">
+<h1><a class="toc-backref" href="#id1" id="lxml-etree" name="lxml-etree">lxml.etree</a></h1>
+<p>lxml.etree tries to follow the <a class="reference" href="http://effbot.org/zone/element-index.htm">ElementTree API</a> wherever it can.  There are
+however some incompatibilities (see <a class="reference" href="compatibility.html">compatibility</a>).  The extensions are
+documented here.</p>
+<p>If you need to know which version of lxml is installed, you can access the
+<tt class="docutils literal"><span class="pre">lxml.etree.LXML_VERSION</span></tt> attribute to retrieve a version tuple.  Note,
+however, that it did not exist before version 1.0, so you will get an
+AttributeError in older versions.  The versions of libxml2 and libxslt are
+available through the attributes <tt class="docutils literal"><span class="pre">LIBXML_VERSION</span></tt> and <tt class="docutils literal"><span class="pre">LIBXSLT_VERSION</span></tt>.</p>
+<p>The following examples usually assume this to be executed first:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; from lxml import etree
+&gt;&gt;&gt; from StringIO import StringIO
+</pre>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id2" id="other-element-apis" name="other-element-apis">Other Element APIs</a></h1>
+<p>While lxml.etree itself uses the ElementTree API, it is possible to replace
+the Element implementation by <a class="reference" href="namespace_extensions.html">custom element subclasses</a>.  This has been
+used to implement well-known XML APIs on top of lxml.  The <tt class="docutils literal"><span class="pre">lxml.elements</span></tt>
+package contains examples.  Currently, there is a data-binding implementation
+called <a class="reference" href="objectify.html">objectify</a>, which is similar to the <a class="reference" href="http://uche.ogbuji.net/tech/4suite/amara/">Amara bindery</a> tool.</p>
+<p>Additionally, the <a class="reference" href="elements.html#lxml.elements.classlookup">lxml.elements.classlookup</a> module provides a number of
+different schemes to customize the mapping between libxml2 nodes and the
+Element classes used by lxml.etree.</p>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id3" id="trees-and-documents" name="trees-and-documents">Trees and Documents</a></h1>
+<p>Compared to the original ElementTree API, lxml.etree has an extended tree
+model.  It knows about parents and siblings of elements:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; root = etree.Element(&quot;root&quot;)
+&gt;&gt;&gt; a = etree.SubElement(root, &quot;a&quot;)
+&gt;&gt;&gt; b = etree.SubElement(root, &quot;b&quot;)
+&gt;&gt;&gt; c = etree.SubElement(root, &quot;c&quot;)
+&gt;&gt;&gt; d = etree.SubElement(root, &quot;d&quot;)
+&gt;&gt;&gt; e = etree.SubElement(d,    &quot;e&quot;)
+&gt;&gt;&gt; b.getparent() == root
+True
+&gt;&gt;&gt; print b.getnext().tag
+c
+&gt;&gt;&gt; print c.getprevious().tag
+b
+</pre>
+<p>Elements always live within a document context in lxml.  This implies that
+there is also a notion of an absolute document root.  You can retrieve an
+ElementTree for the root node of a document from any of its elements:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; tree = d.getroottree()
+&gt;&gt;&gt; print tree.getroot().tag
+root
+</pre>
+<p>Note that this is different from wrapping an Element in an ElementTree.  You
+can use ElementTrees to create XML trees with an explicit root node:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; tree = etree.ElementTree(d)
+&gt;&gt;&gt; print tree.getroot().tag
+d
+&gt;&gt;&gt; print etree.tostring(tree)
+&lt;d&gt;&lt;e/&gt;&lt;/d&gt;
+</pre>
+<p>All operations that you run on such an ElementTree (like XPath, XSLT, etc.)
+will understand the explicitly chosen root as root node of a document.  They
+will not see any elements outside the ElementTree.  However, ElementTrees do
+not modify their Elements:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; element = tree.getroot()
+&gt;&gt;&gt; print element.tag
+d
+&gt;&gt;&gt; print element.getparent().tag
+root
+&gt;&gt;&gt; print element.getroottree().getroot().tag
+root
+</pre>
+<p>The rule is that all operations that are applied to Elements use either the
+Element itself as reference point, or the absolute root of the document that
+contains this Element (e.g. for absolute XPath expressions).  All operations
+on an ElementTree use its explicit root node as reference.</p>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id4" id="iteration" name="iteration">Iteration</a></h1>
+<p>The ElementTree API makes Elements iterable to supports iteration over their
+children.  Using the tree defined above, we get:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; [ el.tag for el in root ]
+['a', 'b', 'c', 'd']
+</pre>
+<p>Tree traversal is commonly based on the <tt class="docutils literal"><span class="pre">element.getiterator()</span></tt> method:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; [ el.tag for el in root.getiterator() ]
+['root', 'a', 'b', 'c', 'd', 'e']
+</pre>
+<p>lxml.etree also supports this, but additionally features an extended API for
+iteration over the children, following/preceding siblings, ancestors and
+descendants of an element, as defined by the respective XPath axis:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; [ el.tag for el in root.iterchildren() ]
+['a', 'b', 'c', 'd']
+&gt;&gt;&gt; [ el.tag for el in root.iterchildren(reversed=True) ]
+['d', 'c', 'b', 'a']
+&gt;&gt;&gt; [ el.tag for el in b.itersiblings() ]
+['c', 'd']
+&gt;&gt;&gt; [ el.tag for el in c.itersiblings(preceding=True) ]
+['b', 'a']
+&gt;&gt;&gt; [ el.tag for el in e.iterancestors() ]
+['d', 'root']
+&gt;&gt;&gt; [ el.tag for el in root.iterdescendants() ]
+['a', 'b', 'c', 'd', 'e']
+</pre>
+<p>Note how <tt class="docutils literal"><span class="pre">element.iterdescendants()</span></tt> does not include the element itself, as
+opposed to <tt class="docutils literal"><span class="pre">element.getiterator()</span></tt>.  The latter effectively implements the
+'descendant-or-self' axis in XPath.</p>
+<p>All of these iterators support an additional <tt class="docutils literal"><span class="pre">tag</span></tt> keyword argument that
+filters the generated elements by tag name:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; [ el.tag for el in root.iterchildren(tag='a') ]
+['a']
+&gt;&gt;&gt; [ el.tag for el in d.iterchildren(tag='a') ]
+[]
+&gt;&gt;&gt; [ el.tag for el in root.iterdescendants(tag='d') ]
+['d']
+&gt;&gt;&gt; [ el.tag for el in root.getiterator(tag='d') ]
+['d']
+</pre>
+<p>See also the section on the utility functions <tt class="docutils literal"><span class="pre">iterparse()</span></tt> and
+<tt class="docutils literal"><span class="pre">iterwalk()</span></tt> below.</p>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id5" id="parsers" name="parsers">Parsers</a></h1>
+<p>One of the differences is the parser.  There is support for both XML and
+(broken) HTML.  Both are based on libxml2 and therefore only support options
+that are backed by the library.  Parsers take a number of keyword arguments.
+The following is an example for namespace cleanup during parsing, first with
+the default parser, then with a parametrized one:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; xml = '&lt;a xmlns=&quot;test&quot;&gt;&lt;b xmlns=&quot;test&quot;/&gt;&lt;/a&gt;'
+
+&gt;&gt;&gt; et     = etree.parse(StringIO(xml))
+&gt;&gt;&gt; print etree.tostring(et.getroot())
+&lt;a xmlns=&quot;test&quot;&gt;&lt;b xmlns=&quot;test&quot;/&gt;&lt;/a&gt;
+
+&gt;&gt;&gt; parser = etree.XMLParser(ns_clean=True)
+&gt;&gt;&gt; et     = etree.parse(StringIO(xml), parser)
+&gt;&gt;&gt; print etree.tostring(et.getroot())
+&lt;a xmlns=&quot;test&quot;&gt;&lt;b/&gt;&lt;/a&gt;
+</pre>
+<p>HTML parsing is similarly simple.  The parsers have a <tt class="docutils literal"><span class="pre">recover</span></tt> keyword
+argument that the HTMLParser sets by default.  It lets libxml2 try its best to
+return something usable without raising an exception.  Note that this
+functionality depends entirely on libxml2.  You should use libxml2 version
+2.6.21 or newer to take advantage of this feature:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; broken_html = &quot;&lt;html&gt;&lt;head&gt;&lt;title&gt;test&lt;body&gt;&lt;h1&gt;page title&lt;/h3&gt;&quot;
+
+&gt;&gt;&gt; parser = etree.HTMLParser()
+&gt;&gt;&gt; et     = etree.parse(StringIO(broken_html), parser)
+
+&gt;&gt;&gt; print etree.tostring(et.getroot())
+&lt;html&gt;&lt;head&gt;&lt;title&gt;test&lt;/title&gt;&lt;/head&gt;&lt;body&gt;&lt;h1&gt;page title&lt;/h1&gt;&lt;/body&gt;&lt;/html&gt;
+</pre>
+<p>Lxml has an HTML function, similar to the XML shortcut known from
+ElementTree:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; html = etree.HTML(broken_html)
+&gt;&gt;&gt; print etree.tostring(html)
+&lt;html&gt;&lt;head&gt;&lt;title&gt;test&lt;/title&gt;&lt;/head&gt;&lt;body&gt;&lt;h1&gt;page title&lt;/h1&gt;&lt;/body&gt;&lt;/html&gt;
+</pre>
+<p>The use of the libxml2 parsers makes some additional information available at
+the API level.  Currently, ElementTree objects can access the DOCTYPE
+information provided by a parsed document, as well as the XML version and the
+original encoding:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; pub_id  = &quot;-//W3C//DTD XHTML 1.0 Transitional//EN&quot;
+&gt;&gt;&gt; sys_url = &quot;http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd&quot;
+&gt;&gt;&gt; doctype_string = '&lt;!DOCTYPE html PUBLIC &quot;%s&quot; &quot;%s&quot;&gt;' % (pub_id, sys_url)
+&gt;&gt;&gt; xml_header = '&lt;?xml version=&quot;1.0&quot; encoding=&quot;ascii&quot;?&gt;'
+&gt;&gt;&gt; xhtml = xml_header + doctype_string + '&lt;html&gt;&lt;body&gt;&lt;/body&gt;&lt;/html&gt;'
+
+&gt;&gt;&gt; tree = etree.parse(StringIO(xhtml))
+&gt;&gt;&gt; docinfo = tree.docinfo
+&gt;&gt;&gt; print docinfo.public_id
+-//W3C//DTD XHTML 1.0 Transitional//EN
+&gt;&gt;&gt; print docinfo.system_url
+http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd
+&gt;&gt;&gt; docinfo.doctype == doctype_string
+True
+
+&gt;&gt;&gt; print docinfo.xml_version
+1.0
+&gt;&gt;&gt; print docinfo.encoding
+ascii
+</pre>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id6" id="iterparse-and-iterwalk" name="iterparse-and-iterwalk">iterparse and iterwalk</a></h1>
+<p>As known from ElementTree, the <tt class="docutils literal"><span class="pre">iterparse()</span></tt> utility function returns an
+iterator that generates parser events for an XML file (or file-like object),
+while building the tree.  The values are tuples <tt class="docutils literal"><span class="pre">(event-type,</span> <span class="pre">object)</span></tt>.  The
+event types are 'start', 'end', 'start-ns' and 'end-ns'.</p>
+<p>The 'start' and 'end' events represent opening and closing elements and are
+accompanied by the respective element.  By default, only 'end' events are
+generated:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; xml = '''\
+... &lt;root&gt;
+...   &lt;element key='value'&gt;text&lt;/element&gt;
+...   &lt;element&gt;text&lt;/element&gt;tail
+...   &lt;empty-element xmlns=&quot;testns&quot; /&gt;
+... &lt;/root&gt;
+... '''
+
+&gt;&gt;&gt; context = etree.iterparse(StringIO(xml))
+&gt;&gt;&gt; for action, elem in context:
+...     print action, elem.tag
+end element
+end element
+end {testns}empty-element
+end root
+</pre>
+<p>The resulting tree is available through the <tt class="docutils literal"><span class="pre">root</span></tt> property of the iterator:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; context.root.tag
+'root'
+</pre>
+<p>The other types can be activated with the <tt class="docutils literal"><span class="pre">events</span></tt> keyword argument:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; events = (&quot;start&quot;, &quot;end&quot;)
+&gt;&gt;&gt; context = etree.iterparse(StringIO(xml), events=events)
+&gt;&gt;&gt; for action, elem in context:
+...     print action, elem.tag
+start root
+start element
+end element
+start element
+end element
+start {testns}empty-element
+end {testns}empty-element
+end root
+</pre>
+<p>You can modify the element and its descendants when handling the 'end' event.
+To save memory, for example, you can remove subtrees that are no longer
+needed:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; context = etree.iterparse(StringIO(xml))
+&gt;&gt;&gt; for action, elem in context:
+...     print len(elem),
+...     elem.clear()
+0 0 0 3
+&gt;&gt;&gt; context.root.getchildren()
+[]
+</pre>
+<p><strong>WARNING</strong>: During the 'start' event, the descendants and following siblings
+are not yet available and should not be accessed.  During the 'end' event, the
+element and its descendants can be freely modified, but its following siblings
+should not be accessed.  During either of the two events, you <strong>must not</strong>
+modify or move the ancestors (parents) of the current element.  You should
+also avoid moving or discarding the element itself.  The golden rule is: do
+not touch anything that will have to be touched again by the parser later on.</p>
+<p>If you have elements with a long list of children in your XML file and want to
+save more memory during parsing, you can clean up the preceding siblings of
+the current element:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; for event, element in etree.iterparse(StringIO(xml)):
+...     # ... do something with the element
+...     element.clear()                # clean up children
+...     if element.getprevious():      # clean up preceding siblings
+...         del element.getparent()[0]
+</pre>
+<p>You can use <tt class="docutils literal"><span class="pre">while</span></tt> instead of <tt class="docutils literal"><span class="pre">if</span></tt> if you skipped siblings using the
+<tt class="docutils literal"><span class="pre">tag</span></tt> keyword argument.  The more selective your tag is, however, the more
+thought you will have to put into finding the right way to clean up the
+elements that were skipped.  Therefore, it is sometimes easier to traverse all
+elements and do the tag selection by hand in the event handler code.</p>
+<p>The 'start-ns' and 'end-ns' events notify about namespace declarations and
+generate tuples <tt class="docutils literal"><span class="pre">(prefix,</span> <span class="pre">URI)</span></tt>:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; events = (&quot;start-ns&quot;, &quot;end-ns&quot;)
+&gt;&gt;&gt; context = etree.iterparse(StringIO(xml), events=events)
+&gt;&gt;&gt; for action, obj in context:
+...     print action, obj
+start-ns ('', 'testns')
+end-ns None
+</pre>
+<p>It is common practice to use a list as namespace stack and pop the last entry
+on the 'end-ns' event.</p>
+<p>lxml.etree supports two extensions compared to ElementTree.  It accepts a
+<tt class="docutils literal"><span class="pre">tag</span></tt> keyword argument just like <tt class="docutils literal"><span class="pre">element.getiterator(tag)</span></tt>.  This
+restricts events to a specific tag or namespace.</p>
+<blockquote>
+<pre class="doctest-block">
+&gt;&gt;&gt; context = etree.iterparse(StringIO(xml), tag=&quot;element&quot;)
+&gt;&gt;&gt; for action, elem in context:
+...     print action, elem.tag
+end element
+end element
+</pre>
+<pre class="doctest-block">
+&gt;&gt;&gt; events = (&quot;start&quot;, &quot;end&quot;)
+&gt;&gt;&gt; context = etree.iterparse(StringIO(xml), events=events, tag=&quot;{testns}*&quot;)
+&gt;&gt;&gt; for action, elem in context:
+...     print action, elem.tag
+start {testns}empty-element
+end {testns}empty-element
+</pre>
+</blockquote>
+<p>The second extension is the <tt class="docutils literal"><span class="pre">iterwalk()</span></tt> function.  It behaves exactly like
+<tt class="docutils literal"><span class="pre">iterparse()</span></tt>, but works on Elements and ElementTrees:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; root = context.root
+&gt;&gt;&gt; context = etree.iterwalk(root, events=events, tag=&quot;element&quot;)
+&gt;&gt;&gt; for action, elem in context:
+...     print action, elem.tag
+start element
+end element
+start element
+end element
+</pre>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id7" id="error-handling-on-exceptions" name="error-handling-on-exceptions">Error handling on exceptions</a></h1>
+<p>Libxml2 provides error messages for failures, be it during parsing, XPath
+evaluation or schema validation.  Whenever an exception is raised, you can
+retrieve the errors that occured and &quot;might have&quot; lead to the problem:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; etree.clearErrorLog()
+&gt;&gt;&gt; broken_xml = '&lt;a&gt;'
+&gt;&gt;&gt; try:
+...   etree.parse(StringIO(broken_xml))
+... except etree.XMLSyntaxError, e:
+...   pass # just put the exception into e
+&gt;&gt;&gt; log = e.error_log.filter_levels(etree.ErrorLevels.FATAL)
+&gt;&gt;&gt; print log
+&lt;string&gt;:1:FATAL:PARSER:ERR_TAG_NOT_FINISHED: Premature end of data in tag a line 1
+</pre>
+<p>This might look a little cryptic at first, but it is the information that
+libxml2 gives you.  At least the message at the end should give you a hint
+what went wrong and you can see that the fatal error (FATAL) happened during
+parsing (PARSER) line 1 of a string (&lt;string&gt;, or filename if available).
+Here, PARSER is the so-called error domain, see lxml.etree.ErrorDomains for
+that.  You can get it from a log entry like this:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; entry = log[0]
+&gt;&gt;&gt; print entry.domain_name, entry.type_name, entry.filename
+PARSER ERR_TAG_NOT_FINISHED &lt;string&gt;
+</pre>
+<p>There is also a convenience attribute <tt class="docutils literal"><span class="pre">last_error</span></tt> that returns the last
+error or fatal error that occurred:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; entry = e.error_log.last_error
+&gt;&gt;&gt; print entry.domain_name, entry.type_name, entry.filename
+PARSER ERR_TAG_NOT_FINISHED &lt;string&gt;
+</pre>
+<p>Alternatively, lxml.etree supports logging libxml2 messages to the Python
+stdlib logging module.  This is done through the <tt class="docutils literal"><span class="pre">etree.PyErrorLog</span></tt> class.
+It disables the error reporting from exceptions and forwards log messages to a
+Python logger.  To use it, see the descriptions of the function
+<tt class="docutils literal"><span class="pre">etree.useGlobalPythonLog</span></tt> and the class <tt class="docutils literal"><span class="pre">etree.PyErrorLog</span></tt> for help.
+Note that this does not affect the local error logs of XSLT, XMLSchema,
+etc. which are described in their respective sections below.</p>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id8" id="python-unicode-strings" name="python-unicode-strings">Python unicode strings</a></h1>
+<p>lxml.etree has broader support for Python unicode strings than the ElementTree
+library.  First of all, where ElementTree would raise an exception, the
+parsers in lxml.etree can handle unicode strings straight away.  This is most
+helpful for XML snippets embedded in source code using the <tt class="docutils literal"><span class="pre">XML()</span></tt>
+function:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; uxml = u'&lt;test&gt; \uf8d1 + \uf8d2 &lt;/test&gt;'
+&gt;&gt;&gt; uxml
+u'&lt;test&gt; \uf8d1 + \uf8d2 &lt;/test&gt;'
+&gt;&gt;&gt; root = etree.XML(uxml)
+</pre>
+<p>This requires, however, that unicode strings do not specify a conflicting
+encoding themselves and thus lie about their real encoding:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; etree.XML(u'&lt;?xml version=&quot;1.0&quot; encoding=&quot;ASCII&quot;?&gt;\n' + uxml)
+Traceback (most recent call last):
+  ...
+ValueError: Unicode strings with encoding declaration are not supported.
+</pre>
+<p>Similarly, you will get errors when you try the same with HTML data in a
+unicode string that specifies a charset in a meta tag of the header.  You
+should generally avoid converting XML/HTML data to unicode before passing it
+into the parsers.  It is both slower and error prone.</p>
+<p>To serialize the result, you would normally use the <tt class="docutils literal"><span class="pre">tostring</span></tt> module
+function, which serializes to plain ASCII by default or a number of other
+encodings if asked for:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; etree.tostring(root)
+'&lt;test&gt; &amp;#63697; + &amp;#63698; &lt;/test&gt;'
+
+&gt;&gt;&gt; etree.tostring(root, 'UTF-8', xml_declaration=False)
+'&lt;test&gt; \xef\xa3\x91 + \xef\xa3\x92 &lt;/test&gt;'
+</pre>
+<p>As an extension, lxml.etree has a new <tt class="docutils literal"><span class="pre">tounicode()</span></tt> function that you can
+call on XML tree objects to retrieve a Python unicode representation:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; etree.tounicode(root)
+u'&lt;test&gt; \uf8d1 + \uf8d2 &lt;/test&gt;'
+
+&gt;&gt;&gt; el = etree.Element(&quot;test&quot;)
+&gt;&gt;&gt; etree.tounicode(el)
+u'&lt;test/&gt;'
+
+&gt;&gt;&gt; subel = etree.SubElement(el, &quot;subtest&quot;)
+&gt;&gt;&gt; etree.tounicode(el)
+u'&lt;test&gt;&lt;subtest/&gt;&lt;/test&gt;'
+
+&gt;&gt;&gt; et = etree.ElementTree(el)
+&gt;&gt;&gt; etree.tounicode(et)
+u'&lt;test&gt;&lt;subtest/&gt;&lt;/test&gt;'
+</pre>
+<p>The result of <tt class="docutils literal"><span class="pre">tounicode()</span></tt> can be treated like any other Python unicode
+string and then passed back into the parsers.  However, if you want to save
+the result to a file or pass it over the network, you should use <tt class="docutils literal"><span class="pre">write()</span></tt>
+or <tt class="docutils literal"><span class="pre">tostring()</span></tt> with an encoding argument (typically UTF-8) to serialize the
+XML.  The main reason is that unicode strings returned by <tt class="docutils literal"><span class="pre">tounicode()</span></tt>
+never have an XML declaration and therefore do not specify their encoding.
+These strings are most likely not parsable by other XML libraries.</p>
+<p>In contrast, the <tt class="docutils literal"><span class="pre">tostring()</span></tt> function automatically adds a declaration as
+needed that reflects the encoding of the returned string.  This makes it
+possible for other parsers to correctly parse the XML byte stream.  Note that
+using <tt class="docutils literal"><span class="pre">tostring()</span></tt> with UTF-8 is also considerably faster in most cases.</p>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id9" id="xpath" name="xpath">XPath</a></h1>
+<p>lxml.etree supports the simple path syntax of the <tt class="docutils literal"><span class="pre">findall()</span></tt> etc.  methods
+on ElementTree and Element, as known from the original ElementTree library.
+As an extension, these classes also provide an <tt class="docutils literal"><span class="pre">xpath()</span></tt> method that
+supports expressions in the complete XPath syntax.</p>
+<p>There are also specialized XPath evaluator classes that are more efficient for
+frequent evaluation: <tt class="docutils literal"><span class="pre">XPath</span></tt> and <tt class="docutils literal"><span class="pre">XPathEvaluator</span></tt>.  See the <a class="reference" href="performance.html#xpath">performance
+comparison</a> to learn when to use which.  Their semantics when used on
+Elements and ElementTrees are the same as for the <tt class="docutils literal"><span class="pre">xpath()</span></tt> method described
+here.</p>
+<p>For ElementTree, the xpath method performs a global XPath query against the
+document (if absolute) or against the root node (if relative):</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('&lt;foo&gt;&lt;bar&gt;&lt;/bar&gt;&lt;/foo&gt;')
+&gt;&gt;&gt; tree = etree.parse(f)
+
+&gt;&gt;&gt; r = tree.xpath('/foo/bar')
+&gt;&gt;&gt; len(r)
+1
+&gt;&gt;&gt; r[0].tag
+'bar'
+
+&gt;&gt;&gt; r = tree.xpath('bar')
+&gt;&gt;&gt; r[0].tag
+'bar'
+</pre>
+<p>When <tt class="docutils literal"><span class="pre">xpath()</span></tt> is used on an element, the XPath expression is evaluated
+against the element (if relative) or against the root tree (if absolute):</p>
+<pre class="literal-block">
+&gt;&gt;&gt; root = tree.getroot()
+&gt;&gt;&gt; r = root.xpath('bar')
+&gt;&gt;&gt; r[0].tag
+'bar'
+
+&gt;&gt;&gt; bar = root[0]
+&gt;&gt;&gt; r = bar.xpath('/foo/bar')
+&gt;&gt;&gt; r[0].tag
+'bar'
+
+&gt;&gt;&gt; tree = bar.getroottree()
+&gt;&gt;&gt; r = tree.xpath('/foo/bar')
+&gt;&gt;&gt; r[0].tag
+'bar'
+</pre>
+<p>Optionally, you can provide a <tt class="docutils literal"><span class="pre">namespaces</span></tt> keyword argument, which should be
+a dictionary mapping the namespace prefixes used in the XPath expression to
+namespace URIs:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('''\
+... &lt;a:foo xmlns:a=&quot;http://codespeak.net/ns/test1&quot;
+...       xmlns:b=&quot;http://codespeak.net/ns/test2&quot;&gt;
+...    &lt;b:bar&gt;Text&lt;/b:bar&gt;
+... &lt;/a:foo&gt;
+... ''')
+&gt;&gt;&gt; doc = etree.parse(f)
+&gt;&gt;&gt; r = doc.xpath('/t:foo/b:bar', {'t': 'http://codespeak.net/ns/test1',
+...                                'b': 'http://codespeak.net/ns/test2'})
+&gt;&gt;&gt; len(r)
+1
+&gt;&gt;&gt; r[0].tag
+'{http://codespeak.net/ns/test2}bar'
+&gt;&gt;&gt; r[0].text
+'Text'
+</pre>
+<p>There is also an optional <tt class="docutils literal"><span class="pre">extensions</span></tt> argument which is used to define
+<a class="reference" href="extensions.html">extension functions</a> in Python that are local to this evaluation.</p>
+<p>The return values of XPath evaluations vary, depending on the XPath expression
+used:</p>
+<ul class="simple">
+<li>True or False, when the XPath expression has a boolean result</li>
+<li>a float, when the XPath expression has a numeric result (integer or float)</li>
+<li>a (unicode) string, when the XPath expression has a string result.</li>
+<li>a list of items, when the XPath expression has a list as result.  The items
+may include elements, strings and tuples.  Text nodes and attributes in the
+result are returned as strings (the text node content or attribute value).
+Comments are also returned as strings, enclosed by the usual <tt class="docutils literal"><span class="pre">&lt;!--</span></tt> and
+<tt class="docutils literal"><span class="pre">--&gt;</span></tt> markers.  Namespace declarations are returned as tuples of strings:
+<tt class="docutils literal"><span class="pre">(prefix,</span> <span class="pre">URI)</span></tt>.</li>
+</ul>
+<p>A related convenience method of ElementTree objects is <tt class="docutils literal"><span class="pre">getpath(element)</span></tt>,
+which returns a structural, absolute XPath expression to find that element:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; a  = etree.Element(&quot;a&quot;)
+&gt;&gt;&gt; b  = etree.SubElement(a, &quot;b&quot;)
+&gt;&gt;&gt; c  = etree.SubElement(a, &quot;c&quot;)
+&gt;&gt;&gt; d1 = etree.SubElement(c, &quot;d&quot;)
+&gt;&gt;&gt; d2 = etree.SubElement(c, &quot;d&quot;)
+
+&gt;&gt;&gt; tree = etree.ElementTree(c)
+&gt;&gt;&gt; print tree.getpath(d2)
+/c/d[2]
+&gt;&gt;&gt; tree.xpath(tree.getpath(d2)) == [d2]
+True
+</pre>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id10" id="xslt" name="xslt">XSLT</a></h1>
+<p>lxml.etree introduces a new class, lxml.etree.XSLT. The class can be
+given an ElementTree object to construct an XSLT transformer:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('''\
+... &lt;xsl:stylesheet version=&quot;1.0&quot;
+...     xmlns:xsl=&quot;http://www.w3.org/1999/XSL/Transform&quot;&gt;
+...     &lt;xsl:template match=&quot;/&quot;&gt;
+...         &lt;foo&gt;&lt;xsl:value-of select=&quot;/a/b/text()&quot; /&gt;&lt;/foo&gt;
+...     &lt;/xsl:template&gt;
+... &lt;/xsl:stylesheet&gt;''')
+&gt;&gt;&gt; xslt_doc = etree.parse(f)
+&gt;&gt;&gt; transform = etree.XSLT(xslt_doc)
+</pre>
+<p>You can then run the transformation on an ElementTree document by simply
+calling it, and this results in another ElementTree object:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('&lt;a&gt;&lt;b&gt;Text&lt;/b&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc = etree.parse(f)
+&gt;&gt;&gt; result = transform(doc)
+</pre>
+<p>The result object can be accessed like a normal ElementTree document:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; result.getroot().text
+'Text'
+</pre>
+<p>but, as opposed to normal ElementTree objects, can also be turned into an (XML
+or text) string by applying the str() function:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; str(result)
+'&lt;?xml version=&quot;1.0&quot;?&gt;\n&lt;foo&gt;Text&lt;/foo&gt;\n'
+</pre>
+<p>The result is always a plain string, encoded as requested by the
+<tt class="docutils literal"><span class="pre">xsl:output</span></tt> element in the stylesheet.  If you want a Python unicode string
+instead, you should set this encoding to <tt class="docutils literal"><span class="pre">UTF-8</span></tt> (unless the <cite>ASCII</cite> default
+is sufficient).  This allows you to call the builtin <tt class="docutils literal"><span class="pre">unicode()</span></tt> function on
+the result:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; unicode(result)
+u'&lt;?xml version=&quot;1.0&quot;?&gt;\n&lt;foo&gt;Text&lt;/foo&gt;\n'
+</pre>
+<p>You can use other encodings at the cost of multiple recoding.  Encodings that
+are not supported by Python will result in an error:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; xslt_tree = etree.XML('''\
+... &lt;xsl:stylesheet version=&quot;1.0&quot;
+...     xmlns:xsl=&quot;http://www.w3.org/1999/XSL/Transform&quot;&gt;
+...     &lt;xsl:output encoding=&quot;UCS4&quot;/&gt;
+...     &lt;xsl:template match=&quot;/&quot;&gt;
+...         &lt;foo&gt;&lt;xsl:value-of select=&quot;/a/b/text()&quot; /&gt;&lt;/foo&gt;
+...     &lt;/xsl:template&gt;
+... &lt;/xsl:stylesheet&gt;''')
+&gt;&gt;&gt; transform = etree.XSLT(xslt_tree)
+
+&gt;&gt;&gt; result = transform(doc)
+&gt;&gt;&gt; unicode(result)
+Traceback (most recent call last):
+  [...]
+LookupError: unknown encoding: UCS4
+</pre>
+<p>It is possible to pass parameters, in the form of XPath expressions, to the
+XSLT template:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; xslt_tree = etree.XML('''\
+... &lt;xsl:stylesheet version=&quot;1.0&quot;
+...     xmlns:xsl=&quot;http://www.w3.org/1999/XSL/Transform&quot;&gt;
+...     &lt;xsl:template match=&quot;/&quot;&gt;
+...         &lt;foo&gt;&lt;xsl:value-of select=&quot;$a&quot; /&gt;&lt;/foo&gt;
+...     &lt;/xsl:template&gt;
+... &lt;/xsl:stylesheet&gt;''')
+&gt;&gt;&gt; transform = etree.XSLT(xslt_tree)
+&gt;&gt;&gt; f = StringIO('&lt;a&gt;&lt;b&gt;Text&lt;/b&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc = etree.parse(f)
+</pre>
+<p>The parameters are passed as keyword parameters to the transform call. First
+let's try passing in a simple string expression:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; result = transform(doc, a=&quot;'A'&quot;)
+&gt;&gt;&gt; str(result)
+'&lt;?xml version=&quot;1.0&quot;?&gt;\n&lt;foo&gt;A&lt;/foo&gt;\n'
+</pre>
+<p>Let's try a non-string XPath expression now:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; result = transform(doc, a=&quot;/a/b/text()&quot;)
+&gt;&gt;&gt; str(result)
+'&lt;?xml version=&quot;1.0&quot;?&gt;\n&lt;foo&gt;Text&lt;/foo&gt;\n'
+</pre>
+<p>There's also a convenience method on the tree object for doing XSL
+transformations.  This is less efficient if you want to apply the same XSL
+transformation to multiple documents, but is shorter to write for one-shot
+operations, as you do not have to instantiate a stylesheet yourself:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; result = doc.xslt(xslt_tree, a=&quot;'A'&quot;)
+&gt;&gt;&gt; str(result)
+'&lt;?xml version=&quot;1.0&quot;?&gt;\n&lt;foo&gt;A&lt;/foo&gt;\n'
+</pre>
+<p>By default, XSLT supports all extension functions from libxslt and libexslt as
+well as Python regular expressions through EXSLT.  Note that some extensions
+enable style sheets to read and write files on the local file system.  See the
+<a class="reference" href="resolvers.html">document loader documentation</a> on how to deal with this.</p>
+<p>If you want to know how your stylesheet performed, pass the <tt class="docutils literal"><span class="pre">profile_run</span></tt>
+keyword to the transform:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; result = transform(doc, a=&quot;/a/b/text()&quot;, profile_run=True)
+&gt;&gt;&gt; profile = result.xslt_profile
+</pre>
+<p>The value of the <tt class="docutils literal"><span class="pre">xslt_profile</span></tt> property is an ElementTree with profiling
+data about each template, similar to the following:</p>
+<pre class="literal-block">
+&lt;profile&gt;
+  &lt;template rank=&quot;1&quot; match=&quot;/&quot; name=&quot;&quot; mode=&quot;&quot; calls=&quot;1&quot; time=&quot;1&quot; average=&quot;1&quot;/&gt;
+&lt;/profile&gt;
+</pre>
+<p>Note that this is a read-only document.  You must not move any of its elements
+to other documents.  Please deep-copy the document if you need to modify it.
+If you want to free it from memory, just do:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; del result.xslt_profile
+</pre>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id11" id="relaxng" name="relaxng">RelaxNG</a></h1>
+<p>lxml.etree introduces a new class, lxml.etree.RelaxNG. The class can
+be given an ElementTree object to construct a Relax NG validator:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('''\
+... &lt;element name=&quot;a&quot; xmlns=&quot;http://relaxng.org/ns/structure/1.0&quot;&gt;
+...  &lt;zeroOrMore&gt;
+...     &lt;element name=&quot;b&quot;&gt;
+...       &lt;text /&gt;
+...     &lt;/element&gt;
+...  &lt;/zeroOrMore&gt;
+... &lt;/element&gt;
+... ''')
+&gt;&gt;&gt; relaxng_doc = etree.parse(f)
+&gt;&gt;&gt; relaxng = etree.RelaxNG(relaxng_doc)
+</pre>
+<p>You can then validate some ElementTree document against the schema. You'll get
+back True if the document is valid against the Relax NG schema, and False if
+not:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; valid = StringIO('&lt;a&gt;&lt;b&gt;&lt;/b&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc = etree.parse(valid)
+&gt;&gt;&gt; relaxng.validate(doc)
+1
+
+&gt;&gt;&gt; invalid = StringIO('&lt;a&gt;&lt;c&gt;&lt;/c&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc2 = etree.parse(invalid)
+&gt;&gt;&gt; relaxng.validate(doc2)
+0
+</pre>
+<p>Calling the schema object has the same effect as calling its validate
+method. This is sometimes used in conditional statements:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; invalid = StringIO('&lt;a&gt;&lt;c&gt;&lt;/c&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc2 = etree.parse(invalid)
+&gt;&gt;&gt; if not relaxng(doc2):
+...     print &quot;invalid!&quot;
+invalid!
+</pre>
+<p>If you prefer getting an exception when validating, you can use the
+<tt class="docutils literal"><span class="pre">assert_</span></tt> or <tt class="docutils literal"><span class="pre">assertValid</span></tt> methods:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; relaxng.assertValid(doc2)
+Traceback (most recent call last):
+  [...]
+DocumentInvalid: Document does not comply with schema
+
+&gt;&gt;&gt; relaxng.assert_(doc2)
+Traceback (most recent call last):
+  [...]
+AssertionError: Document does not comply with schema
+</pre>
+<p>Starting with version 0.9, lxml now has a simple API to report the errors
+generated by libxml2. If you want to find out why the validation failed in the
+second case, you can look up the error log of the validation process and check
+it for relevant messages:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; log = relaxng.error_log
+&gt;&gt;&gt; print log.last_error
+&lt;string&gt;:1:ERROR:RELAXNGV:ERR_LT_IN_ATTRIBUTE: Did not expect element c there
+</pre>
+<p>You can see that the error (ERROR) happened during RelaxNG validation
+(RELAXNGV).  The message then tells you what went wrong.  Note that this error
+is local to the RelaxNG object.  It will only contain log entries that
+appeares during the validation.  The DocumentInvalid exception raised by the
+<tt class="docutils literal"><span class="pre">assertValid</span></tt> method above provides access to the global error log (like all
+other lxml exceptions).</p>
+<p>Similar to XSLT, there's also a less efficient but easier shortcut method to
+do one-shot RelaxNG validation:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; doc.relaxng(relaxng_doc)
+1
+&gt;&gt;&gt; doc2.relaxng(relaxng_doc)
+0
+</pre>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id12" id="xmlschema" name="xmlschema">XMLSchema</a></h1>
+<p>lxml.etree also has a XML Schema (XSD) support, using the class
+lxml.etree.XMLSchema. This support is very similar to the Relax NG
+support. The class can be given an ElementTree object to construct a
+XMLSchema validator:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('''\
+... &lt;xsd:schema xmlns:xsd=&quot;http://www.w3.org/2001/XMLSchema&quot;&gt;
+... &lt;xsd:element name=&quot;a&quot; type=&quot;AType&quot;/&gt;
+... &lt;xsd:complexType name=&quot;AType&quot;&gt;
+...   &lt;xsd:sequence&gt;
+...     &lt;xsd:element name=&quot;b&quot; type=&quot;xsd:string&quot; /&gt;
+...   &lt;/xsd:sequence&gt;
+... &lt;/xsd:complexType&gt;
+... &lt;/xsd:schema&gt;
+... ''')
+&gt;&gt;&gt; xmlschema_doc = etree.parse(f)
+&gt;&gt;&gt; xmlschema = etree.XMLSchema(xmlschema_doc)
+</pre>
+<p>You can then validate some ElementTree document with this. Like with
+RelaxNG, you'll get back true if the document is valid against the XML
+schema, and false if not:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; valid = StringIO('&lt;a&gt;&lt;b&gt;&lt;/b&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc = etree.parse(valid)
+&gt;&gt;&gt; xmlschema.validate(doc)
+1
+
+&gt;&gt;&gt; invalid = StringIO('&lt;a&gt;&lt;c&gt;&lt;/c&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc2 = etree.parse(invalid)
+&gt;&gt;&gt; xmlschema.validate(doc2)
+0
+</pre>
+<p>Calling the schema object has the same effect as calling its validate
+method. This is sometimes used in conditional statements:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; invalid = StringIO('&lt;a&gt;&lt;c&gt;&lt;/c&gt;&lt;/a&gt;')
+&gt;&gt;&gt; doc2 = etree.parse(invalid)
+&gt;&gt;&gt; if not xmlschema(doc2):
+...     print &quot;invalid!&quot;
+invalid!
+</pre>
+<p>If you prefer getting an exception when validating, you can use the
+<tt class="docutils literal"><span class="pre">assert_</span></tt> or <tt class="docutils literal"><span class="pre">assertValid</span></tt> methods:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; xmlschema.assertValid(doc2)
+Traceback (most recent call last):
+  [...]
+DocumentInvalid: Document does not comply with schema
+
+&gt;&gt;&gt; xmlschema.assert_(doc2)
+Traceback (most recent call last):
+  [...]
+AssertionError: Document does not comply with schema
+</pre>
+<p>Error reporting works like for the RelaxNG class:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; log = xmlschema.error_log
+&gt;&gt;&gt; error = log.last_error
+&gt;&gt;&gt; print error.domain_name
+SCHEMASV
+&gt;&gt;&gt; print error.type_name
+SCHEMAV_ELEMENT_CONTENT
+</pre>
+<p>If you were to print this log entry, you would get something like the
+following.  Note that the error message depends on the libxml2 version in
+use:</p>
+<pre class="literal-block">
+&lt;string&gt;:1:ERROR::SCHEMAV_ELEMENT_CONTENT: Element 'c': This element is not expected. Expected is ( b ).
+</pre>
+<p>Similar to XSLT and RelaxNG, there's also a less efficient but easier shortcut
+method to do XML Schema validation:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; doc.xmlschema(xmlschema_doc)
+1
+&gt;&gt;&gt; doc2.xmlschema(xmlschema_doc)
+0
+</pre>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id13" id="xinclude" name="xinclude">xinclude</a></h1>
+<p>Simple XInclude support exists. You can make xinclude statements in a
+document be processed by calling the xinclude() method on a tree:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; data = StringIO('''\
+... &lt;doc xmlns:xi=&quot;http://www.w3.org/2001/XInclude&quot;&gt;
+... &lt;foo/&gt;
+... &lt;xi:include href=&quot;doc/test.xml&quot; /&gt;
+... &lt;/doc&gt;''')
+
+&gt;&gt;&gt; tree = etree.parse(data)
+&gt;&gt;&gt; tree.xinclude()
+&gt;&gt;&gt; etree.tostring(tree.getroot())
+'&lt;doc xmlns:xi=&quot;http://www.w3.org/2001/XInclude&quot;&gt;\n&lt;foo/&gt;\n&lt;a xml:base=&quot;doc/test.xml&quot;/&gt;\n&lt;/doc&gt;'
+</pre>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id14" id="write-c14n-on-elementtree" name="write-c14n-on-elementtree">write_c14n on ElementTree</a></h1>
+<p>The lxml.etree.ElementTree class has a method write_c14n, which takes
+one argument: a file object. This file object will receive an UTF-8
+representation of the canonicalized form of the XML, following the W3C
+C14N recommendation. For example:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; f = StringIO('&lt;a&gt;&lt;b/&gt;&lt;/a&gt;')
+&gt;&gt;&gt; tree = etree.parse(f)
+&gt;&gt;&gt; f2 = StringIO()
+&gt;&gt;&gt; tree.write_c14n(f2)
+&gt;&gt;&gt; f2.getvalue()
+'&lt;a&gt;&lt;b&gt;&lt;/b&gt;&lt;/a&gt;'
+</pre>
+</div>
+</div>
+</body>
+</html>
