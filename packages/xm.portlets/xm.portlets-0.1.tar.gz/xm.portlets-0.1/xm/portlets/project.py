@@ -1,0 +1,136 @@
+from Acquisition import aq_inner
+
+from zope.component import getMultiAdapter
+from zope.interface import implements
+
+from plone.portlets.interfaces import IPortletDataProvider
+from plone.app.portlets.portlets import base
+from plone.memoize.view import memoize
+
+from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+
+from xm.portlets import ProjectPortletMessageFactory as _
+
+
+class IProjectPortlet(IPortletDataProvider):
+    """A portlet
+
+    It inherits from IPortletDataProvider because for this portlet, the
+    data that is being rendered and the portlet assignment itself are the
+    same.
+    """
+
+
+class Assignment(base.Assignment):
+    """Portlet assignment.
+
+    This is what is actually managed through the portlets UI and associated
+    with columns.
+    """
+    implements(IProjectPortlet)
+
+    def __init__(self):
+        pass
+
+    @property
+    def title(self):
+        """This property is used to give the title of the portlet in the
+        "manage portlets" screen.
+        """
+        return _(u'Project links')
+
+
+class Renderer(base.Renderer):
+    """Portlet renderer.
+
+    This is registered in configure.zcml. The referenced page template is
+    rendered, and the implicit variable 'view' will refer to an instance
+    of this class. Other methods can be added and referenced in the template.
+    """
+
+    render = ViewPageTemplateFile('project.pt')
+
+    def __init__(self, *args):
+        base.Renderer.__init__(self, *args)
+        portal_state = getMultiAdapter((self.context, self.request),
+                                        name=u'plone_portal_state')
+        self.portal_url = portal_state.portal_url()
+        self.portal = portal_state.portal()
+        self.project = self._get_project()
+        self.project_url = self.project and self.project.absolute_url() or None
+
+    def _get_project(self):
+        """This property return the url of the current project, if not within
+        a project it return portal_url
+        """
+        try:
+            #If we are inside a project aqcuisition will find it
+            project = aq_inner(self.context).getProject()
+        except AttributeError:
+            # Or raise an error, in which case we return None
+            project = None
+        return project
+
+    @property
+    def available(self):
+        """Return if the portlet is available or not."""
+        return self.links()
+
+    @memoize
+    def links(self):
+        """ This method returns all links that should be shown in the Portlet.
+        The returned dataset is as follows:
+
+        result = [{'url':'http://somewhere.com',
+                   'title':'Somewhere',
+                   'class':'odd/even'}]
+
+        If no links are available it returns None
+
+        """
+        results = []
+        tracker = self.tracker_url()
+        if tracker:
+            results.append(dict(url=tracker, title=_(u'Issues')))
+        attachments = self.attachments_url()
+        if attachments:
+            results.append(dict(url=attachments, title=_(u'Attachments')))
+        if results == []:
+            return None
+        for res in results:
+            row = (results.index(res)+1)%2 and 'odd' or 'even'
+            res['class'] = 'portletItem ' + row
+        return results
+
+    @memoize
+    def tracker_url(self):
+        """Return the url to the tracker, if available.
+        """
+        if self.project is None:
+            return None
+        if 'issues' in self.project.objectIds():
+            return self.project_url + '/issues'
+
+    @memoize
+    def attachments_url(self):
+        """Return the url to the attachments view, if available.
+        """
+        if self.project is None:
+            return None
+        cfilter = {'portal_type': ('File', 'Image')}
+        brains = self.project.getFolderContents(cfilter)
+        if brains and len(brains) > 0:
+            return self.project_url + '/project_content?type=other'
+        return None
+
+
+class AddForm(base.NullAddForm):
+    """Portlet add form.
+
+    This is registered in configure.zcml. The form_fields variable tells
+    zope.formlib which fields to display. The create() method actually
+    constructs the assignment that is being added.
+    """
+
+    def create(self):
+        return Assignment()
