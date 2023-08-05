@@ -1,0 +1,24 @@
+### -*- coding: utf-8 -*- #############################################
+#######################################################################
+"""The mapperattribute class.
+
+$Id: mapperattribute.py 50800 2008-02-21 11:13:08Z cray $
+"""
+__author__  = "Dima Khozin, 2006"
+__license__ = "GPL"
+__version__ = "$Revision: 50800 $"
+__date__ = "$Date: 2008-02-21 14:13:08 +0300 (Чтв, 21 Фев 2008) $"
+__credits__ = """Andrey Orlov, for idea and common control"""
+
+from zope.interface import implements
+from interfaces import IMapperAttributeSchema,IMapperAttribute
+from zope.app.container.btree import BTreeContainer
+from ng.app.converter.mapper.mapperinterface.interfaces import IMapperInterfaceContent
+
+class MapperAttribute(BTreeContainer):
+    __doc__ = IMapperAttribute.__doc__
+    """ container for MapperAttributesItem """
+
+    name__ = ""
+    implements(IMapperAttributeSchema,IMapperInterfaceContent)
+
