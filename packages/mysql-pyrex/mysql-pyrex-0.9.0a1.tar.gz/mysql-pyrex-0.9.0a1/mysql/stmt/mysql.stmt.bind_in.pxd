@@ -1,0 +1,45 @@
+# $Header: /home/cvs2/mysql/mysql/stmt/mysql.stmt.bind_in.pxd,v 1.3 2006/08/26 20:19:52 ehuss Exp $
+# Copyright (c) 2006, Eric Huss
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+# 3. Neither the name of Eric Huss nor the names of any contributors may be
+#    used to endorse or promote products derived from this software without
+#    specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+cimport extern_mysql
+from mysql.connection cimport Connection
+
+cdef class Input_Bind:
+
+    cdef extern_mysql.enum_field_types _buffer_type
+    cdef void * _buffer
+    cdef unsigned long _buffer_length
+    cdef readonly extern_mysql.my_bool _is_null
+    cdef extern_mysql.my_bool _is_unsigned
+    cdef unsigned long _length
+
+    cdef object _who
+    cdef object _what
+
+    cdef init(self, Connection connection, statement, extern_mysql.MYSQL_STMT * stmt, raise_error, unsigned int param_num)
+    cdef set_value(self)
