@@ -1,0 +1,307 @@
+========
+Templess
+========
+
+This document is valid for Templess 0.3.
+
+What is it?
+===========
+
+Templess is an XML templating language for Python, that is very compact and
+simple, fast, and has a very strict seperation of logic and design. It is
+different from other templating languages because instead of 'asking' for
+data from the template, you 'tell' the template what content there is to
+render, and the template just provides placeholders.
+
+Directives
+==========
+
+There are only 5 directives in Templess, all of which are defined as
+attributes on an XML node (see the examples below):
+
+  * content   
+        When an XML node has a templess:content attribute, a lookup will be
+        done in the context (see the examples below) using the value of the
+        attribute as key. If the key can not be found, a KeyError is raised. If
+        the value found is a string, it will be used as text content for the
+        node. If the value found is a 'lazyrenderer' instance as produced by
+        template.render() it will be used as new content for the element (iow,
+        you can use template.render() to generate snippets of XML to be placed
+        into other trees).  If the value is a list node, the element's contents
+        will be repeated for each element in the list, interpolating the
+        current item into the elements' contents (see list interpolation
+        below).
+
+  * replace 
+        Same as content, but instead of 'filling' the node, the node gets
+        replaced by the result of the interpolation.
+
+  * attr 
+        The value of an optional templess:attr on an XML node will be split on
+        ; to form pairs (strings), which are each split on space (' ') to form
+        key, value pairs (so 'foo bar;baz qux' will result in two pairs,
+        ('foo', 'bar'), ('baz', 'qux') of which each first item is the key and
+        the second the value).  For each of those pairs an attribute will be
+        added to the XML node, with the key as name, and as value the result of
+        a lookup in the context.
+
+  * cond 
+        If the value of the templess:cond condition on an XML node resolves to
+        false, the node is removed entirely from the document.
+
+  * not
+        The reverse of 'cond', this makes the node get rendered if the value
+        is false only.
+
+List interpolation
+==================
+
+If the interpolation value found for a templess:content or templess:replace
+attribute is of a string or a node type, the value will just be added to a
+node. If the item's value is a list type, the node will be copied and the
+interpolation will be executed repetetively for each item in the list, using
+the node as the root and the current value as the context. For each list item
+it will respond in the following manner:
+
+ * If the item value is a string type, the value will be used as the
+   current element's text attribute.
+
+ * If the item value is a node type, it will be attached to the node's
+   children.
+
+ * If the item value is a dict type, the content interpolation will recurse
+   with the exact same behaviour as it has with the full template, using
+   the current element as root and the current context value as context (note
+   that the root context is not available anymore).
+
+When the nodes are all copied, they are attached to the tree if the directive
+used was templess:content, and only their contents are attached to the tree
+if the directive was templess:replace.
+
+Examples
+========
+
+All of the examples below assume we're in a script with the following lines
+in the top somewhere:
+
+::
+
+    >>> from templess import templess
+
+Example 1: simple interpolation
+-------------------------------
+
+As a first example we'll interpolate the text 'bar' into a node 'foo' in
+a simple XML document.
+
+::
+
+    >>> xml = """\
+    ... <?xml version="1.0" ?>
+    ... <doc xmlns:t="http://johnnydebris.net/xmlns/templess">
+    ...   <foo t:content="foodata" />
+    ... </doc>
+    ... """
+    >>> context = {
+    ...     'foodata': 'bar',
+    ... }
+    >>> t = templess.template(xml)
+    >>> print t.unicode(context) 
+    <doc>
+      <foo>bar</foo>
+    </doc>
+
+On calling 'render()' the template is searched for any Templess directives,
+and at some point finds the 't:content' one. When this happens, it will look
+in the context passed in as an argument if there's a key for the value of the
+attribute. In our case the value of the attribute is 'foodata', so it will
+look for the key 'foodata', and will find the value 'bar'. Since this value
+is a string type, it will set it as the text value for the node, and remove
+the attribute when it's done.
+
+Note that if the directive used would have been templess:replace, the doc
+element would get the text contents, and the foo node would have been removed,
+so the XML would look something like ``<doc>bar</doc>``.
+
+Example 2: node interpolation
+-----------------------------
+
+In this example we'll interpolate a new XML node into the document. This 
+functionality provides a simple way to re-use templates.
+
+Note that (XXX currently?) the node needs to be a special Templess node to
+be interpolated. More convenient ways to add a node (either using an
+API that is less Templess specific, or perhaps by allowing XML nodes from other
+libraries) will be made available in the future.
+
+::
+
+    >>> xml = """\
+    ... <?xml version="1.0" ?>
+    ... <doc xmlns:t="http://johnnydebris.net/xmlns/templess">
+    ...   <foo t:content="foodata" />
+    ... </doc>
+    ... """
+    >>> context = {
+    ...   'foodata': templess.elnode('bar', {}, None),
+    ... }
+    >>> t = templess.template(xml)
+    >>> print t.unicode(context) 
+    <doc>
+      <foo><bar /></foo>
+    </doc>
+
+Exactly the same happens as with a string, except that instead of setting the
+text value of the node to the string value of the context, the element
+node will be used as the new content of the node.
+
+A somewhat more useful example interpolates the results of another template
+(somewhat similar to macros in other systems)::
+
+    >>> xml_bar = """\
+    ... <?xml version="1.0" ?>
+    ... <bar xmlns:t="http://johnnydebris.net/xmlns/templess"
+    ...      t:content="bardata" />
+    ... """
+    >>> context_bar = {
+    ...   'bardata': 'baz',
+    ... }
+    >>> t_bar = templess.template(xml_bar)
+    >>> xml = """\
+    ... <?xml version="1.0" ?>
+    ... <doc xmlns:t="http://johnnydebris.net/xmlns/templess">
+    ...   <foo t:content="foodata" />
+    ... </doc>
+    ... """
+    >>> context = {
+    ...   'foodata': t_bar.render(context_bar)
+    ... }
+    >>> t = templess.template(xml)
+    >>> print t.unicode(context)
+    <doc>
+      <foo><bar>baz</bar></foo>
+    </doc>
+
+Example 3: list interpolation with string values
+------------------------------------------------
+
+In this example we'll repeat a certain element inside the document, and
+interpolate the contents of an array into each instance.
+
+::
+
+    >>> xml = """\
+    ... <?xml version="1.0" ?>
+    ... <doc xmlns:t="http://johnnydebris.net/xmlns/templess">
+    ...   <foo t:content="foodata" />
+    ... </doc>
+    ... """
+    >>> context = {
+    ...   'foodata': ['foo', 'bar'],
+    ... }
+    >>> t = templess.template(xml)
+    >>> print t.unicode(context)
+    <doc>
+      <foo>foo</foo><foo>bar</foo>
+    </doc>
+
+When the Templess engine notices the value is a list type, it will iterate
+through it, creating a clone of the node for each iteration. From there on the
+interpolation works exactly the same as normal, but then on the clone instead
+of on the original node. When it's done iterating the list, the original will
+be removed.
+
+Note: the interpolation of nodes (templess.node subclasses) works exactly the 
+same, also it's possible to use templess:replace the same way as before.
+
+Note: when the values of the list are not of a string type, interpolation will
+not behave the same on the node, see the next example.
+
+Example 4: list interpolation with dict values
+----------------------------------------------
+
+In this example we'll use dict values for the list, effectively recursing into
+the interpolation process. The context for the recursion is the current
+context value (the current dict), and the root for the recursion is the
+current element.
+
+::
+
+    >>> xml = """\
+    ... <?xml version="1.0" ?>
+    ... <doc xmlns:t="http://johnnydebris.net/xmlns/templess">
+    ...   <foo t:content="foodata"><bar t:content="bardata" /></foo>
+    ... </doc>
+    ... """
+    >>> context = {
+    ...   'foodata': [
+    ...     {'bardata': 'baz'},
+    ...     {'bardata': 'qux'},
+    ...   ],
+    ... }
+    >>> t = templess.template(xml)
+    >>> print t.unicode(context)
+    <doc>
+      <foo><bar>baz</bar></foo><foo><bar>qux</bar></foo>
+    </doc>
+
+Of course this also works the same with templess.node instances instead of
+strings, and recurses infinitely, so you could use lists as the values, too.
+Also behaves as you'd expect when the directive is t:replace.
+
+Example 5: conditional rendering
+--------------------------------
+
+Very simple example for conditional rendering, because it's a very simple
+directive. The end result would be something like ``<doc><bar /></doc>``.
+
+::
+
+    >>> xml = """\
+    ... <?xml version="1.0" ?>
+    ... <doc xmlns:t="http://johnnydebris.net/xmlns/templess">
+    ...   <foo t:cond="foodata" /><bar t:cond="bardata" />
+    ... </doc>
+    ... """
+    >>> context = {
+    ...   'foodata': False,
+    ...   'bardata': True,
+    ... }
+    >>> t = templess.template(xml)
+    >>> print t.unicode(context)
+    <doc>
+      <bar />
+    </doc>
+
+When the t:cond resolves to True, the element is left in tact, when it
+resolves to False, it's removed entirely from the document. There is a counter
+directive called 'not', which has exactly the opposite effect from 'cond', so
+instead of adding the node on a True value, it removes it.
+
+Example 6: setting attributes
+-----------------------------
+
+Setting attributes is also not too hard. The 'attr' directive generates
+attributes for each contained item, using the value in the context as value for
+the attribute. If the context value resolves to False, the attribute is
+skipped (unless the value is '', then it will result in an empty attribute).
+
+::
+
+    >>> xml = """\
+    ... <?xml version="1.0" ?>
+    ... <doc xmlns:t="http://johnnydebris.net/xmlns/templess">
+    ...   <foo t:attr="bar bardata; baz bazdata; qux quxdata" />
+    ... </doc>
+    ... """
+    >>> context = {
+    ...   'bardata': 'quux',
+    ...   'bazdata': 'quuux',
+    ...   'quxdata': False,
+    ... }
+    >>> t = templess.template(xml)
+    >>> print t.unicode(context)
+    <doc>
+      <foo bar="quux" baz="quuux" />
+    </doc>
+
