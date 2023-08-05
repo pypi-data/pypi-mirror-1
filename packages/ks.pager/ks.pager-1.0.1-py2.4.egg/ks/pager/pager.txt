@@ -1,0 +1,109 @@
+Описание pager :
+
+  Автор -- Anatoly Bubenkov
+
+  Версия -- $Id: pager.txt 735 2007-05-14 10:09:14Z anatoly $
+
+  URL -- $URL: https://code.keysolutions.ru/svn/ks.pager/trunk/src/ks/pager/pager.txt $
+
+  Аннотация:
+
+    Продукт pager позволяет создавать виды со страничным выводом списка
+    элементов, с отображением ссылок на предыдущую/следующую порцию,
+    общего числа элементов, т.д, при этом пользователь предоставляет
+    только данные для вывода.
+
+  Идея реализации:
+
+    Продукт состоит из четырех частей:
+
+        - Базового адаптера вида pager, выступает в роли фабрики адаптеров
+          итерируемого объекта для разбиения списка его элементов на порции,
+          получения ссылок на порции, т.д.
+          Фабрика адаптеров реализует следующий интерфейс IPagerFactory:
+
+            - init(iterable) -- получения адаптера к IPager;
+
+        - Базового адаптера итерируемого объекта и
+          запроса zope.publisher.interfaces.http.IHTTPRequest к интерфейсу
+          параметров IPagerParams:
+
+          - start -- начальный элемент;
+
+          - chunkSize -- размер порции;
+
+          - chunkCount -- число ссылок на порции на странице;
+          Данный адаптер вызывается фабрикой адаптеров IPagerFactory.
+
+        - Базового адаптера итерируемого объекта к интерфейсу
+          страничного источника данных IPagedSource:
+
+          - getCount() -- размер итерируемого объекта;
+
+          - getChunk(start, chunkSize) -- получить порцию размеров chunkSize со
+                                    смещением start;
+          Данный адаптер вызывается фабрикой адаптеров IPagerFactory. Данная абстракция
+          необходима для случаев, когда источник данных поддерживает страничный
+          вывод данных.
+
+        - Базового адаптера страничного источника данных IPagedSource,
+          параметров IPagerParams
+          и запроса zope.publisher.interfaces.http.IHTTPRequest к интерфейсу IPager:
+
+          - nextChunkUrl() -- cсылка на след. порцию;
+
+          - prevChunkUrl() -- cсылка на предыд. порцию;
+
+          - haveNextChunk() -- есть ли след порция;
+
+          - havePrevChunk() -- есть ли предыд. порция;
+
+          - chunkUrlList() -- список ссылок на порции (кортеж (номер страницы, ссылка));
+
+          - сhunk() -- порция элементов;
+
+          - сount() -- общее число элементов;
+
+          - lastChunkUrl() -- ссылка на последнюю порцию;
+
+          - firstChunkUrl() -- ссылка на первую порцию;
+
+          - onFirstChunk() -- флаг нахождения на первой порции;
+
+          - onLastChunk() -- флаг нахождения на последней порции;
+
+          Данный адаптер вызывается фабрикой адаптеров IPagerFactory.
+
+        - Базового макроса listing для удобства использования pager.
+
+     Пример использования продукта в шаблоне::
+
+        <tal:block tal:define="pager context/@@pager;
+                               chunk python:pager.init([1,2,3,4,5,6,7,8,9])">
+
+         <ul tal:repeat="item python:chunk.chunk">
+            <li tal:content="item"/>
+         </ul>
+
+         <div tal:content="string:Element Count: ${chunk/count}, Page Count: ${chunk/chunkCount}" />
+
+         <tal:block condition="python:chunk.chunkCount > 1">
+           <br/>
+
+           <a href="" tal:attributes="href chunk/firstChunkUrl" tal:condition="not:chunk/onFirstChunk"> first </a>
+
+           <a href="" tal:attributes="href chunk/prevChunkUrl" tal:condition="chunk/havePrevChunk"> prev </a>
+
+           <tal:block repeat="item python:chunk.chunkUrlList">
+            <a href=""
+               tal:define="itemstyle python:item.selected and 'red' or 'black'"
+               tal:attributes="href item/url;
+                                       style string:color:${itemstyle};" tal:content="item/title"> 1 </a>
+           </tal:block>
+
+           <a href="" tal:attributes="href chunk/nextChunkUrl" tal:condition="chunk/haveNextChunk"> next </a>
+
+           <a href="" tal:attributes="href chunk/lastChunkUrl" tal:condition="not:chunk/onLastChunk"> last </a>
+          </tal:block>
+        </tal:block>
+
