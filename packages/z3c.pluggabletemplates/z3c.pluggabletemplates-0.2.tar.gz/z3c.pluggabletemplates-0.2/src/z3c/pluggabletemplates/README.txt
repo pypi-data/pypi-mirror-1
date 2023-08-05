@@ -1,0 +1,182 @@
+===================
+Pluggable Templates
+===================
+
+
+This package does two things. First, it does everything z3c.viewtemplate does
+-- seperate the view code layer from the template skin layer. Second, it
+allows an unlimited number of templates to be plugged into any view class.
+
+What's this for?
+~~~~~~~~~~~~~~~~
+
+Making masterpages simple is hard work. Using macros is fairly complicated for
+designers to deal with. In fact they don't. Using z3c.viewtemplate with viewlets
+is fairly complicated for programmers to deal with. In fact I don't. So this
+is another evolutionary step to allow designers and programmersto work together
+without necessarily knowing or even liking each other.
+
+This work relies heavily on the working code done by Jurgen for z3c.viewtemplate.
+
+A simple masterpage implementation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This is a simple masterpage implementation without using pluggabletemplates.
+
+browser.py::
+
+	class MyView(object):
+
+		masterpage = ViewTemplateFile('templates/masterpage.pt')
+		subpage = ViewTemplateFile('templates/content.pt')
+
+		authors = ['Roger Zelazny', 'Isaac Asimov', 'Robert Heinlien', 'J.R.R Tolkein']
+
+		def __call__(self):
+			return masterpage()
+
+ templates/masterpage.pt::
+
+ 	<html>...
+ 	<body>
+ 	<h2>My Master Page</h2>
+ 	<span tal:replace="view/subpage" />
+ 	</body>
+ 	</html>
+
+ templates/index.pt::
+
+	<ul>
+		<li tal:repeat="author view/authors" tal:content="author" />
+	</ul>
+
+This is a very easy to follow pattern which can be extended  fairly easily. This
+pattern runs into immediate problems when you want to change skins. Changing skins
+should be as easy as ++skin++design1 ... +++skin++design2, but to do so, all of the
+view code needs to be duplicated. Which can be done, but as soon as one piece of view
+code is changed, all the other view code has to be patched and easily falls out of
+sync.
+
+Enter viewplugs
+~~~~~~~~~~~~~~~
+
+design1/configure.zcml::
+
+	<browser:pluggableTemplates
+		for="myapp.browser.MyView"
+		layer=".skins.Design1"
+		>
+		<template
+			name="master"
+			file="templates/masterpage.pt"
+			/>
+		<template
+			name="subtemplate"
+			file="templates/subtemplate.pt
+			/>
+	</browser:pluggableTemplates>
+
+So does this mean we'll need to duplicate all of this configuration for
+++skin++design2?? Not necessarily::
+
+	class Design2(Design1):
+		""" Skin marker """
+
+Now you can use ++skin++design1 one as your base and simply override
+the views or templates you need to change et. al. stylesheets and
+images.
+
+
+By plugging templates into view code, each template can display each of the
+other templates::
+
+	<span tal:replace="view/template1" />
+	<span tal:replace="view/template2" />
+
+And of course all view attributes are available::
+
+	<span tal:replace="view/myattr1" />
+
+You can add as many views as you like, though, too many, and it could get recomplicated.
+
+Doctests
+~~~~~~~~
+
+Before we can setup a view component using this new method, we have to first
+create a master template and subtemplate ...
+
+  >>> import os, tempfile
+  >>> temp_dir = tempfile.mkdtemp()
+  >>> master = os.path.join(temp_dir, 'master.pt')
+  >>> open(master, 'w').write('''<h2>Masterpage</h2><span tal:replace="view/subtemplate"/>''')
+  >>> subtemplate = os.path.join(temp_dir, 'subtemplate.pt')
+  >>> open(subtemplate, 'w').write('''This is the subtemplate: <span tal:replace="view/taste" />''')
+  >>> from zope.publisher.browser import TestRequest
+  >>> request = TestRequest()
+
+  >>> from zope import interface
+  >>> from z3c.pluggabletemplates.baseview import MasterView
+  >>> from z3c.pluggabletemplates.pagetemplate import RegisteredPageTemplate
+  >>> class IMyView(interface.Interface):
+  ...     pass
+  >>> class MyView(MasterView):
+  ...     interface.implements(IMyView)
+  ...     master = RegisteredPageTemplate( 'master' )
+  ...	  taste = 'success'
+  ...     subtemplate = RegisteredPageTemplate( 'subtemplate' )
+
+
+  >>> view = MyView(root, request)
+
+Since the template is not yet registered, rendering the view will fail::
+
+  >>> print view()
+  Traceback (most recent call last):
+  ...
+  ComponentLookupError: ......
+
+Let's now register the template (commonly done using ZCML)::
+
+  >>> from zope import component
+  >>> from zope.publisher.interfaces.browser import IDefaultBrowserLayer
+  >>> from z3c.pluggabletemplates.zcml import TemplateFactory
+  >>> from zope.pagetemplate.interfaces import IPageTemplate
+
+The template factory allows us to create a ViewPageTemplateFile instance::
+
+  >>> factory = TemplateFactory(master, 'text/html')
+
+We register the factory on a view interface and a layer::
+
+  >>> component.provideAdapter(factory,
+  ...            (interface.Interface, IDefaultBrowserLayer),
+  ...            IPageTemplate, name="master")
+  >>> mastertemplate = component.getMultiAdapter(
+  ...               (view, request), IPageTemplate, name="master"  )
+  >>> mastertemplate
+  <zope.app.pagetemplate.viewpagetemplatefile.ViewPageTemplateFile ...>
+
+  >>> factory = TemplateFactory(subtemplate, 'text/html')
+
+We register the factory on a view interface and a layer::
+
+  >>> component.provideAdapter(factory,
+  ...            (interface.Interface, IDefaultBrowserLayer),
+  ...            IPageTemplate, name="subtemplate")
+  >>> subtemplate = component.getMultiAdapter(
+  ...               (view, request), IPageTemplate, name="subtemplate"  )
+  >>> subtemplate
+  <zope.app.pagetemplate.viewpagetemplatefile.ViewPageTemplateFile ...>
+
+Now that we have a registered template for the default layer we can call our
+view again::
+
+  >>> print view()
+  <h2>Masterpage</h2>This is the subtemplate: success
+  <BLANKLINE>
+
+
+Cleanup
+
+  >>> import shutil
+  >>> shutil.rmtree(temp_dir)
