@@ -1,0 +1,163 @@
++++++++++++++++++
+FormEncode Design
++++++++++++++++++
+
+:author: Ian Bicking <ianb@colorstudy.com>
+:revision: $Rev: 763 $
+:date: $LastChangedDate: 2005-05-02 23:40:39 -0500 (Mon, 02 May 2005) $
+
+.. contents::
+
+This is a document to describe why FormEncode looks the way it looks,
+and how it fits into other applications.  It also talks some about the
+false starts I've made.
+
+Basic Metaphor
+==============
+
+FormEncode performs look-before-you-leap validation.  The idea being
+that you check all the data related to an operation, then apply it.
+The alternative might be a transactional system, where you just start
+applying the data and if there's a problem you raise an exception.
+Someplace else you catch the exception and roll back the transaction.
+Of course FormEncode works fine with such a system, but unlike this
+you can use it without transactions.
+
+FormEncode generally works on primitive types (though you could extend
+it to deal with your own types if you wish).  These are things like
+strings, lists, dictionaries, integers, etc.  This fits in with
+look-before-you-leap; often your domain objects won't exist until
+after you apply the user's request, so it's necessary to work on an
+early form of the data.  Also, FormEncode doesn't know anything about
+your domain objects or classes; it's just easier to keep it this way.
+
+Validation only operates on a single "value" at a time.  This is
+Python, collections are easy, and collections are themselves a single
+"value" made up of many pieces.  A "Schema validator" is a validator
+made up of many subvalidators.
+
+Domain Objects
+==============
+
+These are your objects, specific to your application.  I know nothing
+about them, and cannot know.  FormEncode doesn't do anything with
+these objects, and doesn't try to know anything about them.  At all.
+
+Validation as directional, not intrinsic
+========================================
+
+One false start I've made is an attempt to tie validators into the
+objects they validate against.  E.g., you might have a SQLObject_
+class like::
+
+    class Address(SQLObject):
+        fname = StringCol(notNull=True)
+        lname = StringCol(notNull=True)
+        mi = StringCol()
+
+.. _SQLObject: http://sqlobject.org
+
+It is tempting to take the restrictions of the ``Address`` class and
+automatically come up with a validation schema.  This may yet be a
+viable goal, but in practical terms validation tends to be both more
+and less restrictive.  
+
+Often in an API we are more restrictive than we may be in a user
+interface, demanding that everything be specified explicitly.  In a UI
+we may assist the user by filling in values on their behalf.  The
+specifics of this depend on the UI and the objects in question.
+
+At the same time, we are often more restrictive in a UI.  For
+instance, we may demand that the user enter something that appears to
+be a valid phone number.  But for historical reasons, we may not make
+that demand for objects that already exist, or we may put in a tight
+restriction on the UI keeping in mind that it can more easily be
+relaxed and refined than a restriction in the domain objects or
+underlying database.  Also, we may trust the programmer to use the API
+in a reasonable way, but we seldom trust the user under any
+circumstance.
+
+In essence, there is an "inside" and an "outside".  FormEncode is a
+toolkit for bridging those two areas in a sensible and secure way.
+The specific way we bridge this depends on the nature of the user
+interface.  An XML-RPC interface can make some assumptions that a GUI
+cannot make.  An HTML interface can typically make even less
+assumptions, including the basic integrity of the input data.  It
+isn't reasonable that the object should know about all means of
+inputs, and the varying UI requirements of those inputs; user
+interfaces are volatile, and more art than science, but domain objects
+work better when they remain stable.  For this reason the validation
+schemas are kept in separate objects.
+
+It also didn't work well to annotate domain objects with validation
+schemas, though the option remains open.  This is experimentation that
+belongs outside of FormEncode, simply because it's more specific to
+your domain than it is to FormEncode.
+
+.. _adapted:
+
+Two sides, two aspects
+======================
+
+FormEncode does both validation and conversion at the same time.
+Validation necessarily happens with every conversion; for instance,
+you may want to convert string representation of dates to internal
+date objects; that conversion can fail if the string representation is
+malformed.
+
+To keep things simple, there's only one operation: conversion.  An
+exception raised means there was an error.  If you just want to
+validate, that's a conversion that doesn't change anything.
+
+Similarly, there's two sides to the system, the foreign data and the
+local data.  In Validator the local data is called "python" (meaning,
+a natural Python data structure), so we convert ``to_python`` and
+``from_python``.  Unlike some systems, Validator explicitly converts
+*both* directions.
+
+For instance, consider the date conversion.  In one form, you may want
+a date like ``mm/dd/yyyy``.  It's easy enough to make the necessary
+converter; but the date object that the converter produces doesn't
+know how it's supposed to be formatted for that form.  ``repr`` or
+*any* method that binds an object to its form representation is a bad
+idea.  The converter best knows how to undo its work.  So a date
+converter that expects ``mm/dd/yyyy`` will also know how to turn a
+datetime into that format.
+
+(This becomes even more interesting with compound validators.)
+
+Presentation
+============
+
+At one time FormEncode included form generation in addition to
+validation.  The form generation worked okay; it was reasonably
+attractive, and in many ways quite powerful.  I might revisit it.  But
+generation is limited.  It works *great* at first, then you hit a wall
+-- you want to make a change, and you just *can't*, it doesn't fit
+into the automatic generation.
+
+There are also many ways to approach the generation; again it's
+something that is tied to the framework, the presentation layer, and
+the domain objects, and FormEncode doesn't know anything about those.
+
+Instead FormEncode uses htmlfill_.  *You* produce the form however you
+want.  Write it out by hand.  Use a templating language.  Whatever.
+Then htmlfill (which specifically understands HTML) fills in the form
+and any error messages.
+
+.. _htmlfill: htmlfill.html
+
+Declarative and Imperative
+==========================
+
+All of the objects -- schemas, repeating elements, individual
+validators -- can be created imperatively, though more declarative
+styles often look better (specifically using subclassing instead of
+construction).  You are free to build the objects either way.
+
+For instance, one extension to ``htmlfill``
+(``htmlfill_schemabuilder``) looks for special attributes in an HTML
+form and builds a validator from that.  Even though validation is
+stored in a separate object from your domain, you can build those
+validators programmatically.
+
