@@ -1,0 +1,349 @@
+=====================
+APIs specific to lxml
+=====================
+
+lxml tries to follow established APIs wherever possible. Sometimes
+however the need to expose a feature in an easy way led to the
+invention of a new API.
+
+lxml.etree
+==========
+
+lxml.etree tries to follow the etree API wherever it can. There are
+however some incompatibilities (see compatibility.txt). There are also
+some extensions.
+
+The following examples usually assume this to be executed first::
+
+  >>> import lxml.etree
+  >>> from StringIO import StringIO
+
+
+XMLParser
+---------
+
+One of the differences is the parser.  It is based on libxml2 and therefore
+only supports options that are backed by the library.  Parsers take a number
+of keyword arguments.  The following is an example for namespace cleanup
+during parsing, first with the default parser, then with a parametrized one::
+
+  >>> xml = '<a xmlns="test"><b xmlns="test"/></a>'
+
+  >>> et     = lxml.etree.parse(StringIO(xml))
+  >>> print lxml.etree.tostring(et.getroot())
+  <a xmlns="test"><b xmlns="test"/></a>
+
+  >>> parser = lxml.etree.XMLParser(ns_clean=True)
+  >>> et     = lxml.etree.parse(StringIO(xml), parser)
+  >>> print lxml.etree.tostring(et.getroot())
+  <a xmlns="test"><b/></a>
+
+
+Error handling on exceptions
+----------------------------
+
+Libxml2 provides error messages for failures, be it during parsing, XPath
+evaluation or schema validation.  Whenever an exception is raised, you can
+retrieve the errors that occured and "might have" lead to the problem::
+
+  >>> lxml.etree.clearErrorLog()
+  >>> broken_xml = '<a>'
+  >>> try:
+  ...   lxml.etree.parse(StringIO(broken_xml))
+  ... except lxml.etree.XMLSyntaxError, e:
+  ...   pass # just put the exception into e
+  >>> log = e.error_log.filter_levels(lxml.etree.ErrorLevels.FATAL)
+  >>> print log
+  <string>:1:FATAL:PARSER:ERR_TAG_NOT_FINISHED: Premature end of data in tag a line 1
+
+This might look a little cryptic at first, but it is the information that
+libxml2 gives you.  At least the message at the end should give you a hint
+what went wrong and you can see that the fatal error (FATAL) happened during
+parsing (PARSER) line 1 of a string (<string>, or filename if available).
+Here, PARSER is the so-called error domain, see lxml.etree.ErrorDomains for
+that.  You can get it from a log entry like this::
+
+  >>> entry = log[0]
+  >>> print entry.domain_name, entry.type_name, entry.filename
+  PARSER ERR_TAG_NOT_FINISHED <string>
+
+XSLT error messages are not currently available through the lxml API.
+
+
+xpath method on ElementTree, Element
+------------------------------------
+
+lxml.etree extends the ElementTree and Element interfaces with an
+xpath method. For ElementTree, the xpath method performs a global
+xpath query against the document. When xpath is used on an element,
+the xpath expression is performed taking the element as the xpath
+context node.
+
+You call the xpath() method with the XPath expression to use, and
+optionally a second namespaces argument, which should be a dictionary
+mapping namespace prefixes to be used in the XPath expression to
+namespace URIs.
+
+The return values of xpath vary, depending on the XPath expression
+used:
+
+* 1 or 0, when the XPath expression has a boolean result
+
+* a float, when the XPath expression has a floating point result
+
+* a (unicode) string, when the XPath expression has a string result.
+
+* a list of items, when the XPath expression has a list as result. The
+  items may include element nodes, strings. When the nodeset would
+  contain text nodes or attributes, the node result is also a string
+  (the text node content or attribute value). When the nodeset would
+  contain a comment, the result contains a string as well, inside
+  ``<!--`` and ``-->`` markers.
+
+Example::
+
+  >>> f = StringIO('<foo><bar></bar></foo>')
+  >>> doc = lxml.etree.parse(f)
+  >>> r = doc.xpath('/foo/bar')
+  >>> len(r)
+  1
+  >>> r[0].tag
+  'bar'
+
+Example of using namespace prefixes::
+
+  >>> f = StringIO('''\
+  ... <a:foo xmlns:a="http://codespeak.net/ns/test1" 
+  ...       xmlns:b="http://codespeak.net/ns/test2">
+  ...    <b:bar>Text</b:bar>
+  ... </a:foo>
+  ... ''')
+  >>> doc = lxml.etree.parse(f)
+  >>> r = doc.xpath('/t:foo/b:bar', {'t': 'http://codespeak.net/ns/test1', 
+  ...                                'b': 'http://codespeak.net/ns/test2'})
+  >>> len(r)
+  1
+  >>> r[0].tag
+  '{http://codespeak.net/ns/test2}bar'
+  >>> r[0].text
+  'Text'
+
+
+XSLT
+----
+
+lxml.etree introduces a new class, lxml.etree.XSLT. The class can be
+given an ElementTree object to construct an XSLT transformer::
+
+  >>> f = StringIO('''\
+  ... <xsl:stylesheet version="1.0"
+  ...     xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  ...     <xsl:template match="*" />
+  ...     <xsl:template match="/">
+  ...         <foo><xsl:value-of select="/a/b/text()" /></foo>
+  ...     </xsl:template>
+  ... </xsl:stylesheet>''')
+  >>> xslt_doc = lxml.etree.parse(f)
+  >>> transform = lxml.etree.XSLT(xslt_doc)
+
+You can then run the transformation on an ElementTree document by simply
+calling it, and this results in another ElementTree object::
+
+  >>> f = StringIO('<a><b>Text</b></a>')
+  >>> doc = lxml.etree.parse(f)
+  >>> result = transform(doc)
+
+The result object can accessed like a normal ElementTree document::
+
+  >>> result.getroot().text
+  'Text'
+
+but, as opposed to normal ElementTree objects, can also be turned into an (XML
+or text) string by applying the str() function::
+
+  >>> str(result)
+  '<?xml version="1.0"?>\n<foo>Text</foo>\n'
+
+It is possible to pass parameters, in the form of XPath expressions, to the
+XSLT template::
+
+  >>> f = StringIO('''\
+  ... <xsl:stylesheet version="1.0"
+  ...     xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  ...     <xsl:template match="*" />
+  ...     <xsl:template match="/">
+  ...         <foo><xsl:value-of select="$a" /></foo>
+  ...     </xsl:template>
+  ... </xsl:stylesheet>''')
+  >>> xslt_doc = lxml.etree.parse(f)
+  >>> transform = lxml.etree.XSLT(xslt_doc)
+  >>> f = StringIO('<a><b>Text</b></a>')
+  >>> doc = lxml.etree.parse(f)
+
+The parameters are passed as keyword parameters to the transform call. First
+let's try passing in a simple string expression::
+
+  >>> result = transform(doc, a="'A'")
+  >>> str(result)
+  '<?xml version="1.0"?>\n<foo>A</foo>\n'
+
+Let's try a non-string XPath expression now::
+
+  >>> result = transform(doc, a="/a/b/text()")
+  >>> str(result)
+  '<?xml version="1.0"?>\n<foo>Text</foo>\n'
+
+There's also a convenience method on the tree object for doing XSL
+transformations. This is less efficient if you want to apply the same XSL
+transformation to multiple documents, but is shorter to write, as you do not
+have to instantiate a stylesheet yourself::
+
+  >>> result = doc.xslt(xslt_doc, a="'A'")
+  >>> str(result)
+  '<?xml version="1.0"?>\n<foo>A</foo>\n'
+
+
+RelaxNG
+-------
+
+lxml.etree introduces a new class, lxml.etree.RelaxNG. The class can
+be given an ElementTree object to construct a Relax NG validator::
+
+  >>> f = StringIO('''\
+  ... <element name="a" xmlns="http://relaxng.org/ns/structure/1.0">
+  ...  <zeroOrMore>
+  ...     <element name="b">
+  ...       <text />
+  ...     </element>
+  ...  </zeroOrMore>
+  ... </element>
+  ... ''')
+  >>> relaxng_doc = lxml.etree.parse(f)
+  >>> relaxng = lxml.etree.RelaxNG(relaxng_doc)
+
+You can then validate some ElementTree document with this. You'll get
+back true if the document is valid against the Relax NG schema, and
+false if not::
+
+  >>> valid = StringIO('<a><b></b></a>')
+  >>> doc = lxml.etree.parse(valid)
+  >>> relaxng.validate(doc)
+  1
+
+  >>> invalid = StringIO('<a><c></c></a>')
+  >>> doc2 = lxml.etree.parse(invalid)
+  >>> relaxng.validate(doc2)
+  0
+
+Starting with version 0.9, lxml now has a simple API to report the errors
+generated by libxml2. If you want to find out why the validation failed in the
+second case, you can look up the error log of the validation process and check
+it for relevant messages::
+
+  >>> log = relaxng.error_log
+  >>> print log.filter_from_errors()
+  <string>:1:ERROR:RELAXNGV:ERR_LT_IN_ATTRIBUTE: Did not expect element c there
+
+You can see that the error (ERROR) happened during RelaxNG validation
+(RELAXNGV).  The message then tells you what went wrong.  Note that this error
+is local to the RelaxNG object.  It will only contain log entries that
+appeares during the validation.
+
+Similar to XSLT, there's also a less efficient but easier shortcut method to
+do RelaxNG validation::
+
+  >>> doc.relaxng(relaxng_doc)
+  1
+  >>> doc2.relaxng(relaxng_doc)
+  0
+
+
+XMLSchema
+---------
+
+lxml.etree also has a XML Schema (XSD) support, using the class
+lxml.etree.XMLSchema. This support is very similar to the Relax NG
+support. The class can be given an ElementTree object to construct a
+XMLSchema validator::
+
+  >>> f = StringIO('''\
+  ... <xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  ... <xsd:element name="a" type="AType"/>
+  ... <xsd:complexType name="AType">
+  ...   <xsd:sequence>
+  ...     <xsd:element name="b" type="xsd:string" />
+  ...   </xsd:sequence>
+  ... </xsd:complexType>
+  ... </xsd:schema>
+  ... ''')
+  >>> xmlschema_doc = lxml.etree.parse(f)
+  >>> xmlschema = lxml.etree.XMLSchema(xmlschema_doc)
+
+You can then validate some ElementTree document with this. Like with
+RelaxNG, you'll get back true if the document is valid against the XML
+schema, and false if not::
+
+  >>> valid = StringIO('<a><b></b></a>')
+  >>> doc = lxml.etree.parse(valid)
+  >>> xmlschema.validate(doc)
+  1
+
+  >>> invalid = StringIO('<a><c></c></a>')
+  >>> doc2 = lxml.etree.parse(invalid)
+  >>> xmlschema.validate(doc2)
+  0
+
+Error reporting works like for the RelaxNG class::
+
+  >>> log = xmlschema.error_log
+  >>> errors = log.filter_from_errors()
+  >>> print errors[0].domain_name
+  SCHEMASV
+  >>> print errors[0].type_name
+  SCHEMAV_ELEMENT_CONTENT
+
+If you were to print this log entry, you would get something like the following::
+
+  <string>:1:ERROR::SCHEMAV_ELEMENT_CONTENT: Element 'c': This element is not expected. Expected is ( b ).
+
+Similar to XSLT and RelaxNG, there's also a less efficient but easier shortcut
+method to do XML Schema validation::
+
+  >>> doc.xmlschema(xmlschema_doc)
+  1
+  >>> doc2.xmlschema(xmlschema_doc)
+  0
+
+
+xinclude
+--------
+
+Simple XInclude support exists. You can make xinclude statements in a
+document be processed by calling the xinclude() method on a tree::
+
+  >>> data = StringIO('''\
+  ... <doc xmlns:xi="http://www.w3.org/2001/XInclude">
+  ... <foo/>
+  ... <xi:include href="doc/test.xml" />
+  ... </doc>''')
+
+  >>> tree = lxml.etree.parse(data)
+  >>> tree.xinclude()
+  >>> lxml.etree.tostring(tree.getroot())
+  '<doc xmlns:xi="http://www.w3.org/2001/XInclude">\n<foo/>\n<a xml:base="doc/test.xml"/>\n</doc>'
+
+
+write_c14n on ElementTree
+-------------------------
+
+The lxml.etree.ElementTree class has a method write_c14n, which takes
+one argument: a file object. This file object will receive an UTF-8
+representation of the canonicalized form of the XML, following the W3C
+C14N recommendation. For example::
+
+  >>> f = StringIO('<a><b/></a>')
+  >>> tree = lxml.etree.parse(f)
+  >>> f2 = StringIO()
+  >>> tree.write_c14n(f2)
+  >>> f2.getvalue()
+  '<a><b></b></a>'
