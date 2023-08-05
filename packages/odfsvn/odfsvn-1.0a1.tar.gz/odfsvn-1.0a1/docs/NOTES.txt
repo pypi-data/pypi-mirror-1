@@ -1,0 +1,115 @@
+Processing of ODF files
+=======================
+In subversion we use unpacked ODF files. This gives us much smaller changesets
+since we only need to update modified elements and it makes it easier to
+see the changes made.
+
+Metadata
+--------
+We will insert four fields in the ODF metadata:
+
+Repository-UUID
+  This is the UUID for the repository where the master copy of the file is
+  stored. Not all repository types support this.
+
+Repository-Type
+  The type of repository. At the moment only ''svn'' is supported.
+
+Repository-URL
+  A URL for (the location in) the repository where the document is stored.
+  This is the URL for the actual document. This means it has to end in
+  either ''tags/<tagname>'' or ''trunk''. When displaying the repository
+  information to the user tools should show the base url (ie without tag/trunk
+  information) and if a tag is used indicate the tag name.
+
+Repository-Revision
+  The current revision of the document. This is only stored in an offline
+  ODF package, not in the in-repository version.
+
+
+Other ODF tools
+===============
+We need to be able to pack and unpack the ODF file and update its metadata
+(see below). There are several python packages that may be useful here:
+
+* odfpy_ is a simple package without any dependencies outside the standard
+  python library. It does not seem to offer us much beyond XML parsing
+  routines
+
+* PyUNO_ is the Python-UNO bridge from OpenOffice.org. This provides full
+  access to the OpenOffice.org internals, including routines to manage
+  ODF documents. This module has two problems: it is too high level for
+  our needs (it does not allow access to ODF package internals) and the
+  dependency on OpenOffice.org is undesirable for a reusable tool.
+
+Our needs are very simple: get the list of files in a package, read the
+manifest and metadata information and update those. That makes both packages
+overkill for our needs, so we will use our own minimal implementation to
+provide a dict-style interface for packages along with a few utility methods
+for our specific needs.
+
+.. _odfpy: http://opendocumentfellowship.com/development/projects/odfpy
+.. _PyUNO: http://udk.openoffice.org/python/python-bridge.html
+
+
+Subversion usage
+================
+
+There are three methods we can use to interface with subversion:
+
+* wrap the svn commandline tools. This is not recommended and has several
+  downside: we need to parse output, handle prompting and deal with all the
+  usual pain with external processes.
+
+* the pysvn package. This provides a more pythonic API to work with subversion.
+  It has the downside that it can only deal with local working copies. It
+  has no API to only retrieve data from a repository such as its UUID.
+
+* the official subversion python bindings. These provide a complete interface
+  with all subversion layers, but are much closer to the C API, making them
+  more cumbersome.
+
+There are four types of operations that we will need to perform:
+
+* add a document to the repository
+* retrieve a document from a repository
+* update a local document
+* commit changes to a document in the repository
+
+In the user interface may want to combine the last two in a single
+'synchronise' option. If a user has no commit access this will only update
+the local copy.
+
+It is possible to perform all actions without having a local working copy.
+This has the advantage that it saves disk space and can be more efficient.
+There is also a good readon for using a working copy: it allows us to
+let the subversion library perform more of the check difference/merging
+work. 
+
+Adding a document to the repository
+-----------------------------------
+This is a simple operation: we need to grab all files in the ODF package
+and add them to the repository. When doing that we need to modify meta.xml
+in both the local and remote version to include the repository information.
+The local version will also embed the current revision number. For obvious
+reasons we can not do that in the remote version.
+
+Update a local document
+-----------------------
+This takes a ODF package and looks up its repository. All changes made to
+the repository need to be applied to the ODF package. If any file has a
+conflict we need to roll back all changes in order to keep things in sync
+and prompt the user.
+
+Synchronize changes to a document in the repository
+---------------------------------------------------
+This is the opposite of updating the local document.
+
+
+Relevant standards
+==================
+
+* `ODF part 3`_: Packages 
+
+.. _ODf part 3: http://www.oasis-open.org/committees/download.php/25267/OpenDocument-package-v1.2-draft6.odt
+..
