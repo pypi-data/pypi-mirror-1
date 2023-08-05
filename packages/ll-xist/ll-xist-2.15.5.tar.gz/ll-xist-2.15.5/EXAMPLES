@@ -1,0 +1,243 @@
+                                Examples
+                                ========
+
+Creating HTML
+=============
+
+   You can create and output HTML like this:
+
+ from ll.xist import xsc
+ from ll.xist.ns import html, xml, meta
+
+ node = xsc.Frag(
+    xml.XML10(),
+    html.DocTypeXHTML10transitional(),
+    html.html(
+       html.head(
+          meta.contenttype(),
+          html.title("Example page")
+       ),
+       html.body(
+          html.h1("Welcome to the example page"),
+          html.p(
+             "This example page has a link to the ",
+             html.a("Python home page", href="http://www.python.org/"),
+             "."
+          )
+       )
+    )
+ )
+
+ print node.conv().asBytes(encoding="us-ascii")
+
+Defining new elements
+=====================
+
+   You can define new elements and how they should be converted to
+   HTML (or other XML vocabularies) like this:
+
+ from ll.xist import xsc
+ from ll.xist.ns import html, xml, meta
+
+ class pypilink(xsc.Element):
+    class Attrs(xsc.Element.Attrs):
+       class name(xsc.TextAttr): pass
+
+    def convert(self, converter):
+       e = html.a(
+          self["name"],
+          href=("http://www.python.org/pypi?:action=display&name=", self["name"])
+       )
+       return e.convert(converter)
+
+ names = ["ll-xist", "cx_Oracle", "PIL"]
+
+ node = xsc.Frag(
+    xml.XML10(),
+    html.DocTypeXHTML10transitional(),
+    html.html(
+       html.head(
+          meta.contenttype(),
+          html.title("PyPI links")
+       ),
+       html.body(
+          html.h1("PyPI links"),
+          html.ul(html.li(pypilink(name=name)) for name in names)
+       )
+    )
+ )
+
+ print node.conv().asBytes(encoding="us-ascii")
+
+Parsing HTML
+============
+
+   Parsing HTML is done like this:
+
+ from ll.xist import parsers
+
+ node = parsers.parseURL("http://www.python.org/", tidy=True)
+
+Finding and counting nodes
+==========================
+
+   The following example shows you how to output the URLs of all
+   images inside links on Python's homepage:
+
+ >>> from ll.xist import parsers
+ >>> from ll.xist.ns import html
+ >>> node = parsers.parseURL("http://www.python.org/", utidy=True)
+ >>> for img in node//html.a/html.img:
+ ...    print img["src"]
+ ...
+ http://www.python.org/images/python-logo.gif
+ http://www.python.org/images/trans.gif
+ http://www.python.org/images/trans.gif
+ http://www.python.org/images/success/nasa.jpg
+
+   If you want to output both the links and the image URLs, do the
+   following:
+
+ >>> from ll.xist import parsers, xfind
+ >>> from ll.xist.ns import html
+ >>> node = parsers.parseURL("http://www.python.org/", tidy=True)
+ >>> for link in node//html.a/xfind.contains(html.img):
+ ...    print link["href"], str((link/html.img)[0]["src"])
+ http://www.python.org/ http://www.python.org/images/python-logo.gif
+ http://www.python.org/#left%2dhand%2dnavigation http://www.python.org/images/trans.gif
+ http://www.python.org/#content%2dbody http://www.python.org/images/trans.gif
+ http://www.python.org/about/success/usa http://www.python.org/images/success/nasa.jpg
+
+   If you want to count the number of links on the page you can do
+   the following:
+
+ >>> from ll import misc
+ >>> from ll.xist import parsers
+ >>> from ll.xist.ns import html
+ >>> node = parsers.parseURL("http://www.python.org/", tidy=True)
+ >>> misc.count(node//html.a)
+ 90
+
+Replacing text
+==============
+
+   This example demonstrates how to make a copy of an XML tree with
+   some text replacements:
+
+ from ll.xist import xsc, parsers
+
+ def p2p(node, converter):
+    if isinstance(node, xsc.Text):
+       node = node.replace("Python", "Parrot")
+       node = node.replace("python", "parrot")
+    return node
+
+ node = parsers.parseURL("http://www.python.org/", tidy=True)
+
+ node = node.mapped(p2p)
+ node.write(open("parrot_index.html", "wb"))
+
+Converting HTML to XIST code
+============================
+
+   The class ll.xist.presenters.CodePresenter makes it possible to
+   output an XIST tree as usable Python source code:
+
+ >>> from ll.xist import parsers, presenters
+ >>> e = parsers.parseURL("http://www.python.org/", tidy=True)
+ >>> print e.asrepr(presenters.CodePresenter())
+ ll.xist.xsc.Frag(
+    ll.xist.ns.html.html(
+       xsc.Comment(' THIS PAGE IS AUTOMATICALLY GENERATED.  DO NOT EDIT. '),
+       xsc.Comment(' Thu Jan 27 12:33:38 2005 '),
+       xsc.Comment(' USING HT2HTML 2.0 '),
+       xsc.Comment(' SEE http://ht2html.sf.net '),
+       xsc.Comment(' User-specified headers:\nTitle: Python Programming Language\n\n'),
+       ll.xist.ns.html.head(
+          ll.xist.ns.html.title(
+             'Python Programming Language'
+          ),
+          ll.xist.ns.html.meta(
+             content='text/html; charset=iso-8859-1',
+             http_equiv='Content-Type'
+          ),
+          ll.xist.ns.html.meta(
+             content='HT2HTML/2.0',
+             name='generator'
+          ),
+          ll.xist.ns.html.meta(
+             content='Python programming language object oriented web free\n source',
+             name='keywords'
+          ),
+          [... Many lines deleted ...]
+          xsc.Comment(' end of page table '),
+          marginheight=0,
+          alink='#ff0000',
+          text='#000000',
+          bgcolor='#ffffff',
+          link='#0000bb',
+          marginwidth=0,
+          vlink='#551a8b'
+       )
+    )
+ )
+
+Using converter contexts to pass information between elements
+=============================================================
+
+   Converter contexts can be used to pass information between
+   elements. The following example will generate HTML <h1>, ..., <h6>
+   elements according to the nesting depth of a <section> element.
+
+ from ll.xist import xsc
+
+ class section(xsc.Element):
+    class Attrs(xsc.Element.Attrs):
+       class title(xsc.TextAttr): pass
+
+    class Context(xsc.Element.Context):
+       def __init__(self):
+          xsc.Element.Context.__init__(self)
+          self.level = 1
+
+    def convert(self, converter):
+       context = converter[self]
+       elementname = "h%d" % min(context.level, 6)
+       node = xsc.Frag(
+          converter.target.element(elementname)(self["title"]),
+          self.content
+       )
+       context.level += 1
+       node = node.convert(converter)
+       context.level -= 1
+       return node
+
+ document = section(title="Python Tutorial")(
+    section(title="Using the Python Interpreter")(
+       section(title="Invoking the Interpreter")(
+          section(title="Argument Passing"),
+          section(title="Interactive Mode")
+       ),
+       section(title="The Interpreter and Its Environment")(
+          section(title="Error Handling"),
+          section(title="Executable Python Scripts"),
+          section(title="Source Code Encoding"),
+          section(title="The Interactive Startup File")
+       )
+    )
+ )
+
+ print document.conv().asBytes()
+
+   The output of this script will be:
+
+ <h1>Python Tutorial</h1>
+ <h2>Using the Python Interpreter</h2>
+ <h3>Invoking the Interpreter</h3>
+ <h4>Argument Passing</h4>
+ <h4>Interactive Mode</h4>
+ <h3>The Interpreter and Its Environment</h3>
+ <h4>Error Handling</h4>
+ <h4>Executable Python Scripts</h4>
+ <h4>Source Code Encoding</h4>
+ <h4>The Interactive Startup File</h4>
