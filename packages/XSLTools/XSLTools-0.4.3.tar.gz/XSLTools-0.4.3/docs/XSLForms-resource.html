@@ -1,0 +1,207 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><head>
+  <meta content="text/html;charset=ISO-8859-1" http-equiv="Content-Type" />
+  
+  <title>Using the XSLFormsResource API</title><meta name="generator" content="amaya 8.1a, see http://www.w3.org/Amaya/" />
+  <link href="styles.css" rel="stylesheet" type="text/css" /></head>
+<body>
+<h1>Using the XSLFormsResource API</h1>
+<p>The XSLForms toolkit provides&nbsp;a special WebStack resource class (described in the <a href="Web-resource.html">"Creating Applications: Write a Web Resource"</a>
+document),&nbsp; and
+from this class,&nbsp;<code>XSLFormsResource</code>,
+you can derive your own application-specific resources and use the
+class's API to obtain, manipulate and present form data. Although the
+supplied <a href="../apidocs/index.html">API documentation</a> provides details of the class's API, specifically in the&nbsp;<code><a href="../apidocs/public/XSLForms.Resources.WebResources-module.html">XSLForms.Resources.WebResources</a></code><a href="../apidocs/public/XSLForms.Resources.WebResources-module.html"></a> module, this document attempts to explain how the API is used in practice.</p><h2>Resource Structure</h2><p>The structure of a Web resource derived from&nbsp;<code>XSLFormsResource</code> should look like this:</p><pre>class MyResource(XSLForms.Resources.WebResources.XSLFormsResource):<br /><br />    [Resource definitions]<br /><br />    def respond_to_form(self, trans, form):<br />        [Examine the form data, see if the user has added or removed anything.]<br />        [Perform additional processing and initialise the form data.]<br />        [Produce some kind of response to show the user the updated form data.]</pre><p>Since&nbsp;<code>XSLFormsResource</code> builds on WebStack's resource mechanisms, we do have the transaction object, <code>trans</code>, available. However,&nbsp;most of the information we need to access and manipulate is generally available through the <code>form</code> object.</p><h2>Defining Resources</h2><p>Classes derived from&nbsp;<code>XSLFormsResource</code>
+support the concept of resources which are used to produce output,
+support processing and to provide access to useful information. At the
+class level it is essential to define at least some of these resources
+in order to make a working application.</p><h3>The Resource Directory</h3><p>Since
+XSLForms relies on template files residing in the filesystem, along
+with other files, we need to define where such files can be found (as
+described in the <a href="directory.html">"Creating Applications: Create
+a Directory"</a> document). Consequently, it is the convention that all resource classes define such information as follows:</p><pre>class ConfiguratorResource(XSLForms.Resources.WebResources.XSLFormsResource):<br /><br />    resource_dir = os.path.join(os.path.split(__file__)[0], "Resources")</pre><p>All
+filenames, defined in the various resource sections (as described
+below) must be stated without leading path information - in other
+words,&nbsp;as "leafnames" rather than "pathnames". Thus, an example of
+an incorrect filename would be&nbsp;<code>/home/paulb/templates/my_template.xhtml</code>, whereas an example of a correct filename would be just&nbsp;<code>my_template.xhtml</code> when correcting the incorrect example.<br /></p><h3>Character Encoding</h3><p>It
+is also the convention to define the character encoding of the output
+produced by an application and the way ambiguous or
+insufficiently-specified input should be interpreted; this is done as
+follows:</p><pre>    # Continuing from above...<br /><br />    encoding = "utf-8"</pre><h3>Template Resources</h3><p>The
+main purpose of XSLForms is to produce Web page output containing a
+visual representation of a form. Therefore, we need to define templates
+(as described in the <a href="design.html">"Creating Applications: Design a Template"</a>
+document) to express the representation of each kind of form, along
+with any intermediate files that may be produced. A&nbsp;special
+class-level&nbsp;<code>template_resources</code> dictionary is used to hold such definitions.</p><p>To
+define a template resource, we first choose a name (which need not have
+any special significance); we then associate with that name&nbsp;a
+template filename&nbsp;and an output filename. Finally, we make an
+entry for the name and its associated details in the special
+class-level&nbsp;<code>template_resources</code> dictionary as follows:</p><pre>    # Continuing from above...<br /><br />    template_resources = {<br />        "configuration" : ("config_template.xhtml", "config_output.xsl"),<br />        # More entries go here...<br />        }</pre><p>The&nbsp;purpose
+of the output filename is to define where the intermediate
+output-producing stylesheet is to be written, since the template itself
+is not actually used to produce output, but knowing where the
+intermediate stylesheet can be found is sometimes useful when debugging
+templates and is thus defined explicitly to avoid confusion.</p><h3>Initialisation Resources</h3><p>The
+XSLForms toolkit also support the initialisation of form data
+documents. This document initialisation is useful when preparing a
+document for output since some parts of a template may not be produced
+unless certain elements are present in the form data document. For
+example, a template may contain something like this:</p><pre>&lt;div template:element="hard-disks"&gt;<br />  &lt;input template:selector-field="add-hard-disk,hard-disk" type="submit" name="..." value="Add hard disk"/&gt;<br />  &lt;p template:element="hard-disk"&gt;<br />    ...<br />  &lt;/p&gt;<br />&lt;/div&gt;</pre><p>In the above example, if no <code>hard-disks</code> element exists, the selector will not be displayed and there will be no way of adding <code>hard-disk</code> elements. With document initialisation, certain measures can be taken to ensure that the <code>hard-disks</code> element is added before output is generated.</p><p>At the class level, the <code>init_resources</code>
+dictionary is used to hold definitions mapping initialiser names (which
+need not have any special significance) to the initialiser details: the
+filename of the template which defines the structure of the form data,
+and an intermediate filename similar to the output filename described
+in the context of template resources above. An example of this is as
+follows:</p><pre>    # Continuing from above...<br /><br />    init_resources = {<br />        "configuration" : ("config_template.xhtml", "config_input.xsl"),<br />        # More entries go here...<br />        }</pre><p>Note
+that initialiser and template resources may (and should) share the same
+template filename. As with the output filename for template resources,
+the input filename provides firm information about the location of the
+stylesheet which actually performs the initialisation process.</p><h3>Document Resources</h3><p>Since
+it is the XSLForms convention to access files using a simple name, any
+other document resources should be defined in the&nbsp;<code>document_resources</code>
+dictionary at the class level. Such document resources may be used in
+the initialisation process or in other transformations (as described
+below), and are defined as entries mapping names to filenames such as
+in the following example:</p><pre>    # Continuing from above...<br /><br />    document_resources = {<br />        "accessories" : "config_accessories.xml",<br />        "base-system" : "config_base_system.xml",<br />        # More entries go here...<br />        }</pre><p>There is no particular limitation on the types of files which can be referenced in the <code>document_resources</code>
+dictionary, nor any insistence in the XSLForms toolkit to define such
+files as resources - the dictionary is merely a convenience for
+accessing files in the resources directory.</p><h3>Transform Resources</h3><p>It is sometimes the case that initialisation of a&nbsp;document 
+is not sufficient and that additional processing needs to be done.
+Whilst various techniques exist for the processing of XML-based
+information, since XSLForms is part of a wider toolkit based on XSL
+transformations, it seems reasonable to provide certain facilities for
+the usage of such transformations. Thus, stylesheet processing
+pipelines may be defined at the class level in the&nbsp;<code>transform_resources</code> dictionary.</p><p>Entries in the <code>transform_resources</code>
+dictionary map simple names (which need not have any special
+significance) to collections of stylesheet filenames as in the
+following example:</p><pre>    # Continuing from above...<br /><br />    transform_resources = {<br />        "filter" : ["filter.xsl"],<br />        # More entries go here...<br />        }</pre><p>Where
+more than one stylesheet filename is specified, the stylesheets are
+applied from first to last in the transformation. Additional
+information, such as stylesheet parameters and referenced documents,
+are mentioned when the transformation is acquired and invoked, as
+described below.</p><h3>In-Page Update Resources</h3><p>In certain
+applications, a technique referred to within XSLForms as "in-page
+updates" is employed to provide updates of details within a Web page
+without refreshing the entire page itself (and this is described in the
+<a href="in-page-updates.html">"Creating Applications: In-Page Updates"</a>
+document). When such updates are requested, applications have to
+identify the kind of update requested and then to select the correct
+part of the Web page to generate as output. Consequently, the
+application has to have some kind of record of the different kinds of
+updates and the corresponding parts of the whole page template to use,
+and this information is recorded in the class-level&nbsp;<code>in_page_resources</code> dictionary.</p><p>The form of an entry in the&nbsp;<code>in_page_resources</code>
+dictionary is that of a mapping from a name identifying the kind of
+update to the details of the part of the template to be employed in
+producing the final output for the update: an intermediate filename
+(distinct from that associated with the whole page template), and a
+node identifier used to isolate the pertinent part of the whole page
+template. Here is an example of an in-page resource definition:</p><pre>    # Continuing from above...<br /><br />    in_page_resources = {<br />        "cpu" : ("config_output_cpu.xsl", "cpu-node"),<br />        # More entries go here...<br />        }</pre><h4>Update Names</h4><p>It
+is important to note that, unlike other resources, the name identifying
+the kind of update is significant: consider an application available at
+the following location:</p><pre>http://localhost/configurator/</pre><p>An in-page update called&nbsp;<code>cpu</code> would be accessed through the following location:</p><pre>http://localhost/configurator/cpu</pre><p>Thus,
+the availability of such an update "service" depends on the proper
+configuration of the Web application to let such updates be handled by
+the resource.</p><h4>Update Nodes</h4><p>The node identifier mentioned
+in an in-page update resource definition must be a valid node
+identifier in the whole page template document. Thus, if we wished to
+use the identifier in the above example together with <code>config_template.xhtml</code>, we would have to ensure that the identifier appeared as a value of an&nbsp;<code>id</code>
+node in that template document. Note that the choice of template
+document is not defined here, but is instead made when handling an
+in-page update request.</p><h2>Examining the Form Data</h2><p>The form data is available through the <code>form</code> object which exposes the&nbsp;<code><a href="../apidocs/public/XSLForms.Fields.Form-class.html">XSLForms.Fields.Form</a></code> API. The most interesting operations are as follows:</p><h3>Obtain the Form Data Documents</h3><p>Since
+XSLForms is an XML-based toolkit, the form data is available as XML
+documents which can be accessed and manipulated using a DOM-style API.
+Upon receiving submitted form data, XSLForms converts the data to such
+documents and then makes it available through the <code>form</code>
+object by associating certain document names with the actual documents
+themselves in a dictionary; this dictionary can be obtained as follows:</p><pre>documents = form.get_documents()</pre><p>Imagine that a template document has been written with <code>items</code> as the root (or topmost) element; such a document will consequently be made available via the <code>form</code> object's documents dictionary using the name <code>items</code>, and can be accessed as follows:</p><pre>items = documents["items"]</pre><p>However,
+it may be the case that no form data has been submitted. To avoid
+causing an exception, we should really test for the presence of such a
+document first:</p><pre>if documents.has_key("items"):<br />    items = documents["items"]</pre><p>Since
+it is likely that we will want to work with such a document regardless
+of whether one existed before - we must after all prepare such a
+document in the first place in order to show it to the user and have it
+submitted back to us - we really want to create it if it does not exist:</p><pre>if documents.has_key("items"):<br />    items = documents["items"]<br />else:<br />    items = form.new_document("items")</pre><p>The resulting&nbsp;<code>items</code> object is a genuine DOM-style document containing the form data.</p><h3>Obtain the Form Data Selectors</h3><p>As described in the <a href="selectors.html">"Creating Applications: Add Selectors"</a>
+document, XSLForms templates may define selectors - special form fields
+which select parts of the form data documents and make those parts
+available to applications; such selector information can be obtained as
+follows:</p><pre>selectors = form.get_selectors()</pre><p>If a selector was defined with the name&nbsp;<code>remove</code>, then any selected elements that are associated with this selector may be obtained as follows:</p><pre>removed_elements = selectors.get("remove") # which will return None if no such selector was defined</pre><p>Since
+the collection contains DOM-style elements, various XML libraries and
+tools may be used to manipulate the data. However, XSLForms also
+provides convenience functions to add and remove elements.</p><h3>Obtaining Other Parameters</h3><p>Sometimes,
+there is a need to obtain the "raw" request parameters submitted by the
+Web client or browser which sent the form data in to the application.
+Such parameters could be obtained using the&nbsp;<code>trans</code> object, but it is also possible to use the following approach:</p><pre>parameters = form.get_parameters()<br />some_parameter = parameters.get("something") # which returns None if no such parameter exists; a list otherwise<br />another_parameter = parameters.get("another", [""])[0] # which will always return a string, empty if no such parameter was found</pre><h2>Performing Additional Processing</h2><p>Additional
+processing of the form data can be performed in many different ways,
+limited only by the DOM-style API exposed by the data and the XSL
+transformation features available in the XSLForms toolkit.</p><h3>Transformations</h3><p>To take advantage of the defined&nbsp;<code>transform_resources</code>, we can call a method on the resource itself to prepare such resources:</p><pre>filter_stylesheets = self.prepare_transform("filter")</pre><p>Then,
+with the result of this call (a list of stylesheet filenames), we can
+then perform a transformation on a document, producing a new document
+from the results:</p><pre>configuration_document = self.get_result(filter_stylesheets, configuration_document)</pre><p>This new document is different from the document supplied to the&nbsp;<code>get_result</code>
+method. It should therefore be noted that any references to elements in
+the old document will not affect the new document; thus selectors
+previously obtained from the&nbsp;<code>form</code> object will not refer to elements in the new document. However, by setting the new document in the&nbsp;<code>form</code> object, new selectors may be obtained referring to elements in the new document:</p><pre>form.set_document("configuration", configuration_document)<br />selectors = form.get_selectors()</pre><p>Care
+must be taken doing this, however, since the selectors may now not
+refer to valid elements - the transformation may have removed or moved
+elements previously referred to by the selectors.</p><p>The&nbsp;<code>get_result</code>
+method also supports stylesheet parameters, document references and
+stylesheet expressions; these are described in the "Additional
+Stylesheet Parameters" section below.</p><h3>Using Selectors to Modify the Data</h3><p>As
+described above in "Obtain the Form Data Selectors", if the user of an
+application requested changes to the form data using a selector field
+(typically represented by a button or checkbox in a Web page), a list
+of selected elements will be available to the resource through the&nbsp;<code>form</code> object. Given a selector which is associated with a&nbsp;<code>remove</code>
+operation, we could use the DOM-style API exposed by the contents of
+the selectors to perform such an operation in the resource using our
+own code. However, the XSLForms toolkit provides some useful
+convenience functions to assist in the removal or addition of elements:</p><pre># After doing this:<br /># import XSLForms.Utils<br /><br /># Removing elements...<br /><br />removed_elements = selectors.get("remove")       # this may return None<br />XSLForms.Utils.remove_elements(removed_elements) # this can handle None, realising that no elements are to be removed<br /><br /># Adding elements...<br /><br />places_to_add_elements = selectors.get("add")<br />XSLForms.Utils.add_elements(places_to_add_elements, "element")</pre><p>See the&nbsp;<code><a href="../apidocs/public/XSLForms.Utils-module.html">XSLForms.Utils</a></code><a href="../apidocs/public/XSLForms.Utils-module.html"></a> documentation for more information on these functions.<br /></p><h2>Document Initialisation</h2><p>The initialisation of a document, using information defined in the&nbsp;<code>init_resources</code>
+attribute, is similar to the transformation of a document as described
+above. First, we obtain a reference to an initialisation stylesheet:</p><pre>init_stylesheet = self.prepare_initialiser("configuration")</pre><p>Note
+that only a single stylesheet is returned. With the result of the call,
+we then perform a transformation similar to the above activity,
+although we have to supply the returned stylesheet in a list to be
+compatible with the&nbsp;<code>get_result</code> method:</p><pre>configuration_document = self.get_result([init_stylesheet], configuration_document)</pre><p>In practice, the above call will probably not suffice: if <a href="multiple.html">multiple-choice fields</a>
+are used in the template, there will be a need to initialise such
+elements using references to other documents containing the values of
+such fields; for example:</p><pre>configuration_document = self.get_result([init_stylesheet], configuration_document,<br />    references={<br />        "cpu" : self.prepare_document("cpu")<br />    })</pre><p>The
+use of document references and other stylesheet parameter information
+is described in the "Additional Stylesheet Parameters" section below.</p><h2>Preparing Responses</h2><p>The process of preparing a response involves three main steps:</p><ol><li>Setting a content type.</li><li>Defining an output stylesheet and parameter information.</li><li>Sending the output to the user.</li></ol><h3>Setting a Content Type</h3><p>In
+the examples supplied with XSLTools, the content type is generally
+defined as that of XHTML, meaning that the resulting output should be
+accessible to most modern Web browsers. When writing resources based
+on&nbsp;<code>XSLFormsResource</code>, we can just use the WebStack API to set the content type:</p><pre>trans.set_content_type(WebStack.Generic.ContentType("application/xhtml+xml", self.encoding))</pre><p>Note that the&nbsp;<code>encoding</code> attribute is used here to make the character encoding clear to the user's Web browser or client.</p><h3>Defining an Output Stylesheet</h3><p>In most cases, the&nbsp;output stylesheet can be chosen by selecting a template name and invoking a method on the resource:</p><pre>output_stylesheet = self.prepare_output("configuration")</pre><p>However,
+where in-page updates are handled, we may need to check to see if we
+should be sending a fragment of the whole page instead. First, we must
+check to see if an in-page update&nbsp;is being requested:</p><pre>in_page_resource = self.get_in_page_resource(trans)</pre><p>The
+result of calling the above method should be a string identifying an
+"in-page resource" - that is, a kind of in-page update related to part
+of the whole page -&nbsp;if such a "resource" is actually being
+requested. We can thus check to see if such a request is taking place:</p><pre>if in_page_resource in self.in_page_resources.keys():<br />    [Handle the in-page update request]</pre><p>If
+so, instead of getting a stylesheet which produces output for the whole
+page, we get a "fragment" which produces output only for the part of
+the page being updated:</p><pre>    # Continued from above...<br /><br />    output_stylesheet = self.prepare_fragment("configuration", in_page_resource)<br />    stylesheet_parameters = self.prepare_parameters(parameters) # from form.get_parameters()</pre><p>An
+additional step when handling in-page updates is the usage of
+stylesheet parameters to send in some required information about the
+location of the update in the page. The&nbsp;<code>prepare_parameters</code>
+method on the resource is used to discover this information and return
+it as a dictionary to be passed to the final output generation activity.</p><h3>Sending the Output to the User</h3><p>Given
+an output stylesheet reference and possibly some parameters, the output
+is sent to the user with a single call to a method on the resource
+object:</p><pre>self.send_output(trans, [output_stylesheet], configuration_document, stylesheet_parameters)</pre><p>This method should, using the&nbsp;<code>encoding</code>
+attribute on the resource class, ensure that the generated output is
+correct and consistent for the user's Web browser or client.</p><h2>Additional Stylesheet Parameters</h2><p>In addition to a collection of stylesheets and a document to process, the&nbsp;<code>get_result</code> and&nbsp;<code>send_output</code> methods can accept a number of possible sources of information:</p><ul><li>Stylesheet parameters</li><li>Document references</li><li>Stylesheet expressions</li></ul><p>Generally,
+stylesheet parameters are used to configure the output in some way,
+whilst document references and stylesheet expressions typically offer a
+means of accessing additional information that is to be merged in or
+included in the processed document. The most common need to introduce
+additional information arises from the use of multiple-choice elements;
+consider the list of values given in the <a href="multiple.html">"Creating Applications: Adding Multiple-Choice Fields and Values"</a> document:</p><pre>&lt;?xml version="1.0"?&gt;<br />&lt;type&gt;<br />  &lt;type-enum value="(Not selected)"/&gt;<br />  &lt;type-enum value="Important"/&gt;<br />  &lt;type-enum value="Not important"/&gt;<br />  &lt;type-enum value="Personal"/&gt;<br />&lt;/type&gt;</pre><p>Such
+information needs to reside somewhere and then be referenced in order
+to be included in the processing operation being performed, which would
+either be a document initialisation or just a normal transformation.</p><h3>Document References</h3><p>To refer to an externally-defined information, we define the document resource as described above:</p><pre>    # At class attribute level...<br /><br />    document_resources = {<br />        "types" : "types.xml",<br />        # Other documents...<br />        }</pre><p>Then, we access the resource, getting a reference to the document:</p><pre>types_xml = self.prepare_document("types")</pre><p>To bring&nbsp;this document into the processing operation, we add an entry to a dictionary passed as the&nbsp;<code>references</code> parameter to&nbsp;<code>get_result</code> (or&nbsp;<code>send_output</code>, if appropriate). In the above example, the information is referenced as follows in the template document:</p><pre>    &lt;select template:multiple-choice-field="type,value" name="..."&gt;<br />      &lt;option template:multiple-choice-value="type-enum,value,selected" value="..." /&gt;<br />    &lt;/select&gt;</pre><p>Therefore, we take the element name,&nbsp;<code>type</code>, from the field and use it to refer to the external document in the dictionary of references:</p><pre>structure = self.get_result([structure_xsl], structure, references={"type" : types_xml})</pre><p>This should result in the stylesheet incorporating the information from the types document into the transformation.</p><h3>Stylesheet Expressions</h3><p>In
+more advanced cases, referencing external documents does not provide
+enough flexibility when introducing additional information into a
+transformation. An alternative approach involves copying data into the
+document to be processed and then to supply references to the data in
+its new location within the document.</p></body></html>
