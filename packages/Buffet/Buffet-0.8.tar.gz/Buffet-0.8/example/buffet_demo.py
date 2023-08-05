@@ -1,0 +1,80 @@
+import cherrypy
+
+from buffet import TemplateFilter, using_template, TemplateEngineMissing
+
+missing_messages = {'kid_section':'Plugin not installed.  Try "easy_install TurboKid" and restart this demo',
+                    'cheetah_section': 'Plugin not installed.  Try "easy_install TurboCheetah" and restart this demo',
+                    'string_section': 'Plugin not installed.  Try "easy_install BuffetString" and restart this demo',
+                    'myghty_section': 'Plugin not installed.  Try "easy_install BuffetMyghty" and restart this demo',
+                    }
+
+class EmptySection(object):
+    @cherrypy.expose
+    def index(self):
+        page_handler_name = cherrypy.request.path.rstrip('/').split('/').pop()
+        return missing_messages.get(page_handler_name, "Plugin not installed")
+
+try:    
+    class StringSection(object):
+        _cpFilterList = [TemplateFilter('string')]
+
+        @cherrypy.expose
+        @using_template('templates.string.generic_template')
+        def index(self):
+            return dict(title="New String Test", message="End Points are fun!")
+except TemplateEngineMissing:
+    StringSection = EmptySection
+    
+try:
+    class CheetahSection(object):
+        _cpFilterList = [TemplateFilter('cheetah')]
+
+        @cherrypy.expose
+        @using_template('templates/cheetah/test')
+        def index(self):
+            return dict(title="New TurboCheetah Test", message="Buffet does TurboCheetah!")
+except TemplateEngineMissing:
+    CheetahSection = EmptySection
+
+try:
+    class KidSection(object):
+        _cpFilterList = [TemplateFilter('kid')]
+
+        @cherrypy.expose
+        @using_template('templates/kid/test')
+        def index(self):
+            return dict(title="Kid at a Buffet", message="All you can eat templates.")
+except TemplateEngineMissing:
+    KidSection = EmptySection
+
+try:
+    class MyghtySection(object):
+        _cpFilterList = [TemplateFilter('myghty')]
+
+        @cherrypy.expose
+        @using_template('templates/myghty/test')
+        def index(self):
+            return dict(title="Myghty good Buffet", message="Fill up another template.")
+except TemplateEngineMissing:
+    MyghtySection = EmptySection
+    
+class TmplTest(object):
+    string_section = StringSection()
+    cheetah_section = CheetahSection()
+    kid_section = KidSection()
+    myghty_section = MyghtySection()
+    
+    def index(self):
+        return "<a href='string_section'>string</a><br />\
+        <a href='cheetah_section'>cheetah</a><br />\
+        <a href='kid_section'>kid</a><br />\
+        <a href='myghty_section'>myghty</a><br />\
+        "
+    index.exposed = True
+
+
+cherrypy.root = TmplTest()
+
+cherrypy.config.update({'global':{'autoreload.on':False}})
+
+cherrypy.server.start()
