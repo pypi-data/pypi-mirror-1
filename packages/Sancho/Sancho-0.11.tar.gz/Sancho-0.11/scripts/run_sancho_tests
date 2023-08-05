@@ -1,0 +1,76 @@
+#!/usr/bin/env python
+
+"""Run all test scripts in a directory tree and report the results.
+Searches for any file "test_*.py" in any subdirectory "test" under the
+current directory (or a starting point given on the command line),
+and runs them all.
+"""
+
+# created 2000/07/10, Greg Ward
+
+__revision__ = "$Id: run_sancho_tests 20440 2003-01-24 22:38:10Z dbinger $"
+
+import sys, os
+import getopt
+
+from sancho.util import find_test_scripts, run_all_scripts
+from sancho.unittest import TestOptions
+
+USAGE = """\
+usage: %(prog)s [ -i ] [ -c ] [ -q ] [ -v ] [start_dir | test_script] ...
+
+ -i for use_debugger
+ -c for show_code_coverage
+ -q for not verbose
+ -v for extra verbose
+ 
+Directories in the arguments are searched recursively for test_*
+scripts in test directories.
+
+With no arguments, the search is recursive from the current directory.
+
+"""
+
+def write_now(msg):
+    sys.stdout.write(msg)
+    sys.stdout.flush()
+
+def main (prog, args):
+    usage = USAGE % vars()
+    try:
+        (opts, args) = getopt.getopt(args, 'cvqi')
+    except getopt.error, msg:
+        raise SystemExit, usage + "\n" + str(msg)
+    VERBOSITY = TestOptions.MEDIUM
+    SHOW_COVERAGE = 0
+    USE_DEBUGGER = 0
+    for (opt, _) in opts:
+        if opt == '-q':
+            VERBOSITY = TestOptions.LOW
+        elif opt == '-v':
+            VERBOSITY = TestOptions.HIGH
+        elif opt == '-c':
+            SHOW_COVERAGE = 1
+        elif opt == '-i':
+            USE_DEBUGGER = 1
+    scripts = []
+    for arg in args or ["."]:
+        if os.path.isdir(arg):
+            if VERBOSITY != TestOptions.LOW:
+                write_now("looking for test scripts in %s ..." % arg)
+            scripts.extend(find_test_scripts(arg))
+        else:
+            scripts.append(arg)
+        if VERBOSITY != TestOptions.LOW:
+            write_now(" found %d\n" % len(scripts))
+    results = run_all_scripts(scripts,
+                              use_debugger=USE_DEBUGGER,
+                              show_coverage=SHOW_COVERAGE,
+                              verbosity=VERBOSITY)
+    print results
+    if not results.ok():
+        sys.exit(2) # some tests failed
+        
+
+if __name__ == "__main__":
+    main(os.path.basename(sys.argv[0]), sys.argv[1:])
