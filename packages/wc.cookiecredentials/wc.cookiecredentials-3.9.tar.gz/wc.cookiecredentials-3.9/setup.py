@@ -1,0 +1,38 @@
+from setuptools import setup, find_packages
+
+setup(name='wc.cookiecredentials',
+      version='3.9',
+      url='http://worldcookery.com/Downloads',
+      description="Cookie Credentials plug-in for Zope's Pluggable "
+                  "Authentication Utility",
+      author='Philipp von Weitershausen',
+      author_email='philipp@weitershausen.de',
+      long_description=file('README.txt').read(),
+      classifiers=['Development Status :: 5 - Production/Stable',
+                   'Environment :: Web Environment',
+                   'Framework :: Zope3',
+                   'Intended Audience :: Developers'],
+
+      packages=find_packages(),
+      namespace_packages=['wc',],
+      install_requires=['setuptools',
+                        'zope.interface',
+                        'zope.publisher',
+                        'zope.formlib',
+                        'zope.i18nmessageid',
+                        'zope.annotation',
+                        'zope.app.authentication',
+                        # testing dependencies:
+                        'ZODB3',
+                        'zope.component',
+                        'zope.testbrowser',
+                        'zope.app.zcmlfiles',
+                        'zope.app.component',
+                        'zope.app.publisher',
+                        'zope.app.testing',
+                        'zope.app.security',
+                        'zope.app.securitypolicy',
+                        ],
+      include_package_data=True,
+      zip_safe=False,
+      )
