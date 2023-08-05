@@ -1,0 +1,111 @@
+"""
+
+Watermarking
+------------
+
+>>> base = Image("tests/kapow.png")
+>>> watermark = base.Image()
+>>> canvas = watermark.Canvas()
+>>> canvas.Layout("my watermark", "Helvetica 9").fill("black", alpha=.5)
+>>> base.composite(watermark, 'under')
+>>> base.save("test/kapow_marked.png")
+
+This is a shift from the existing APIs. The idea is to involve fewer
+operation and to only create an explict canvas (which holds a Cairo
+Context) when we need it.
+
+The hidden gotchas compared to the stock Cairo api are that we can
+create an image w/o a fixed size. In this case base will provide the 
+size and style options to watermark. It should be possible to create
+an ImageFromLayout which would offer a scaled layout from a know Font
+Transformation Matrix.
+
+The other change is that images support the compositing
+operators. Under the covers they will create a canvas and map the
+proper operations. I'll type pyrex so you don't have to think about it
+later.
+
+
+Text Generation
+---------------
+
+>>> layout = Image().Canvas().Layout(font="Helvetica 16")
+>>> layout.Text("First Sample\n")
+>>> layout.Text("Second Sample\n")
+>>> image = layout.fill("black", width=600)
+>>> image.save("test/generated_text.png")
+
+Here we generate an image w/o any starting sample size. This means
+that we will not be able to generate the image until we apply some
+size specification. Normally if the size was unspecified we might
+scale the bounds by passing size to layout.fill as an x,y pair that we
+should try to fit the rendered text to. In this example we mearly
+spefic a width yielding a set of extents. Internally these extents
+will then be used to generate and return an image of the correct size.
+
+This means that fill/stroke will return a new image if one isn't
+associated wth the layout at the time of creation (again, as indicated
+by the lack of size parameters to the Image constructor).
+
+
+Text on a Path
+--------------
+
+Paths require somewhat complex manipulations of each individual point
+in the font outline according to some transform matrix. At the time of
+writing this interface is purely speculative.
+
+>>> canvas = Image().Canvas()
+>>> layout = canvas.Layout("running text", font="Helvetica 16")
+
+Draw a circle. 
+>>> path = canvas.arc(0.5, 0.5, 0.05, 0, 2*math.pi)
+
+Now force the text onto that path
+
+>>> image = layout.fill("black", path=path)
+
+This will internally map points as we move along the text path the
+passed in path (in this case laying the text out along a circle)
+
+>>> image.save("tests/text_path.png")
+
+
+Drawing
+-------
+
+Using the Cairo API one can draw on the canvas. Most of the operations
+exposed by Cairo are directly supported.
+
+>>> canvas = Image(256, 256).Canvas()
+>>> canvas.scale(256, 256)
+>>> canvas.move_to(0.5, 0.1)
+>>> canvas.line_to(0.9, 0.0)
+>>> canvas.rel_line_to(-0.4, 0.0)
+>>> canvas.curve_to(0.2, 0.9, 0.2, 0.5, 0.5, 0.5)
+>>> image = canvas.stroke("black")
+>>> image.save("tests/test_draw_path.png")
+
+
+Patterns
+--------
+
+We are not restricted to doing fills and strokes in simple colors, we
+can use images as surfaces for fill particular paths.
+
+>>> pattern = Image("tests/kapow.png").Pattern()
+>>> base = pattern.Image()
+>>> pattern.extend = "repeat"
+>>> pattern.filter = "best"
+>>> canvas = base.Canvas()
+>>> canvas.translate(0.5, 0.5)
+>>> canvas.rotateDegrees(45.0)
+>>> canvas.scale(1/sqrt(2), 1/sqrt(2))
+>>> canvas.translate(-0.5, -0.5)
+>>> canvas.rectangle(0,0, 1,1)
+>>> image = canvas.fill(pattern)
+>>> image.save("tests/test_pattern.png")
+
+"""
+
+
