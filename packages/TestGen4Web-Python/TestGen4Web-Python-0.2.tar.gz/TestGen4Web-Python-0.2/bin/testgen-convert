@@ -1,0 +1,71 @@
+#!/usr/bin/env python
+import os
+import sys
+
+from testgen.parser import parseXML
+
+def usage():
+    output = """
+    Usage: testgen-convert [test type] [test method] [TestGen4Web session XML file]
+
+    The currently supported test types are the following:
+
+        * twill-shell [test method] - Use the twill mechanize wrapper
+        * zope-testbrowser [test method] - Use the zope.testbrowser mechanize
+            wrapper (zope.testbrowser can be used from standalone, downloadable
+            package or from a Zope 2.9.X, or higher, Zope install)
+        * mechanize [test method] - Use mechanize 
+
+    The currently supported test methods are the following:
+
+        * [test type] code - Print to stdout the executable code for the given
+            test type
+        * [test type] doctest - Print to stdout doctests suitable for inclusion
+            in a python docstring
+        * [test type] run - Run a unittest for the given test type 
+    """
+    return output
+
+# parameters
+try:
+    script, testType, testMode, xmlFile = sys.argv
+    if not os.path.isfile(xmlFile):
+        raise ValueError
+    if testType not in ['twill-shell', 'zope-testbrowser', 'mechanize']:
+        raise ValueError
+    if testMode not in ['code', 'doctest', 'run']:
+        raise ValueError
+except ValueError:
+    print usage()
+    sys.exit()
+
+if testType == 'twill-shell':
+    if testMode == 'code':
+        from testgen.twillshell import TwillShellHandler as Handler
+elif testType == 'zope-testbrowser':
+    if testMode == 'code':
+        from testgen.zopecode import TestBrowserCodeHandler as Handler
+    elif testMode == 'doctest':
+        from testgen.zopecode import TestBrowserDocTestHandler as Handler
+    elif testMode == 'run':
+        from testgen.zopeunit import TestBrowserUnitTest as UnitTest
+elif testType == 'mechanize':
+    if testMode == 'run':
+        from testgen.mechunit import MechanizeUnitTest as UnitTest
+else:
+    print usage()
+    sys.exit()
+
+if testMode in ['code', 'doctest']:
+    actions = parseXML(xmlFile)
+    h = Handler(actions)
+    h.process()
+    print h.getResults()
+elif testMode == 'run':
+    import unittest
+    loader = unittest.TestLoader()
+    test = UnitTest
+    test.sourceFilename = xmlFile
+    suite = loader.loadTestsFromTestCase(test)
+    suite = unittest.TestSuite(suite)
+    unittest.TextTestRunner().run(suite)
