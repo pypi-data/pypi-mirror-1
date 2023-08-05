@@ -1,0 +1,31 @@
+from setuptools import setup, find_packages
+
+setup(name='wc.rating',
+      version='3.9',
+      url='http://worldcookery.com/Downloads',
+      description='Rating functionality for Zope content objects',
+      author='Philipp von Weitershausen',
+      author_email='philipp@weitershausen.de',
+      long_description=file('README.txt').read(),
+      classifiers=['Development Status :: 5 - Production/Stable',
+                   'Environment :: Web Environment',
+                   'Framework :: Zope3',
+                   'Intended Audience :: Developers'],
+
+      packages=find_packages(),
+      namespace_packages=['wc',],
+      install_requires=['setuptools',
+                        'ZODB3',
+                        'zope.interface',
+                        'zope.schema',
+                        'zope.component',
+                        'zope.annotation',
+                        'zope.i18nmessageid',
+                        # wc.worldcookeryskin viewlet support
+                        'zope.viewlet',
+                        'zope.app.pagetemplate',
+                        'wc.worldcookeryskin',
+                        ],
+      include_package_data=True,
+      zip_safe=False,
+      )
