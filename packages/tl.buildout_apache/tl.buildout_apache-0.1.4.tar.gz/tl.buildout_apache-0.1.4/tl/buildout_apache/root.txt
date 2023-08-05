@@ -1,0 +1,260 @@
+======================================================
+tl.buildout_apache:root - Set up an Apache server root
+======================================================
+
+For an Apache server environment, you need the Apache server software, a
+configuration file, and a control script. The server root recipe concerns
+itself only with the configuration and the control script.
+
+However, it needs to find out which extension modules are compiled into the
+server executable in order not to configure it to load them again. To find out
+about the modules, the server executable itself is run, so we need to fake one
+to avoid compiling Apache for this test. Our fake server claims to have two
+modules compiled in, "dir" and "autoindex":
+
+    >>> write("bin", "httpd",
+    ... """\
+    ... #!/bin/sh
+    ... echo mod_dir.c
+    ... echo mod_autoindex.c
+    ... """)
+    >>> import os
+    >>> os.chmod(join("bin", "httpd"), 0755)
+    >>>
+    >>> import tl.buildout_apache.root
+    >>> list(tl.buildout_apache.root.builtin_modules(join("bin", "httpd")))
+    ['dir', 'autoindex']
+
+This is how our buildout configurations will start:
+
+    >>> boilerplate = \
+    ... """
+    ... [buildout]
+    ... parts = apachesite
+    ...
+    ... [httpd]
+    ... httpd-path = %s
+    ... envvars-path = %s
+    ... apxs-path = %s
+    ... module-dir = %s
+    ...
+    ... [apachesite]
+    ... recipe = tl.buildout_apache:root
+    ... """ % (join("bin", "httpd"), join("bin", "envvars"),
+    ...        join("bin", "apxs"), join("modules"))
+    >>>
+    >>> write("buildout.cfg", boilerplate)
+    >>> _ = system(buildout)
+    >>> ls("parts")
+    d apachesite
+
+(By default, the root recipe looks up a section named "httpd" to find out the
+path to the httpd executable. That section is expected to export some other
+paths as well.)
+
+The apachesite part contains the server root configuration file:
+
+    >>> httpd_conf = join("parts", "apachesite", "conf", "httpd.conf")
+    >>> cat(httpd_conf)
+    # ...
+    # This is the main Apache HTTP server configuration file.
+    ...
+
+
+Log files
+=========
+
+By default, Apache will be configured to write log files to a subdirectory of
+the server root's buildout part:
+
+    >>> ls("parts", "apachesite")
+    d ...
+    d log
+    ...
+
+This directory and its content will be removed and recreated along with the
+rest of the part directory whenever the apachesite part is reinstalled:
+
+    >>> write("parts", "apachesite", "log", "foo", "bar")
+    >>> ls("parts", "apachesite", "log")
+    - foo
+    >>> write("buildout.cfg", boilerplate + """\
+    ... dummy = cause a reinstall
+    ... """)
+    >>> print ".", system(buildout)
+    . ...
+    Uninstalling apachesite.
+    Installing apachesite.
+    >>> ls("parts", "apachesite", "log")
+
+In order to make Apache log to a place that is preserved across reinstalls we
+can set the log-dir option of the server root part to either an absolute
+file-system path or one relative to the server root part's path. This option
+specifies where to create the log directory instead of inside the apachesite
+part:
+
+    >>> write("buildout.cfg", boilerplate + """\
+    ... log-dir = ${buildout:directory}/permanent-log
+    ... """)
+    >>> _ = system(buildout)
+    >>> print ".", ls(".")
+    . ...
+    d permanent-log
+    ...
+
+Also, the server config file created points to the specified log directory:
+
+    >>> cat("parts", "apachesite", "conf", "httpd.conf")
+    # ...
+    ErrorLog .../permanent-log/error_log
+    ...
+    CustomLog .../permanent-log/access_log ...
+
+Since the path we specified is outside the apachesite part, its content is
+left untouched when reinstalling the part:
+
+    >>> write("permanent-log", "foo", "bar")
+    >>> cat("permanent-log", "foo")
+    bar
+    >>> write("buildout.cfg", boilerplate + """\
+    ... log-dir = ${buildout:directory}/permanent-log
+    ... dummy = cause a reinstall
+    ... """)
+    >>> print ".", system(buildout)
+    . ...
+    Uninstalling apachesite.
+    Installing apachesite.
+    >>> cat("permanent-log", "foo")
+    bar
+
+
+Modules
+=======
+
+By default, the Apache configuration loads one module, authz_host:
+
+    >>> cat(httpd_conf)
+    # ...
+    LoadModule authz_host_module modules/mod_authz_host.so
+    ...
+
+We can now configure our server such that it uses different modules:
+
+    >>> write("buildout.cfg", boilerplate +
+    ... """
+    ... modules = rewrite
+    ... """)
+    >>> _ = system(buildout)
+    >>> cat(httpd_conf)
+    # ...
+    LoadModule rewrite_module modules/mod_rewrite.so
+    ...
+
+It should be noted that the default authz_host module is no longer loaded now.
+It must be listed explicitly if the apachesite section overrides the modules
+option:
+
+    >>> "authz_host_module" in open(httpd_conf).read()
+    False
+
+If we try to load a module that is compiled into the server executable, it is
+skipped:
+
+    >>> write("buildout.cfg", boilerplate +
+    ... """
+    ... modules = rewrite autoindex
+    ... """)
+    >>> _ = system(buildout)
+    >>> cat(httpd_conf)
+    # ...
+    LoadModule rewrite_module modules/mod_rewrite.so
+    ...
+    >>> "autoindex_module" in open(httpd_conf).read()
+    False
+
+Also, modules that are listed multiple times will only be loaded once, in the
+order of their first occurrence:
+
+    >>> write("buildout.cfg", boilerplate +
+    ... """
+    ... modules = rewrite cache rewrite
+    ... """)
+    >>> _ = system(buildout)
+    >>> cat(httpd_conf)
+    # ...
+    LoadModule rewrite_module modules/mod_rewrite.so
+    LoadModule cache_module modules/mod_cache.so
+    ...
+    >>> open(httpd_conf).read().count("rewrite_module")
+    1
+
+
+Config parts
+============
+
+A server configuration may include information from multiple buildout
+sections. This is useful if other sections install third-party extensions, or
+just to get some structure into a lengthy configuration.
+
+A config part is an ordinary buildout section which may export some particular
+options which are read by the Apache server root recipe. Let's define and use
+sections that describe the needs of the www1.example.org and www2.example.org
+web sites:
+
+    >>> write("buildout.cfg", boilerplate +
+    ... """
+    ... config-parts = www1-example-org www2-example-org
+    ...
+    ... [www1-example-org]
+    ... modules = expires
+    ...
+    ... [www2-example-org]
+    ... modules = cache
+    ... """)
+    >>> _ = system(buildout)
+    >>> cat(httpd_conf)
+    # ...
+    LoadModule authz_host_module modules/mod_authz_host.so
+    LoadModule expires_module modules/mod_expires.so
+    LoadModule cache_module modules/mod_cache.so
+    ...
+
+All the modules required by the config parts will be loaded. Note that
+authz_host is included since the modules option of the root section wasn't
+overridden. Also note that the root section's own modules are listed first,
+followed by those of the config sections in order.
+
+Config parts are collected recursively, breadth-first. Suppose the
+www1.example.org part puts the configuration of the site's cgi scripts into
+its own section:
+
+    >>> write("buildout.cfg", boilerplate +
+    ... """
+    ... config-parts = www1-example-org www2-example-org
+    ...
+    ... [www1-example-org]
+    ... modules = expires
+    ... config-parts = www1-example-org-cgi
+    ...
+    ... [www1-example-org-cgi]
+    ... modules = cgi cache
+    ...
+    ... [www2-example-org]
+    ... modules = cache expires
+    ... """)
+    >>> _ = system(buildout)
+    >>> cat(httpd_conf)
+    # ...
+    LoadModule authz_host_module modules/mod_authz_host.so
+    LoadModule expires_module modules/mod_expires.so
+    LoadModule cache_module modules/mod_cache.so
+    LoadModule cgi_module modules/mod_cgi.so
+    ...
+
+The previous example also shows that modules listed by multiple config parts
+are loaded only once, in the order of their first occurrence:
+
+    >>> open(httpd_conf).read().count("expires_module")
+    1
+    >>> open(httpd_conf).read().count("cache_module")
+    1
