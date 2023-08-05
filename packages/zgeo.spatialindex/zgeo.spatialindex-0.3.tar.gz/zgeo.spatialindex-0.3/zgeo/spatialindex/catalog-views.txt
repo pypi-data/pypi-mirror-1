@@ -1,0 +1,122 @@
+
+Integration tests of the views
+==============================
+
+Setup
+
+    >>> root = getRootFolder()
+    >>> from zope.app.folder import Folder
+    >>> import transaction
+    >>> root['places'] = Folder()
+    >>> places = root['places']
+    >>> from zope.dublincore.interfaces import IWriteZopeDublinCore
+    >>> dc = IWriteZopeDublinCore(places)
+    >>> dc.title = u'Test Places'
+    >>> dc.description = u'Places for testing'
+    >>> places['a'] = Folder()
+    >>> placemark = places['a']
+    >>> dc = IWriteZopeDublinCore(placemark)
+    >>> dc.title = u'Placemark A'
+    >>> dc.description = u'A first testing placemark'
+    >>> from zgeo.geographer.interfaces import IWriteGeoreferenced
+    >>> geo = IWriteGeoreferenced(placemark)
+    >>> geo.setGeoInterface('Point', (-105, 40))
+    >>> transaction.commit()
+
+Spatially catalog the places folder by using the manage-spatialcatalog view
+
+    >>> print http(r"""
+    ... GET /places/@@create-spatialcatalog?create=1 HTTP/1.1
+    ... Authorization: Basic mgr:mgrpw
+    ... """)
+    HTTP/1.1 200 Ok
+    Content-Length: 112
+    Content-Type: text/html;charset=utf-8
+    <BLANKLINE>
+    <html>
+      <body>
+        <div>the spatial index has been created</div>
+        <div>
+    <BLANKLINE>
+        </div>
+      </body>
+    </html>
+    <BLANKLINE>
+
+    >>> from zgeo.spatialindex.interfaces import ISpatiallyCataloged
+    >>> ISpatiallyCataloged.providedBy(places)
+    True
+
+Query the catalog using the spatialcatalog view
+
+    >>> print http(r"""
+    ... GET /places/search.html?bbox=0,0,10,10 HTTP/1.1
+    ... Authorization: Basic mgr:mgrpw
+    ... """)
+    HTTP/1.1 200 Ok
+    ...
+    Content-Type: text/html;charset=utf-8
+    ...
+        <h1>Search Spatial Catalog</h1>
+        <form method="GET">
+          <div>Bounding box (min longitude (or x), min latitude (or y), max longitude (x), max latitude (or y)</div>
+          <div>
+            <input type="text" name="bbox" value="0,0,10,10" />
+          </div>
+          <div>
+            <input type="submit" name="submit" value="Search" />
+          </div>
+        </form>
+        <div>
+          <h2>Results</h2>
+          <div>
+          <ol>
+          </ol>
+          </div>
+        </div>
+    ...
+
+    >>> print http(r"""
+    ... GET /places/search.html?bbox=-110,40,-100,50 HTTP/1.1
+    ... Authorization: Basic mgr:mgrpw
+    ... """)
+    HTTP/1.1 200 Ok
+    ...
+    Content-Type: text/html;charset=utf-8
+    ...
+        <h1>Search Spatial Catalog</h1>
+        <form method="GET">
+          <div>Bounding box (min longitude (or x), min latitude (or y), max longitude (x), max latitude (or y)</div>
+          <div>
+            <input type="text" name="bbox"
+                   value="-110,40,-100,50" />
+          </div>
+          <div>
+            <input type="submit" name="submit" value="Search" />
+          </div>
+        </form>
+        <div>
+          <h2>Results</h2>
+          <div>
+          <ol>
+            <li>http://localhost/places/a</li>
+          </ol>
+          </div>
+        </div>
+    ...
+
+
+Rebuild, and expect 1 object in the index
+
+    >>> print http(r"""
+    ... GET /places/@@manage-spatialcatalog?rebuild=1 HTTP/1.1
+    ... Authorization: Basic mgr:mgrpw
+    ... """)
+    HTTP/1.1 200 Ok
+    ...
+        <h1>Manage Spatial Catalog</h1>
+        <p>Number of items in index: 1</p>
+        <p>Click to reindex</p>
+    ...
+
+
