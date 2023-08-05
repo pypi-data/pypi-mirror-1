@@ -1,0 +1,71 @@
+#!/usr/bin/env python
+"""
+
+Demo showing pyhjb accessing a 'JBoss Messaging' JMS provider via a
+HJB server.
+
+N.B. JBoss Messaging is not the same as JBoss MQ.  The demo should
+work just the same, but as of 2006/06/01, it has been tested on JBoss
+Messaging, but not on JBoss MQ.
+
+"""
+
+from copy import deepcopy
+
+from hjb.hjbclient import HJBClient, SimpleMessagingScenario
+from hjb.democli import DemoCommand
+
+__docformat__ = "restructuredtext en"
+
+queue_aliases = {
+    "Map": "/queue/hjb.sample.MAP",
+    "Text": "/queue/hjb.sample.TEXT",
+    "Object": "/queue/hjb.sample.OBJECT",
+    "Stream": "/queue/hjb.sample.STREAM",
+    "Bytes": "/queue/hjb.sample.BYTES",
+}
+
+topic_aliases = {
+    "qotd": "/topic/hjb.sample.QOTD",
+    "logmessage": "/topic/hjb.sample.LOGMESSAGE",
+    "heartbeat": "/topic/hjb.sample.HEARTBEAT",
+}
+
+destination_aliases = deepcopy(queue_aliases)
+destination_aliases.update(deepcopy(topic_aliases))
+
+def create_scenario():
+    provider_config = {
+        # This provider config matches the JBOSS messaging environment
+        # created using the files in the samples/data/jboss directory
+        # 
+        # These are the parameters that are used to configure the java
+        # Hashtable that initialises a provider's JNDI initial context
+        "provider" : {
+            "java.naming.factory.initial": 
+                "org.jnp.interfaces.NamingContextFactory",
+            "java.naming.provider.url": 
+                "jnp://localhost:1099",
+            "java.naming.factory.url.pkgs":
+                "org.jboss.naming:org.jnp.interfaces",
+        }
+    }
+    provider = "jboss"
+    root = "/hjb-jboss/hjb"
+    factory = "/ConnectionFactory"
+    host = "localhost:8015"
+    return SimpleMessagingScenario(
+            HJBClient(host, root),
+            provider,
+            factory,
+            destination_aliases.values(),
+            provider_config)
+
+def main():
+    command = DemoCommand(
+            create_scenario(),
+            destination_aliases)
+    command.execute()
+ 
+if __name__ == '__main__':
+    main()
