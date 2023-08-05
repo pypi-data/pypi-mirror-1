@@ -1,0 +1,91 @@
+#!/usr/bin/env python
+# Modded: kforge-integrationtest-loader to autodeploy site every night
+# Bootstrap for kforge automatic testing.
+# Will pass through any command line arguments supplied to the script
+# This script is **NOT** safe to run on a production machine:
+# it does things like stop/start the webserver
+# and if httpd.conf not properly rebuilt you it will fail to restart webserver
+
+import os
+import shutil
+import commands
+import urllib
+import sys
+import tempfile
+
+verbose = True
+def _print(msg, isError=False):
+    if verbose or isError:
+        print(msg)
+
+scriptName = 'kforge-integrationtest'
+url = 'http://project.knowledgeforge.net/kforge/svn/trunk/bin/%s' % scriptName
+
+def main(argv):
+    # reconstruct the command line args
+    args = ''
+    if len(argv) > 1:
+        args = ' '.join(argv[1:])
+    # temp file to store the script in
+    (fd, filename) = tempfile.mkstemp(prefix=scriptName)
+    _print('Downloading and executing %s...' % (scriptName))
+
+    try:
+        urllib.urlretrieve(url, filename)
+        _print('Downloaded %s to %s.' % (url, filename))
+        cmd = 'python '  + filename + ' ' + args
+        _print('Attempting to execute %s' % cmd)
+        if not verbose:
+            # does not print test run stuff correctly
+            status, output = commands.getstatusoutput(cmd)
+            if status: _print(output, True)
+            else: _print(output)
+        else:
+            # WARN: using os.system means that all messages will get printed 
+            status = os.system(cmd)
+        _print('Downloading and execution completed.')
+        return status
+    finally:
+        os.remove(filename)
+
+if __name__ == '__main__':
+    # have to set this here or we get prompted in script and everything tanks
+    # TODO: set this in integrationtest-loader?
+    os.environ['PGPASSWORD'] = 'pass'
+    basePath = '/home/kforge/test.kforgeproject.com'
+    configFilePath = '/home/kforge/test.kforgeproject.com/kforge.conf'
+    instancePath = os.path.join(basePath, 'instance')
+    argv = ['<name-of-this-script>', '--base', basePath,
+            '--config', configFilePath,
+            ]
+    
+    # we need to stop the web server or we won't be able to delete the db
+    os.system('sudo /etc/init.d/apache2 stop')
+    cmd = 'sudo /bin/chown -R kforge:kforge %s' %  instancePath
+    if os.system(cmd):
+        _print('Command [%s] failed' % cmd, True)
+    _print('Removing current instance path: %s' % instancePath)
+    if os.path.exists(instancePath):
+        shutil.rmtree(instancePath)
+    status = 0
+    try:
+        status = main(argv)
+    except Exception, inst:
+        _print('EXCEPTION: %s' % inst, True)
+
+    # ensure we have a apache config file or restart will break
+    httpFilePath = os.path.join(instancePath, 'httpd.conf')
+    if not os.path.exists(httpFilePath):
+        dirPath = os.path.dirname(httpFilePath)
+        if not os.path.exists(dirPath):
+            os.makedirs(dirPath)
+        ff = file(httpFilePath, 'w')
+        ff.write('')
+        ff.close()
+
+    cmd = 'sudo /bin/chown -R www-data:www-data %s' % instancePath
+    if os.system(cmd):
+        _print('Command [%s] failed' % cmd, True)
+    os.system('sudo /etc/init.d/apache2 restart')
+    if status:
+        sys.exit(1)
