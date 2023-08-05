@@ -1,0 +1,1 @@
+In this section you will find a simple CherryPy app that uses Buffet to show off a few template plugins.  The code for the templates is available as well in the aptly named "templates" directory.  The code and templates are very basic as they are only showcasing the ease at which template plugins can be installed and their functionality access by Buffet.
