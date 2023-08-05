@@ -1,0 +1,728 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils 0.4: http://docutils.sourceforge.net/" />
+<title>InformixDB Documentation</title>
+<meta name="authors" content="Daniel Smertnig and Carsten Haese" />
+<meta name="date" content="2007-10-16" />
+<style type="text/css">
+
+@import url(default.css);
+
+h1.title
+{ 
+    background: #448866; 
+    color: white; 
+    padding: 3pt 0;
+    border-bottom: 0px;
+}
+
+h1, h2, h3
+{
+    border-bottom: 1px dashed #448866;
+}
+
+div.note
+{
+   margin: 0.5em 2em; 
+   padding: 0.5em 0.5em;
+   background: #ffff77;
+   border: 1px solid black;
+}
+
+</style>
+</head>
+<body>
+<div class="document" id="informixdb-documentation">
+<h1 class="title">InformixDB Documentation</h1>
+<table class="docinfo" frame="void" rules="none">
+<col class="docinfo-name" />
+<col class="docinfo-content" />
+<tbody valign="top">
+<tr><th class="docinfo-name">Authors:</th>
+<td>Daniel Smertnig and Carsten Haese</td></tr>
+<tr><th class="docinfo-name">Version:</th>
+<td>informixdb 2.5</td></tr>
+<tr><th class="docinfo-name">Date:</th>
+<td>2007-10-16</td></tr>
+<tr class="field"><th class="docinfo-name">Homepage:</th><td class="field-body"><a class="reference" href="http://informixdb.sourceforge.net/">InformixDB on Sourceforge</a></td>
+</tr>
+</tbody>
+</table>
+<div class="contents topic">
+<p class="topic-title first"><a id="informixdb" name="informixdb">InformixDB</a></p>
+<ul class="simple">
+<li><a class="reference" href="#introduction" id="id2" name="id2">Introduction</a></li>
+<li><a class="reference" href="#connecting" id="id3" name="id3">Connecting</a></li>
+<li><a class="reference" href="#executing-sql-statements" id="id4" name="id4">Executing SQL statements</a><ul>
+<li><a class="reference" href="#binding-parameters" id="id5" name="id5">Binding parameters</a></li>
+<li><a class="reference" href="#getting-results" id="id6" name="id6">Getting results</a><ul>
+<li><a class="reference" href="#describing-result-sets" id="id7" name="id7">Describing result sets</a></li>
+</ul>
+</li>
+<li><a class="reference" href="#fast-execution-of-batch-statements" id="id8" name="id8">Fast execution of batch statements</a><ul>
+<li><a class="reference" href="#statement-caching" id="id9" name="id9">Statement caching</a></li>
+<li><a class="reference" href="#executemany" id="id10" name="id10">executemany()</a></li>
+<li><a class="reference" href="#explicitly-prepared-statements" id="id11" name="id11">Explicitly prepared statements</a></li>
+</ul>
+</li>
+<li><a class="reference" href="#using-named-cursors" id="id12" name="id12">Using named cursors</a></li>
+<li><a class="reference" href="#cursor-attributes" id="id13" name="id13">Cursor attributes</a></li>
+<li><a class="reference" href="#scroll-cursors-and-cursors-with-hold" id="id14" name="id14">Scroll Cursors and Cursors with Hold</a></li>
+<li><a class="reference" href="#interrupting-queries" id="id15" name="id15">Interrupting Queries</a></li>
+</ul>
+</li>
+<li><a class="reference" href="#transactions" id="id16" name="id16">Transactions</a></li>
+<li><a class="reference" href="#database-values" id="id17" name="id17">Database values</a></li>
+<li><a class="reference" href="#error-handling" id="id18" name="id18">Error handling</a><ul>
+<li><a class="reference" href="#advanced-error-handling" id="id19" name="id19">Advanced error handling</a></li>
+</ul>
+</li>
+<li><a class="reference" href="#inspecting-version-numbers" id="id20" name="id20">Inspecting Version Numbers</a></li>
+</ul>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id2" id="introduction" name="introduction">Introduction</a></h1>
+<p>InformixDB is a Python extension module that provides a way to connect to an
+Informix database via Python's Database API 2.0 <a class="footnote-reference" href="#pep249" id="id1" name="id1">[1]</a>.</p>
+<p>This document describes versions 2.0 and up of InformixDB. Features that are
+not present in version 2.0 are identified by indicating the version in which
+they were implemented.</p>
+<p>Here's a quick example to get started:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; import informixdb
+&gt;&gt;&gt; conn = informixdb.connect('mydatabase')
+&gt;&gt;&gt; cursor = conn.cursor()
+&gt;&gt;&gt; cursor.execute(&quot;SELECT * FROM names&quot;)
+&gt;&gt;&gt; cursor.fetchall()
+[('donald', 'duck', 34), ('mickey', 'mouse', 23)]
+</pre>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id3" id="connecting" name="connecting">Connecting</a></h1>
+<p>To do anything useful with InformixDB one must connect to a database. This
+is accomplished by calling <cite>informixdb.connect</cite>:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; import informixdb
+&gt;&gt;&gt; conn = informixdb.connect('db&#64;daniel', user='me', password='something')
+&gt;&gt;&gt; conn
+&lt;_informixdb.Connection object at 0xb7d08e90&gt;
+</pre>
+<p><cite>informixdb.connect</cite> takes three arguments: A <cite>dsn</cite> which identifies the
+database and server to connect to, as recognized by ESQL's <tt class="docutils literal"><span class="pre">CONNECT</span></tt>
+statement (e.g. <tt class="docutils literal"><span class="pre">'database&#64;server'</span></tt>, <tt class="docutils literal"><span class="pre">'database'</span></tt>, <tt class="docutils literal"><span class="pre">'&#64;server'</span></tt>) plus
+an optional <cite>user</cite> and a corresponding password.</p>
+<p>If the <cite>dsn</cite> doesn't include a servername the value of the environment
+variable <tt class="docutils literal"><span class="pre">INFORMIXSERVER</span></tt> is used. When connecting without specifying the
+name of the database no database will be selected. This is useful for
+setting up a new database from within InformixDB.</p>
+<p><cite>New in version 2.2</cite>: An optional <cite>autocommit</cite> parameter may be passed to
+turn on autocommit mode. In autocommit mode, the connection operates without
+transaction control and any changes are committed automatically. By default,
+autocommit is off.</p>
+<p>A <cite>Connection</cite> can be closed by calling its <cite>close</cite> method. From that point
+forward all operations on the <cite>Connection</cite> object or any of its associated
+<cite>Cursor</cite> objects will raise an <cite>InterfaceError</cite>. A connection will also be
+closed upon deallocation (this requires all <cite>Cursor</cite> objects which use
+the connection to be closed or deallocated first).</p>
+<p><cite>New in version 2.3</cite>: Connections and cursors support the context management
+protocol for Python 2.5 <cite>with</cite> blocks. This allows code like this:</p>
+<pre class="literal-block">
+conn = informixdb.connect(...)
+try:
+   cur = conn.cursor()
+   try:
+      # do something with cur
+   finally:
+      cur.close()
+finally:
+   conn.close()
+</pre>
+<p>to be written in Python 2.5 more concisely as:</p>
+<pre class="literal-block">
+with informixdb.connect(...) as conn:
+   with conn.cursor() as cur:
+      # do something with cur
+</pre>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id4" id="executing-sql-statements" name="executing-sql-statements">Executing SQL statements</a></h1>
+<p>To actually execute a SQL statement a <cite>Cursor</cite> object must be created by
+calling <cite>Connection.cursor</cite>:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; cursor = conn.cursor()
+&gt;&gt;&gt; cursor
+&lt;_informixdb.Cursor object at 0xb7d84440&gt;
+</pre>
+<p>This Cursor object can then be used to execute SQL statements or to call
+stored procedures:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; cursor.execute('SELECT * FROM NAMES')
+&gt;&gt;&gt; cursor.callproc('lower')
+</pre>
+<div class="note">
+<p class="first admonition-title">Note</p>
+<p class="last">It is also possible to call a stored procedure by issuing a
+<tt class="docutils literal"><span class="pre">EXECUTE</span> <span class="pre">PROCEDURE</span> <span class="pre">...</span></tt> statement with <cite>execute</cite>, but <cite>callproc</cite>
+should be used where possible for standards compatibility.</p>
+</div>
+<div class="section">
+<h2><a class="toc-backref" href="#id5" id="binding-parameters" name="binding-parameters">Binding parameters</a></h2>
+<p>To pass in arguments for an SQL statement a sequence can be passed as second
+parameter to <cite>execute</cite>. The arguments can then be referenced either using
+<tt class="docutils literal"><span class="pre">numeric</span></tt> or <tt class="docutils literal"><span class="pre">qmark</span></tt> style:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; cursor.execute('INSERT INTO names VALUES(:1,:2,:3)', ('some', 'body', 56))
+1
+&gt;&gt;&gt; cursor.execute('INSERT INTO names VALUES(?,?,?)', ('dagobert', 'duck', 77))
+1
+</pre>
+<p>Care must be taken when passing in a single string as argument, since it
+would be interpreted as a sequence, which is usually not what is intended:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; cursor.execute('SELECT * FROM names WHERE first=:1', 'dagobert')
+Traceback (most recent call last):
+  File &quot;&lt;stdin&gt;&quot;, line 1, in ?
+_informixdb.InterfaceError: too many actual parameters
+&gt;&gt;&gt; cursor.execute('SELECT * FROM names WHERE first=:1', ('dagobert',)
+</pre>
+<p>InformixDB will catch most of these errors since it requires the number of
+actual parameters to match the number of parameters which are referenced by the
+SQL statement exactly.</p>
+<p>Calling stored procedures with arguments is supported in a similar way,
+except that no placeholders have to be specified:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; cursor.callproc('lower', ('FOO',))
+</pre>
+<p><cite>New in version 2.4</cite>: Parameters may also be specified using <tt class="docutils literal"><span class="pre">named</span></tt>
+style, in which case the arguments must be a dictionary whose keys
+correspond to the parameter names:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; cursor.execute('INSERT INTO names VALUES(:first,:last,:age)',
+...                dict(first='some', last='body', age=56) )
+</pre>
+<p>If a parameter name is not in the dictionary, a KeyError will be raised.
+However, the dictionary may contain more keys than the statement needs.
+This allows, for example, to simply pass <tt class="docutils literal"><span class="pre">locals()</span></tt> to bind all
+parameters from correspondingly named variables.</p>
+<p>Note: While it is perfectly acceptable to execute different statements
+with different parameter styles, mixing parameter styles in the same
+statement is not allowed.</p>
+</div>
+<div class="section">
+<h2><a class="toc-backref" href="#id6" id="getting-results" name="getting-results">Getting results</a></h2>
+<p>To retrieve the results of a previously executed SQL statement or stored
+procedure <cite>Cursor</cite> objects provide the <cite>fetchone</cite>, <cite>fetchmany</cite> and
+<cite>fetchall</cite> methods:</p>
+<ul>
+<li><p class="first"><tt class="docutils literal"><span class="pre">fetchone()</span></tt>: Returns the next row of the result set or <tt class="docutils literal"><span class="pre">None</span></tt> if no
+more rows are available.</p>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">fetchmany([size=Cursor.arraysize])</span></tt>: Fetches up to <cite>size</cite> rows (less if
+there are no more rows) and returns them as a list. An empty list is
+returned when no (more) rows are available.</p>
+<p>If <cite>size</cite> is not specified <cite>Cursor.arraysize</cite> is used, which defaults to
+<tt class="docutils literal"><span class="pre">1</span></tt> for InformixDB.</p>
+</li>
+<li><p class="first"><tt class="docutils literal"><span class="pre">fetchall()</span></tt>: Fetches all (remaining) rows and returns them as a list.</p>
+</li>
+</ul>
+<pre class="literal-block">
+&gt;&gt;&gt; cursor.execute(&quot;SELECT * FROM names&quot;)
+&gt;&gt;&gt; cursor.fetchall()
+[('donald', 'duck', 34), ('mickey', 'mouse', 23),
+ ('dagobert', 'duck', 77), ('some', 'body', 56)]
+</pre>
+<p>As an extension to the DB-API 2.0 specification InformixDB <cite>Cursor</cite> objects
+can also be used as iterators:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; cursor.execute(&quot;SELECT * FROM names&quot;)
+&gt;&gt;&gt; for row in cursor:
+...     print &quot;%s %s (%d)&quot; % row
+...
+donald duck (34)
+mickey mouse (23)
+dagobert duck (77)
+some body (56)
+&gt;&gt;&gt;
+</pre>
+<p>Normally rows are returned as tuples, but optionally dictionaries can be
+returned. This must be specified when the <cite>Cursor</cite> is created:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; dictcur = conn.cursor(rowformat = informixdb.ROW_AS_DICT)
+&gt;&gt;&gt; dictcur.execute(&quot;SELECT * FROM names&quot;)
+&gt;&gt;&gt; dictcur.fetchone()
+{'age': 34, 'last': 'duck', 'first': 'donald'}
+</pre>
+<p><cite>New in version 2.1</cite>: Rows can also be returned as objects whose attributes
+correspond to column names:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; objcur = conn.cursor(rowformat = informixdb.ROW_AS_OBJECT)
+&gt;&gt;&gt; objcur.execute(&quot;SELECT * FROM names&quot;)
+&gt;&gt;&gt; row = objcur.fetchone()
+&gt;&gt;&gt; print row.age
+34
+</pre>
+<div class="section">
+<h3><a class="toc-backref" href="#id7" id="describing-result-sets" name="describing-result-sets">Describing result sets</a></h3>
+<p>Whenever a statement which returns a result set is executed a description of
+the columns returned is made available in the <cite>Cursor</cite> objects <cite>description</cite>
+attribute.</p>
+<p>It is a sequence of 7-tuples with one tuple for each returned column. Each
+tuple consists of <cite>name</cite>, <cite>type_code</cite>, <cite>display_size</cite>, <cite>internal_size</cite>,
+<cite>precision</cite>, <cite>scale</cite> and <cite>null_ok</cite> values (<cite>precision</cite> and <cite>scale</cite> are
+currently always set to <cite>None</cite> by InformixDB).</p>
+<p>The <cite>type_code</cite> is a textual description of the column type and can be
+evaluated by comparing it to the global type objects defined by the
+<cite>informixdb</cite>-module (see <a class="reference" href="#database-values">Database values</a>):</p>
+<pre class="literal-block">
+&gt;&gt;&gt; cursor.execute('SELECT * FROM names')
+&gt;&gt;&gt; cursor.description
+(('first', 'char', 25, 25, None, None, 1),('last', 'char', 50, 50,
+None, None, 1), ('age', 'integer', 4, 4, None, None, 1))
+&gt;&gt;&gt; cursor.description[0][1] == informixdb.STRING
+1
+&gt;&gt;&gt; cursor.description[0][1] == informixdb.NUMBER
+0
+</pre>
+</div>
+</div>
+<div class="section">
+<h2><a class="toc-backref" href="#id8" id="fast-execution-of-batch-statements" name="fast-execution-of-batch-statements">Fast execution of batch statements</a></h2>
+<div class="section">
+<h3><a class="toc-backref" href="#id9" id="statement-caching" name="statement-caching">Statement caching</a></h3>
+<p>When <cite>execute</cite> is called multiple times with the same SQL statement object
+on the same Cursor object but different arguments the statement is prepared
+only once. This mechanism is called statement caching. Each Cursor object
+only caches its most recent query. If you need to execute different queries
+multiple times while still making use of statement caching, you will need to
+create one cursor for each query.</p>
+<p>Note: Statement caching operates based on the identity of the statement
+string, not on the contents, because an identity check is much faster
+than an equality check. In practice this means that:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; cursor.execute(&quot;UPDATE names SET age = :2 WHERE last = :1&quot;, params1)
+&gt;&gt;&gt; cursor.execute(&quot;UPDATE names SET age = :2 WHERE last = :1&quot;, params2)
+</pre>
+<p>will not make use of statement caching, since each command will instantiate
+its own copy of the query string, which will result in two query strings that
+are equal to each other but not identical. To gurantee that statement caching
+is used, you need to do the following:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; query_string = &quot;UPDATE names SET age = :2 WHERE last = :1&quot;
+&gt;&gt;&gt; cursor.execute(query_string, params1)
+&gt;&gt;&gt; cursor.execute(query_string, params2)
+</pre>
+</div>
+<div class="section">
+<h3><a class="toc-backref" href="#id10" id="executemany" name="executemany">executemany()</a></h3>
+<p><cite>executemany</cite> can be used to execute the same statement with different
+parameters multiple times. It takes a sequence of parameter-sequences as
+taken by <cite>execute</cite> as its second argument and executes the statement for
+each of the parameters. Internally, insert cursors are used for batch inserts,
+which can result in a huge performance boost, especially over a network:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; cursor.executemany(&quot;INSERT INTO names VALUES(:1,:2,:3)&quot;,
+...     [ ('no', 'more', 12), ('names', 'left', 34) ]
+... )
+</pre>
+<p><cite>(New in version 2.3)</cite>: In earlier versions, the parameter list for
+<cite>executemany</cite> had to be a true sequence (i.e. list or tuple) of sequences.
+Beginning with version 2.3, it is allowed to be any iterable object that
+yields sequences.</p>
+</div>
+<div class="section">
+<h3><a class="toc-backref" href="#id11" id="explicitly-prepared-statements" name="explicitly-prepared-statements">Explicitly prepared statements</a></h3>
+<p><cite>(new in version 2.3)</cite></p>
+<p>The method <cite>Cursor.prepare</cite> explicitly prepares a query for subsequent
+execution by the same cursor, and the attribute <cite>command</cite> contains the query
+string that the cursor has most recently prepared or executed. Note that
+<cite>prepare</cite> simply caches the statement like <cite>execute</cite> does, except
+that the query is not immediately executed. Consequently, to prepare more than
+one statement, you'll need to create more than one cursor.</p>
+<p>Since <cite>prepare</cite> is just statement caching in disguise, it does not offer
+any additional performance benefits, but it makes your code more readable.
+The following code snippet is equivalent to the above example of guaranteed
+statement caching, but it conveys in a clearer fashion that a statement is
+prepared once and executed twice:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; cursor.prepare(&quot;UPDATE names SET age = :2 WHERE first = :1&quot;)
+&gt;&gt;&gt; cursor.execute(cursor.command, params1)
+&gt;&gt;&gt; cursor.execute(cursor.command, params2)
+</pre>
+<p><cite>New in version 2.4</cite>: You may pass <cite>None</cite> instead of <cite>cursor.command</cite> to
+execute the previously prepared query. This reduces code clutter if your
+cursor instances have long names.</p>
+</div>
+</div>
+<div class="section">
+<h2><a class="toc-backref" href="#id12" id="using-named-cursors" name="using-named-cursors">Using named cursors</a></h2>
+<p>Named Cursors can be created by passing the requested cursor name in as first
+argument to <cite>Connection.cursor</cite>:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; namcursor = conn.cursor('foo')
+</pre>
+<p>The returned <cite>Cursor</cite> object will then use this name whenever it declares a
+database cursor. It is important to note that a <cite>Cursor</cite> object's lifetime is
+decoupled from that actual database cursors. Database cursor are created
+whenever a SQL statement that can return a result set is executed (i.e.
+<tt class="docutils literal"><span class="pre">SELECT</span></tt> and <tt class="docutils literal"><span class="pre">EXECUTE</span> <span class="pre">PROCEDURE</span></tt>) and destroyed when the <cite>Cursor</cite> is
+closed or another statement is executed with the same <cite>Cursor</cite> object.</p>
+<p>The main implication of this is that you cannot use the named <cite>Cursor</cite>
+object to execute statements on the named cursor itself, as that will destroy
+the database cursor before executing the statement. Instead, a second (possibly
+unnamed) <cite>Cursor</cite> is used to execute <tt class="docutils literal"><span class="pre">...</span> <span class="pre">WHERE</span> <span class="pre">CURRENT</span> <span class="pre">OF</span> <span class="pre">...</span></tt>
+statements:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; namcursor = conn.cursor('foo')
+&gt;&gt;&gt; cursor = conn.cursor()
+&gt;&gt;&gt; namcursor.execute('SELECT * FROM names FOR UPDATE')
+&gt;&gt;&gt; namcursor.fetchone()
+('donald', 'duck', 34)
+&gt;&gt;&gt; cursor.execute(&quot;UPDATE names SET first='notdonald' WHERE CURRENT OF foo&quot;)
+1
+&gt;&gt;&gt; cursor.execute(&quot;SELECT * FROM names&quot;)
+&gt;&gt;&gt; cursor.fetchone()
+('notdonald', 'duck', 34)
+</pre>
+</div>
+<div class="section">
+<h2><a class="toc-backref" href="#id13" id="cursor-attributes" name="cursor-attributes">Cursor attributes</a></h2>
+<p><cite>Cursor</cite> objects expose a few attributes, most of which provide extra
+information about executed statements:</p>
+<dl class="docutils">
+<dt><cite>arraysize</cite></dt>
+<dd>Default <cite>size</cite> to be used for <cite>fetchmany</cite>, defaults to 1.</dd>
+<dt><cite>connection</cite></dt>
+<dd>The <cite>Connection</cite> object associated with this <cite>Cursor</cite>.</dd>
+<dt><cite>description</cite></dt>
+<dd>Description of the result set returned by the currently prepared
+statement. See <a class="reference" href="#describing-result-sets">Describing result sets</a> for information on how to use
+this attribute.</dd>
+<dt><cite>rowcount</cite></dt>
+<dd>Number of rows affected by the last executed statement, or -1 if no
+statement was executed or the number can not be determined. InformixDB
+only provides values for <tt class="docutils literal"><span class="pre">DELETE</span></tt>, <tt class="docutils literal"><span class="pre">UPDATE</span></tt>, and <tt class="docutils literal"><span class="pre">INSERT</span></tt>
+statements.</dd>
+<dt><cite>sqlerrd</cite></dt>
+<dd>Informix SQL error descriptor (<tt class="docutils literal"><span class="pre">sqlerrd</span></tt>) as a tuple.</dd>
+<dt><cite>messages</cite></dt>
+<dd>See <a class="reference" href="#advanced-error-handling">Advanced error handling</a> on how to use <cite>errorhandler</cite> and <cite>messages</cite>.</dd>
+<dt><cite>errorhandler</cite></dt>
+<dd>See <a class="reference" href="#advanced-error-handling">Advanced error handling</a> on how to use <cite>errorhandler</cite> and <cite>messages</cite>.</dd>
+</dl>
+</div>
+<div class="section">
+<h2><a class="toc-backref" href="#id14" id="scroll-cursors-and-cursors-with-hold" name="scroll-cursors-and-cursors-with-hold">Scroll Cursors and Cursors with Hold</a></h2>
+<p><cite>(new in version 2.1)</cite></p>
+<p>InformixDB allows you to use scroll cursors and cursors with hold. To
+create a scroll cursor, pass the argument <tt class="docutils literal"><span class="pre">scroll=True</span></tt> to the
+<cite>Connection.cursor()</cite> call. To create a cursor with hold, pass the argument
+<tt class="docutils literal"><span class="pre">hold=True</span></tt>. Both arguments may be given together to create a scroll cursor
+with hold.</p>
+<p>If a cursor was created as a scroll cursor, you may use its <cite>scroll()</cite>
+method to navigate through the result set. <cite>scroll()</cite> takes up to two
+arguments, a mandatory <cite>value</cite> argument and an optional <cite>mode</cite> argument.
+If given, <cite>mode</cite> must be either <tt class="docutils literal"><span class="pre">'absolute'</span></tt> or <tt class="docutils literal"><span class="pre">'relative'</span></tt>,
+and it defaults to <tt class="docutils literal"><span class="pre">'relative'</span></tt> if not given. In absolute mode, <cite>value</cite>
+is the result row number to which you want to scroll. In relative mode,
+<cite>value</cite> is the number of rows by which you want to scroll from the current
+row.</p>
+</div>
+<div class="section">
+<h2><a class="toc-backref" href="#id15" id="interrupting-queries" name="interrupting-queries">Interrupting Queries</a></h2>
+<p><cite>(new in version 2.5)</cite></p>
+<p>Cursor objects provide two mechanisms for interrupting long-running queries,
+configurable with the attributes <tt class="docutils literal"><span class="pre">sqltimeout</span></tt> and <tt class="docutils literal"><span class="pre">sqlinterrupt</span></tt>.
+<tt class="docutils literal"><span class="pre">sqltimeout</span></tt> is an integer that specifies how many milliseconds a query is
+allowed to take.  If a query takes longer than that, it is automatically
+aborted.  If <tt class="docutils literal"><span class="pre">sqltimeout</span></tt> is zero, no timeout is in effect and queries are
+allowed to run indefinitely.</p>
+<p><tt class="docutils literal"><span class="pre">sqlinterrupt</span></tt> is a boolean attribute that indicates whether interrupt
+signals during query execution interrupt the query. Note that turning this
+feature on disables Python's handling of interrupt signals while queries are
+executed.</p>
+<p>Connection objects have <tt class="docutils literal"><span class="pre">sqltimeout</span></tt> and <tt class="docutils literal"><span class="pre">sqlinterrupt</span></tt> attributes that
+set the defaults for the corresponding attributes of any cursor objects
+that the connection object creates. By default, <tt class="docutils literal"><span class="pre">sqltimeout</span></tt> is zero,
+and <tt class="docutils literal"><span class="pre">sqlinterrupt</span></tt> is False.</p>
+</div>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id16" id="transactions" name="transactions">Transactions</a></h1>
+<p>When enabled in the underlying database, transactions can be used by calling
+<cite>commit</cite> and <cite>rollback</cite> on a <cite>Connection</cite> object. A new transaction will
+automatically be started after the previous one was committed or rolled
+back.</p>
+<p>Before the connection to the database is closed an implicit rollback is
+performed.</p>
+<p>When transactions are disabled in the database, <cite>commit</cite> becomes a no-op and
+<cite>rollback</cite> raises a <cite>NotSupportedError</cite> when called.</p>
+<p><cite>New in version 2.2</cite>: A <cite>Connection</cite> object has an <cite>autocommit</cite> attribute
+that can be used to turn automatic commits on or off.</p>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id17" id="database-values" name="database-values">Database values</a></h1>
+<p>The following describes how database values are mapped to Python objects by
+InformixDB:</p>
+<dl class="docutils">
+<dt><tt class="docutils literal"><span class="pre">CHAR</span></tt>, <tt class="docutils literal"><span class="pre">VARCHAR</span></tt>, <tt class="docutils literal"><span class="pre">NCHAR</span></tt>, <tt class="docutils literal"><span class="pre">NVARCHAR</span></tt>, <tt class="docutils literal"><span class="pre">LVARCHAR</span></tt></dt>
+<dd><cite>string</cite></dd>
+<dt><tt class="docutils literal"><span class="pre">FLOAT</span></tt>, <tt class="docutils literal"><span class="pre">SMALLFLOAT</span></tt></dt>
+<dd><cite>float</cite></dd>
+<dt><tt class="docutils literal"><span class="pre">DECIMAL</span></tt>, <tt class="docutils literal"><span class="pre">MONEY</span></tt></dt>
+<dd><cite>float</cite> or <cite>decimal.Decimal</cite>;
+In InformixDB-2.2 and Python 2.4, <tt class="docutils literal"><span class="pre">DECIMAL</span></tt> and <tt class="docutils literal"><span class="pre">MONEY</span></tt> values
+will be returned as <cite>decimal.Decimal</cite> instances unless the cursor was
+created with the <tt class="docutils literal"><span class="pre">use_decimal</span></tt> flag set to False.</dd>
+<dt><tt class="docutils literal"><span class="pre">SMALLINT</span></tt>, <tt class="docutils literal"><span class="pre">INT</span></tt>, <tt class="docutils literal"><span class="pre">SERIAL</span></tt></dt>
+<dd><cite>int</cite></dd>
+<dt><tt class="docutils literal"><span class="pre">BYTE</span></tt>, <tt class="docutils literal"><span class="pre">TEXT</span></tt></dt>
+<dd><cite>buffer</cite>; The <tt class="docutils literal"><span class="pre">informixdb.Binary(string)</span></tt> should be used to create
+database independent large object values.</dd>
+<dt><tt class="docutils literal"><span class="pre">DATE</span></tt></dt>
+<dd><cite>datetime.date</cite>; <tt class="docutils literal"><span class="pre">informixdb.Date(year,month,day)</span></tt> or
+<tt class="docutils literal"><span class="pre">informixdb.DateFromTicks(ticks)</span></tt> should be used to create database
+independent date values.</dd>
+<dt><tt class="docutils literal"><span class="pre">DATETIME</span></tt></dt>
+<dd><cite>datetime.datetime</cite>;
+<tt class="docutils literal"><span class="pre">informixdb.Time(hour,minute,second[,microsecond=0])</span></tt>,
+<tt class="docutils literal"><span class="pre">informixdb.TimeFromTicks(ticks)</span></tt>,
+<tt class="docutils literal"><span class="pre">informixdb.Timestamp(year,month,day,hour=0,minute=0,second=0[,microsecond=0]</span></tt>
+or <tt class="docutils literal"><span class="pre">informixdb.TimestampFromTicks(ticks)</span></tt> should be used to create
+database independent time or timestamp (i.e. <tt class="docutils literal"><span class="pre">DATETIME</span></tt>) values.</dd>
+<dt><tt class="docutils literal"><span class="pre">INTERVAL</span></tt> (<cite>new in version 2.1</cite>)</dt>
+<dd><cite>informixdb.IntervalYearToMonth</cite> or <cite>informixdb.IntervalDayToFraction</cite>
+depending on the interval's precision. Interval instances support certain
+arithmetic operations, such as adding to or subtracting from a datetime,
+adding to or subtracting from another compatible interval, and scaling by
+a factor.</dd>
+<dt><tt class="docutils literal"><span class="pre">INT8</span></tt>, <tt class="docutils literal"><span class="pre">SERIAL8</span></tt> (IDS) (<cite>new in version 2.1</cite>)</dt>
+<dd><cite>long</cite></dd>
+<dt><tt class="docutils literal"><span class="pre">BLOB</span></tt>, <tt class="docutils literal"><span class="pre">CLOB</span></tt> (IDS) (<cite>new in version 2.1</cite>)</dt>
+<dd><cite>informixdb.Sblob</cite>; To insert (or update) a Smart Large Object into a
+database column, you need to create an Sblob instance by calling the
+Sblob() method of the connection to which the Sblob should belong.
+Once an Sblob instance is either created or fetched, it provides a
+file-like interface for reading and writing its data.</dd>
+<dt><tt class="docutils literal"><span class="pre">BOOLEAN</span></tt> (IDS) (<cite>new in version 2.2</cite>)</dt>
+<dd><cite>bool</cite></dd>
+<dt>extended types, user-defined types (IDS) (<cite>new in version 2.1</cite>)</dt>
+<dd><p class="first">Complex and opaque types are mapped to their string representation.
+Distinct types are mapped like the type from which they are derived.</p>
+<p><cite>New in version 2.4</cite>: If desired, opaque types can be fetched in their
+internal binary representation. The cursor attribute <tt class="docutils literal"><span class="pre">binary_types</span></tt>
+is a dictionary that controls which opaque types are fetched in binary
+format.</p>
+<p>When a query returns values of an opaque type, the type name is looked up
+in the cursor's <tt class="docutils literal"><span class="pre">binary_types</span></tt> dictionary. If the type name is found
+and has a true value, the contents will be read in binary format.
+Otherwise, the contents will be read in text format.</p>
+<p class="last">Connection objects have a <tt class="docutils literal"><span class="pre">binary_types</span></tt> dictionary that serves as the
+default for the cursors that the connection creates. This dictionary is
+empty by default.</p>
+</dd>
+<dt><tt class="docutils literal"><span class="pre">NULL</span></tt></dt>
+<dd>SQL <tt class="docutils literal"><span class="pre">NULL</span></tt> is represented by Python's <tt class="docutils literal"><span class="pre">None</span></tt> when binding parameters
+or returning results.</dd>
+</dl>
+<p>Furthermore there are a number of objects defined by the module which can be
+used to compare database column types as they appear in <cite>Cursor.description</cite>
+against well-known types in a database independent manner:</p>
+<dl class="docutils">
+<dt><cite>informixdb.STRING</cite></dt>
+<dd>Compares equal to any string based types.</dd>
+<dt><cite>informixdb.BINARY</cite></dt>
+<dd>Compares equal to long/binary types (<tt class="docutils literal"><span class="pre">BYTE</span></tt> and <tt class="docutils literal"><span class="pre">TEXT</span></tt>).</dd>
+<dt><cite>informixdb.NUMBER</cite></dt>
+<dd>Compares equal to any numeric types.</dd>
+<dt><cite>informixdb.DATETIME</cite></dt>
+<dd>Compares equal to any date, time or datetime types.</dd>
+<dt><cite>informixdb.ROWID</cite></dt>
+<dd>Compares equal to rowid types (i.e. <tt class="docutils literal"><span class="pre">SERIAL</span></tt>).</dd>
+</dl>
+<p>They are used like this, except of course that the actual column types would
+come from <cite>Cursor.description</cite>:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; informixdb.STRING == 'char'
+1
+&gt;&gt;&gt; informixdb.STRING == 'integer'
+0
+&gt;&gt;&gt; informixdb.NUMBER == 'integer'
+1
+&gt;&gt;&gt; informixdb.NUMBER == 'decimal'
+1
+</pre>
+<div class="note">
+<p class="first admonition-title">Note</p>
+<p class="last">InformixDB uses the <cite>datetime</cite> module to represent date, time and
+timestamp values. This module is part of the standard library
+since Python 2.3 and is automatically installed by InformixDB for
+Python 2.2.</p>
+</div>
+<div class="note">
+<p class="first admonition-title">Note</p>
+<p class="last">The <tt class="docutils literal"><span class="pre">FRAC</span></tt> part of Informix <tt class="docutils literal"><span class="pre">DATETIME</span></tt> fields is mapped to
+<cite>datetime.microseconds</cite> but the precision is limited to a maximum
+of 10 microseconds (or less, depending on how the field is defined
+in the database), due to the limited precision of fractional
+datetimes in Informix.</p>
+</div>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id18" id="error-handling" name="error-handling">Error handling</a></h1>
+<p>InformixDB defines a number of exception types derived from <cite>StandardError</cite>
+to report error conditions:</p>
+<dl class="docutils">
+<dt><cite>Error</cite></dt>
+<dd><p class="first">Base for all InformixDB errors.</p>
+<dl class="last docutils">
+<dt><cite>InterfaceError</cite></dt>
+<dd>Error in the database interface itself. This is currently raised
+when trying to used closed <cite>Cursor</cite> or <cite>Connection</cite> objects or when
+an internal date/time conversion error occurs.</dd>
+<dt><cite>DatabaseError</cite></dt>
+<dd><p class="first">Base and catch-all for errors reported by the database.
+<cite>DatabaseError</cite> or subclasses of it are raised whenever a database
+operation fails.  When it's possible to determine the class of an
+error via <tt class="docutils literal"><span class="pre">SQLSTATE</span></tt>, the more specific error types are raised.</p>
+<dl class="last docutils">
+<dt><cite>DataError</cite></dt>
+<dd>Error due to the processed data. E.g. a division by zero or
+when a numeric value is out of range.</dd>
+<dt><cite>OperationalError</cite></dt>
+<dd>Operational database errors that aren't necessarily under the
+programmer's control, e.g. connection problems, permission
+denied or out of memory conditions.</dd>
+<dt><cite>IntegrityError</cite></dt>
+<dd>An integrity constraint would be violated.</dd>
+<dt><cite>InternalError</cite></dt>
+<dd>An error internal to the database, e.g. invalid cursor or
+transaction states.</dd>
+<dt><cite>ProgrammingError</cite></dt>
+<dd>An error caused by the program. Typically raised when an invalid
+table is referenced, a syntax error occurs or a SQL statement is
+invalid.</dd>
+<dt><cite>NotSupportedError</cite></dt>
+<dd>A operation or method is not supported by the database. Raised
+when trying to invoke <cite>rollback</cite> on a database that doesn't
+support transactions or when the database doesn't support a
+particular feature (e.g. <tt class="docutils literal"><span class="pre">BYTE/TEXT</span></tt> or <tt class="docutils literal"><span class="pre">VARCHAR</span></tt> on
+Informix SE).</dd>
+</dl>
+</dd>
+</dl>
+</dd>
+<dt><cite>Warning</cite></dt>
+<dd>Represents a SQL warning (e.g. data truncation). This exception is never
+actually raised by the default error handler. By default, warnings are
+only reported via the <cite>Connection</cite> or <cite>Cursor</cite> object's <cite>messages</cite>
+attribute (see <a class="reference" href="#advanced-error-handling">Advanced error handling</a>).</dd>
+</dl>
+<p>These exception types are accessible as attributes of the
+<cite>informixdb</cite>-module or <cite>Connection</cite> objects.</p>
+<p><cite>DatabaseError</cite> and <cite>Warning</cite> provide a number of useful attributes with
+information about the underlying SQL error:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; try:
+...     informixdb.connect('nonexisting')
+... except informixdb.DatabaseError, e:
+...     print e
+...     print e.action, e.sqlcode, e.diagnostics
+...
+SQLCODE -329 in CONNECT:
+IX000: Database not found or no system permission.
+IX000: No such file or directory
+
+CONNECT -329 [ {'message': 'Database not found or no system permission.',
+'sqlstate': 'IX000'}, {'message': 'No such file or directory',
+'sqlstate': 'IX000'}]
+</pre>
+<dl class="docutils">
+<dt><cite>action</cite></dt>
+<dd>The ESQL/C statement which was executed by InformixDB when the error was
+encountered.</dd>
+<dt><cite>sqlcode</cite></dt>
+<dd>Value of Informix' SQLCODE.</dd>
+<dt><cite>diagnostics</cite></dt>
+<dd>Sequence of all diagnostic messages reported by Informix where each item
+is a dictionary with keys <tt class="docutils literal"><span class="pre">'message'</span></tt> for a text representation of the
+message and <tt class="docutils literal"><span class="pre">'sqlstate'</span></tt> for the corresponding SQLSTATE value.</dd>
+</dl>
+<div class="section">
+<h2><a class="toc-backref" href="#id19" id="advanced-error-handling" name="advanced-error-handling">Advanced error handling</a></h2>
+<p><cite>Connection</cite> and <cite>Cursor</cite> objects both have <cite>errorhandler</cite> and <cite>messages</cite>
+attributes which are used for error handling.</p>
+<dl class="docutils">
+<dt><cite>messages</cite></dt>
+<dd>A list of <tt class="docutils literal"><span class="pre">(exception_class,</span> <span class="pre">exception_value)</span></tt> tuples for all errors
+and warnings generated by the database relating to this <cite>Cursor</cite> or
+<cite>Connection</cite>. This list is automatically cleared prior to execution of
+any <cite>Cursor</cite> or <cite>Connection</cite> methods except for the <cite>fetch*</cite> methods.</dd>
+<dt><cite>errorhandler</cite></dt>
+<dd><p class="first">A Python callable of the form <tt class="docutils literal"><span class="pre">errorhandler(connection,</span> <span class="pre">cursor,</span>
+<span class="pre">errorclass,</span> <span class="pre">errorvalue)</span></tt> which is called for all database warnings and
+errors relating to this <cite>Cursor</cite> or <cite>Connection</cite>. The default (if this
+is <cite>None</cite>) is to append the error/warning to the <cite>messages</cite> list and
+raise an exception for errors.</p>
+<p class="last">This attribute is inherited from the associated <cite>Connection</cite> by <cite>Cursor</cite>
+objects when they are created.</p>
+</dd>
+</dl>
+<p>When a database error occurs in InformixDB it is basically handled like this
+(which path is followed depends on whether the error occurs during execution
+of a <cite>Connection</cite> or <cite>Cursor</cite> method):</p>
+<ul class="simple">
+<li>The exception class and exception value is determined.</li>
+<li>The <cite>Cursor</cite> or <cite>Connection</cite> objects <cite>errorhandler</cite> attribute is checked
+to see if it is set.</li>
+<li>If an <cite>errorhandler</cite> is available, it is invoked with <cite>connection</cite>,
+<cite>cursor</cite>, <cite>errorclass</cite> and <cite>errorvalue</cite> as its arguments. The error
+handler might raise an exception or return, in which case execution is
+continued.</li>
+<li>If no <cite>errorhandler</cite> is available, the built in error handler is invoked.
+A  <tt class="docutils literal"><span class="pre">(errorclass,</span> <span class="pre">errorvalue)</span></tt> tuple is appended to the <cite>Cursor</cite> or
+<cite>Connection</cite> object's messages attribute, and if the error is an actual
+error (i.e. not of type <cite>Warning</cite>), an exception is raised.</li>
+</ul>
+</div>
+</div>
+<div class="section">
+<h1><a class="toc-backref" href="#id20" id="inspecting-version-numbers" name="inspecting-version-numbers">Inspecting Version Numbers</a></h1>
+<p>Occasionally it may be useful to inspect the version numbers of the database
+engine, the ESQL/C driver, or of InformixDB itself. The following version
+information is available at runtime:</p>
+<p>Module-level attribute:</p>
+<blockquote>
+<ul class="simple">
+<li><tt class="docutils literal"><span class="pre">version</span></tt>: The version number of InformixDB itself.
+(<cite>new in version 2.3</cite>)</li>
+</ul>
+</blockquote>
+<p>Versions 2.0 through 2.2 didn't provide any version information. If you
+have an installation of InformixDB that doesn't have a <tt class="docutils literal"><span class="pre">version</span></tt> attribute,
+you should probably upgrade, since you're missing out on a lot of features
+and bug fixes.</p>
+<p>Connection attributes (<cite>new in version 2.5</cite>):</p>
+<blockquote>
+<ul class="simple">
+<li><tt class="docutils literal"><span class="pre">dbms_name</span></tt>, <tt class="docutils literal"><span class="pre">dbms_version</span></tt>: The name and version number of the
+database engine. For older engines such as Standard Engine, the name can
+not be determined and the string &quot;Unknown&quot; is returned instead.</li>
+<li><tt class="docutils literal"><span class="pre">driver_name</span></tt>, <tt class="docutils literal"><span class="pre">driver_version</span></tt>: The name and version number of the
+ESQL/C installation with which InformixDB was compiled. The name is either
+&quot;INFORMIX-ESQL&quot; or &quot;IBM Informix-ESQL&quot;</li>
+</ul>
+</blockquote>
+<table class="docutils footnote" frame="void" id="pep249" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id1" name="pep249">[1]</a></td><td><a class="reference" href="http://www.python.org/peps/pep-0249.html">http://www.python.org/peps/pep-0249.html</a></td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</body>
+</html>
