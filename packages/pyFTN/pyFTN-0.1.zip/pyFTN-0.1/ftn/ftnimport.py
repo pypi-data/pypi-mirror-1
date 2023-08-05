@@ -1,0 +1,2 @@
+"""Importing arrived FTN data"""
+
