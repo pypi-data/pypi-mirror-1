@@ -1,0 +1,79 @@
+#!/usr/bin/python
+# -*- mode:python; -*-
+#
+# Twisted Goodies:
+# Miscellaneous add-ons and improvements to the separately maintained and
+# licensed Twisted (TM) asynchronous framework. Permission to use the name was
+# graciously granted by Twisted Matrix Laboratories, http://twistedmatrix.com.
+#
+# Copyright (C) 2006 by Edwin A. Suominen, http://www.eepatents.com
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2 of the License, or (at your option) any later
+# version.
+# 
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the file COPYING for more details.
+# 
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to the Free Software Foundation, Inc., 51
+# Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA
+
+
+import os, os.path
+from optparse import OptionParser
+from twisted.internet import reactor, defer
+from twisted_goodies.webfetch import patents
+
+
+class Fetcher(object):
+    def __init__(self, dir):
+        self.patents = patents.PatentFetcher(dir)
+        self.apps = patents.AppFetcher(dir)
+
+    def fetchAll(self, pubNumbers):
+        dList = []
+        for pubNumber in pubNumbers:
+            for fetcher in (self.apps, self.patents):
+                validated = fetcher.parsePubNumber(pubNumber)
+                if validated:
+                    break
+            else:
+                continue
+            print "Fetching US%d ->" % validated
+            if fetcher.filePath(validated) is None:
+                d = fetcher.fetch(validated)
+                d.addCallback(self._fetched)
+                dList.append(d)
+        self.d = defer.DeferredList(dList)
+        self.d.addCallback(self._done)
+    
+    def _fetched(self, filePath):
+        print " -> %s" % os.path.basename(filePath)
+
+    def _done(self, null):
+        print "%s\nAll Done" % ('-'*70,)
+        reactor.stop()
+
+
+# Parse the command line arguments
+p = OptionParser()
+p.add_option(
+    "-f", "--front",
+    dest="front", action="store_true",
+    help="Front page(s) only")
+p.add_option(
+    "-d", "--dir",
+    dest="dir", action="store",
+    help="Destination directory")
+p.set_defaults(
+    front=False,
+    dir=os.getcwd())
+opts, args = p.parse_args()
+
+# Run the desired operation
+fetcher = Fetcher(opts.dir)
+reactor.callWhenRunning(fetcher.fetchAll, args)
+reactor.run()
