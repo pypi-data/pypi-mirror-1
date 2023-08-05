@@ -1,0 +1,124 @@
+[[PageOutline(2-3, Table of Contents)]]
+
+= The !TurboMail Guide =
+
+!TurboMail is a !TurboGears extension, meaning that it starts up and shuts down alongside any !TurboGears applications you write, in the same way that visit tracking and identity do. !TurboMail uses built-in Python modules for SMTP communication and MIME e-mail creation, but greatly simplifies these tasks by performing the grunt-work for you. Additionally, !TurboMail is multi-threaded, allowing for single or batch enqueueing and background delivery of mail.
+
+== Compatability ==
+
+!TurboMail is compatible with Python 2.4 and 2.5, and should be compatable with Python 2.3, although this is untested.
+
+== Installation & Upgrade Instructions ==
+
+If you already have a copy of ''setup_tools'' installed, installation is as easy as running the following command:
+
+{{{
+easy_install [-U] TurboMail
+}}}
+
+!TurboMail installs no external scripts.  (Only include `-U` if upgrading an existing installation.  If you do not have ''setup_tools'' installed... you haven't installed !TurboGears yet, and !TurboMail is a !TurboGears extension, and thus requires that it be present.
+
+== Configuration ==
+
+Before you can use !TurboMail, you must enable a few options within your !TurboGears application's configuration files.  Some of these options make sense to have included in the development- or production-specific configurations, while others make sense in the global configuration.  All of these options can be placed in any of the three files.
+
+=== Basic Options ===
+
+ * `mail.on` (Default: ''False'') Enable !TurboMail. '''Required.'''
+ * `mail.server` (Default: ''None'') SMTP server address.  '''Required.'''
+ * `mail.username` (Default: ''None'')
+ * `mail.password` (Default: ''None'')
+
+Both a username and password are required to enable authentication—passwords can be blank strings.
+
+=== Advanced Options ===
+
+ * `mail.debug` (Default: ''False'') Output all SMTP server communications.
+ * `mail.interval` (Default: ''10'') Polling delay between new thread creation, in seconds.
+ * `mail.threads` (Default: ''4'') Maximum number of concurrent threads.
+ * `mail.jobs` (Default: ''10'') Maximum number of job units per thread.
+ * `mail.timeout` (Default: ''60'') Maximum time a worker thread will wait for additional jobs, in seconds.
+ * `mail.tls` (Defalut: ''None'') Enable or disable TLS, None will attempt to auto-detect TLS. This will not always work.
+ * `mail.encoding` (Default: ''us-ascii'') Set the character set and encoding on the MIMEText parts of the message. Common character sets include:
+    * `us-ascii` -- Performs no encoding, but is 7bit only.
+    * `iso-8859-1` -- Uses quoted-printable encoding.
+    * `utf-8` -- Uses base64 encoding.
+    * `utf-8-qp` -- Configures utf-8 to use quoted-printable encoding.  (Note: this is not a real character set and can only be used with !TurboMail.  Note also that this setting reconfigures the global ''utf-8'' setting to use a different encoding and will effect other processes using this mechanism.)
+ * `mail.polling` (Defaut: ''False'') If enabled, configures the thread pool to poll every mail.interval seconds for new jobs. This may give performance benefits to the running application. The default behaviour is to create new threads as soon as work is enqueued, resulting in faster delivery, but greater initial load.
+
+In debug mode, using a single thread with a maximum of one job can be advantageous. Having a single thread with a maximum of a single job limits !TurboMail to a single SMTP connection at a time and automatically disconnects after sending each message.
+
+== Basic Usage ==
+
+To use !TurboMail in your !TurboGears application, after adding the appropriate configuration options to your application, use the following as a guide:
+
+{{{
+#!python
+# Import TurboMail.
+import turbomail
+
+# Create a Message instance.
+message = turbomail.Message("from@example.com", "to@example.com", subject)
+message.plain = "Hello world!"
+
+# Enqueue the message.
+turbomail.enqueue(message)
+}}}
+
+Your message will now have been enqueued. Depending on how you have configured !TurboMail, your message will either be delivered immediately (if a thread is idle), create a thread immediately, or delay up to `mail.interval` seconds before creating a thread.
+
+== Advanced ==
+
+There are many additional options which are best described in the source or API reference guides.  The API reference guide can be generated using [http://epydoc.sourceforge.net/ Epydoc] and the included configuration file.  Use the following command to generate the documentation:
+
+{{{
+epydoc --config=epydoc.cfg
+}}}
+
+Documentation will be generated (along with a few harmless errors because !TurboMail is not running within !TurboGears) inside the documentation/api folder of the source tree.  No documentation will be installed if you use ``easy_install`` or a binary package—it is included with the source only.
+
+== Reference ==
+
+=== Message Class ===
+
+Simple e-mail message class.
+
+Message provides a means to easily create e-mail messages to be sent through the Dispatch mechanism or by using a !MailPool. Message provides various helper functions to correctly format plain text, dual plain text and rich text MIME encoded messages, as well as handle embedded and external attachments.
+
+All properties can be set from the constructor.
+
+E-mail addresses can be represented as any of the following:
+
+ * A string.
+ * A 2-tuple of ("Full Name", "name@host.tld")
+
+Encoding can be overridden on a per-message basis, but note that 'utf-8-qp' modifies the default 'utf-8' behaviour to output quoted-printable, and you will have to change it back yourself if you want base64 encoding.
+
+((The plain- and rich-text parts of the message may be defined as any callable which returns plain- or rich-text.  The callable is executed at the time the message is built - usually just prior to being delivered. -- Not true until next release.))
+
+==== Methods ====
+
+ * `attach(file, name=None)` -- Attach a given file (either on-disk by passing a path, or in-memory by passing a File descendant) to the message.  The `name` argument is required if passing an in-memory File descendant.
+ * `embed(file, name)` -- As per attach, but limited to image files for embedding in the rich-text (HTML) part of the message.  Name is the desired CID of the embedded image.
+
+==== Properties ====
+
+ * `bcc` -- Blind carbon-copy address or addresses.
+ * `cc` -- Carbon-copy address or addresses.
+ * `date` -- The Date header.
+ * `disposition` -- Request disposition notfication be sent to this address.
+ * `encoding` -- Content encoding specific to this message.
+ * `headers` -- A list of additional headers.
+ * `organization` -- The descriptive Organization header.
+ * `plain` -- Plain text content.  Can be automatically generated.
+ * `priority` -- The X-Priority header, in the range of 1-5.
+ * `recipient` -- The To header, containing one or more addresses.
+ * `replyto` -- The X-Reply-To header, allowing you to request alternative return routing for replies.
+ * `rich` -- The rich-text part.  If this part is set the plain-text part will be automatically generated unless otherwise specified.
+ * `sender` -- The From header.
+ * `smtpfrom` -- The envelope address, if different from the sender.
+ * `subject` -- A textual description or summary of the content of the message.
+
+----
+
+This [http://purl.org/dc/dcmitype/Text work] is licensed under a [http://creativecommons.org/licenses/by-nd/2.5/ca/ Creative Commons Attribution-No Derivative Works 2.5 Canada License].
