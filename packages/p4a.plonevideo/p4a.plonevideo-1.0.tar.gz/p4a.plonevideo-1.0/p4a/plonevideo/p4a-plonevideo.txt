@@ -1,0 +1,91 @@
+=========================
+Plone4Artists Plone Video
+=========================
+
+Plone4Artists Plone Video is a Zope 3 dependent Plone framework for dealing
+with video files and their metadata.
+
+Set Up
+======
+
+First some mock objects to make testing easier.
+
+    >>> class Mock(object): pass
+
+Browser Components
+==================
+
+First we must setup a mock request and mock context.
+
+    >>> from zope import component, interface
+    >>> from p4a.videoembed import interfaces as embedifaces
+    >>> from p4a.video import interfaces
+
+    >>> request = Mock()
+    >>> request.response = response = Mock()
+    >>> redirects = []
+    >>> def redirect(url):
+    ...     redirects.append(url)
+    >>> response.redirect = redirect
+
+    >>> class MockLink(Mock):
+    ...     interface.implements(embedifaces.ILinkProvider, interfaces.IVideo)
+    ...     def __init__(self, url):
+    ...         self.url = url
+    ...     def getLink(self): return self.url
+    >>> context = MockLink('foo')
+    >>> context.absolute_url = lambda: 'http://blah.com'
+
+Using our metadata view is as simple as instantiating the class.
+
+    >>> from p4a.plonevideo.browser import video
+    >>> view = video.QueryMetadata(context, request)
+
+We have a simple redirect method.
+
+    >>> ignored = view.redirect('foo')
+    >>> ignored = view.redirect('bar', False)
+    >>> redirects
+    ['http://blah.comfoo', 'bar']
+
+Instantiating our view and then calling it will always return an empty string
+since all of it's logic does redirects.
+
+    >>> redirects[:] = []
+    >>> view()
+    ''
+
+Since we haven't made the embedvideo metadata retrieval zope 3 components
+available yet, we'll get a simple redirect telling us that things are
+misconfigured.
+
+    >>> redirects
+    ['http://blah.com/view?portal_status_message=Remote%20metadata%20retrieval%20misconfigured.']
+
+So we go ahead and register some mock components.
+
+    >>> class MockRetriever(Mock):
+    ...     interface.implements(embedifaces.IVideoMetadataRetriever)
+    ...     def __init__(self): self.metadata = {}
+    ...     def get_metadata(self, url):
+    ...         return self.metadata.get(url)
+
+    >>> retriever = MockRetriever()
+    >>> component.provideUtility(retriever)
+
+And we test the view once more.  This time getting the retriever was
+no problem.  But there isn't any metadata available.
+
+    >>> redirects[:] = []
+    >>> ignored = view()
+    >>> redirects
+    ['http://blah.com/view?portal_status_message=Retriever%20returned%20no%20data%2C%20most%20likely%20cause%20is%20that%20there%20is%20no%20registered%20lookup%20component%20for%20%22foo%22']
+
+So now we go ahead and register some metadata.
+
+    >>> data = embedifaces.VideoMetadata()
+    >>> retriever.metadata[context.url] = data
+    >>> redirects[:] = []
+    >>> ignored = view()
+    >>> redirects
+    ['http://blah.com/view?portal_status_message=Video%20updated.']
