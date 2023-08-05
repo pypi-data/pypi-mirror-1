@@ -1,0 +1,15 @@
+from setuptools import setup
+setup(name='pIDLy',
+      version='0.1.2',
+      description='IDL within Python',
+      long_description='Control ITT\'s IDL (Interactive Data Language) from within Python',
+      author='Anthony Smith',
+      author_email='A.J.Smith@sussex.ac.uk',
+      url='http://astronomy.sussex.ac.uk/~anthonys/pidly/',
+      py_modules=['pidly'],
+      license='MIT',
+      install_requires=['numpy', 'pexpect'],
+      classifiers=['Intended Audience :: Science/Research',
+                   'Programming Language :: Other',
+                   'License :: OSI Approved :: MIT License']
+      )
