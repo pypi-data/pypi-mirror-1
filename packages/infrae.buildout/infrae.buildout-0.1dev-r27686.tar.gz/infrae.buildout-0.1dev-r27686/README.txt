@@ -1,0 +1,52 @@
+infrae.buildout
+===============
+
+Used to run a sub-buildout in a buildout. Example::
+
+  [cms]
+  recipe = infrae.subversion
+  urls = https://svn.infrae.com/buildout/silva/trunk .
+
+  [cms-build]
+  recipe = infrae.buildout
+  path = ${cms:location}
+  config = profiles/test-instance.cfg
+  merge-bin = True
+
+
+The ``cms`` part fetch buildout files, here from a SVN. You can use
+``infrae.paster`` to create a buildout tree using a paster template.
+
+The ``cms-build`` part runs buildout on the ``cms`` part:
+
+- The ``path`` option determines which parts to depends on, and which
+  path to use. This is important to use the ``${cms:location}``
+  because this says to buildout that the ``cms-build`` parts depends
+  on the ``cms`` one. This parameter is required.
+
+- The ``config`` option tells which configuration file to use in the
+  ``path``. By default it will ``buildout.cfg``, but you can use
+  safely ``profiles/something.cfg`` (buildout directory is configured
+  to use the ``path`` folder to run himself).
+
+- The ``merge-bin`` option tells if the generated scripts of the
+  sub-buildout should end up in the same directory than the current
+  one. The default is ``False``.
+
+
+Disclaimer
+----------
+
+The sub-buildout is run in the main parts directory in this sample. If
+this sub-buildout contains data (in a ``var`` folder for example),
+they will end-up in the same part directory than the sub-buildout
+(useless specific configuration in this one). This implies if you
+update your main buildout and the main parts directory is deleted,
+*your data would be lost*.
+
+
+Latest version
+--------------
+
+The latest version is available in a `Subversion repository
+<https://svn.infrae.com/buildout/infrae.buildout/trunk#egg=infrae.buildout-dev>`_.
