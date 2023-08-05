@@ -1,0 +1,5 @@
+version = "0.1"
+author = "Kevin Dangoor (packager), Fredrik Lundh"
+email = "dangoor+turbogears@gmail.com"
+copyright = "Copyright 2006 Fredrik Lundh"
+license = "BSD"
