@@ -1,0 +1,298 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+##    fui Copyright (C) 2008 Donn.C.Ingle
+##    Contact: donn.ingle@gmail.com - I hope this email lasts.
+##
+##    This file is part of fui.
+##    fui is free software: you can redistribute it and/or modify
+##    it under the terms of the GNU General Public License as published by
+##    the Free Software Foundation, either version 3 of the License, or
+##    (at your option) any later version.
+##
+##    fui is distributed in the hope that it will be useful,
+##    but WITHOUT ANY WARRANTY; without even the implied warranty of
+##    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+##    GNU General Public License for more details.
+##
+##    You should have received a copy of the GNU General Public License
+##    along with fui.  If not, see <http://www.gnu.org/licenses/>.
+
+import sys, locale, os, subprocess, getopt
+import fuimodules.i18n
+import fuimodules.strings
+import tempfile
+
+## Where it's at: Get system's tmp dir, whatever it may be:
+selFile = "/%s/fui_selection" % tempfile.gettempdir()
+
+class BadEntry( Exception ):
+    def __init__(self, bad):
+        ## Try to keep print sweet...
+        self.bad = unicode(bad, locale.getpreferredencoding(),errors="ignore")
+        ## I tried errors="replace" but it still gives me 'ascii'codec can't
+        ## blah blah errors :(
+
+## Parse the cli arguments, removing options and leaving args:
+try:
+    ## I dunno if this is crazy, but these cli options could because
+    ## localized. Why not?
+    ch = _("h") # single character options
+    cv = _("v")
+    ce = _("e")
+    cc = _("c") #copy
+    ck = _("k")
+    cm = _("m") #move
+    cl = _("l")
+    cf = _("f")
+    wh = _("help") # 'word' options (long)
+    wv = _("version")
+    we = _("exclude")
+    wc = _("copy")
+    wk = _("keep")
+    wm = _("move")
+    wl = _("list")
+    wf = _("flush")
+
+    shorts = "%s%s%s%s%s%s%s%s" % (ch,cv,cl,cf,cc,cm,ck,ce)
+    longs = "%s %s %s %s %s %s %s %s" % (wh,wv,wl,wf,wc,wm,wk,we)
+    longs = longs.split()
+
+    opts, args = getopt.gnu_getopt(sys.argv[1:], shorts, longs)
+
+except getopt.GetoptError, err:
+    print _("Your arguments amuse me :) Please read the help.")
+    raise SystemExit
+
+## Flags
+doList = False
+doFlush = False
+doExclude = False
+doSelect = False
+doKeep = False
+doCopy = False
+doMove = False
+
+## The main lists
+selection = []
+inputStrings = [] # Stuff in from the cli
+
+## Some worker funcs:
+def testAndAppendArgsToList( listname, *args ):
+    """
+    Fills listname with absolute paths to each item in args
+    """
+    if not args: return
+
+    ## go through each one and make sure it's a file or directory.
+    for i in args:
+        if i.endswith("\n"): i = i[0:-1]
+        absi = os.path.abspath(i)
+        if not os.path.exists( absi ):
+            raise BadEntry( absi )
+        listname.append(absi)
+    ## Remove duplicates
+    tmp =  list( set( listname ) )
+    listname = tmp
+    del(tmp)
+
+def writeSelectionFile():
+    """
+    Writes the selection file to /tmp
+    """
+    f = open( selFile, 'w' )
+    bytestring = "".join([line + "\n" for line in selection if line != ""])
+    f.write( bytestring )
+    f.close()
+
+def flushFile():
+    """
+    Remove the /tmp/fui_selection file.
+    """
+    if os.path.exists( selFile ):
+        os.unlink( selFile )
+        print _("Selection flushed.")
+        raise SystemExit
+
+## Add anything that sneaks past argv (i.e. a pipe)
+## to the inputStrings list.
+# This test thanks to "Reedick, Andrew" <jr9445@att.com>
+keyboardStdin = os.isatty(sys.stdin.fileno())
+## If this is not done, and there are no args, then the script
+## awaits keyboard input. There are some opinions about this;
+## that it's the way it's supposed to be. This whole stdin thing
+## is really an early attempt at being a good cli citizen and 
+## will neeed more work.
+if not keyboardStdin:
+    pipedIn = sys.stdin.readlines()
+    try:
+        testAndAppendArgsToList( inputStrings, *pipedIn )
+    except BadEntry,e:
+        print _("This entry does not exist: %s") % e.bad
+        raise SystemExit
+
+## Add any dangling args to inputStrings
+try:
+    testAndAppendArgsToList( inputStrings, *args )
+except BadEntry, e:
+    print _("This entry does not exist: %s") % e.bad
+    raise SystemExit
+
+## I won't support mixed arguments because it gets confusing.
+## But, you *can* mix keep with copy or move
+
+## Aim to support:
+## fui blah blam *.jpg
+##  No option means SELECT.
+##  SELECT is always going to append to the list.
+##
+## fui -e bollocks.jpg lump.jpg
+##  this will then exclude those two
+##
+## fui -c
+##  will copy and then flush the selection
+##
+## fui -k -c
+##  will copy and keep the selection
+##
+## fui -m
+##  will move and then flush the selection
+##
+## fui -k -m
+##  will move and keep the selection.
+
+if not args and not opts:
+    print _("Doing nothing.")
+    raise SystemExit
+
+## Select is the default action.
+if not opts:
+    doSelect = True
+else:
+    for o, a in opts:
+        ## version
+        if o in ( "-%s" % cv , "--%s" % wv):
+            print fuimodules.strings.verString
+            raise SystemExit
+        ## help
+        elif o in ( "-%s" % ch , "--%s" % wh):
+            print fuimodules.strings.help
+            raise SystemExit
+        ## list
+        elif o in ( "-%s" % cl , "--%s" % wl):
+            doList = True
+            break
+        ## flush
+        elif o in ( "-%s" % cf , "--%s" % wf):
+            doFlush = True
+            break
+        ## keep
+        elif o in ( "-%s" % ck, "--%s" % wk ):
+            doKeep = True
+        ## exclude
+        elif o in ( "-%s" % ce, "--%s" % we ):
+            doExclude = True
+        ## copy
+        elif o in ( "-%s" % cc, "--%s" % wc ):
+            doCopy = True
+        ## move
+        elif o in ( "-%s" % cm, "--%s" % wm ):
+            doMove = True
+
+## Flush
+if doFlush:
+    flushFile()
+
+## Open the selection file
+if os.path.exists( selFile ):
+    try:
+        f = open( selFile, 'r' )
+    except:
+        raise
+    tmp = f.read().split("\n")
+    f.close()
+    ## Remove the last blank entry caused by split.
+    ## Damned thing had me debugging for hours :\
+    tmp = tmp[0:-1]
+    ## Merge into selection, remove duplicates
+    try:
+        testAndAppendArgsToList( selection, *tmp )
+    except BadEntry, e:
+        print _("%s no longer exists, you must flush and reselect.") % e.bad
+        raise SystemExit
+
+if doSelect:
+    ## Append inputStrings to selection
+    for s in inputStrings:
+        selection.append( s )
+    ## Remove duplicates
+    tmp =  list( set( selection ) )
+    selection = tmp
+    del(tmp)
+    ## Write the file
+    writeSelectionFile()
+    raise SystemExit
+
+if doList:
+    if not selection:
+        print _("There's nothing selected.")
+    else:
+        print _("These are selected:")
+        for s in selection:
+            print unicode(s, locale.getpreferredencoding(),errors="ignore")
+    raise SystemExit
+
+
+if doExclude:
+    if not selection:
+        print _("The selection is empty.")
+        raise SystemExit
+    ## The strings in inputStrings must be removed
+    ## from those in selection
+    newSelection = []
+    for ex in selection:
+        if ex not in inputStrings:
+            newSelection.append( ex )
+    selection = newSelection
+
+    del( newSelection )
+
+    ## Now to write the file
+    writeSelectionFile()
+    raise SystemExit
+
+if doCopy:
+    if not selection:
+        print _("The selection is empty, nothing to copy.")
+        raise SystemExit
+    ## Go through selection and perform a copy
+    ## operation on each element.
+    cwd = os.path.abspath(".")
+    for s in selection:
+        ## Let's use cp to shoulder the grunt work
+        ## -R to cover those strings that are directories.
+        c = ["cp", "-R", s, cwd ]
+        p1 = subprocess.call( c )
+        if p1 != 0:
+            print _("Copy error. Go figure.")
+            raise SystemExit
+
+if doMove:
+    if not selection:
+        print _("The selection is empty, nothing to move.")
+        raise SystemExit
+    cwd = os.path.abspath(".")
+    for s in selection:
+        ## Let's use mv to shoulder the grunt work
+        ## -R to cover those strings that are directories.
+        c = ["mv", s, cwd ]
+        p1 = subprocess.call( c )
+        if p1 != 0:
+            print _("Move error. Go figure.")
+            raise SystemExit
+
+if not doKeep:
+    flushFile()
+    print _("Finished. The selection has been cleared.")
+else:
+    print _("Finished. The selection remains unchanged.")
