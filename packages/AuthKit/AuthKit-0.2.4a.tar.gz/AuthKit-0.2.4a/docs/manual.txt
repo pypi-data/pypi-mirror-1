@@ -1,0 +1,302 @@
+Pylons Integration
+++++++++++++++++++
+
+Pylons is a highly configurable system that encourages many different ways of restricting access to code. 
+
+In general to implement security in Pylons you install some auth middleware in your middleware config to do the authentication, you implement sign in and sign out functions in an action and check your user has permission to access code at each place authorisation is required, displaying a sign in prompt if necessary.
+
+AuthKit can be useful at all of these stages in different ways and you are free to use it in whatever way you see fit to implement your own security.
+
+This document shows you one way to build a complete security system with AuthKit and then shows you how to modify it to use HTTP digest sign in instead of a form and cookie based sign in. This way of doing things can also be used as a basis for your own security system.
+
+Setting up a Secure Application
+===============================
+
+Getting Started
+---------------
+
+Create a pylons project if you haven't already done so. We are going to call our project authexample::
+
+    > paster create --template=pylons authexample
+    
+We need to give the project access to the default authkit templates so add the following to ``config/middleware.py`` before the ``app = pylons.wsgiapp.make_app(config)`` line::
+
+    import authkit.standard
+    config.myghty['component_root'].append({'authkit/standard':authkit.standard.__path__[0]+'/templates'})
+
+In the ``# YOUR MIDDLEWARE`` section add the AuthKit middleware::
+
+    from authkit.standard.middleware import authkit_form
+    app = authkit_form(
+            app, 
+            global_conf,
+            secret=app_conf['session_secret'],
+            cookie_name='auth_tkt',
+            secure=False,
+            include_ip=True,
+            sign_out_path='/account/sign_out',
+            sign_in_path='/account/signin',
+    )
+
+Next we will need access to the AuthKit model, validators, domain objects, mappers, tables etc. In ``models/__init__.py`` add::
+
+    from authkit.standard.models import *
+
+We need to add an account controller to actually handle the sign in or sign out::
+
+    > cd authexample
+    > paster controller account
+    
+Edit ``controllers/account.py`` to look like this::
+
+    from authexample.lib.base import *
+    from authkit.standard.controllers.account import AuthKitAccountController
+
+    class AccountController(AuthKitAccountController):
+        model = model
+        def __before__(self):
+            c.template_dir = 'authkit/standard'
+            c.controller_name = 'account'
+
+Add some extra required software::
+
+    > easy_install web
+
+and add ``web==0.6.0`` and ``AuthKit>=0.2.3b`` to your ``setup.py`` file's ``install_requires`` line so that it looks like this::
+
+    install_requires=["Pylons==0.9", "web==0.6.0", "AuthKit>=0.2.3b"],
+
+Add some necessary helpers to ``lib/helpers.py``::
+
+    from web.mail import send as mail
+    from web.util.time import seconds
+
+and add some lines to ``websetup.py`` so that your users can install the database tables using ``paster setup-app``::
+
+    import sqlalchemy.mods.threadlocal
+    from sqlalchemy import *
+    from authexample.models import *
+    from paste.deploy import appconfig
+
+    def setup_config(command, filename, section, vars):
+        app_conf = appconfig('config:'+filename)
+        print "Connecting to DSN %s..."%repr(app_conf['dsn'])
+        
+        meta.connect(app_conf['dsn'])
+        print "Creating tables"
+        meta.create_all()
+        
+        print "Adding data..."
+        g = Group('Everyone')
+        r = Role('Role')
+        a = App('Admin')
+        objectstore.flush()
+        u = User(username='admin@example.com',password='admin')
+        objectstore.flush()
+        p = Permission(user_uid=1,app_uid=1,role_uid=1)
+        objectstore.flush()
+
+        # Save changes
+        objectstore.flush()
+        print "Successfully setup. You can now run `paster serve' and sign in"
+        print "with username `admin@example.com' and `admin'."
+
+Finally edit ``development.ini`` with the DSN of your database eg::
+
+    [DEFAULT]
+    ...
+    sendmail = /usr/sbin/sendmail
+    smtp_server = smtp.bulldogdsl.com
+    method = smtp
+
+    [app:main]
+    use = egg:authexample
+    dsn = postgres://@localhost/authexample_test
+    email_from = James Gardner <james@example.com>
+    confirm_email_subject = Confirmation
+    password_reminder_subject = Password Reminder
+    ... 
+    
+You will probably want to change the email options at the top too. XXX More here.
+    
+Now give it a try::
+    
+    > python setup.py develop
+    > paster setup-app development.ini
+    > paster serve --reload development.ini
+
+.. Note:: If you see no output when you run ``paster setup-app`` it might be there was a problem with your ``websetup.py`` file. Load a python prompt and type ``import authexample.websetup`` to see if there are any problems.
+    
+Customising the Templates
+=========================
+
+All the templates defined in the authkit module's ``authkit/standard/templates`` can be overriden in your Pylons code by creating an ``authkit/standard`` directory in your ``templates`` directory and copying across the file from the authkit module's ``authkit/standard/templates`` directory.
+
+For example to change the style so that all authkit pages are blue you would override the authkit ``autohandler`` file. Copy the file from the ``authkit/standard/templates/authkit/standard`` directory of your authkit installation to the ``templates/authkit/standard`` directory of your project and edit it so that the ``<body>`` tag looks like this::
+
+    <body bgcolor="#ccccff">
+
+You might already have content in an ``autohandler`` file higher up in your Myghty directory structure in which case you may simply want to embed put the follwing in your custom ``autohandler`` so that no extra HTML is added::
+
+    % m.call_next()
+    
+Alternatively you might want to specify a different Myghty path where the controller should look for templates. You can do this by changing the ``c.template_dir`` variable in the ``controllers/account.py`` ``__before__()`` method. Incidentally, if you called your controller something other than ``account`` you could specify the correct name with ``c.controller_name``::
+
+        def __before__(self):
+            c.template_dir = 'path/to/templates' 
+            c.controller_name = 'account'
+
+
+Adding AuthKit functionality to other controllers
+=================================================
+
+Add a new controller named ``permissions`` which is going to have some public actions and some private ones::
+
+    > paster controller permissions
+
+We need to make sure the controller is a secure controller so modify ``controllers/permissions.py`` to be based on a ``PylonsSecureController`` and then add some actions so that it looks like this::
+
+    from authexample.lib.base import *
+    from authkit.standard.controllers.secure import SecureController
+    from authkit.standard.permissions import *
+
+    class PermissionsController(SecureController):
+    
+        model = model
+
+        def index(self):
+            return Response('''
+                <a href="/permissions/private">See a private page</a>.<br />
+                <a href="/permissions/public">See a public page</a>.<br />
+            ''')
+
+        def public(self):
+            return Response('This is public')
+            
+        def private(self):
+            return Response('This is private!')
+        private.permissions = ValidSession()
+
+Notice that the method ``private()`` has a ``.permissions`` attribute which is assigned an AuthKit permissions object, in this case an ``authkit.standard.permissions.ValidSession`` object which checks that a user is signed in.
+
+Visit http://127.0.0.1:5000/permissions and have a play. You will notice that you can't 
+
+There are a range of different permissions objects available that can be used. For example often rather than checking a user has a valid session you could just check they are signed regardless of whether their session had expired by doing using ``SignedIn``::
+
+    private.permissions = SignedIn()
+
+You could use ``UserIn([...])`` to check the signed in user has one of the usernames specified or ``UserAndHasPermission(app=..., role=...)`` to only allow users with rights to certain applications or roles or you could use ``Group(...)`` to ensure the user is a member of a particular group.
+
+There are also other permissions objects such as ``And``, ``Or`` and ``Not`` which can be chained together with permissions objects.
+
+If you need even more power you can derive your own permissions object from the base ``Permissions`` object. Your object should implement the ``__call__()`` method with no parameters and return ``True`` if the user has the particular permissions the class checks for or ``False`` otherwise.
+
+Customising the My Account Page
+===============================
+
+When a user signs in they are redirected (by default) to the My Account page. To edit what is on that page copy the ``index.myt`` file from the authkit module's ``authkit/standard/templates`` directory into yout ``templates/authkit/standard directory and edit it as necessary. 
+
+In our case we might want to add a link back to the ``permissions`` controller so we would add this line to the list::
+
+    <li><% h.link_to('Permissions', h.url_for(controller='permissions')) %></li>
+
+Using Scafold to create an Admin Interface
+==========================================
+
+# XXX To write
+
+.. Warning:: Everything from here onwards is wrong and broken!
+
+Modify the account controller like this::
+
+    from pylonshq.lib.base import *
+    from authkit.standard.controllers.account import AuthKitAccountController
+    from authkit.standard.permissions import *
+    from authkit.standard.controllers.secure_scaffold import Secure_ScaffoldController, Lookup
+    import formbuild
+
+    admin_permissions = And(UserAndHasPermission(model, app='Admin'), ValidSession())
+
+    class AccountController(AuthKitAccountController):
+        model = model
+        admin_permissions = admin_permissions
+        
+        def __call__(self, **p):
+            c.security = c.account = 'account'
+            c.model = model
+            return AuthKitAccountController.__call__(self, **p)
+
+        def admin(self, table=None, subaction=None, **params):
+            if table == None:
+                m.subexec('account/admin.myt')
+            else:
+                c.model = self.model
+                c.url_map = {
+                    'action':'subaction',
+                    'controller':'table',
+                }
+                c.exclude = ['uid']
+                c.foreign_key_values = {}
+                c.foreign_key_lookup = {}
+                if table == 'user':
+                    c.name = 'User'
+                    c.exclude = ['active', 'uid']
+                    c.foreign_key_values = {
+                            'group': [tuple([x.uid, x.name]) for x in c.model.Group.mapper.select()]
+                        }
+                    c.foreign_key_lookup = {
+                            'group': Lookup(c.model.Group, 'uid', 'name')
+                        }
+                elif table in ['app','role','group']:
+                    c.name = table.capitalize()
+                elif table in 'news':
+                    c.name = 'News'
+                    c.exclude.append('user')
+                   # if not hasattr(self.model, c.name):
+                   # raise Exception(getattr(self.model, c.name))
+                elif table == 'permission':
+                    c.name = 'Permission'
+                    c.foreign_key_values = {
+                        'user': [tuple([x.uid, x.user]) for x in model.User.mapper.select()],
+                        'app': [tuple([x.uid, x.name]) for x in model.App.mapper.select()],
+                        'role': [tuple([x.uid, x.name]) for x in model.Role.mapper.select()],
+                    }
+                    c.foreign_key_lookup = {
+                        'user': Lookup(model.User, 'uid', 'user'),
+                        'app': Lookup(model.App, 'uid', 'name'),
+                        'role': Lookup(model.Role, 'uid', 'name'),
+                    }
+                else:
+                    m.abort(404, 'Scaffold table not found')
+
+                class AutoGeneratedController(Secure_ScaffoldController):
+                    #~ def __call__(self, subaction, **p):
+                        #~ h.log(p)
+                        #~ #request.environ['pylons.routes_dict']['action'] = subaction
+                        #~ #return Secure_ScaffoldController.__call__(self, **p)
+                        #~ return getattr(self, subaction)(**p)
+                        
+                    model=model
+                    def __before__(self):
+                        c.template = '/scaffold/templates/standard/'
+                        c.table = getattr(c.model,c.name).table.name
+                        c.form = formbuild.Form()
+                        
+                # Override the real action with the subaction
+                params['action'] = subaction
+                return AutoGeneratedController()(**params)
+        admin.permissions = admin_permissions
+        
+        
+::
+
+    <h1>User Administration</h1>
+    <p></p>
+
+    <ul>
+    <li><a href="<% h.url_for(controller='account', action='admin', table='user', subaction='list') %>">Edit Users</a></li>
+    <li><a href="<% h.url_for(controller='account', action='admin', table='group', subaction='list') %>">Edit Groups</a></li>
+    <li><a href="<% h.url_for(controller='account', action='admin', table='app', subaction='list') %>">Edit Applications</a></li>
+    <li><a href="<% h.url_for(controller='account', action='admin', table='role', subaction='list') %>">Edit Roles</a></li>
+    <li><a href="<% h.url_for(controller='account', action='admin', table='permission', subaction='list') %>">Edit Permissions</a></li>
+    </ul>
