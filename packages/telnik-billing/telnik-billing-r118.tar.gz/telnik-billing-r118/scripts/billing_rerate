@@ -1,0 +1,52 @@
+#!/usr/bin/python
+
+from django.db.transaction import commit_on_success
+from django.contrib.auth.models import User
+from django.contrib.billing.models import Receipt
+
+@commit_on_success
+def rerate(receipt, rate_id):
+	for item in receipt.itemrecord_set.filter(rate = rate_id):
+		detail = item.detail()
+		item._default_manager.update(item, detail, sync = False)
+	receipt._refresh()
+
+if __name__ == '__main__':
+	from os import stat, remove
+	from sys import argv, exit
+	username, receipt_id, rate_id = argv[1:]
+
+	lockfile = '/tmp/billing_rerate_%s_%s' % (receipt_id, rate_id)
+	try:
+		stat(lockfile)
+		exit(1)
+	except:
+		open(lockfile, 'w').close()
+
+	try:
+		user = User.objects.get(username = username)
+		receipt = Receipt.objects.get(pk = receipt_id)
+	except User.DoesNotExist:
+		remove(lockfile)
+		exit(1)
+	except Receipt.DoesNotExist:
+		remove(lockfile)
+		exit(1)
+
+	if not user.get_profile().accounts.filter(pk = receipt.account.id).count():
+		remove(lockfile)
+		exit(1)
+
+	try:
+		rerate(receipt, rate_id)
+		message = '%s %s' % (
+			_('Rate recalculation complete for'),
+			receipt.number)
+		user.message_set.create(message = message)
+	except Exception, e:
+		message = '%s: %s' % (
+			_('Rate recalculation failed'),
+			e)
+		user.message_set.create(message = message)
+
+	remove(lockfile)
