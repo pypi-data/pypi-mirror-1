@@ -1,0 +1,59 @@
+=======
+wrapper
+=======
+
+Provides a wrapper on the top of z3c.sqlalchemy base wrapper, that knows how
+to recall the SQL server when a query fails.
+
+
+Why ?
+=====
+
+This use case is happening when a SQL server restarts: if SQLALchemy has opened
+sessions over the server, the first query will fail.
+
+Here's an example (a memory database is created in memory with a mapper).
+We can query the session to get `MyTable` objects::
+
+    >>> session.query(MyTable).first()
+    <....MyTable object at 0x...>
+
+Let's restart the server::
+
+    >>> restart_server()
+
+The first query will fail ! ::
+
+    >>> import sqlalchemy
+    >>> session.query(MyTable).first()
+    Traceback (most recent call last):
+    ...
+    SQLAlchemyError: the server said: pouf!
+
+The second query will succeed::
+
+    >>> session.query(MyTable).first()
+    <...MyTable object at 0x...>
+
+iw.sql wrapper
+==============
+
+We provide a base wrapper to avoid it::
+
+    >>> from wrapper import SecuredBaseWrapper
+
+It has a session property, that returns a session object::
+
+    >>> wrapper = SecuredBaseWrapper('sqlite:///:memory:')
+    >>> wrapper.session
+    <wrapper.DynamicDecorator object at 0x...>
+
+But we have our own session object, that knows how to perform the
+retry-on-failure pattern::
+
+    >>> mapper = add_mapper(wrapper.session)
+    >>> wrapper.session.query(mapper).first
+    <function _w_retry_on_failure at 0x...>
+
+    >>> wrapper.session.query(mapper).first()
+    <....MyTable object at 0x...>
