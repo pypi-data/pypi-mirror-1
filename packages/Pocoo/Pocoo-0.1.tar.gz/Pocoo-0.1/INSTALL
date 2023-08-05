@@ -1,0 +1,263 @@
+================
+Installing Pocoo
+================
+
+
+A note first
+============
+
+If you have any troubles with installing or find this guide to be
+too sketchy, please tell us in #pocoo on irc.freenode.net or open
+a ticket at http://trac.pocoo.org/newticket -- Thanks.
+
+
+Installing Pocoo
+================
+
+*Note:* If you installed from the Pocoo Python egg, colubrid, jinja,
+SQLAlchemy and simplejson will already have been installed as a
+dependency. You'll then only have to install the database adapter,
+then you can proceed with "Creating a Pocoo instance"
+
+To install and use Pocoo, you will need to:
+
+* install the dependencies:
+
+  * "colubrid" version 0.10 from http://wsgiarea.pocoo.org/colubrid
+  * "jinja" version 0.9 from http://wsgiarea.pocoo.org/jinja
+  * "SQLAlchemy" version 0.2.7 or higher from http://www.sqlalchemy.org
+  * "simplejson" from http://undefined.org/python
+
+  * a database adapter, such as
+    *pysqlite* version 2 from http://pysqlite.org or
+    *MySQLdb* from http://sourceforge.net/projects/mysql-python or
+    *psycopg2* from http://www.initd.org/tracker/psycopg.
+
+  You can install most of them with ``easy_install``.
+
+* install Pocoo: either install it into the site-packages using
+  ``python setup.py install``, or put it into some other directory
+  where your webserver process can read it.
+
+
+Creating a Pocoo instance
+=========================
+
+* create an empty directory, e.g. ``/path/to/instance`` 
+* initialize the instance with::
+
+    python /path/to/pocoo/management.py createinstance /path/to/instance
+  
+* configure the instance by editing the newly created ``pocoo.conf``.
+  Especially the ``database`` settings will be interesting.
+
+
+Creating test data
+==================
+
+In order to test Pocoo, you'll have to create your selected database
+(in case of SQLite, the database file will be created automatically).
+
+Then, you can insert test data into the database by running::
+
+    POCOO_ROOT=/path/to/instance python /path/to/pocoo/scripts/make_testdata.py
+
+This will create some bogus users, forums and posts.
+
+
+Starting the local development server
+=====================================
+
+Start the server by running::
+
+    python /path/to/instance/manage.py runserver
+
+Now you should be able to point your browser to ``http://localhost:8080``
+and look at a freshly installed Pocoo instance!
+
+By default, the server is started with the "reloader" enabled which
+means that it will automatically reinitialize itself whenever a
+source file is changed.
+
+
+Connecting Pocoo with the web server
+====================================
+
+For serious applications, you'll have to setup a real web server
+that serves Pocoo.
+
+Since web servers don't speak WSGI natively, they must communicate
+with Python using one of several methods.
+
+
+CGI
+---
+
+CGI is the oldest and slowest method.  For each request, a new Python
+process is started, which means that all modules must be imported and
+all initialization must be done each time.
+
+If you really need to use CGI, create a simple script like this::
+
+    #!/usr/bin/python
+    import sys
+
+    # add this if Pocoo is not installed in site-packages
+    # (it will be there if installed as an egg or with setup.py install)
+    sys.path.append("/path/to/pocoo/package")
+
+    from pocoo.wrappers.cgi import run_cgi
+    run_cgi("/path/to/instance/root")
+
+and make sure it is invoked by your web server (usually by placing
+it into a ``cgi-bin`` directory and making it executable).
+
+Be sure to adapt the config setting ``general.serverpath``
+accordingly: if the script is accessible as
+``http://server:port/dir/pocoo.cgi``, set the ``serverpath``
+to ``http://server:port/dir/pocoo.cgi/``.
+
+
+mod_python
+----------
+
+The advantage of mod_python over CGI is that all initialization happens
+just once and pocoo will handle more requests in less time.
+
+If you have mod_python and FastCGI on your server, FastCGI will be
+the better alternative since you can run your pocoo instance as a
+different user which can improve security.
+
+If your web server supports mod_python you have two possibilities to
+let mod_python know where it should serve your pocoo instance.
+
+If you have access to the apache config you can setup a vhost::
+
+    <VirtualHost *>
+        ServerName forum.example.com
+        <Location />
+            SetHandler mod_python
+            PythonAutoReload Off
+
+            # add this if Pocoo is not installed in site-packages
+            # (it will be there if installed as an egg or with setup.py install)
+            PythonPath "['/path/to/pocoo'] + sys.path"
+
+            PythonHandler pocoo.wrappers.modpy::handler
+            PythonOption instancepath /path/to/pocoo/instance
+        </Location>
+    </VirtualHost>
+
+Sometimes ``mod_python`` doesn't work, then you should try ``python-program``.
+
+If you don't want a vhost but have access to the apache.conf, just
+change the ``Location`` value to your settings.
+
+If you can only create a ``.htaccess`` file, create a new folder
+somewhere under your document root and add a ``.htaccess`` file
+with the following content::
+
+    SetHandler mod_python
+    PythonAutoReload Off
+
+    # add this if Pocoo is not installed in site-packages
+    # (it will be there if installed as an egg or with setup.py install)
+    PythonPath "['/path/to/pocoo'] + sys.path"
+
+    PythonHandler pocoo.wrappers.modpy::handler
+    PythonOption instancepath /path/to/pocoo/instance
+
+It's technically possible to create the Pocoo instance folder inside
+this newly created folder but in this case you have to disallow
+remote users to access it by adding the following to your ``.htaccess``::
+
+    <Files myinstance/*>
+        Order deny,allow
+        Deny from all
+    </Files>
+
+
+FastCGI
+-------
+
+If you want to use pocoo over FastCGI you'll need one of those two
+FastCGI gateways:
+
+- `flup <http://www.saddi.com/software/flup/>`_ or
+- `python-fastcgi <http://cheeseshop.python.org/pypi/python-fastcgi>`_
+
+If you're using flup you need to create the following file::
+
+    #!/usr/bin/python
+    import sys
+
+    # add this if Pocoo is not installed in site-packages
+    # (it will be there if installed as an egg or with setup.py install)
+    sys.path.append('/path/to/pocoo')
+
+    from pocoo.context import ApplicationContext
+    from flup.fcgi import WSGIServer
+
+    app = ApplicationContext('/path/to/pocoo/instance')
+    if __name__ == '__main__':
+        srv = WSGIServer(app)
+        srv.run()
+
+If you want to use the C implementation ``python-fastcgi`` use this file::
+
+    #!/usr/bin/python
+    import sys
+
+    # add this if Pocoo is not installed in site-packages
+    # (it will be there if installed as an egg or with setup.py install)
+    sys.path.append('/path/to/pocoo')
+
+    from pocoo.context import ApplicationContext
+    from fastcgi import ForkingWSGIServer
+
+    app = ApplicationContext('/path/to/pocoo/instance')
+    if __name__ == '__main__':
+        srv = ForkingWSGIServer(app)
+        srv.serve_forever()
+
+Save that file as ``pocoo.fcgi`` in a location the web server can access.
+It's possible to save it inside of the instance folder.
+
+If you are using apache you can run pocoo by putting this into
+your apache.conf::
+
+    <VirtualHost *>
+        ServerName forum.example.com
+
+        AddHandler fcgi-script fcgi
+        ScriptAlias / /path/to/the/pocoo.fcgi/
+    </VirtualHost>
+
+If you don't want to run it in the document root use this::
+
+    <VirtualHost *>
+        ServerName forum.example.com
+
+        AddHandler fcgi-script fcgi
+        ScriptAlias /forum /path/to/the/pocoo.fcgi
+    </VirtualHost>
+
+Note the missing trailing slash in this case.
+
+For lighttpd, put this into your lighttpd.conf::
+
+    fastcgi.server = (".fcgi" => (
+        "localhost" => (
+            "min-procs" => 1
+            "socket"    => "/tmp/fcgi.sock"
+        )
+    ))
+
+Note that lighttpd requires that you use a UNIX socket. You have
+to tell flup to use a socket::
+
+    srv = WSGIServer(app, bindAddress = '/tmp/fcgi.sock')
+    srv.run()
+
+For more information about the gateways, have a look at their
+documentation.
