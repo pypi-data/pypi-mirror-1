@@ -1,0 +1,61 @@
+"""
+tests for parsing which does not raise Exceptions normally
+"""
+__author__ = '$LastChangedBy: doerwalter $'
+__date__ = '$LastChangedDate: 2007-08-09 21:41:10 +0200 (Do, 09 Aug 2007) $'
+__version__ = '0.9.2a1, $LastChangedRevision: 210 $'
+
+import xml.dom
+
+import basetest
+
+import cssutils
+
+class CSSStyleSheetTestCase(basetest.BaseTestCase):
+
+    def setUp(self):
+        # should be be disabled here??
+        ##cssutils.log.raiseExceptions = False
+        pass
+
+
+    def test_invalidstring(self):
+        "cssutils.parseString(INVALID_STRING)"
+        validfromhere = '@import "x";'
+        csss = (
+            u'''@charset "ascii
+                ;''' + validfromhere,
+            u'''@charset 'ascii
+                ;''' + validfromhere,
+            u'''@import "x
+                ;''' + validfromhere,
+            u'''@unknown "x
+                ;''' + validfromhere)
+        for css in csss:
+            s = cssutils.parseString(css)
+            self.assertEqual(validfromhere, s.cssText)
+
+        css = u'''a { font-family: "Courier
+                ; }'''
+        s = cssutils.parseString(css)
+        self.assertEqual(u'a {}', s.cssText)
+
+
+    def test_attributes(self):
+        "cssutils.parseString(href, media)"
+        s = cssutils.parseString("a{}", href="file:foo.css", media="screen, projection, tv")
+        self.assertEqual(s.href, "file:foo.css")
+        self.assertEqual(s.media, ["screen", "projection", "tv"])
+
+        s = cssutils.parseString("a{}", href="file:foo.css", media=["screen", "projection", "tv"])
+        self.assertEqual(s.media, ["screen", "projection", "tv"])
+
+
+    def tearDown(self):
+        # needs to be reenabled here for other tests
+        cssutils.log.raiseExceptions = True
+
+
+if __name__ == '__main__':
+    import unittest
+    unittest.main()
