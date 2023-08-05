@@ -1,0 +1,186 @@
+#!/usr/bin/python
+# -*- encoding: utf-8 -*-
+
+"""Author: ÖÜÅô(Chowroc)
+Date: 2006-10-20
+Email: chowroc.z@gmail.com
+
+ÅúÁ¿´¦Àí½Å±¾£¬ÒÔÊÊÓ¦¶Ô ALFS µÄÐèÒª
+* ´ÓÁÐ±íÎÄ¼þ(packages.list)¶ÁÈ¡£¬°´Ë³Ðòµ÷ÓÃ userpack Ö´ÐÐ°²×°
+
+* ·ÖÎª crablfs ºÍ alfs Á½ÖÖÄ£Ê½£º
+crablfs ÔòÖ»ÐèÖ¸¶¨Ò»¸öÄ¿Â¼£¬¼´ÓÚ homepre ½á¹¹ÏàÍ¬µÄÄ¿Â¼
+alfs ÐèÒªÖ¸¶¨Á½¸öÄ¿Â¼£¬¼´ËùÓÐ config ËùÔÚµÄÄ¿Â¼ºÍ°üËùÔÚµÄÄ¿Â¼
+
+* ÄÜ¹»¼ÇÂ¼µ±Ç°Ö´ÐÐµãÒÔ±ãÏÂ´Î´ÓÕâÒ»µã¿ªÊ¼Ö´ÐÐ
+
+* ½«°²×°Ö´ÐÐÇé¿ö¼ÇÈë log(Î´ÊµÏÖ)
+Ö÷ÒªÊÇÏë½«¾ßÌåµÄÃüÁî´òÓ¡µ½±ê×¼Êä³ö£¬ÔÚ¿¼ÂÇÊ¹ÓÃ FIFO Ê±»¹ÓÐÐ©ÎÊÌâ
+
+crablfs Copyright (c) 2006 ÖÜÅô(chowroc.z@gmail.com)
+
+This file is part of crablfs.
+
+crablfs is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+crablfs is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with Foobar; if not, write to the Free Software
+Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA"""
+
+import os
+import sys
+import getopt
+import time
+
+if __name__ == '__main__':
+	program = os.path.basename(sys.argv[0])
+	location = os.path.dirname(sys.argv[0])
+	usage = """program usage: %s [OPTIONS] PKGLIST
+	OPTIONS:
+	-t|--type crablfs/alfs,
+		crablfs(Ä¬ÈÏ) ÐèÒªÖ¸¶¨ --home-sources
+		alfs ÐèÒª·Ö±ðÖ¸¶¨: --packs-dir and --confs-dir
+	-d|--home-prefix $homepre, Ö¸¶¨°üÓÃ»§µÄ HOME Ä¿Â¼µÄÇ°×ºÄ¿Â¼
+	-s|--home-source $homesrc, Óë $homepre ÓµÓÐÍ¬Ñù½á¹¹µÄÄ¿Â¼
+	-F|--packs-dir $packs_dir, ´æ·ÅËùÓÐÑ¹Ëõ°üµÄÄ¿Â¼
+	-C|--confs-dir $confs_dir, ´æ·ÅËùÓÐ°²×°ÅäÖÃÐÅÏ¢ÎÄ¼þÄ¿Â¼
+	-g|--admin $name, Ö¸¶¨ install µÄ group
+	-h|--help""" % program
+	usage_en = """program usage: %s [OPTIONS] PKGLIST
+	OPTIONS:
+	-t|--type crablfs/alfs,
+		crablfs(default) needs --home-sources
+		alfs needs: --packs-dir and --confs-dir
+	-d|--home-prefix $homepre,
+		the prefix to the abs path of package users' HOME
+	-s|--home-source $homesrc,
+		the directory that has the same struct as $homepre
+	-F|--packs-dir $packs_dir,
+		the directory stores compressed source archives
+	-C|--confs-dir $confs_dir,
+		the directory stores installation profiles)
+	-g|--admin $name,
+		the 'install' group all package users belong to
+	-h|--help""" % program
+	if os.environ['LANG'] not in ['zh', 'zh_CN',
+		'zh_CN.GB2312', 'zh_CN.GB18030', 'zh_CN.UTF-8', 'zh_CN.GBK']:
+		usage = usage_en
+
+	homepre = '/usr/src'
+	pkglist = ''
+	homesrc = ''
+	packs_dir = ''
+	confs_dir = ''
+	command = 'userpack'
+	argv = [command, 'install', '-a']
+	type = 'crablfs'
+	instlog = '/var/log/crablfs'
+	if not os.path.exists(instlog):
+		os.makedirs(instlog)
+	elif not os.path.isdir(instlog):
+		raise "installation_log_dir '%s' is not a direcotry"
+
+	try:
+		opts, args = getopt.gnu_getopt(sys.argv[1:], 't:d:s:F:C:g:h',
+			[	'type=', 
+				'home-prefix=', 'home-source=', 
+				'packs-dir=', 'confs-dir=', 
+				'admin=', 'help'	])
+
+		for o, v in opts:
+			if o == '-t' or o == '--type':
+				type = v
+			elif o == '-d' or o == '--home-prefix':
+				homepre = v
+				argv.extend(['-d', homepre])
+				# pkglist = '%s/packages.list' % homepre
+			elif o == '-s' or o == '--home-source':
+				homesrc = v
+			elif o == '-F' or o == '--packs-dir':
+				packs_dir = v
+			elif o == '-C' or o == '--confs-dir':
+				confs_dir = v
+			elif o == '-g' or o == '--amdin':
+				argv.extend(['-o', 'admin=%s' % v])
+			elif o == '-h' or o == '--help':
+				print usage
+				sys.exit(0)
+
+		if not args:
+			strerr = "No packages list given"
+			print >> sys.stderr, strerr
+			print usage
+			sys.exit(1)
+		pkglist = args[0]
+
+		from userpack import __parse_name
+		packages = []
+		for package in open(pkglist, 'r'):
+			package = package.strip()
+			pkgname, version = __parse_name(package)
+			packages.append((pkgname, version))
+		# ÏÈÐ£Ñé packages.list
+		# Èç¹û packages.list ÖÐÓÐÎÞÐ§µÄ°üÃû£¬Ôò»áÍË³ö
+
+		markfn = os.path.join(instlog, '.mark')
+		if os.path.isfile(markfn):
+			mark = open(markfn, 'r').readline().strip()
+			i = packages.index(__parse_name(mark))
+			# ²»»áÓÐÁ½¸öÏàÍ¬µÄ°üÃû£¬²Î¼û filetools Ä£¿é
+			packages = packages[i+1:]
+
+		for pkgname, version in packages:
+			tmpv = argv[:]
+			if type == 'alfs':
+				if not confs_dir or not packs_dir:
+					raise "No packages dir or config files dir given"
+				argv.extend(['-c', os.path.join(confs_dir, pkgname)])
+				argv.extend(['-o', 'PACKS_DIR="%s"' % packs_dir])
+			elif type in ['crablfs', 'default']:
+				if not homesrc:
+					raise "No home source tree prefix given"
+				argv.extend(['-s', homesrc])
+			argv.append('%s-%s' % (pkgname, version))
+			print "[31m%s[00m" % ' '.join(argv)
+			pid = os.fork()
+			if pid == 0:
+				# fd = os.open('%s/%s' % (instlog, pkgname), \
+				# 	os.O_WRONLY|os.O_CREAT)
+				# os.close(1)
+				# os.dup(fd)
+				# os.close(2)
+				# os.dup(fd)
+				os.execvp(command, argv)
+				assert 0, "installation execution error"
+			else:
+				status = (not os.wait()[1])
+				# xid = os.fork()
+				# if xid == 0:
+				#	fifo = '/tmp/crablfs.fifo'
+				#	while not os.path.isfile(fifo): time.sleep(1)
+				#	pipein = open(fifo, 'r')
+				#	line = ""
+				#	while line != 'EOF':
+				#		line = pipein.readline().strip()
+				#		print line
+				# print 'DEBUG: %d' % pid
+				# status = (not os.waitpid(pid, 0)[1])
+				# print '[31mDEBUG: %s00m' % status
+				if status:
+					open(markfn, 'w').write('%s-%s\n' % (pkgname, version))
+				else:
+					raise "terminated by previous error"
+			argv = tmpv
+
+	except getopt.GetoptError, goEx:
+		strerr = 'getopt error: %s, %s' % (goEx.opt, goEx.msg)
+		sys.stderr.write('%s\n' % strerr)
+		sys.exit(1)
