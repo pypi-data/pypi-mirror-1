@@ -1,0 +1,676 @@
+import socket, time
+import cStringIO
+
+from quixote import get_request, get_session, get_publisher, get_path
+from quixote import get_session_manager
+from quixote.html import href
+from quixote.errors import AccessError
+
+from mems.lib import MODE
+from mems.instrument.server.configuration import get_configuration
+
+_q_exports = ['debug', 'image', 'handle', 'login', 'save']
+    
+my_ip_address = socket.gethostbyname(socket.gethostname())
+
+def _q_access (request):
+    session = get_session()
+    uscope = get_uscope()
+    remote_ip = request.environ.get('REMOTE_ADDR', None) 
+    if (remote_ip == my_ip_address or
+        remote_ip == '127.0.0.1' or
+	MODE=='DEVEL'):
+        # The server is wide open.
+        return
+
+    if request.get_path() == '/login?':
+        # Allow access to the login URL
+        return
+    if session.user is None:
+        raise AccessError, "You're not logged in, and access is restricted"
+    elif 'manage-scope' in session.privileges:
+        # Managers can always view the microscope
+        pass
+    elif (uscope.allowed_users is not None and 
+	session.user not in uscope.allowed_users):
+        raise AccessError, "You're not on the list of allowed users"
+
+
+def _q_index [html] (request=None, reload=0):
+    if request:
+        request.response.set_header('Pragma', 'no-cache')
+
+    # The scope state hasn't been filled in yet, so just pause for a
+    # little bit and then redirect the user back to the current page.    
+    config = get_configuration()
+    if config.server.allow_control:
+        scope = get_uscope()
+        if not scope.scope_state.has_key('x'):
+            time.sleep(0.2)
+            return request.redirect(str('/'))
+
+    '<html><head>'
+
+    if reload:
+        '<meta http-equiv="Refresh" content="%d;' % reload
+        'url=%s">' % get_path()
+    '\n<title>Remote Microscope</title>'
+    '\n</head>\n<body style="background-color:#777">' 
+    body()
+    '</body>\n</html>'
+
+def list_users ():
+    """list_users() : [str]
+    Returns a list of users that have accessed the microscope server in the
+    last 5 minutes.
+    """
+    sm = get_session_manager()
+    anonymous_count = 0
+    result = []
+    for sess_id in sm.keys():
+        sess = sm[sess_id]
+        if sess.get_access_age() > 5*60:
+            # too old; skip it
+            continue
+        if sess.user is None:
+            anonymous_count += 1
+        else:
+            result.append(sess.user)
+
+    result.sort()
+    if anonymous_count == 1:
+        result.append('1 anonymous user')
+    elif anonymous_count > 1:
+        result.append("%i anonymous users" % anonymous_count)
+    return result
+    
+    
+def body [html] ():
+    scope = get_uscope()
+    '\n<form method="POST" action="handle" '
+    '>'
+
+    '<table style="background-color:#557">'
+    '<tr>\n<td>'
+    # The text inputs in this form use onchange="submit()",
+    # which uses the first submit button found on the form.
+    # The dummy input appears first in the form so that
+    # other submit buttons (with other actions) don't get
+    # used.
+    """<input type="submit" name="dummy" value="Reload" 
+        style="font-size:small;display:none">
+    <input type="submit" name="reload" value="Reload" valign="top">
+    """
+    
+    framed_image()
+    '</td>\n<td valign="top" bgcolor=white>'
+    controls()
+    '</td>'
+
+    session = get_session()
+    if (session.user is not None) and scope.step_names:
+        '<td style="background-color:white" valign="top">'
+        '<b>Steps</b><br />\n'
+        for i in range(len(scope.step_names)):
+            name = scope.step_names[i]
+            str(i+1) + '.&nbsp;' 
+            href('/save?%i' % i, name)
+            '<br />'
+        '</td>'
+
+    '</tr>'
+    
+    '<tr><td colspan="2" style="background-color:white">'
+    management_ui()
+    '</td></tr>'
+    '\n</table>'
+    '\n</form>'
+    
+def framed_image [html] ():
+    config = get_configuration()
+    '<table cellpadding=0 cellspacing=0 style="background-color:#aaa"><tr>'
+    if config.server.allow_control:
+        '<td>%s</td><td>%s</td><td>%s</td>' % (up_left_arrow_button(),
+                                               up_arrow_button(),
+                                               up_right_arrow_button())
+        '</tr><tr>'
+        '<td>%s</td>' % left_arrow_button()
+
+        
+    '<td>%s</td>' % image_button()
+
+    if config.server.allow_control:
+        '<td>%s</td>' % right_arrow_button()
+        '</tr><tr>'
+        '<td>%s</td><td>%s</td><td>%s</td>' % (down_left_arrow_button(),
+                                               down_arrow_button(),
+                                               down_right_arrow_button())
+        '</tr>'    
+
+    '<tr><td colspan="3">%s</td></tr>' % image_info()    
+    '<tr>'
+    '<td colspan="3">Current users: <br />'
+    ', '.join(list_users())
+    '</td></tr>'
+    '</table>'
+
+
+def up_arrow_button [html] ():
+    '<input type="submit" name="up_arrow" value="." '
+    'style="width:100%;height:2ex;color:#aaa;background-color:#aaa;border:raised">'
+
+def down_arrow_button [html] ():
+    '<input type="submit" name="down_arrow" value="." '
+    'style="width:100%;height:2ex;color:#aaa;background-color:#aaa;border:raised">'
+
+def left_arrow_button [html] ():
+    '<input type="submit" name="left_arrow" value="." '
+    'style="width:2ex;height:100%;color:#aaa;background-color:#aaa;border:raised">'
+
+def right_arrow_button [html] ():
+    '<input type="submit" name="right_arrow" value="." '
+    'style="width:2ex;height:100%;color:#aaa;background-color:#aaa;border:raised">'
+
+def up_left_arrow_button [html] ():
+    '<input type="submit" name="up_left_arrow" value="." '
+    'style="width:2ex;height:2ex;color:#aaa;background-color:#aaa;border:raised">'
+
+def up_right_arrow_button [html] ():
+    '<input type="submit" name="up_right_arrow" value="." '
+    'style="width:2ex;height:2ex;color:#aaa;background-color:#aaa;border:raised">'
+
+def down_left_arrow_button [html] ():
+    '<input type="submit" name="down_left_arrow" value="." '
+    'style="width:2ex;height:2ex;color:#aaa;background-color:#aaa;border:raised">'
+
+def down_right_arrow_button [html] ():
+    '<input type="submit" name="down_right_arrow" value="." '
+    'style="width:2ex;height:2ex;color:#aaa;background-color:#aaa;border:raised">'
+
+def image_button [html] ():
+    uscope = get_uscope()
+    size = uscope.image_size
+    x = uscope.get_image_width()
+    y = uscope.get_image_height()
+    '<input type="image" name="image" value="image" '
+    'style="width:%dpx;height:%dpx" ' % (x,y)
+    'src="image?%s">' % time.time()
+
+
+def image_info [html] ():
+    bar_microns, bar_pixels = get_uscope().get_scale_bar_dims()
+    '<div style="margin:1ex;text-align:center">'
+    '<button name="scale_size" value="scale_size" type="submit" '
+    'style="width:%spx;' % bar_pixels
+    'background-color:#008;border:none;color:white">'
+    '%s &micro;m' % bar_microns
+    '</button>'
+    '</div>'
+    time.ctime()
+
+    
+
+def management_ui [html] ():
+    request = get_request()
+    remote_ip = request.environ.get('REMOTE_ADDR', None) 
+    if not (MODE == 'DEVEL' or 
+            'manage-scope' in get_session().privileges or
+            remote_ip == my_ip_address or
+            remote_ip == '127.0.0.1'):
+        return
+    uscope = get_uscope()
+    if uscope.allowed_users is None:
+        "<p>Access is unrestricted; anyone can connect to microscope"
+    else:
+        "<p>Access is restricted to following users: "
+        ' '.join(uscope.allowed_users)
+        
+    """
+    <p>
+    Add a user to the access list:
+    <input type=text size=10 value="" name="user_id">
+    </p>
+    """
+    if uscope.allowed_users:
+        """
+        <p>
+        <input type=submit size=10 value="Clear user access list" name="clear_user_access_list">
+        </p>
+        """
+    """
+    <p>
+    Set Run ID of MX run being viewed:
+    <input type=text size=10 value="" name="run_id">
+    </p>
+    """        
+
+
+
+    
+def select [html] (name, value, values):
+    '\n<select style="width:100%;font-size:small" '
+    'name="%s" onchange="submit()">' % name
+    for v in values:
+        if v == value:
+            sel=' selected'
+        else:
+            sel = ""
+        '\n<option value="%s"%s> %s' % (v, sel, v)
+    '</select>'
+
+def controls [html] ():
+    config = get_configuration()
+    uscope = get_uscope()
+    state = uscope.scope_state
+
+    '<table style="font-size:small;height:100%;background-color:white"><tr>'
+    '<td colspan="3">'
+    select('image_size', uscope.image_size,
+           ['small', 'medium', 'large', 'huge'])
+    '</td>'
+    '</tr>'
+    if config.server.allow_control:
+        microscope_controls()
+
+    '<tr><td colspan="3">'
+    if uscope.show_crosshair:
+        '<input name="hide_crosshair" value="Hide crosshair" type="submit" '
+        'style="width:100%">'
+    else:
+        '<input name="show_crosshair" value="Show crosshair" type="submit" '
+        'style="width:100%">'
+    '</td>'
+    '</tr>'
+
+    '<tr><td colspan="3">'
+    if uscope.show_scale:
+        '<input name="hide_scale" value="Hide scale" type="submit" '
+        'style="width:100%">'
+    else:
+        '<input name="show_scale" value="Show scale" type="submit" '
+        'style="width:100%">'
+    '</td></tr>'
+
+    """<tr><td colspan="3">
+    To:&nbsp;<input name="email_address" value="" size="15"><br>
+    Subject:&nbsp;<input name="email_title" value="" size="15"><br>
+    <input name="email" value="Send" type="submit" 
+    style="width:100%">
+    </td></tr>
+    """
+
+    '<tr><td colspan="3" align="center">'
+    '<br />'
+    if uscope.run_id:
+        '<a href="http://www.mems-exchange.org/run/%s">'  % uscope.run_id
+        'Run %s' % uscope.run_id
+        '</a><br/ >'
+    '<a href="http://www.mems-exchange.org/my/">' 
+    '<img src="/images/logo-small.png" border="0">'
+    '</a><br/ >'
+    'MEMS Exchange<sup><small>&reg;</small></sup>'
+    '</td>'
+    '</tr></table>'
+    
+def microscope_controls [html] ():
+    uscope = get_uscope()
+    state = uscope.scope_state
+    '<tr>'
+    '<td colspan="3">'
+    select('magnification', '%sX' % state['magnification'],
+           ['5X', '10X', '20X', '50X', '100X'])
+    '</td>'
+    '</tr><tr>'
+    '<td colspan="3">'
+    select('aperture', 'aperture: %s' % state['aperture'],
+           ['aperture: 1', 'aperture: 2', 'aperture: 3',
+            'aperture: 4', 'aperture: 5'])
+    '</td>'
+    '</tr><tr>'
+    '<td colspan="3">'
+    select('mode', state['mode'],
+           ['brightfield', 'darkfield', 'icr'])
+    '</td>'
+    '</tr><tr>'
+    '<td style="width:50%%">%s</td>' % adjustment(
+        'x', 'x <small>(&micro;m)</small>', state['x'])
+    '<td style="width:50%%">%s</td>' % adjustment(
+        'y', 'y <small>(&micro;m)</small>', state['y'])
+    '<td></td>'
+    '</tr><tr>'
+    '<td valign="bottom">%s</td>' % adjustment(
+        'z', 'focus <small>(&micro;m)</small>', state['z'])
+    '<td valign="bottom">%s</td>' % adjustment(
+        'light', 'light <small>(%)</small>', state['light'])
+
+    config = get_configuration()
+    if config.server.rotate_stage:
+        '<td valign="bottom">%s</td>' % adjustment(
+            'angle', 'angle <small>(0-360&deg;)</small>', state['angle'])
+    else:
+        '<td></td>'
+    '</tr><tr>'
+    '<td colspan="3" align="center">'
+    '<div style="margin-top:1ex">'
+    if state.get('autofocus') == 'off':
+        '<input name="resume_autofocus" value="Autofocus" type="submit" '
+        'style="width:100%"><br />'
+
+    '</div></td></tr>'
+    
+def adjustment [html] (field, label, value):
+    if field in ['z', 'light']:
+        large_increment = 10
+        small_increment = 1
+    elif field == 'angle':
+        large_increment = 90
+        small_increment = 15
+    else:
+        # For X and Y, choose values depending on the scale
+        bar_microns, bar_pixels = get_uscope().get_scale_bar_dims()
+        large_increment = bar_microns
+        small_increment = large_increment / 10
+        
+    value = round(value, 1)
+    style = 'width:100%'
+    '''
+    <div style="margin-top:width:100%%;text-align:center;font-size:small">
+    <span style="font-weight:bold">
+    %(label)s
+    </span>
+    <br />
+    <input style="%(style)s" type=submit name="%(field)s_upmore"
+       value="+%(large_increment)i"><br />
+    <input style="%(style)s" type=submit name="%(field)s_up"
+       value="+%(small_increment)i"><br />
+    <input style="%(style)s;text-align:center"
+    type=text name="%(field)s" size=7 maxlength=7 value="%(value)s">
+    <br />
+    <input style="%(style)s" type=submit name="%(field)s_down"
+       value="-%(small_increment)i"><br />
+    <input style="%(style)s" type=submit name="%(field)s_downmore"
+       value="-%(large_increment)i"><br />
+    </div>
+    ''' % locals()
+
+def get_uscope ():
+    publisher = get_publisher()
+    return publisher.uscope
+
+def image (request):
+    uscope = get_uscope()
+    image = uscope.get_image()
+    if image is None:
+        # XXX what's the error to return here?
+        request.response.set_status(404)
+        return "no image"
+    output = cStringIO.StringIO()
+    image.save(output, 'JPEG')
+    request.response.set_content_type('image/jpeg')
+    request.response.set_header('Pragma', 'no-cache')
+    return output.getvalue()
+
+
+def handle_size (image_size):
+    if not image_size:
+        return
+    get_uscope().set_image_size(image_size)
+        
+def handle_click (x, y):
+    if not (x and y):
+        return False
+    
+    uscope = get_uscope()
+    state = uscope.scope_state
+    view_width = state['x_scale']
+    view_height = state['y_scale']
+    view_x = state['x']
+    view_y = state['y']
+    image_width = uscope.get_image_width()
+    image_height = uscope.get_image_height()    
+    image_target_x = max(0, min(int(x), image_width))
+    image_target_y = max(0, min(int(y), image_height))    
+    image_dx = image_target_x - (image_width / 2)
+    image_dy = image_target_y - (image_height / 2)
+    view_target_x = view_x - image_dx * view_width / image_width
+    view_target_y = view_y - image_dy * view_width / image_width    
+    get_uscope().move(x=view_target_x, y=view_target_y)
+    return True
+
+def handle_magnification (magnification):
+    if not magnification:
+        return
+    magnification_number = int(magnification[:-1]) # Remove 'X'
+    get_uscope().move(magnification=magnification_number)
+
+def handle_aperture (aperture):
+    if not aperture:
+        return
+    aperture_number = int(aperture.split()[-1])
+    get_uscope().move(aperture=aperture_number)
+
+def handle_mode (mode):
+    if not mode:
+        return
+    uscope = get_uscope()
+    uscope.move(mode=mode)
+
+def handle_arrows (up, down, left, right):
+    if not (up or down or left or right):
+        return False
+    uscope = get_uscope()
+    state = uscope.scope_state
+    dx = state['x_scale'] / 2
+    dy = state['y_scale'] / 2    
+    x = state['x']
+    y = state['y']    
+    if up:
+        y += dy
+    if down:
+        y -= dy
+    if left:
+        x += dx
+    if right:
+        x -= dx
+    uscope.move(x=x, y=y)
+    return True
+
+def handle_crosshair (show, hide):
+    if not (show or hide):
+        return
+    uscope = get_uscope()
+    if show:
+        uscope.show_crosshair = True
+    elif hide:
+        uscope.show_crosshair = False
+
+def handle_scale (show, hide):
+    if not (show or hide):
+        return
+    uscope = get_uscope()
+    if show:
+        uscope.show_scale = True
+    elif hide:
+        uscope.show_scale = False        
+
+
+def handle_adjustment (field, get):
+    uscope = get_uscope()
+
+    # Use value from text box
+    try:
+        value = float(get(field, ''))
+    except ValueError:
+        value = uscope.scope_state[field]
+
+    for suffix in ('_upmore', '_up', '_down', '_downmore'):
+        if get(field+suffix):
+            value += float(get(field + suffix))
+            break
+
+    uscope.move(**{field : value})
+        
+
+def handle_management (user_id, new_user_id, clear, run_id):
+    if not (new_user_id or clear or run_id):
+        return
+    check_management_privilege()
+    if clear:
+        uscope = get_uscope()
+        uscope.set_allowed_users(None)
+        uscope.set_run_id(user_id, None)
+    elif new_user_id:
+        uscope = get_uscope()
+        L = uscope.allowed_users or []
+        if new_user_id not in L:
+            uscope.set_allowed_users(L + [new_user_id])
+    elif run_id:
+        uscope = get_uscope()
+        try:
+            run_id = int(run_id)
+        except ValueError:
+            uscope.set_run_id(user_id, None)
+        else:
+            uscope.set_run_id(user_id, run_id)
+
+    
+def handle_email (address, subject):
+    if not address:
+        return False
+    uscope = get_uscope()
+    uscope.request_email(address, subject)
+    return True
+
+def handle_autofocus (resume_autofocus):
+    if not resume_autofocus:
+        return False
+    uscope = get_uscope()
+    uscope.move(autofocus='on')
+    return True
+
+def handle (request):
+    get = request.form.get
+    config = get_configuration()
+    
+    if get('reload'):
+        # On reloading, just update the microscope status and redirect
+        if config.server.allow_control:
+            uscope = get_uscope()
+            uscope.execute()
+        return request.redirect('/')
+    
+    # The following settings are always checked, whether or not
+    # remote control of the microscope itself is supported.
+    handle_size(get('image_size'))
+    handle_crosshair(show=get('show_crosshair'),
+                     hide=get('hide_crosshair'))
+    handle_scale(show=get('show_scale'),
+                 hide=get('hide_scale'))
+    handle_management(request.session.user,
+                      get('user_id'),
+                      get('clear_user_access_list'),
+                      get('run_id'))
+
+    if handle_email(get('email_address'), get('email_title')):
+        # If there was, in fact, an e-mail address supplied, we'll
+        # exit early and not look at any of the coordinates.
+        # This lets a user in the fab adjust the microscope manually
+        # and take a picture without messing up their settings.
+        return request.redirect('/')
+
+    # If controlling the microscope isn't permitted, we can return
+    # now. 
+    if not config.server.allow_control:
+        return request.redirect('/')
+
+    # The remainder of this function handles the microscope settings.
+    handle_magnification(get('magnification'))
+    handle_aperture(get('aperture'))
+    handle_mode(get('mode'))
+
+    moved = handle_arrows(up=(get('up_left_arrow') or
+                              get('up_arrow') or
+                              get('up_right_arrow')),
+                          down=(get('down_left_arrow') or
+                                get('down_arrow') or
+                                get('down_right_arrow')),
+                          left=(get('up_left_arrow') or
+                                get('left_arrow') or
+                                get('down_left_arrow')),
+                          right=(get('up_right_arrow') or
+                                 get('right_arrow') or
+                                 get('down_right_arrow')))
+    if not moved:
+        moved = handle_click(get('image.x'), get('image.y'))
+
+    if not moved:
+        handle_adjustment('x', get)
+        handle_adjustment('y', get)        
+
+    handle_adjustment('light', get)
+    
+    if config.server.rotate_stage:
+        handle_adjustment('angle', get)
+        
+    handle_autofocus(get('resume_autofocus')) or handle_adjustment('z', get)
+
+    uscope = get_uscope()
+    uscope.execute()
+    return request.redirect('/')
+
+
+def login (request):
+    session = get_session()
+    qs = request.environ.get('QUERY_STRING', '')
+    if qs:
+        session.process_ticket(qs)
+    return request.redirect('/')
+
+
+
+def check_management_privilege ():
+    if MODE == 'DEVEL':
+        return
+    if 'manage-scope' not in get_session().privileges:
+        raise RuntimeError, 'Attempt to access management URL without privileges'
+
+    
+
+def debug [html] (request):
+    '<html><head><title>Debugging Info</title></head><body>'
+    sm = get_session_manager()
+
+    '<h3>Sessions</h3>'
+    '<table border=1>'
+    ids = sm.sorted_keys()
+    for id in ids:
+        '<tr><td>'
+        str(sm[id])
+        '</td></tr>'
+        
+    '</table>'
+
+    '<h3>Environment</h3>'
+    '<table border=1>'
+    for key, value in request.environ.items():
+        '<tr><td>%s</td><td>%s</td></tr>' % (key, repr(value))
+    
+    '</table>'
+    '</body></html>'
+
+    
+def save [html] (request):
+    index = request.environ.get('QUERY_STRING')
+    if index is not None and  request.session.user is not None:
+        try:
+            index = int(index)
+        except ValueError:
+            pass
+        else:
+            uscope = get_uscope()
+            session = get_session()
+            uscope.save_image(session.user, index)
+
+    return request.redirect(str('/'))
+    
+        
