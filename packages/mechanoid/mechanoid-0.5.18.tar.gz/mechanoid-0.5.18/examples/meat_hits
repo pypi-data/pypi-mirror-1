@@ -1,0 +1,169 @@
+#!/usr/bin/env python
+
+# meat_hits
+# Copyright (C) 2004 by Richard Harris
+# truenolejano@yahoo.com 
+# Released under the GNU General Public License
+# (See the included COPYING file)
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# with this program; if not, write to the Free Software Foundation,
+# Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+
+import netrc, os, string, sys
+
+try:
+	import mechanoid
+except:
+	print ("""
+	cafepress_loot requires mechanoid, an Open Source programmatic
+	browser written in Python.  Download is under 200kb.
+	See http://python.org/pypi/mechanoid
+	""")
+	sys.exit()
+
+try:
+	from mechanoid.sites import FreshMeat
+except:
+	print ("""
+	Your mechanoid version is too old and does not have the FreshMeat sites
+	package. Update from http://python.org/pypi/mechanoid
+	""")
+	sys.exit()
+
+from mechanoid.misc.Common import Common
+	
+class meat_hits:
+	# USER CONSTS BEGIN
+	TMP = "/tmp/.m_h.html"
+	DATA = os.path.expandvars("$HOME/.m_h")
+	# USER CONSTS END
+	NAME = "meat_hits"
+	AUTHOR = "Richard Harris"
+	CPRT = "2004"
+	USAGE = '''
+usage: '''+NAME+'''
+  requires freshmeat account and freshmeat
+  authenticators in ~/.netrc
+'''
+
+	def __init__(self):
+		self.lib = Common()
+		self.params, self.options = self.lib.get_args()
+		self.debug = ("debug" in self.options)
+		self.verbose = ("verbose" in self.options)
+		return
+
+	def __usage(self):
+		if ("?" in self.options):
+			print self.USAGE
+			sys.exit(1)
+		return
+
+	def __write_page(self, response):
+		f = open(self.TMP, 'w')
+		f.write(response.read())
+		f.close()
+		return
+
+	def __extract(self, project, tag, index):
+		i = self.lib.find_line(project, tag)
+		tmp = self.lib.strip_html(project[i])
+		tokens = self.lib.tokens(tmp)
+		return tokens[index]
+
+	def __parse_project(self, lines, new_log):
+		i = self.lib.find_line(lines, "<li>")
+		j = self.lib.find_line(lines, "</small>")
+		project = lines[i:j]
+		proj = self.lib.strip_html(project[self.lib.find_line(project,"/projects/")])
+		recs = self.__extract(project, "Record hits", 2)
+		urls = self.__extract(project, "URL hits", 2)
+		subs = self.__extract(project, "Subscriptions", 1)
+		new_log[proj] = (("Record hits", recs), ("URL hits",urls), ("Subscriptions",subs))
+		lines = lines[j+1:]
+		return lines
+
+	def __parse_page(self):
+		new_log = {}
+		lines = self.lib.get_lines(self.TMP)
+		i = self.lib.find_line(lines, "Your projects")
+		j = self.lib.find_line(lines, "Non-visible release submissions")
+		if (j == -1):
+			j = self.lib.find_line(lines, "Your project ratings")
+		lines = lines[i:j]
+		k = self.lib.find_line(lines, "<li>")
+		while (k != -1):
+			lines = self.__parse_project(lines, new_log)
+			k = self.lib.find_line(lines, "<li>")
+		return new_log
+
+	def __display_stats(self, old_log, new_log):
+		keys = new_log.keys()
+		keys.sort()
+		for key in keys:
+			name = 0
+			for i in range(0,3):
+				text = new_log[key][i][0]
+				new = new_log[key][i][1]
+				try:
+					old = old_log[key][i][1]
+				except:
+					old = "0"
+				old = string.replace(old, ",", "")
+				new = string.replace(new, ",", "")
+				try:
+					diff = int(new) - int(old)
+				except:
+					print new
+					print old
+					raise
+				if (diff != 0):
+					if (not name):
+						print key
+						name = 1
+					print "%16s %6d %6s" % (text, diff, new)
+		return
+
+	def __merge_logs(self, old, new):
+		for key in old.keys():
+			if not new.has_key(key):
+				new[key] = old[key]
+		return new
+
+	def run(self):
+		try:
+			self.__usage()
+			if (1):						# test switch
+				b = mechanoid.Browser()
+				fm = FreshMeat(b, self.debug, self.verbose)
+				response = fm.go_to()
+				response = fm.log_in()
+				self.__write_page(response)
+			new_log = self.__parse_page()
+			old_log = self.lib.get_dict(self.DATA)
+			self.__display_stats(old_log, new_log)
+			new_log = self.__merge_logs(old_log, new_log)
+			self.lib.save_dict(self.DATA, new_log)
+
+			self.lib.exit()
+		except SystemExit:
+			pass
+		except:
+			self.lib.exc(self.NAME)	
+		return
+
+if __name__ == "__main__":
+	obj = meat_hits()
+	obj.run()
+
