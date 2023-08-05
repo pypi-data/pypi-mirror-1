@@ -1,0 +1,2 @@
+- move to SVN
+- change lib -> poly so develop mode can be used
