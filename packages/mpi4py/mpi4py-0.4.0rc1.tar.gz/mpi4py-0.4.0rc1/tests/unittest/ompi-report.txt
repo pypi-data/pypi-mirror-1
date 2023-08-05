@@ -1,0 +1,99 @@
+Here an example of the problems I have with MPI_INPLACE in OMPI.
+
+First I present a very simple program that gives right results with
+OMPI, next a small modification changing the sendcount argument, wich
+gives now wrong results.
+
+Using MPICH2, both versions give the same, right result.
+
+My environment:
+--------------
+
+$ echo $PATH
+/usr/local/openmpi/1.1.1/bin:/usr/kerberos/bin:/usr/lib/ccache/bin:/usr/local/bin:/bin:/usr/bin:/usr/X11R6/bin:.
+
+$ echo $LD_LIBRARY_PATH 
+/usr/local/openmpi/1.1.1/lib:/usr/local/openmpi/1.1.1/lib/openmpi
+
+First test program
+-----------------
+
+This stupid program gathers the values of comm.rank at a root process
+with rank = com.size/2 and prints the gathered values.
+
+$ cat gather.c
+#include <stdio.h>
+#include <mpi.h>
+
+int main() {
+  int size, rank, root;
+  MPI_Init(NULL, NULL);
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  root = size/2;
+  if (rank == root) {
+    int i;
+    int *buf = (int *) malloc(size * sizeof(int));
+    for (i=0; i<size; i++) buf[i] = -1;
+    buf[rank] = rank;
+    MPI_Gather(MPI_IN_PLACE, 1, MPI_DATATYPE_NULL,
+               buf,          1, MPI_INT,
+               root, MPI_COMM_WORLD);
+    for (i=0; i<size; i++) printf("%d,", buf[i]);
+    printf("\n");
+    free(buf);
+  } else {
+    MPI_Gather(&rank, 1, MPI_INT,
+               NULL,  0, MPI_DATATYPE_NULL, 
+               root, MPI_COMM_WORLD);
+  }
+  MPI_Finalize();
+}
+
+Run results:
+-----------
+$ mpicc gather.c
+$ mpirun -n 5 a.out
+0,1,2,3,4,
+
+
+Second test program
+-------------------
+
+I only modify the sendcount argument at root process, which is the one
+passing sendbuf=MPI_INPLACE.
+
+$ cat gather.c
+#include <stdio.h>
+#include <mpi.h>
+
+int main() {
+  int size, rank, root;
+  MPI_Init(NULL, NULL);
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  root = size/2;
+  if (rank == root) {
+    int i;
+    int *buf = (int *) malloc(size * sizeof(int));
+    for (i=0; i<size; i++) buf[i] = -1;
+    buf[rank] = rank;
+    MPI_Gather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL,
+	       buf,          1, MPI_INT,
+	       root, MPI_COMM_WORLD);
+    for (i=0; i<size; i++) printf("%d,", buf[i]);
+    printf("\n");
+    free(buf);
+  } else {
+    MPI_Gather(&rank, 1, MPI_INT,
+	       NULL,  0, MPI_DATATYPE_NULL, 
+	       root, MPI_COMM_WORLD);
+  }
+  MPI_Finalize();
+}
+
+Run results:
+-----------
+$ mpicc gather.c
+$ mpirun -n 5 a.out
+-1,-1,2,-1,-1,
