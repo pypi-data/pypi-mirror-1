@@ -1,0 +1,76 @@
+<h1>ZestyParser 0.4.0 by Adam Atlas</h1>
+
+<p>ZestyParser is a small parsing toolkit for Python. It doesn't use the traditional separated lexer/parser approach, nor does it make you learn a new ugly syntax for specifying grammar. It aims to remain as Pythonic as possible; its flow is very simple, but can accomodate a vast array of parsing situations.</p>
+
+<p>The recommended way of importing ZestyParser is <code>from ZestyParser import *</code>. This imports a few objects that shouldn't clutter your namespace much. Of course, if you prefer, you can always simply do <code>import ZestyParser</code>. See the <code>__all__</code> definition at the top of Parser.py to see what names are imported.</p>
+
+<h2>Parsing</h2>
+
+<p>As you may expect, the fundamental interaction with ZestyParser takes place through the <code>ZestyParser</code> class. The only state maintained by instances is the text being parsed and the current location in it (hereafter known as the cursor); therefore, you cannot use a single instance to parse multiple strings at once. Meanwhile, it does not keep a master list of tokens; you'll maintain them as objects independently of the parser, and pass them to it as needed. So if you do need to create multiple parsers at once, you won't have to waste memory making new copies of the token descriptions every time.</p>
+
+<p><code>ZestyParser</code>'s initializer takes one optional parameter: <code>data</code>, which can contain the string to process. You can always replace this with the <code>useData</code> method.</p>
+
+<p><code>ZestyParser</code>'s <code>scan</code> method is the part that does most of the work. It scans for one token at the current location of the cursor. It takes one required parameter, <code>tokens</code>. This is a list of tokens that are allowed at this point (or a single token object), and which can be scanned and returned. The method returns the value returned by the token instance, and places the matched token object in its <code>last</code> property. The method returns <code>None</code> if there was no match.</p>
+
+<p>Tokens, as given in the <code>tokens</code> parameter, may be either the actual token objects or the tokens' string names (or a mix). Named tokens are useful for when mutually recursive definitions come up. You must add a token to a <code>ZestyParser</code> object with the <code>addTokens</code> method for it to recognize it as a named token, but you can pass any token object directly to a parser at any time.</p>
+
+<h2>Types of Tokens</h2>
+
+<p>Tokens are constructed as callables of any type. They receive the <code>ZestyParser</code> instance and the parser's current cursor as parameters. Several types of tokens are predefined to simplify typical parsing tasks.</p>
+
+<p>ZestyParser includes several classes whose instances are callable as tokens; they mainly derive from the <code>AbstractToken</code> class, which provides some useful routines common to all these classes.</p>
+
+<p>Unless otherwise noted, token classes take an optional <code>callback</code> parameter, a callable, in their initializers. If included, this will be called whenever this token is matched. You can write your callbacks to take one, two, or three arguments. If one, it will be passed the token's data. If two, it will be passed the <code>ZestyParser</code> instance and the data. If three, it will be passed the parser instance, the data, and the parser's cursor location before this token began matching.</p>
+
+<p>This callback can do any additional processing necessary. Return an object to be given to whoever called the <code>scan()</code> call that invoked this in the first place. Raise the <code>NotMatched</code> exception if you want the parser to consider this token not matched, despite its internal conditions having matched (i.e. its regex having matched). If you do this, the parser's cursor will be rewound to wherever it was before it started matching this token, so any additional <code>scan()</code> calls you make in your callback are perfectly safe (and are, in fact, an important part of much of the serious parsing that can be done with ZestyParser).</p>
+
+<p>The most common token type you'll use is the <code>Token</code> class. It matches a regular expression with Python's included <code>re</code> module. Its initializer takes a required <code>regex</code> parameter; either a string (which will be compiled) or an already-compiled regex object. Matching <code>Token</code> instances return the regex match object.</p>
+
+<p>Another useful type of token available is <code>CompositeToken</code>. This is a convenience that allows you to create one token object that matches any of a given set of other ones, and optionally passes the result to a callback. Its initializer takes an iterable <code>tokens</code>. When matched, the return value is whatever the matching token returned.</p>
+
+<p>There is also <code>TokenSequence</code>, which matches a sequence of other tokens. Its initializer takes an iterable <code>tokenGroups</code> (each of whose items should be a list of valid tokens, treated the same way as the input of <code>scan()</code>). It only matches if each member of <code>tokenGroups</code> matches, and in sequence. It returns a list of the tuples returned by <code>scan()</code> for each token.</p>
+
+<p>Instances of the <code>RawToken</code> class simply look for a constant string passed in the initializer. This can be faster than using a regex <code>Token</code> if you're simply looking for a specific string. It returns the string in question if it matches.</p>
+
+<p>Since tokens are simply expected to be callables with certain semantics (see the first paragraph of this section), you can also use a function, method, or instance with a call method <code>__call__</code> directly as a token. It is solely responsible for reporting whether it matched or not (via <code>NotMatched</code>), and, if so, returning a value to be passed back to the caller.</p>
+
+<p>Finally, there is a token called <code>EOF</code>. (It itself is a callable token, not a class to be instantiated.) Use this to see if the parser has reached the end of the string. If it matches, it returns <code>None</code>.</p>
+
+<h2>Other Ways To Construct Tokens</h2>
+
+<p>If you're using Python 2.4 or later, you can use the <code>CallbackFor</code> method as a function decorator. Pass it a callable token; it will replace the decorated function with that token, and it will set the function as that token's callback. This can make your code a bit cleaner; it may be easier to understand what's going on, for example, to have a <code>Token</code> regex definition and <em>then</em> its callback, instead of defining the callback and then a token that uses it (using up an extra name in the process).</p>
+
+<p>Tokens deriving from <code>AbstractToken</code> can be composited with overloaded Python operators. You can construct a <code>CompositeToken</code> by joining other tokens together with the <code>|</code> operator; you can construct a <code>TokenSequence</code> by joining other tokens with the <code>+</code> operator. </p>
+
+<p>If you apply the <code>&gt;&gt;</code> operator to a token, passing a callable on the right side, the result will be a copy of that token with the callable set as its callback. This is useful for when you're dealing with "anonymous" tokens (i.e. ones constructed within <code>+</code> or <code>|</code> compositions); that way, you don't need to assign each one to a name and set its <code>callback</code> parameter before joining them together.</p>
+
+<h2>Other Things To Do</h2>
+
+<p>There is an <code>Exception</code> subclass called ParseError. Raise it (passing a <code>ZestyParser</code> instance and an error message) if your own parsing code encounters some syntax error. The resulting <code>ParseError</code> instance will have a tuple property called <code>coord</code> containing the line and column coordinates (starting at (1, 1), not (0, 0)) of the parser's cursor at the time the exception was raised. You can either use its <code>parser</code>, <code>message</code>, and <code>coord</code> properties to give error information to your users, or simply use its default representation, which shows the error message and coordinates.</p>
+
+<p>There is also a function called <code>ReturnRaw()</code> with the semantics of a token callback; set this as a <code>Token</code>'s callback to simply return the matched text instead of the whole regex match object.</p>
+
+<h2>Utilities</h2>
+
+<p><code>ZestyParser</code> instances provide the following utility methods: </p>
+
+<ul>
+<li><code>useData()</code>, taking a string, which resets the cursor and sets the subject string to the parameter. Use this if, after processing a string, you want to reuse the instance on another.</li>
+<li><code>scanMultiple()</code>, a convenience method that wraps <code>TokenSequence</code>. It takes a variable number of arguments, creates a <code>TokenSequence</code> using those arguments as the sequence, and scans for it once. It then returns the resulting list if all matched, otherwise <code>None</code>.</li>
+<li><code>take()</code>, taking an integer, which simply returns that many characters from the string starting at the cursor, and advances the cursor likewise.</li>
+<li><code>iter()</code>, taking a list with the same semantics as <code>scan()</code>, which returns an iterator object. The iterator's <code>next()</code> method calls <code>scan()</code> on the parser with the list originally passed, and ends when the parser returns <code>None</code>.</li>
+<li><code>skip()</code>, taking a single token object, which matches it, allows the cursor to move forward, and returns whether it matched or not. This can be faster than using scan() if, say, you're just skipping whitespace.</li>
+<li><code>coord()</code>, which is used by <code>ParseError</code> to get the current line and column. But you can use it anywhere to get a tuple in the same (x, y) format. By default it gives you the coordinates of the current cursor, but you can also pass an integer to use as the position instead.</li>
+</ul>
+
+<h2>More?</h2>
+
+<p>The best way to learn is by example. Take a look at the files in the <code>examples</code> directory to see some things you can do with ZestyParser.</p>
+
+<hr />
+
+<p>Copyright &copy; 2006 Adam Atlas. ZestyParser is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 2 of the License, or (at your option) any later version.</p>
+
+<p>This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.</p>
+
+<p>You should have received a copy of the GNU General Public License along with this program; if not, write to the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.</p>
