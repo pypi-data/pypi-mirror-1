@@ -1,0 +1,26 @@
+from setuptools import setup, find_packages
+
+setup(
+    name='ks.reference',
+    version='1.0.1',
+    url='http://code.keysolutions.ru/svn/ks.reference',
+    author='Key Solutions Development TEAM',
+    author_email='ksd-team@keysolutions.ru',
+    license='ZPL v2.1',
+    classifiers=['Environment :: Web Environment',
+                 'Intended Audience :: Developers',
+                 'License :: OSI Approved :: Zope Public License',
+                 'Programming Language :: Python',
+                 'Operating System :: OS Independent',
+                 'Topic :: Internet :: WWW/HTTP',
+                 'Framework :: Zope3',
+                 ],
+    description="Referene package for zope3",
+    long_description="\n\n".join([open(item).read() for item in ('README.txt','CHANGES.txt')]),
+    packages=find_packages('src'),
+    package_dir={'': 'src'},
+    namespace_packages=['ks'],
+    include_package_data=True,
+    install_requires=['setuptools', 'zope.interface', 'zope.component'],
+    zip_safe=False,
+    )
