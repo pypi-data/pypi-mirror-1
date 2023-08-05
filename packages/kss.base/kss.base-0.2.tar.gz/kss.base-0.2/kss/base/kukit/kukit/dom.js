@@ -1,0 +1,436 @@
+/*
+* Copyright (c) 2005-2007
+* Authors: KSS Project Contributors (see doc/CREDITS.txt)
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as published
+* by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program; if not, write to the Free Software
+* Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
+* 02111-1307, USA.
+*/
+
+/* Generic dom helpers */
+
+kukit.dom = new function() {   /// MODULE START
+ 
+var dom = this;
+
+dom.getPreviousSiblingTag = function(node) {
+    var toNode = node.previousSibling;
+    while ((toNode != null) && (toNode.nodeType != 1)) {
+        toNode = toNode.previousSibling;
+    }
+    return toNode;
+};
+
+dom.getNextSiblingTag = function(node) {
+    var toNode = node.nextSibling;
+    while ((toNode != null) && (toNode.nodeType != 1)) {
+        toNode = toNode.nextSibling;
+    }
+    return toNode;
+};
+
+dom.insertBefore = function(nodes, parentNode, toNode) {
+    for(var i=0; i<nodes.length; i++) {
+        parentNode.insertBefore(nodes[i], toNode);
+    }
+};
+
+dom.appendChildren = function(nodes, toNode) {
+    for(var i=0; i<nodes.length; i++) {
+        toNode.appendChild(nodes[i]);
+    }
+};
+
+dom.clearChildNodes = function(node) {
+    //XXX Maybe we want to get rid of sarissa once?
+    Sarissa.clearChildNodes(node);
+};
+
+dom.parseHTMLNodes = function(txt){
+    var node = document.createElement('div');
+    node.innerHTML = txt;
+    var resultNodes = [];
+    for (var i=0; i<node.childNodes.length; i++) {
+        resultNodes.push(node.childNodes.item(i));
+    }
+    return resultNodes;
+};
+
+/*
+*  really the query should start from the document root, but
+*  limited to inNodes subtrees!
+*/
+
+dom.cssQuery = function(selector, inNodes) {
+    // to eliminate possible errors
+    if (typeof(inNodes) != 'undefined' && inNodes == null) {
+;;;    kukit.E = 'Selection error in kukit.dom.cssQuery';
+        throw new Error(kukit.E);
+    }
+    return _cssQuery(selector, inNodes);
+};
+
+/*
+ * Decide which query to use
+ */
+
+var _USE_BASE2 = (typeof(base2) != 'undefined');
+if (_USE_BASE2) {
+;;;kukit.log('Using cssQuery from base2.');
+    var _cssQuery = function(selector, inNodes) {
+        // global scope, always.
+        // This is very bad. However the binding makes sure that
+        // nodes once bound will never be bound again
+        // (also, noticed the following issue: cssQuery, when called
+        // on an element, does not check the element itself.)
+        var results = base2.DOM.Document.matchAll(document, selector);
+        var nodes = [];
+        for(var i = 0; i < results.length; i++) {
+            nodes.push(results.item(i));
+        }
+        return nodes;
+    };
+} else {
+;;;kukit.log('Using original cssQuery.');
+    var _cssQuery = function(selector, inNodes) {
+        // global scope, always.
+        // This is very bad. However the binding makes sure that
+        // nodes once bound will never be bound again
+        // (also, noticed the following issue: cssQuery, when called
+        // on an element, does not check the element itself.)
+        var results = cssQuery(selector);
+        return results;
+    };
+};
+
+dom.focus = function(node) {
+    tagName = node.tagName.toLowerCase();
+    if ((tagName == 'input') || (tagName == 'select')
+       || (tagName == 'textarea')) {
+        node.focus();
+;;;} else {
+;;;    kukit.logWarning('Focus on node that cannot have focus !');
+    };
+};
+
+/*
+*  Gets the textual content of the node
+*  if recursive=false (default), does not descend into sub nodes
+*/
+dom.textContent = function(node, recursive) {
+    var value = _textContent(node, recursive);
+    // replace newline with spaces
+    value = value.replace(/\r\n/g, ' ');
+    value = value.replace(/[\r\n]/g, ' ');
+    return value;
+};
+
+var _textContent = function(node, recursive) {
+    if (typeof(recursive) == 'undefined') {
+        recursive = false;
+    }
+    var value = '';
+    var childnodes = node.childNodes;
+    for (var i=0; i<childnodes.length; i++) {
+        var child = childnodes[i];
+        if (child.nodeType == 3) {
+            // Only process text nodes
+            value += child.nodeValue;
+        } else if (recursive && child.nodeType == 1) {
+            // recurr into element nodes
+            value += dom.textContent(child, true);
+        }
+    }
+    return value;
+};
+
+/* Getting and setting node attibutes 
+   We need to provide workarounds for IE.
+*/
+
+dom.getAttribute = function(node, attrname) {
+    if (attrname.toLowerCase() == 'style') {
+        throw new Error('Style attribute is not allowed with getAttribute');
+    }
+;;;if (typeof(attrname) != 'string') {
+;;;    throw new Error('value error : attrname must be string');
+;;;}
+    // The code hereunder does not work for kssattr:xxx args
+    // var value = node[argname];
+
+    // try catch is needed in some cases on IE
+    try {
+        var value = node.getAttribute(attrname);
+    }
+    catch(e) {
+        var value = null;
+    }
+    if (! value) {
+        // Workarounds, in case we have not found above
+        if (attrname.toLowerCase() == 'class') {
+            // for IE
+            value = node.className;
+        } else if (attrname.toLowerCase() == 'for') {
+            // for IE
+            value = node.htmlFor;
+        }
+    }
+    return value;
+    // XXX We cannot distinguish between notfound and '', unfortunately
+};
+
+dom.setAttribute = function(node, attrname, value) {
+    if (attrname.toLowerCase() == 'style') {
+        throw new Error('Style attribute is not allowed with setAttribute');
+    }
+    else if (attrname.toLowerCase() == 'class') {
+        // The class attribute cannot be set on IE, instead
+        // className must be used. However node.className = x
+        // works on both IE and FF.
+        node.className = value;
+    } else if (attrname.toLowerCase() == 'for') {
+        // On IE, workaround is needed. Since I am not sure, I use both methods.
+        node.htmlFor = value;
+        node.setAttribute(attrname, value);
+    } else if (attrname.toLowerCase() == 'checked') {
+        // we need to convert this to boolean.
+        value = ! (value == '' || value == 'false' || value == 'False');
+        node.checked = value;
+    } else {
+        node.setAttribute(attrname, value);
+    }
+};
+
+
+/* KSS attributes: a workaround to provide attributes
+   in our own namespace.
+   Since namespaced attributes (kss:name="value") are not allowed
+   even in transitional XHTML, we must provide a way to
+   substitute them. This is achieved by putting kssattr-name-value
+   identifiers in the class attribute, separated by spaces.
+   We only read these attributes, writing happens
+   always in the kss namespace.
+   XXX at the moment, deletion can be achieved with setting with
+   a value ''. This is consistent with DOM behaviour as we seem to
+   be getting '' for nonexistent values anyway.
+*/
+
+var _kssAttrNamespace = 'kssattr';
+
+var _getKssClassAttribute = function(node, attrname) {
+    // Gets a given kss attribute from the class
+    var klass = dom.getAttribute(node, 'class');
+    var result = null;
+    if (klass) {
+        var splitclass = klass.split(/ +/);
+        for (var i=0; i<splitclass.length; i++) {
+            var elem = splitclass[i];
+            var splitelem = elem.split('-', 3);
+            if (splitelem.length == 3 &&
+                splitelem[0] == _kssAttrNamespace
+                    && splitelem[1] == attrname) {
+                // Found it. (The last one will be valid,
+                // in case of duplication)
+                var index = splitelem[0].length + splitelem[1].length + 2;
+                result = elem.substr(index);
+            }
+
+        }
+    }
+    return result;
+};
+
+dom.getKssAttribute = function(node, attrname) {
+    // Gets a given kss attribute 
+    // first from the namespace, then from the class
+    var fullName = _kssAttrNamespace + ':' + attrname;
+    var result = dom.getAttribute(node, fullName);
+    // XXX if this was '' it is the same as notfound,
+    // so it shadows the class attribute!
+    // This means setting an attribute to '' is the same as deleting it - 
+    // at least at the moment
+    if (! result) {
+        result = _getKssClassAttribute(node, attrname);
+    }
+    return result;
+};
+
+dom.setKssAttribute = function(node, attrname, value) {
+    // Sets a given kss attribute on the namespace
+    var fullName = _kssAttrNamespace + ':' + attrname;
+    dom.setAttribute(node, fullName);
+};
+
+/* Recursive query of node attributes
+   getter is a function that gets the value from the node.
+*/
+
+dom.getRecursiveAttribute =
+    function(node, attrname, recurseParents, getter) {
+    var value = getter(node, attrname);
+    if (recurseParents) {
+        var element = node;
+        // need to recurse even if value="" !
+        // We cannot figure out if there exists
+        // and attribute in a crossbrowser way, or it is set to "".
+        while (! value) {
+            element = element.parentNode;
+            if (! element || ! element.getAttribute) {
+                break;
+            }
+            value = getter(element, attrname);
+        }
+    } 
+    if (typeof(value) == 'undefined') {
+        // notfound arguments will get null
+        value = null;
+    }
+    return value;
+};
+
+/*
+*  class EmbeddedContentLoadedScheduler
+*
+*  Scheduler for embedded window content loaded
+*/
+dom.EmbeddedContentLoadedScheduler =
+    function(framename, func, autodetect) {
+    this.framename = framename;
+    this.func = func;
+    this.autodetect = autodetect;
+    var self = this;
+    var f = function() {
+        self.check();
+    };
+    this.counter = new kukit.ut.TimerCounter(250, f, true);
+    // check immediately.
+    //this.counter.timeout();
+    // XXX can't execute immediately, it fails on IE.
+    this.counter.start();
+};
+
+/*
+* From http://xkr.us/articles/dom/iframe-document/
+* Note it's not necessary for the iframe to have the name
+* attribute since we don't access it from window.frames by name.
+*/
+var _getIframeDocument = function(framename) {
+    var iframe = document.getElementById(framename);
+    var doc = iframe.contentWindow || iframe.contentDocument;
+    if (doc.document) {
+        doc = doc.document;
+    }
+    return doc;
+};
+
+dom.EmbeddedContentLoadedScheduler.prototype.check = function() {
+    
+;;;kukit.logDebug('Is iframe loaded ?');
+    
+    var doc = _getIframeDocument(this.framename);
+
+    // quit if the init function has already been called
+    // XXX I believe we want to call the function too, then
+    // XXX attribute access starting with _ breaks full compression,
+    // even in strings
+    //if (doc._embeddedContentLoadedInitDone) {
+    if (doc['_' + 'embeddedContentLoadedInitDone']) {
+;;;    var msg = 'Iframe already initialized, but we execute the action';
+;;;    msg += ' anyway, as requested.';
+;;;    kukit.logWarning(msg);
+        this.counter.restart = false;
+    }
+
+    // autodetect=false implements a more reliable detection method
+    // that involves cooperation from the internal document. In this
+    // case the internal document sets the _kssReadyForLoadEvent attribute
+    // on the document, when loaded. It is safe to check for this in any 
+    // case, however if this option is selected, we rely only on this, 
+    // and skip the otherwise problematic default checking.
+    // XXX attribute access starting with _ breaks full compression,
+    // even in strings
+    //if (typeof doc._kssReadyForLoadEvent != 'undefined') {
+    if (typeof doc['_' + 'kssReadyForLoadEvent'] != 'undefined') {
+        this.counter.restart = false;
+    } 
+
+    if (this.autodetect && this.counter.restart) {
+
+        // obviously we are not there... this happens on FF
+        if (doc.location.href == 'about:blank') {
+            return;
+        } /* */
+        
+        // First check for Safari or
+        // if DOM methods are supported, and the body element exists
+        // (using a double-check including document.body,
+        // for the benefit of older moz builds [eg ns7.1] 
+        // in which getElementsByTagName('body')[0] is undefined,
+        // unless this script is in the body section)
+        
+        if(/KHTML|WebKit/i.test(navigator.userAgent)) {
+            if(/loaded|complete/.test(doc.readyState)) {
+                this.counter.restart = false;
+            }
+        } else if(typeof doc.getElementsByTagName != 'undefined'
+            && (doc.getElementsByTagName('body')[0] != null ||
+                doc.body != null)) {
+            this.counter.restart = false;
+        } /* */
+
+    }
+
+    if ( ! this.counter.restart) {
+;;;    kukit.logDebug('Yes, iframe is loaded.');
+        // XXX attribute access starting with _ breaks full compression,
+        // even in strings
+        // doc._embeddedContentLoadedInitDone = true;
+        doc['_' + 'embeddedContentLoadedInitDone'] = true;
+        this.func();
+    }
+};
+
+dom.getNsTags = function(dom_obj, tagName) {
+    // Now, all the document is in the kukit namespace,
+    // so we just access them by tagname.
+    tags = dom_obj.getElementsByTagName(tagName);
+    return tags;
+};
+
+var _hasClassName = function(node, class_name) {
+    return new RegExp('\\b'+class_name+'\\b').test(node.className);
+};
+
+dom.addClassName = function(node, class_name) {
+    if (!node.className) {
+        node.className = class_name;
+    } else if (!_hasClassName(node, class_name)) {
+        var className = node.className+" "+class_name;
+        // cleanup
+        node.className = className.split(/\s+/).join(' ');
+    }
+};
+
+dom.removeClassName = function(node, class_name) {
+    var className = node.className;
+    if (className) {
+        // remove
+        className = className.replace(new RegExp('\\b'+class_name+'\\b'), '');
+        // cleanup
+        className = className.replace(/\s+/g, ' ');
+        node.className = className.replace(/\s+$/g, '');
+    }
+};
+
+}();                              /// MODULE END
+
