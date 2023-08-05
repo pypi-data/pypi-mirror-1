@@ -1,0 +1,507 @@
+#!/usr/bin/env python
+#############################################################################
+#
+# Linux Desktop Testing Project http://ldtp.freedesktop.org
+# 
+# ldtprunner
+#
+#  Author:
+#     A. Nagappan <nagappan@gmail.com>
+# 
+#  Copyright 2005 - 2006 Novell, Inc.
+#  Copyright 2008 Nagappan Alagappan
+# 
+#  This program is free software; you can redistribute it and/or
+#  modify it under the terms of the GNU Lesser General Public
+#  License as published by the Free Software Foundation; either
+#  version 2 of the License, or (at your option) any later version.
+# 
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#  Lesser General Public License for more details.
+# 
+#  You should have received a copy of the GNU Lesser General Public
+#  License along with this program; if not, write to the
+#  Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+#  Boston, MA 02110, USA.
+#
+#############################################################################
+
+__author__ = "Nagappan A <nagappan@gmail.com>"
+__maintainer__ = "Nagappan A <nagappan@gmail.com>"
+__version__ = "1.0.0"
+
+import sys, re, os, commands, time, trace, traceback
+import xml.dom.minidom
+import ldtp, ldtputils
+
+from optparse import OptionParser
+
+#Defining the command line arguments
+usage = 'Usage:\n %prog [-c CONFIGFILE] [-i IPADDRESS [-p PORT]] xmlfile'
+parser = OptionParser (usage)
+parser.add_option ('-c', '--conf', dest='conffile',
+                  help='Add a log configuration file')
+parser.add_option ('-i', '--ip', dest='ipAddress',
+                  help='LDTP engine IP address')
+parser.add_option ('-p', '--port', dest='port',
+                  help='LDTP engine port')
+(options, args) = parser.parse_args ()
+
+if len (args) != 1:
+    parser.error ('Incorrect number of arguments')
+
+filename = options.conffile
+
+if options.ipAddress != None:
+    os.environ['LDTP_SERVER_ADDR'] = options.ipAddress
+    if options.port != None:
+        os.environ['LDTP_SERVER_PORT'] = options.port
+
+try:
+    dom = xml.dom.minidom.parse (args[0])
+except xml.parsers.expat.ExpatError, msg:
+    print 'XML Error: ' + str (msg)
+    sys.exit (1)
+except IOError:
+    print 'XML \"' + args[0] + '\" file not found'
+    sys.exit (1)
+
+scriptLevelTimeinfo = False
+
+class TESTCASESTATE(object):
+    TCS_ENTERING = 1
+    TCS_RUNNING = 2
+    TCS_EXITING = 3
+
+scriptLevelTimeinfo = False
+g_prj_tcID = 0
+g_prj_tccaseentername = None
+g_prj_tccaseexitname = None
+g_prj_tcappstatename = None
+g_prj_exception = False
+g_prj_casestate = None
+
+def getText (nodelist):
+    rc = ""
+    for node in nodelist:
+        if node.nodeType == node.TEXT_NODE:
+            rc = rc + node.data
+    return rc
+
+def executeldtp (ldtpxmldata):
+    global g_prj_tccaseentername, g_prj_tccaseexitname
+
+    ldtpxml = ldtpxmldata.getElementsByTagName ('ldtp')
+    if ldtpxml == []:
+        ldtp.log ('ldtp xml tag not present')
+        print 'ldtp xml tag not present'
+        sys.exit (1)
+    logfileappend = 1
+    logfilename = ''
+    for ldtpelements in ldtpxml:
+        try:
+            logfileoverwrite = ldtpelements.getElementsByTagName ('logfileoverwrite')[0]
+            logfileupdate = getText (logfileoverwrite.childNodes)
+            try:
+                logfileappend = int (logfileupdate)
+            except ValueError:
+                # print 'Log file append status not integer value - ' + logfileupdate
+                log ('Log file append status not integer value - '
+                     + logfileupdate, 'warning')
+                pass
+            # print 'Log append - ' + logfileappend
+        except IndexError:
+            # print 'Log file overwrite not present'
+            pass
+        try:
+            logconf = ldtpelements.getElementsByTagName ('logconf')[0]
+            logConfFile = getText (logconf.childNodes)
+            ldtp.addlogger (logConfFile)
+        except IndexError:
+            # print 'Log configuration file'
+            pass
+        try:
+            logfile = ldtpelements.getElementsByTagName ('logfile')[0]
+            logfilename = getText (logfile.childNodes)
+            logfilename = ldtputils.getFullPath (logfilename)
+            ldtp.startlog (logfilename, int (logfileappend))
+            # print 'Log file name - ' + logfilename + ' - overwrite - ' + str (int (logfileappend))
+        except IndexError:
+            # print 'Log file entry not present'
+            raise ldtp.LdtpExecutionError ('logfile tag not present')
+        try:
+            loglevel = ldtpelements.getElementsByTagName ('loglevel')[0]
+            logLevel = getText (loglevel.childNodes)
+            ldtp.setloglevel (logLevel)
+        except IndexError:
+            # print 'Log configuration file'
+            pass
+        try:
+            appmapfile = ldtpelements.getElementsByTagName ('appmapfile')[0]
+            appmapfilename = getText (appmapfile.childNodes)
+            appmapfilename = ldtputils.getFullPath (appmapfilename)
+            # print 'Appmap file name: ' + appmapfilename
+            ldtp.log ('appmap file name ' + appmapfilename, 'info')
+            ldtp.initappmap (appmapfilename)
+        except IndexError:
+            # print 'Log file entry not present'
+            None
+        except ldtp.LdtpExecutionError, msg:
+            # print 'appmap could not be initalize ' + str (msg)
+            ldtp.log ('Appmap could not be initalized ' + str (msg), 'error')
+
+        # Check the tag for case enter and exit
+        try:
+            tcenter = ldtpelements.getElementsByTagName ("caseenter")[0]
+            tcentername = getText (tcenter.childNodes)
+            tcentername = ldtputils.getFullPath(tcentername)
+        except IndexError:
+            ldtp.log ('Not use TestCase Enter', 'info')
+        else:
+            g_prj_tccaseentername = tcentername
+        try:
+            tcexit = ldtpelements.getElementsByTagName ("caseexit")[0]
+            tcexitname = getText (tcexit.childNodes)
+            tcexitname = ldtputils.getFullPath(tcexitname)
+        except IndexError:
+            ldtp.log ('Not use TestCase Exit', 'info')
+        else:
+            g_prj_tccaseexitname = tcexitname
+
+        try:
+            executecategories (ldtpelements)
+        except KeyboardInterrupt:
+            return
+    if logfilename != '':
+        ldtp.stoplog ()
+
+def executecategories (ldtpelements):
+        categories = ldtpelements.getElementsByTagName ('category')
+        if categories == []:
+            executegroup (ldtpelements)
+            return
+        i = 1
+        _categoryTestcaseCount = 0
+        _categoryScriptPassCount = 0
+        _startTime = time.time ()
+        _startLocalTime = time.strftime ('%H:%M:%S %p on %d-%b-%Y', time.localtime ())
+        for categoryelements in categories:
+            categoryname = None
+            try:
+                categoryname = categoryelements.getElementsByTagName ('name')[0]
+            except IndexError:
+                # print 'Script file entry not present - skipping'
+                ldtp.log ('categoryname entry not present - skipping', 'info')
+            if categoryname != None and categoryname.parentNode == categoryelements:
+                ldtp.log (getText (categoryname.childNodes), 'categorystart')
+            else:
+                ldtp.log (categoryelements.nodeName + str (i), 'categorystart')
+            scriptPassCount, totalScripts = executegroup (categoryelements)
+            _categoryScriptPassCount += scriptPassCount
+            _categoryTestcaseCount   += totalScripts
+            if categoryname != None and categoryname.parentNode == categoryelements:
+                ldtp.log (getText (categoryname.childNodes), 'categoryend')
+            else:
+                ldtp.log ('Executing ' + categoryelements.nodeName + str (i), 'categoryend')
+            i = i + 1
+        ldtp.log ('start=\"' + str (_startLocalTime) + '\" elapsed=\"' + getElapsedTime (time.time (), _startTime) + '\"', 'totaltimeinfo')
+        ldtp.log ('total=\"' + str (_categoryTestcaseCount) + '\" pass=\"' + str (_categoryScriptPassCount) + \
+                  '\" fail=\"' + str (_categoryTestcaseCount - _categoryScriptPassCount) + '\"', 'categorystatus')
+
+def executegroup (ldtpelements):
+        global g_prj_tcID, g_prj_exception, g_prj_casestate
+        global g_prj_tccaseentername, g_prj_tccaseexitname, g_prj_tcappstatename
+        global scriptLevelTimeinfo
+        groups = ldtpelements.getElementsByTagName ('group')
+        if groups == []:
+            raise ldtp.LdtpExecutionError ('Atleast one group tag should be present')
+        groupstart = 'groupstart'
+        groupend = 'groupend'
+        i = 1
+        _groupTestcaseCount = 0
+        _groupScriptPassCount = 0
+        global scriptLevelTimeinfo
+        for groupelements in groups:
+            comment = None
+            testcaseid = None
+            groupname = None
+            try:
+                testcaseid = groupelements.getElementsByTagName ('testcaseid')[0]
+            except IndexError:
+                # print 'Script file tag not present - skipping'
+                ldtp.log ('testcaseid tag not present - skipping', 'info')
+            try:
+                groupname = groupelements.getElementsByTagName ('name')[0]
+            except IndexError:
+                # print 'Script file tag not present - skipping'
+                ldtp.log ('groupname tag not present - skipping', 'info')
+            try:
+                _scriptLevelTimeInfo = groupelements.getElementsByTagName ('scripttimeinfo')[0]
+                try:
+                    if int (getText (_scriptLevelTimeInfo.childNodes)) == 1:
+                        scriptLevelTimeinfo = True
+                except ValueError:
+                    pass
+            except IndexError:
+                pass
+            try:
+                comment = groupelements.getElementsByTagName ('comment')[0]
+            except IndexError:
+                # print 'Script file tag not present - skipping'
+                ldtp.log ('comment tag not present - skipping', 'info')
+            # Check the tag for the state of testcase
+            try:
+                tcappstate = ldtpelements.getElementsByTagName ("appstate")[0]
+                tcappstatename = getText (tcappstate.childNodes)
+                tcappstatename = ldtputils.getFullPath(tcappstatename)
+            except IndexError:
+                ldtp.log ('appstate tag not present', 'info')
+                g_prj_tcappstatename = None
+            else:
+                g_prj_tcappstatename = tcappstatename
+
+            # print 'Executing group ' + groupelements.nodeName + str (i)
+            if groupname != None and groupname.parentNode == groupelements:
+                ldtp.log (getText (groupname.childNodes), groupstart)
+            else:
+                ldtp.log (groupelements.nodeName + str (i), groupstart)
+            scriptPassCount = 0
+            totalScripts = 0
+            _startTime = time.time ()
+            _startLocalTime = time.strftime ('%H:%M:%S %p on %d-%b-%Y', time.localtime ())
+            # Run TestCaseEnter and Appstate before to execute every group
+            g_prj_exception = False
+            g_prj_casestate = None
+            if g_prj_tccaseentername:
+                g_prj_casestate = TESTCASESTATE.TCS_ENTERING
+                try:
+                    ldtp.log ('TestCase Enter is: %s' % g_prj_tccaseentername, 'info')
+                    execfile (g_prj_tccaseentername)
+                except:
+                    ldtp.log ('Failed in TestCase Enter', 'info')
+                    ldtp.log (traceback.print_exc(), 'error')
+
+            if g_prj_tcappstatename:
+                try:
+                    ldtp.log ('Entering AppState is: %s' % g_prj_tcappstatename, 'info')
+                    execfile(g_prj_tcappstatename)
+                except:
+                    ldtp.log('Failed in Entering AppState', 'info')
+                    ldtp.log (traceback.print_exc(), 'error')
+
+            try:
+                if testcaseid != None:
+                    ldtp.log (getText (testcaseid.childNodes), 'testcaseid')
+                if comment != None:
+                    ldtp.log (getText (comment.childNodes), 'comment')
+                scriptPassCount, totalScripts = executescript (groupelements)
+                if scriptPassCount == totalScripts:
+                    _groupScriptPassCount += 1
+                _groupTestcaseCount   += 1
+                ldtp.log ('start=\"' + str (_startLocalTime) + '\" elapsed=\"' + getElapsedTime (time.time (), _startTime) + '\"', 'timeinfo')
+            except KeyboardInterrupt:
+                ldtp.log ('start=\"' + str (_startLocalTime) + '\" elapsed=\"' + getElapsedTime (time.time (), _startTime) + '\"', 'timeinfo')
+                if groupname != None and groupname.parentNode == groupelements:
+                    ldtp.log (getText (groupname.childNodes), groupend)
+                else:
+                    ldtp.log (groupelements.nodeName + str (i), groupend)
+                raise
+            # Run TestCaseExit and Appstate after executed every group
+            if g_prj_tcappstatename:
+                g_prj_casestate = TESTCASESTATE.TCS_EXITING
+                try:
+                    ldtp.log ('Exiting AppState is: %s' % g_prj_tcappstatename, 'info')
+                    execfile (g_prj_tcappstatename)
+                except:
+                    ldtp.log ('Failed in Exiting AppState', 'info')
+                    ldtp.log (traceback.print_exc(), 'error')
+            if g_prj_tccaseexitname:
+                g_prj_casestate = TESTCASESTATE.TCS_EXITING
+                try:
+                    ldtp.log ('TestCase Exit is: %s' % g_prj_tccaseexitname, 'info')
+                    execfile (g_prj_tccaseexitname)
+                except:
+                    ldtp.log('Failed in TestCase Exit.', 'info')
+                    ldtp.log (traceback.print_exc(), 'error')
+
+            ldtp.log ('total=\"' + str (totalScripts) + '\" pass=\"' + str (scriptPassCount) + \
+                      '\" fail=\"' + str (totalScripts - scriptPassCount) + '\"', 'groupsstatus')
+            if groupname != None and groupname.parentNode == groupelements:
+                ldtp.log (getText (groupname.childNodes), groupend)
+            else:
+                ldtp.log (groupelements.nodeName + str (i), groupend)
+            i = i + 1
+        return _groupScriptPassCount, _groupTestcaseCount
+
+def getElapsedTime (_endTime, _startTime):
+    timeDiff = _endTime - _startTime
+    minbaseon = 60
+    hourbaseon = minbaseon*60
+    daybaseon = hourbaseon*24
+    days = int (timeDiff / daybaseon)
+    hours = int ((timeDiff - days*daybaseon) / hourbaseon)
+    minutes = int ((timeDiff - days * daybaseon - hours * hourbaseon) / minbaseon)
+    seconds = int (timeDiff  - days * daybaseon - hours * hourbaseon - minutes * minbaseon)
+
+    if days > 0:
+        return ('%s day(s) %s:%s:%s' %
+                (str (days), str (hours), str (minutes), str (seconds)))
+    else:
+        return ('%s:%s:%s' %
+                (str (hours), str (minutes), str (seconds)))
+
+def executescript (groupelements):
+    global g_prj_exception
+    global scriptLevelTimeinfo
+
+    scripts = groupelements.getElementsByTagName ('script')
+    scriptPassCount = 0
+    totalScripts = len (scripts)
+    for scriptelements in scripts:
+        scriptname = ''
+        scriptdata = ''
+        testcasename = None
+        try:
+            name = scriptelements.getElementsByTagName ('name')[0]
+        except IndexError:
+            # print 'Script file entry not present - skipping'
+            ldtp.log ('Script file entry not present - skipping', 'warning')
+            continue
+        scriptname = getText (name.childNodes)
+        try:
+            data = scriptelements.getElementsByTagName ('data')[0]
+            scriptdata = getText (data.childNodes)
+        except IndexError:
+            ldtp.log ('Data file maynot be present')
+        try:
+            testcase = scriptelements.getElementsByTagName ('testcase')[0]
+            testcasename = getText (testcase.childNodes)
+        except IndexError:
+            ldtp.log ('testcase name maynot be present')
+        scriptglobal = dict ({'datafilename' : ''})
+        if scriptdata != '':
+            ldtp.log (scriptname, 'scriptstart')
+            ldtp.log (scriptdata, 'datafilename')
+            scriptglobal = dict ({'datafilename' : scriptdata})
+        else:
+            ldtp.log (scriptname, 'scriptstart')
+            ldtp.log ('data xml tag missing', 'info')
+        # print 'Executing script: ' + scriptname + ' - ' + scriptdata
+        try:
+            appmapfile = scriptelements.getElementsByTagName ('appmapfile')[0]
+            appmapfilename = getText (appmapfile.childNodes)
+            appmapfilename = ldtputils.getFullPath (appmapfilename)
+            # print 'Appmap file name: ' + appmapfilename
+            ldtp.log ('appmap file name ' + appmapfilename, 'info')
+            ldtp.initappmap (appmapfilename)
+        except IndexError:
+            # print 'Log file entry not present'
+            None
+        except ldtp.LdtpExecutionError, msg:
+            # print 'appmap could not be initalize ' + str (msg)
+            ldtp.log ('Appmap could not be initalized ' + str (msg), 'error')
+        _startTime = time.time ()
+        _startLocalTime = time.strftime ('%H:%M:%S %p on %d-%b-%Y', time.localtime ())
+        global scriptLevelTimeinfo
+        try:
+            if testcasename is not None:
+                ldtp.log (testcasename, 'teststart')
+            scriptname = ldtputils.getFullPath (scriptname)
+            execfile (scriptname, scriptglobal)
+            time.sleep (1)
+            if scriptLevelTimeinfo == True:
+                ldtp.log ('start=\"' + str (_startLocalTime) + '\" elapsed=\"' + getElapsedTime (time.time (), _startTime) + '\"', 'timeinfo')
+            scriptPassCount = scriptPassCount + 1
+            if testcasename is not None:
+                ldtp.log (testcasename, 'pass')
+                ldtp.log (testcasename, 'testend')
+        except ldtp.LdtpExecutionError, ErrorMsg:
+            g_prj_exception = True
+            if scriptLevelTimeinfo == True:
+                ldtp.log ('start=\"' + str (_startLocalTime) + '\" elapsed=\"' + getElapsedTime (time.time (), _startTime) + '\"', 'timeinfo')
+            msg = str (ErrorMsg)# + traceback.print_exc ()
+            # Escape unicode message
+            replacequotes = re.compile ('\'u\"')
+            msg = replacequotes.sub ('', msg)
+            # Escape single quotes and dobule quotes
+            replacequotes = re.compile ('\'\"')
+            msg = replacequotes.sub ('', msg)
+            # print msg
+            ldtp.log (traceback.print_exc (), 'error')
+            ldtp.log (msg, 'cause')
+            if testcasename is not None:
+                ldtp.log (testcasename, 'fail')
+                ldtp.log (testcasename, 'testend')
+            ldtp.log (scriptname, 'scriptend')
+            break
+        except IOError:
+            if testcasename is not None:
+                ldtp.log (testcasename, 'fail')
+                ldtp.log (testcasename, 'testend')
+            g_prj_exception = True
+            ldtp.log ('Script \"' + scriptname + '\" not found', 'error')
+            ldtp.log (scriptname, 'scriptend')
+            break
+        except KeyboardInterrupt:
+            if testcasename is not None:
+                ldtp.log (testcasename, 'fail')
+                ldtp.log (testcasename, 'testend')
+            if scriptLevelTimeinfo == True:
+                ldtp.log ('start=\"' + str (_startLocalTime) + '\" elapsed=\"' + getElapsedTime (time.time (), _startTime) + '\"', 'timeinfo')
+            ldtp.log (scriptname, 'scriptend')
+            raise
+        except:
+            g_prj_exception = True
+            ldtp.log (traceback.print_exc (), 'error')
+            if testcasename is not None:
+                ldtp.log (testcasename, 'fail')
+                ldtp.log (testcasename, 'testend')
+            if scriptLevelTimeinfo == True:
+                ldtp.log ('start=\"' + str (_startLocalTime) + '\" elapsed=\"' + getElapsedTime (time.time (), _startTime) + '\"', 'timeinfo')
+            ldtp.log (scriptname, 'scriptend')
+            break
+        ldtp.log (scriptname, 'scriptend')
+    return scriptPassCount, totalScripts
+
+def enable_accessibility ():
+    global old_accessibility_value
+    old_accessibility_value = commands.getoutput('gconftool-2 --get ' +
+                                                 '/desktop/gnome/interface'+
+                                                 '/accessibility')
+    if old_accessibility_value == 'true':
+        return # accessibility is enabled
+    
+    if commands.getstatusoutput ('gconftool-2 --set --type bool /desktop/gnome'
+                                 + '/interface/accessibility true')[0] != 0:
+        raise ldtp.LdtpExecutionError ('Accessibility not enabled')
+    
+def replace_accessibility ():
+    global old_accessibility_value
+    if old_accessibility_value == 'true':
+        return
+    if commands.getstatusoutput ('gconftool-2 --set --type bool /desktop/gnome'
+                                 + '/interface/accessibility false')[0] != 0:
+        raise ldtp.LdtpExecutionError ('Unable to reset Accessibility')    
+    
+# Add current working directory to path
+sys.path = sys.path + ['.']
+# Change to current working directory
+os.chdir (os.getcwdu ())
+
+if options.ipAddress != None:
+    # Check accessibility, if not enabled, then enable it
+    old_accessibility_value = 'false'
+    enable_accessibility ()
+
+# Added user's configuration file, which uses python logging module and configuration format
+if filename != None:
+    ldtp.addlogger (filename)
+
+# Execute LDTP runner XML file
+executeldtp (dom)
+
+if options.ipAddress != None:
+    # Restore the previous accessibility state
+    replace_accessibility ()

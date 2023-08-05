@@ -1,0 +1,978 @@
+#!/usr/bin/env python 
+#############################################################################
+#
+#  Linux Desktop Testing Project http://ldtp.freedesktop.org
+# 
+#  Author:
+#      Nagappan A (nagappan@gmail.com)   
+# 
+#  Copyright 2004 - 2007 Novell, Inc.
+# 
+#  This program is free software; you can redistribute it and/or
+#  modify it under the terms of the GNU Lesser General Public
+#  License as published by the Free Software Foundation; either
+#  version 2 of the License, or (at your option) any later version.
+# 
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#  Lesser General Public License for more details.
+# 
+#  You should have received a copy of the GNU Lesser General Public
+#  License along with this program; if not, write to the
+#  Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+#  Boston, MA 02110, USA.
+#
+#############################################################################
+
+from optparse import OptionParser
+
+#Defining the command line arguments
+usage = 'Usage:\n %prog -c start [-a application] [-p prefs] [-t]\n %prog -c stop -f file'
+parser = OptionParser (usage)
+parser.add_option ('-c', '--command', dest = 'command',
+                  help = 'Command to start / stop / listen the server', metavar = 'start/stop/listen')
+parser.add_option ('-a', '--application', dest = 'application', default = 'all', 
+                  help = 'Application to be recorded', metavar = 'all/application')
+parser.add_option ('-p', '--prefs', dest = 'prefs',
+                  help = 'Preferences while recording ', metavar = 'all/mouse/keybrd', default = 'all')
+parser.add_option ('-f', '--file', dest = 'filename', metavar = 'filepath',
+                  help = 'File where the recorded script is written')
+parser.add_option ('-t','--timer', action = 'store_true',
+                  help = 'Record time delays also')
+(options, args) = parser.parse_args ()
+
+#Checking for the command line arguments
+if options.command == None:
+	parser.error ('Command start / stop / listen must be provided')
+if options.command == 'stop' and options.filename == None :
+	parser.error ('File name must be given for stop command')
+if options.command != 'start' and options.command != 'stop' and options.command != 'listen':
+	parser.error ('Invalid command . Please give start / stop / listen')
+
+actionName = None
+#Assigning the variables to be used in the file
+if options.command == 'start' :
+	actionName = 'startrecord'
+elif options.command == 'stop' :
+	actionName = 'stoprecord'
+elif options.command == 'listen' :
+	actionName = 'listen'
+
+filename        = options.filename
+arguments       = options.prefs
+applicationName = options.application
+
+from xml.dom.minidom import *
+from xml.parsers.expat import ExpatError
+from xml.sax import saxutils
+import socket, os, sys, struct, time, threading, re, random, thread, traceback
+import types, atexit, select, signal
+
+ldtpDebug = os.getenv ('LDTP_DEBUG')
+
+class command:
+	INVALID       = 0
+	STOP          = 1
+	WINDOWEXIST   = 2
+	GETWINDOWNAME = 3
+	GETOBJECTNAME = 4
+
+class ConnectionLost (Exception):
+	def __init__(self, value):
+		self.value = value
+	def __str__(self):
+		return repr (self.value)
+
+# generate XML content
+def generatexml (commandId, _requestId, name = None, application = None, argument = None):
+	_xml = '<?xml version=\"1.0\"?>'
+	_xml += '<REQUEST>'
+	# Fill action name
+	_xml = _xml + '<ID>' + _requestId + '</ID>'
+	_xml = _xml + '<COMMAND>' + str (commandId) + '</COMMAND>'
+	if application != None:
+		_xml = _xml + '<APPLICATION>' + saxutils.escape (application) + '</APPLICATION>'
+	if name is not None:
+		_xml = _xml + '<NAME>' + saxutils.escape (name) + '</NAME>'
+	_xml = _xml + '<ARGUMENTS>'
+	_xml = _xml + '<ARGUMENT>ALL</ARGUMENT>'
+	_xml = _xml + '</ARGUMENTS>'
+	_xml += '</REQUEST>'
+	return _xml
+
+# Send given packet to server
+def sendpacket (msg):
+	global ldtpDebug, mainsock
+	flag = False
+	try:
+		timedelay = os.getenv ('LDTP_DELAY_CMD')
+		sendLck.acquire ()
+		if timedelay != None:
+			try:
+				# Delay each command by 'timedelay' seconds
+				time.sleep (int (timedelay))
+			except IndexError:
+				# Default to 5 seconds delay if LDTP_DELAY_CMD
+				# env variable is set
+				time.sleep (5)
+		flag = True
+		
+		# Encode the message in UTF-8 so we don't break on extended
+		# characters in the application GUIs
+		buf = msg.encode ('utf8')
+		
+		# Pack length (integer value) in network byte order
+		msglen = struct.pack ('!i', len (buf))
+		# Send message length
+		mainsock.send (msglen)
+
+		# Send message
+		mainsock.send (buf)
+		if ldtpDebug != None and ldtpDebug == '2':
+			print 'Send packet', buf
+		sendLck.release ()
+	except socket.error, msg:
+		if flag == True:
+			# Reason for using the flag:
+			# 'Do not call this method when the lock is unlocked.'
+			sendLck.release ()
+		raise LdtpExecutionError ('Server aborted')
+
+def recvpacket (peek_flag = 0):
+	global ldtpDebug, mainsock
+	flag = False
+	try:
+		recvLck.acquire ()
+		flag = True
+		_responsePacket = None
+		mainsock.settimeout (5.0)
+		# Hardcoded 4 bytes, as the server sends 4 bytes as packet length
+		data = mainsock.recv (4, peek_flag)
+		if data == '' or data == None:
+			if flag == True:
+				# Reason for using the flag:
+				# 'Do not call this method when the lock is unlocked.'
+				recvLck.release ()
+			return None
+		_packetSize, = struct.unpack('!i', data)
+		if peek_flag == 0 and ldtpDebug != None and ldtpDebug == '2':
+			print 'Received packet size', _packetSize
+		# MSG_PEEK
+                # This flag causes the receive operation to return data from the beginning
+		# of the receive queue without removing that data from  the  queue.
+		# Thus, a subsequent receive call will return the same data.
+
+		if peek_flag != 0:
+			# MSG_PEEK
+			_responsePacket = mainsock.recv (4 + _packetSize, peek_flag)
+		else:
+			_responsePacket = mainsock.recv (_packetSize, peek_flag)
+		if peek_flag != 0:
+			_pattern = re.compile ('\<\?xml')
+			_searchObj = re.search (_pattern, _responsePacket)
+			_finalPacket = _responsePacket[_searchObj.start () :]
+			_responsePacket = _finalPacket
+		recvLck.release ()
+		if peek_flag == 0 and ldtpDebug != None and ldtpDebug == '2':
+			print 'Received response Packet', _responsePacket
+		return _responsePacket
+	except struct.error, msg:
+		if flag == True:
+			# Reason for using the flag:
+			# 'Do not call this method when the lock is unlocked.'
+			recvLck.release ()
+		raise LdtpExecutionError ('Invalid packet length ' + str (msg))
+	except AttributeError, msg:
+		if flag == True:
+			# Reason for using the flag:
+			# 'Do not call this method when the lock is unlocked.'
+			recvLck.release ()
+		raise LdtpExecutionError ('Error while receiving packet ' + str (msg))
+	except socket.timeout:
+		if flag == True:
+			# Reason for using the flag:
+			# 'Do not call this method when the lock is unlocked.'
+			recvLck.release ()
+		if ldtpDebug != None and ldtpDebug == '2':
+			print 'Timeout'
+		return ''
+	except socket.error, msg:
+		if flag == True:
+			# Reason for using the flag:
+			# 'Do not call this method when the lock is unlocked.'
+			recvLck.release ()
+		raise LdtpExecutionError ('Error while receiving packet ' + str (msg))
+	except MemoryError, msg:
+		if flag == True:
+			# Reason for using the flag:
+			# 'Do not call this method when the lock is unlocked.'
+			recvLck.release ()
+		raise LdtpExecutionError ('Error while receiving packet ' + str (msg))
+	except:
+		if flag == True:
+			# Reason for using the flag:
+			# 'Do not call this method when the lock is unlocked.'
+			recvLck.release ()
+		raise LdtpExecutionError ('Error while receiving packet')
+
+def getText (nodelist):
+	rc = ""
+	for node in nodelist:
+		if node.nodeType == node.TEXT_NODE:
+			rc = rc + node.data
+	return rc
+
+def getCData (nodelist):
+	rc = ""
+	for node in nodelist:
+		if node.nodeType == node.CDATA_SECTION_NODE:
+			rc = rc + node.data
+	return rc
+
+def parsexml (xmldata):
+	"""Returns the value obtained from the server's return LDTP packet"""
+	_statusMsg      = None
+	_statusCode     = None
+	_responseType   = None
+	_requestId      = None
+	_responseObj    = None
+	_data           = None
+
+	try:
+		dom = parseString (xmldata)
+		try:
+			_responseObj   = dom.getElementsByTagName ('RESPONSE')[0]
+			_responseType = 'response'
+		except IndexError:
+			try:
+				_responseObj   = dom.getElementsByTagName ('NOTIFICATION')[0]
+				#_responseType = 'notification'
+				return 'notification', None, None
+			except IndexError:
+				try:
+					_responseObj   = dom.getElementsByTagName ('KEYBOARD')[0]
+					#_responseType = 'keyboard'
+					return 'keyboard', None, None
+				except IndexError:
+					return None
+		try:
+			_responseStatusObj = _responseObj.getElementsByTagName ('STATUS')[0]
+			_statusCode = int (getText (_responseStatusObj.getElementsByTagName ('CODE')[0].childNodes))
+		except ValueError:
+			return None
+		except IndexError:
+			return None
+		try:
+			_statusMsg  = getText (_responseStatusObj.getElementsByTagName ('MESSAGE')[0].childNodes)
+		except ValueError:
+			pass
+		except IndexError:
+			pass
+		try:
+			_requestId  = getText (_responseObj.getElementsByTagName ('ID')[0].childNodes)
+		except IndexError:
+			# On notification _requestId will be empty
+			pass
+		try:
+			_data = getText (_responseObj.getElementsByTagName ('DATA')[0].childNodes).encode ('utf-8')
+		except ValueError:
+			pass
+		except IndexError:
+			# Data tag may not be present
+			pass
+	except ExpatError, msg:
+		if xml.parsers.expat.ErrorString (msg.code) == xml.parsers.expat.errors.XML_ERROR_NO_ELEMENTS:
+			return None
+		raise LdtpExecutionError ('Parsing XML error: ' + str (msg))
+	return _responseType, (_statusCode, _statusMsg, _requestId), _data
+
+def parsenotificationxml (xmldata):
+	"""Returns the value obtained from the server's return LDTP packet"""
+	_windowName = None
+	_objectName = None
+	_objectType = None
+	_eventType  = None
+	_key        = None
+	_data       = None
+	_detail1    = None
+	_detail2    = None
+	_timeElapsed     = None
+	_notificationObj = None
+
+	try:
+		dom = parseString (xmldata)
+		try:
+			_notificationObj   = dom.getElementsByTagName ('NOTIFICATION')[0]
+		except IndexError:
+			return None
+		try:
+			_windowName = getText (_notificationObj.getElementsByTagName ('WINDOWNAME')[0].childNodes)
+			_objectName = getText (_notificationObj.getElementsByTagName ('OBJECTNAME')[0].childNodes)
+			_objectType = getText (_notificationObj.getElementsByTagName ('OBJECTTYPE')[0].childNodes)
+			_eventType  = getText (_notificationObj.getElementsByTagName ('EVENTTYPE')[0].childNodes)
+			_timeElapsed  = getText (_notificationObj.getElementsByTagName ('TIMEELAPSED')[0].childNodes)
+		except ValueError:
+			return None
+		except IndexError:
+			return None
+		try:
+			_key  = getText (_notificationObj.getElementsByTagName ('KEY')[0].childNodes)
+		except ValueError:
+			pass
+		except IndexError:
+			pass
+		try:
+			_data  = getText (_notificationObj.getElementsByTagName ('DATA')[0].childNodes)
+		except ValueError:
+			pass
+		except IndexError:
+			pass
+		try:
+			_detail1  = getText (_notificationObj.getElementsByTagName ('DETAIL1')[0].childNodes)
+		except ValueError:
+			pass
+		except IndexError:
+			pass
+		try:
+			_detail2  = getText (_notificationObj.getElementsByTagName ('DETAIL2')[0].childNodes)
+		except ValueError:
+			pass
+		except IndexError:
+			pass
+	except ExpatError, msg:
+		if xml.parsers.expat.ErrorString (msg.code) == xml.parsers.expat.errors.XML_ERROR_NO_ELEMENTS:
+			return None
+		raise LdtpExecutionError ('Parsing XML error: ' + str (msg))
+	return _windowName, _objectName, _objectType, _eventType, _timeElapsed, _key, _data, _detail1, _detail2
+
+def parsekeyboardxml (xmldata):
+	"""Returns the value obtained from the server's return LDTP packet"""
+	_keyboardData = None
+	_timeElapsed  = None
+	_keyboardObj  = None
+
+	try:
+		dom = parseString (xmldata)
+		try:
+			_keyboardObj   = dom.getElementsByTagName ('KEYBOARD')[0]
+		except IndexError:
+			return None
+		try:
+			_keyboardData = getText (_keyboardObj.getElementsByTagName ('DATA')[0].childNodes)
+		except ValueError:
+			return None
+		except IndexError:
+			return None
+	except ExpatError, msg:
+		if xml.parsers.expat.ErrorString (msg.code) == xml.parsers.expat.errors.XML_ERROR_NO_ELEMENTS:
+			return None
+		raise LdtpExecutionError ('Parsing XML error: ' + str (msg))
+	return _keyboardData
+
+#def getresponse (packetId):
+#	while True:
+#		_readflag.wait ()
+#		_readflag.clear ()
+#		ldtpDebug = os.getenv ('LDTP_DEBUG')
+#		peekResponsePacket = peekresponse ()
+#		if peekResponsePacket == None or peekResponsePacket == '':
+#			if ldtpDebug != None and ldtpDebug == '2':
+#				print 'Peekresponse None'
+#			continue
+#		try:
+#			_responseType, _responseStatus, _responseData = parsexml (peekResponsePacket)
+#		except TypeError, msg:
+#			if ldtpDebug != None and ldtpDebug == '2':
+#				print 'TypeError', msg
+#			continue
+#		# For precautions, we are just checking, whether the packet is notification or not
+#		if _responseType == 'notification' or _responseType == 'keyboard' or _responseType == None:
+#			continue
+#		if _responseStatus [2] == packetId:
+#			if _responseStatus [0] != 0 and ldtpDebug != None:
+#				print '*** ' + _responseStatus [1]
+#			packet = recvpacket ()
+#			# As we have already parsed the packet,
+#			# we are just returning the parsed packet
+#			return _responseStatus, _responseData
+
+class PollServer (threading.Thread):
+	def __init__ (self):
+		threading.Thread.__init__ (self)
+		self._events = None
+	def run (self):
+		try:
+			self.start_polling_server ()
+		except:
+			try:
+				raise LdtpExecutionError (str (traceback.print_exc ()))
+			except AttributeError:
+				pass
+			except:
+				pass
+	def start_polling_server (self):
+		self._serverDisconnected = False
+		global _serverpoll
+		_serverpoll = select.poll ()
+		_serverpoll.register (mainsock, select.POLLIN)
+
+		while True:
+			try:
+				self._events = _serverpoll.poll ()
+			except socket.error, msg:
+				break
+			except:
+				_serverpoll.unregister (mainsock)
+				sys.exit ()
+			try:
+				if self._events == None:
+					break
+				for i in range (0, len (self._events)):
+					if (self._events [i][1] & select.POLLIN or self._events [i][1] & select.POLLPRI):
+						try:
+							if self.handlePacket () == None:
+								self._serverDisconnected = True
+								break
+						except LdtpExecutionError, msg:
+							self._serverDisconnected = True
+							# _readflag.set ()
+							break
+						except:
+							print traceback.print_exc ()
+					elif (self._events [i][1] & select.POLLNVAL):
+						# Unregister newly created socket from polling once its completed
+						_serverpoll.unregister (self._events [i][0])
+					else:
+						self._serverDisconnected = True
+						break
+				if self._serverDisconnected == True:
+					break
+			# Checking this exception due to bug # 333090 comment # 6
+			except TypeError:
+				_serverpoll.unregister (mainsock)
+				sys.exit ()
+	def handlePacket (self):
+		global ldtpDebug
+		self._responsePacket = None
+		try:
+			self._responsePacket = recvpacket ()
+		except KeyboardInterrupt:
+			return None
+		self._responseType = None
+		self._responseStatus = None
+		self._responseData = None
+		try:
+			if self._responsePacket == None:
+				# When there is no data to read let us quit
+				return None
+			if self._responsePacket != '':
+				self._responseType, self._responseStatus, self._responseData = parsexml (self._responsePacket)
+				if self._responseType == None:
+					return None
+			else:
+				_readflag.set ()
+		except TypeError:
+			if ldtpDebug:
+				print traceback.print_exc ()
+			return ''
+		except LdtpExecutionError, msg:
+			if ldtpDebug:
+				print traceback.print_exc ()
+			#_readflag.set ()
+			return ''
+		except KeyboardInterrupt:
+			return None
+		try:
+			if self._responseType == 'notification':
+				if _notificationflag.isSet ():
+					# Let us allow only one callback function to execute at any point of time
+					_notificationflag.wait ()
+					_notificationflag.clear ()
+					_windowName, _objectName, _objectType, _eventType, \
+						     _timeElapsed, _key, _data, _detail1, \
+						     _detail2 = parsenotificationxml (self._responsePacket)
+					#packet = recvpacket ()
+					# As we have already parsed the packet,
+					# we are just returning the parsed packet
+					pckt.pushPacket (self._responseType, _windowName, _objectName, _objectType, _eventType, \
+							 _timeElapsed, _key, _data, _detail1, _detail2)
+					_notificationflag.set ()
+				else:
+					# CPU goes high for some time, if this delay is not there
+					# as the notification packet is still in the Queue, but the
+					# new spanned thread takes some time to receive the notification packet
+					# So this delay is required
+					time.sleep (1)
+			elif self._responseType == 'keyboard':
+				if _keyboardflag.isSet ():
+					# Let us allow only one callback function to execute at any point of time
+					_keyboardflag.wait ()
+					_keyboardflag.clear ()
+					_keyboardData = parsekeyboardxml (self._responsePacket)
+					# As we have already parsed the packet,
+					# we are just returning the parsed packet
+					#packet = recvpacket ()
+					pckt.pushPacket (self._responseType, data = _keyboardData)
+					_keyboardflag.set ()
+				else:
+					# CPU goes high for some time, if this delay is not there
+					# as the keyboard packet is still in the Queue, but the
+					# new spanned thread takes some time to receive the keyboard packet
+					# So this delay is required
+					time.sleep (1)
+			else:
+				_readflag.set ()
+		except KeyboardInterrupt:
+			return None
+		return ''
+	def getresponse (self, packetId):
+		global ldtpDebug
+		while True:
+			_readflag.wait ()
+			_readflag.clear ()
+			if self._responseType != 'response':
+				continue
+			if self._responseStatus [2] == packetId:
+				if ldtpDebug and self._responseStatus [0] != 0:
+					print '*** ' + self._responseStatus [1]
+				#packet = recvpacket ()
+				# As we have already parsed the packet,
+				# we are just returning the parsed packet
+			return self._responseStatus, self._responseData
+
+	def shutdown (self):
+		_readflag.set ()
+
+class packetInfo:
+	def __init__ (self, packetType, windowName, objectName, objectType, eventType,
+		      timeElapsed, key = None, data = None, detail1 = None,
+		      detail2 = None):
+		self.packetType = packetType
+		self.windowName = windowName
+		self.objectName = objectName
+		self.objectType = objectType
+		self.eventType = eventType
+		self.timeElapsed = timeElapsed
+		self.key = key
+		self.data = data
+		self.detail1 = detail1
+		self.detail2 = detail2
+
+class packet:
+	def __init__ (self):
+		self._packet = {}
+		self._endPacketId = 0
+		self._startPacketId = 0
+		self._pushPacketEvent = threading.Event ()
+		self._popPacketEvent = threading.Event ()
+		self._pushPacketEvent.set ()
+		self._popPacketEvent.set ()
+	def pushPacket (self, packetType, windowName = None, objectName = None, objectType = None,
+			eventType = None, timeElapsed = None, key = None, data = None,
+			detail1 = None, detail2 = None):
+		if self._pushPacketEvent.isSet ():
+			self._pushPacketEvent.wait ()
+			self._pushPacketEvent.clear ()
+			_pcktInfo = packetInfo (packetType, windowName, objectName, objectType, eventType,
+						timeElapsed, key, data, detail1, detail2)
+			self._packet [self._endPacketId] = _pcktInfo
+			self._endPacketId += 1
+			self._pushPacketEvent.set ()
+	def fetchPacket (self):
+		if self._popPacketEvent.isSet ():
+			self._popPacketEvent.wait ()
+			self._popPacketEvent.clear ()
+			_pcktInfo = None
+			if self._startPacketId in self._packet:
+				_pcktInfo = self._packet.pop (self._startPacketId)
+			else:
+				self._popPacketEvent.set ()
+				return None
+			self._startPacketId += 1
+			self._popPacketEvent.set ()
+			return _pcktInfo
+	def peekPacket (self, pcktId = None):
+		_pcktInfo = None
+		if pcktId is not None:
+			if pcktId in self._packet:
+				_pcktInfo = self._packet [pcktId]
+		else:
+			if self._startPacketId in self._packet:
+				_pcktInfo = self._packet [self._startPacketId]
+		return _pcktInfo
+
+def doesWindowExist (windowName):
+	try:
+		global _pollThread
+		_requestId  = str (random.randint (0, sys.maxint))
+		_message = generatexml (command.WINDOWEXIST, _requestId, windowName)
+		sendpacket (_message)
+		_responseStatus, _responseData = _pollThread.getresponse (_requestId)
+		if _responseStatus [0] == 0:
+			return True
+		else:
+			return False
+	except:
+		return False
+
+def getObjectName (objName):
+	try:
+		global _pollThread
+		_requestId  = str (random.randint (0, sys.maxint))
+		_message = generatexml (command.GETOBJECTNAME, _requestId, objName)
+		sendpacket (_message)
+		_responseStatus, _responseData = _pollThread.getresponse (_requestId)
+		if _responseStatus [0] == 0:
+			return _responseData
+		else:
+			return None
+	except:
+		print traceback.print_exc ()
+		return None
+
+def addWait (generatedCode, timeElapsed):
+    print 'Time elapsed',  int (timeElapsed)
+    try:
+        if int (timeElapsed) > 0:
+            generatedCode += 'wait (' + timeElapsed + ')\n'
+    except ValueError:
+        pass
+
+def processData ():
+	try:
+		print 'WARNING !!!!!!!!!!!!!!!! SHOULD BE REMOVED !!!!!!!!!!!!!!!!!!!!!'
+		processDataTmpFunction ()
+	except:
+		print traceback.print_exc ()
+def processDataTmpFunction ():
+	global pckt, generatedCode
+	# Its a hack, please remove it, once debugging is done
+	while True:
+		try:
+			_pcktInfo = pckt.peekPacket ()
+			if _pcktInfo:
+				if pckt._startPacketId == pckt._endPacketId:
+					# If both are same, let us wait till we receive the next packet
+					pckt._pushPacketEvent.wait ()
+				if ldtpDebug and ldtpDebug == '2':
+					print _pcktInfo.windowName, _pcktInfo.objectName,
+					print _pcktInfo.objectType, _pcktInfo.eventType,
+					print _pcktInfo.key, _pcktInfo.data
+				if _pcktInfo.packetType == 'keyboard':
+					# FIXME: Manipulate the keyboard strings with the text box
+					generatedCode += 'enterstring (\"'+ _pcktInfo.data + '\")\n'
+					_pcktInfo = pckt.fetchPacket ()
+					continue
+				if _pcktInfo.objectType == 'push button':
+					if ldtpDebug:
+						print pckt._startPacketId, pckt._endPacketId
+					if _pcktInfo.eventType.startswith ('object:state-changed:armed') and \
+					       pckt._startPacketId != pckt._endPacketId:
+						_tmpPckt = pckt.peekPacket (pckt._startPacketId + 1)
+						if ldtpDebug:
+							print '*** tmpPckt', _tmpPckt
+						if _tmpPckt == None or (_tmpPckt.objectType == _pcktInfo.objectType and \
+									_tmpPckt.windowName == _pcktInfo.windowName and \
+									_tmpPckt.objectName == _pcktInfo.objectName and \
+									_tmpPckt.eventType.startwith ('focus:')):
+							addWait (generatedCode, _pcktInfo.timeElapsed)
+							generatedCode += 'click (\"'+ _pcktInfo.windowName + \
+									 '\", \"' + _pcktInfo.objectName + '\")\n'
+							_pcktInfo = pckt.fetchPacket ()
+							_pcktInfo = pckt.fetchPacket () # Note we are fetching two times
+							continue
+					elif _pcktInfo.eventType.startswith ('focus:') and doesWindowExist (_pcktInfo.windowName):
+						if ldtpDebug:
+							print '*** Window exist'
+						_pcktInfo = pckt.fetchPacket ()
+						continue
+					elif _pcktInfo.eventType.startswith ('focus:') and \
+					       pckt._startPacketId != pckt._endPacketId:
+						_tmpPckt = pckt.peekPacket (pckt._startPacketId + 1)
+						if ldtpDebug:
+							print '*** tmpPckt', _tmpPckt
+						if _tmpPckt == None or (_tmpPckt.objectType == _pcktInfo.objectType and \
+									_tmpPckt.windowName == _pcktInfo.windowName and \
+									_tmpPckt.objectName == _pcktInfo.objectName and \
+									_tmpPckt.eventType.startwith ('object:state-changed:armed')):
+							addWait (generatedCode, _pcktInfo.timeElapsed)
+							generatedCode += 'click (\"'+ _pcktInfo.windowName + \
+									 '\", \"' + _pcktInfo.objectName + '\")\n'
+							_pcktInfo = pckt.fetchPacket ()
+							_pcktInfo = pckt.fetchPacket () # Note we are fetching two times
+							continue
+					addWait (generatedCode, _pcktInfo.timeElapsed)
+					generatedCode += 'click (\"'+ _pcktInfo.windowName + \
+							 '\", \"' + _pcktInfo.objectName + '\")\n'
+					_pcktInfo = pckt.fetchPacket ()
+					continue
+				elif _pcktInfo.eventType.startswith ('object:state-changed:checked'):
+					if _pcktInfo.objectType == 'check box':
+						addWait (generatedCode, _pcktInfo.timeElapsed)
+						if _pcktInfo.detail1 == '1':
+							generatedCode += 'check (\"'+ _pcktInfo.windowName + \
+									 '\", \"' + _pcktInfo.objectName + '\")\n'
+						else:
+							generatedCode += 'uncheck (\"'+ _pcktInfo.windowName + \
+									 '\", \"' + _pcktInfo.objectName + '\")\n'
+						_pcktInfo = pckt.fetchPacket ()
+						continue
+					elif _pcktInfo.objectType == 'radio button' or \
+						 _pcktInfo.objectType == 'toggle button':
+						addWait (generatedCode, _pcktInfo.timeElapsed)
+						generatedCode += 'click (\"'+ _pcktInfo.windowName + \
+								 '\", \"' + _pcktInfo.objectName + '\")\n'
+						_pcktInfo = pckt.fetchPacket ()
+						continue
+					else:
+						_pcktInfo = pckt.fetchPacket ()
+						if ldtpDebug:
+							print 'Invalid packet with object:state-changed:checked event type ??'
+						continue
+				elif _pcktInfo.eventType.startswith ('object:state-changed:selected'):
+					if _pcktInfo.objectType == 'page tab':
+						addWait (generatedCode, _pcktInfo.timeElapsed)
+						_responseData = getObjectName (_pcktInfo.objectName)
+						if _responseData is not None:
+							generatedCode += 'selecttab (\"'+ _pcktInfo.windowName + \
+									 '\", \"' + _responseData + '\", \"' + \
+									 _pcktInfo.data + '\")\n'
+						_pcktInfo = pckt.fetchPacket ()
+						continue
+					elif _pcktInfo.objectType == 'table cell':
+						addWait (generatedCode, _pcktInfo.timeElapsed)
+						_responseData = getObjectName (_pcktInfo.objectName)
+						if _responseData is not None:
+							generatedCode += 'selectrow (\"'+ _pcktInfo.windowName + \
+									 '\", \"' + _responseData + '\", \"' + \
+									 _pcktInfo.data + '\")\n'
+						_pcktInfo = pckt.fetchPacket ()
+						continue
+					else:
+						_pcktInfo = pckt.fetchPacket ()
+						if ldtpDebug:
+							print 'Invalid packet with object:state-changed:selected event type ??'
+						continue
+				elif _pcktInfo.eventType.startswith ('focus:') and \
+					 _pcktInfo.objectType == 'table cell':
+					_tmpPckt = None
+					if pckt._startPacketId != pckt._endPacketId:
+						_tmpPckt = pckt.peekPacket (pckt._startPacketId + 1)
+						if _tmpPckt is not None and _tmpPckt.eventType.startswith ('focus:') == False and \
+						       _tmpPckt.objectType != _pcktInfo.objectType:
+							_tmpPckt = None
+					if _tmpPckt == None or (_tmpPckt.objectType == _pcktInfo.objectType and \
+								_tmpPckt.windowName == _pcktInfo.windowName and \
+								_tmpPckt.objectName == _pcktInfo.objectName and \
+								_tmpPckt.eventType.startwith ('focus:')):
+						addWait (generatedCode, _pcktInfo.timeElapsed)
+						_responseData = getObjectName (_pcktInfo.objectName)
+						if _responseData is not None:
+							generatedCode += 'selectrow (\"'+ _pcktInfo.windowName + \
+									 '\", \"' + _responseData + '\", \"' + \
+									 _pcktInfo.data + '\")\n'
+						_pcktInfo = pckt.fetchPacket ()
+						if _tmpPckt is not None:
+							_pcktInfo = pckt.fetchPacket ()
+					continue
+				elif _pcktInfo.eventType.startswith ('window:create'):
+					generatedCode += 'waittillguiexist (\"' + _pcktInfo.windowName + '\")\n'
+					_pcktInfo = pckt.fetchPacket ()
+					continue
+				elif _pcktInfo.eventType.startswith ('window:destroy'):
+					generatedCode += 'waittillguinotexist (\"' + _pcktInfo.windowName + '\")\n'
+					_pcktInfo = pckt.fetchPacket ()
+					continue
+				elif _pcktInfo.objectType == 'spin button':
+					if pckt._startPacketId != pckt._endPacketId:
+						_tmpPckt = pckt.peekPacket (pckt._startPacketId + 1)
+						if ldtpDebug:
+							print '*** tmpPckt', _tmpPckt
+						if _tmpPckt == None or (_tmpPckt.objectType == _pcktInfo.objectType and \
+									_tmpPckt.windowName == _pcktInfo.windowName and \
+									_tmpPckt.objectName == _pcktInfo.objectName):
+							addWait (generatedCode, _pcktInfo.timeElapsed)
+							generatedCode += 'setvalue (\"'+ _pcktInfo.windowName + \
+									 '\", \"' + _pcktInfo.objectName + '\", \"' + \
+									 _pcktInfo.data + '\")\n'
+							if _tmpPckt is not None:
+								_pcktInfo = pckt.fetchPacket ()
+							_pcktInfo = pckt.fetchPacket ()
+					else:
+						addWait (generatedCode, _pcktInfo.timeElapsed)
+						generatedCode += 'setvalue (\"'+ _pcktInfo.windowName + \
+								 '\", \"' + _pcktInfo.objectName + '\", \"' + \
+								 _pcktInfo.data + '\")\n'
+						_pcktInfo = pckt.fetchPacket ()
+					continue
+				elif _pcktInfo.objectType == 'text':
+					addWait (generatedCode, _pcktInfo.timeElapsed)
+					_objName = _pcktInfo.objectName
+					if re.search ('#', _objName) is not None:
+						_responseData = getObjectName (_pcktInfo.objectName)
+						if _responseData is not None:
+							_objName = _responseData
+					generatedCode += 'settextvalue (\"'+ _pcktInfo.windowName + \
+							 '\", \"' + _objName + '\", \"' + \
+							 _pcktInfo.data + '\")\n'
+					_pcktInfo = pckt.fetchPacket ()
+					continue
+				elif _pcktInfo.objectType == 'combo box':
+					addWait (generatedCode, _pcktInfo.timeElapsed)
+					generatedCode += 'comboselect (\"'+ _pcktInfo.windowName + \
+							 '\", \"' + _pcktInfo.objectName + '\", \"' + \
+							 _pcktInfo.data + '\")\n'
+					_pcktInfo = pckt.fetchPacket ()
+					continue
+				elif _pcktInfo.objectType == 'menu item':
+					addWait (generatedCode, _pcktInfo.timeElapsed)
+					generatedCode += 'selectmenuitem (\"'+ _pcktInfo.windowName + \
+							 '\", \"' + _pcktInfo.objectName + '\")\n'
+					_pcktInfo = pckt.fetchPacket ()
+					continue
+				elif _pcktInfo.objectType == 'right click':
+					addWait (generatedCode, _pcktInfo.timeElapsed)
+					_objName = _pcktInfo.objectName
+					if re.search ('#', _objName) is not None:
+						_responseData = getObjectName (_pcktInfo.objectName)
+						if _responseData is not None:
+							_objName = _responseData
+					generatedCode += 'rightclick (\"'+ _pcktInfo.windowName + \
+							 '\", \"' + _objName + '\", \"' + \
+							 _pcktInfo.data + '\")\n'
+					_pcktInfo = pckt.fetchPacket ()
+					continue
+				elif _pcktInfo.objectType == 'panel' and \
+					 _pcktInfo.eventType.startswith ('object:state-changed:focused'):
+					addWait (generatedCode, _pcktInfo.timeElapsed)
+					_objName = _pcktInfo.objectName
+					if re.search ('#', _objName) is not None:
+						_responseData = getObjectName (_pcktInfo.objectName)
+						if _responseData is not None:
+							_objName = _responseData
+					generatedCode += 'selectpanelname (\"'+ _pcktInfo.windowName + \
+							 '\", \"' + _objName + '\", \"' + \
+							 _pcktInfo.data + '\")\n'
+					_pcktInfo = pckt.fetchPacket ()
+					continue
+				else:
+					if ldtpDebug:
+						print 'Unknown object type', _pcktInfo.objectType
+					_pcktInfo = pckt.fetchPacket ()
+					continue
+			else:
+				time.sleep (1)
+		except KeyboardInterrupt:
+			break
+
+def stoprecord (filename = None):
+	try:
+		global _pollThread
+		_requestId  = str (random.randint (0, sys.maxint))
+		_message = generatexml (command.STOP, _requestId)
+		sendpacket (_message)
+		_responseStatus, _responseData = _pollThread.getresponse (_requestId)
+	except:
+		pass
+
+def shutdown ():
+	if threading.activeCount () > 1:
+		thread.exit ()
+	sys.exit ()
+
+def __shutdownAndExit (signum, frame):
+	global generatedCode
+	print ''
+	print ''
+	print ''
+	print generatedCode.encode ('utf8')
+	print ''
+	print ''
+	print ''
+	stoprecord ()
+	mainsock.close ()
+	shutdown ()
+
+socketpath = '/tmp/ldtp-record-' + os.getenv ('USER') + '-' + os.getenv ('DISPLAY')
+
+# Create read flag
+_readflag = threading.Event ()
+# Clear the flag by default
+_readflag.clear ()
+
+# Create notification flag
+_notificationflag = threading.Event ()
+# Set the flag by default
+_notificationflag.set ()
+
+# Create keyboard flag
+_keyboardflag = threading.Event ()
+# Set the flag by default
+_keyboardflag.set ()
+
+# Contains poll fd's
+_serverpoll = None
+
+# Send lock
+sendLck = threading.Lock ()
+# Recieve lock
+recvLck = threading.Lock ()
+
+generatedCode = 'from ldtp import *\n\n'
+
+try:
+	# Create a client socket
+	mainsock = socket.socket (socket.AF_UNIX, socket.SOCK_STREAM)
+except socket.error,msg:
+	raise LdtpExecutionError ('Error while creating UNIX socket  ' + str (msg))
+
+# Let us retry connecting to the server for 3 times
+retryCount = 0
+
+while True:
+	try:
+		try:
+			# Connect to server socket
+			mainsock.connect (socketpath)
+			break
+		except TypeError:
+			raise ConnectionLost ('Environment LDTP_AUTH_SOCK variable not set')
+	except socket.error, msg:
+		if retryCount == 3:
+			raise ConnectionLost ('Could not establish connection ' + str (msg))
+		retryCount += 1
+		_pid = os.fork ()
+		if _pid == 0:
+			try:
+				os.execvpe ('ldtpcodegen', (), os.environ)
+			except OSError:
+				raise LdtpExecutionError ('ldtp executable not in PATH')
+		else:
+			# Let us wait for 1 second, let the server starts
+			time.sleep (1)
+
+signal.signal (signal.SIGINT, __shutdownAndExit)
+signal.signal (signal.SIGQUIT, __shutdownAndExit)
+
+# Start polling server
+_pollThread = PollServer ()
+_pollThread.setDaemon (True)
+_pollThread.start ()
+atexit.register (_pollThread.shutdown)
+
+pckt = packet ()
+
+ldtpDebug = os.getenv ('LDTP_DEBUG')
+
+if actionName == 'stoprecord':
+	stoprecord (filename)
+
+if actionName == 'listen':
+	thread.start_new_thread (processData, ())
+	# Its a hack, please remove it, once debugging is done
+	while True:
+		try:
+			time.sleep (1)
+		except KeyboardInterrupt:
+			break

@@ -1,0 +1,141 @@
+dnl *************************************************************
+dnl Process this file with autoconf to produce a configure script
+dnl *************************************************************
+AC_INIT(ldtp, 1.0.0, ldtp-dev@lists.freedesktop.org)
+AC_CANONICAL_SYSTEM
+
+AM_INIT_AUTOMAKE
+
+dnl AC_CONFIG_SRCDIR([src/ldtp.c])
+AC_PREREQ(2.52)
+
+AM_CONFIG_HEADER(config.h)
+
+dnl checks for programs
+AC_PROG_INSTALL
+
+dnl Check for build configuration.
+AM_PROG_LIBTOOL
+
+AC_MSG_CHECKING([to see if we should build the python modules.])
+AC_ARG_WITH([pythonmodules],
+	    [ --without-pythonmodules    builds ldtp-server without building the python modules],
+	    [],
+	    [with_pythonmodules=yes])
+
+AC_MSG_RESULT($with_pythonmodules)
+
+AM_CONDITIONAL(EXCLUDE_PYTHONMODULES, test "x$with_pythonmodules" != "xyes")
+
+AC_PATH_PROG(PYTHON_CMD, python, no)
+if test "x$PYTHON_CMD" = "xno"; then
+	AC_MSG_ERROR([Your python installation doesn't expose python])
+fi
+
+dnl Check for the python site-packages install path
+dnl Copied over from a11y-test-suite
+AC_MSG_CHECKING([python site path])
+pythonsitedir="`./find-python-path.py`"
+dnl pythondir="\${libdir}/${pythonsitedir}"
+pythondir="${pythonsitedir}"
+ldtpdir="${pythondir}/ldtplib"
+AC_MSG_RESULT([$ldtpdir])
+AC_MSG_RESULT([$pythondir])
+AC_SUBST(ldtpdir)
+AC_SUBST(pythondir)
+
+AC_PATH_PROG(GCC_CMD, gcc, no)
+if test "x$GCC_CMD" != "xno"; then
+	AC_DEFINE(GCC_CMD,1,[GCC Compiler])
+fi
+AM_CONDITIONAL(GCC_CMD, test x$GCC_CMD != xno)
+dnl AC_SUBST(GCC_CMD)
+
+dnl ************************
+dnl Check for pthreads
+dnl (stolen from Evolution)
+dnl ************************
+PTHREAD_LIB=""
+AC_CHECK_LIB(pthread, pthread_create, PTHREAD_LIB="-lpthread",
+        [AC_CHECK_LIB(pthreads, pthread_create, PTHREAD_LIB="-lpthreads",
+            [AC_CHECK_LIB(c_r, pthread_create, PTHREAD_LIB="-lc_r",
+                [AC_CHECK_LIB(pthread, __pthread_attr_init_system, PTHREAD_LIB="-lpthread",
+                        [AC_CHECK_FUNC(pthread_create)]
+                )]
+            )]
+        )]
+        )
+AC_SUBST(PTHREAD_LIB)
+
+
+dnl *********************************
+dnl Check for libxml2
+dnl *********************************
+PKG_CHECK_MODULES(LIBXML2, libxml-2.0 >= 2.0.0)
+AC_SUBST(LIBXML2_CFLAGS)
+AC_SUBST(LIBXML2_LIBS)
+
+dnl *********************************
+dnl Check for glib2 and gobjec2
+dnl *********************************
+PKG_CHECK_MODULES(GLIB2, glib-2.0 >= 2.2.0 gobject-2.0 >= 2.2.0)
+AC_SUBST(GLIB2_CFLAGS)
+AC_SUBST(GLIB2_LIBS)
+
+dnl *********************************
+dnl Check for cspi-1.0
+dnl *********************************
+PKG_CHECK_MODULES(CSPI_1_0, cspi-1.0 >= 1.2.0)
+AC_SUBST(CSPI_1_0_CFLAGS)
+AC_SUBST(CSPI_1_0_LIBS)
+
+LOCALIZATION_LIB=""
+dnl **************************************************
+dnl Localization support.
+dnl **************************************************
+AC_ARG_ENABLE(localization, 
+[  --enable-localization=[no/yes]      Build LDTP with localization support],,enable_localization=no)
+if test "x$enable_localization" = "xyes"; then
+	AC_CHECK_LIB(gettextpo, po_file_read_v2, LOCALIZATION_LIB="-lgettextpo")
+	AC_DEFINE(ENABLE_LOCALIZATION, 1 ,[Build localization])
+fi
+AM_CONDITIONAL(ENABLE_LOCALIZATION, test "x$enable_localization" == "xyes")
+AC_SUBST(LOCALIZATION_LIB)
+
+dnl **************************************************
+dnl GOptionParse support.
+dnl **************************************************
+AC_ARG_ENABLE(goptionparse, 
+[  --enable-goptionparse=[no/yes]      Build LDTP with goptionparse support],,enable_goptionparse=yes)
+if test "x$enable_goptionparse" = "xyes"; then
+	AC_CHECK_LIB(glib-2.0, g_option_context_parse, enable_goptionparse=yes, enable_goptionparse=no)
+	if test "x$enable_goptionparse" = "xyes"; then
+	   AC_DEFINE(ENABLE_GOPTIONPARSE, 1 ,[Build localization])
+	fi
+fi
+AM_CONDITIONAL(ENABLE_GOPTIONPARSE, test "x$enable_goptionparse" == "xyes")
+
+dnl **************************************************
+dnl New roles support.
+dnl **************************************************
+AC_ARG_ENABLE(newroles, 
+[  --enable-newroles=[no/yes]      Build LDTP with newroles support],,enable_newroles=yes)
+if test "x$enable_newroles" = "xyes"; then
+	AC_DEFINE(ENABLE_NEWROLES, 1 ,[Build newroles])
+fi
+AM_CONDITIONAL(ENABLE_NEWROLES, test "x$enable_newroles" == "xyes")
+
+AC_OUTPUT([
+doc/Makefile
+src/Makefile
+icons/Makefile
+python/Makefile
+python/ldtplib/Makefile
+Makefile
+])
+
+echo "---"
+echo "Configuration successful."
+echo
+
+dnl configure.in ends here

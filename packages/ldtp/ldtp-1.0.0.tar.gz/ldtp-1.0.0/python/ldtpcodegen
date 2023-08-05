@@ -1,0 +1,575 @@
+#!/usr/bin/env python
+
+#############################################################################
+#
+#  Linux Desktop Testing Project http://ldtp.freedesktop.org
+# 
+#  Author:
+#     A. Nagappan <nagappan@gmail.com>
+# 
+#  Copyright 2004 - 2007 Novell, Inc.
+# 
+#  This program is free software; you can redistribute it and/or
+#  modify it under the terms of the GNU Lesser General Public
+#  License as published by the Free Software Foundation; either
+#  version 2 of the License, or (at your option) any later version.
+# 
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#  Lesser General Public License for more details.
+# 
+#  You should have received a copy of the GNU Lesser General Public
+#  License along with this program; if not, write to the
+#  Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+#  Boston, MA 02110, USA.
+#
+#############################################################################
+
+__author__ = "Nagappan A <nagappan@gmail.com>"
+__maintainer__ = "Nagappan A <nagappan@gmail.com>"
+__version__ = "1.0.0"
+
+import socket, os, types, sys, struct, traceback, time
+import threading, re, atexit
+import thread, select, signal
+from xml.parsers.expat import ExpatError
+from xml.dom.minidom import parse, parseString
+from xml.sax import saxutils
+import ldtplib.ldtprecorder
+import ldtplib.ldtplibutils
+
+_ldtpDebug = os.getenv ('LDTP_DEBUG') # Enable debugging
+
+class command:
+	INVALID       = 0
+	STOP          = 1
+	WINDOWEXIST   = 2
+	GETWINDOWNAME = 3
+	GETOBJECTNAME = 4
+
+class error (Exception):
+	def __init__ (self, value):
+		self.value = value
+	def __str__ (self):
+		return repr (self.value)
+
+class LdtpExecutionError (Exception):
+	def __init__ (self, value):
+		self.value = value
+	def __str__ (self):
+		return repr (self.value)
+
+class ConnectionLost (Exception):
+	def __init__ (self, value):
+		self.value = value
+	def __str__ (self):
+		return repr (self.value)
+
+class packet:
+	def __init__ (self):
+		pass
+	def generatenotificationxml (self, windowName, objectName, objectType, eventType,
+				     timeElapsed, key = None, data = None, detail1 = None,
+				     detail2 = None):
+		"""This Function will generate some information to LDTP packet
+		INPUT: windowname, objectname, objecttype, eventtype[, key[, data]]
+
+		OUTPUT: returns a string in the LDTP packet (XML lib2) format"""
+		_xml = '<?xml version=\"1.0\"?>' ## should this header be there in the packets?
+		_xml += '<NOTIFICATION>'
+		# Fill action name
+		if windowName is not None:
+			_xml = _xml + '<WINDOWNAME>' + \
+			    saxutils.escape (ldtplib.ldtplibutils.escapeChars (windowName,  False)) + \
+			    '</WINDOWNAME>'
+		if objectName is not None:
+			if re.search (';',  objectName) != None and re.search ('\:',  objectName) != None:
+				_xml = _xml + '<OBJECTNAME>' + \
+				    saxutils.escape (objectName) + '</OBJECTNAME>'
+			else:
+				_xml = _xml + '<OBJECTNAME>' + \
+				    saxutils.escape (ldtplib.ldtplibutils.escapeChars (objectName)) + \
+				    '</OBJECTNAME>'
+		if objectType is not None:
+			_xml = _xml + '<OBJECTTYPE>' + objectType + '</OBJECTTYPE>'
+		if eventType is not None:
+			_xml = _xml + '<EVENTTYPE>' + eventType + '</EVENTTYPE>'
+		_xml = _xml + '<TIMEELAPSED>' + str (timeElapsed) + '</TIMEELAPSED>'
+		if key:
+			_xml = _xml + '<KEY>' + saxutils.escape (key) + '</KEY>'
+		if data:
+			_xml = _xml + '<DATA>' + saxutils.escape (data) + '</DATA>'
+		if detail1:
+			_xml = _xml + '<DETAIL1>' + str (detail1) + '</DETAIL1>'
+		if detail2:
+			_xml = _xml + '<DETAIL2>' + str (detail2) + '</DETAIL2>'
+		_xml += '</NOTIFICATION>'
+		return _xml
+
+	def generatekeyboardxml (self, text):
+		_xml = '<?xml version=\"1.0\"?>' ## should this header be there in the packets?
+		_xml += '<KEYBOARD>'
+		# Fill action name
+		_xml = _xml + '<DATA>' + saxutils.escape (text) + '</DATA>'
+		_xml += '</KEYBOARD>'
+		return _xml
+
+	def generateresponsexml (self, requestId, status, data = None):
+		"""This Function will generate some information to LDTP packet
+		INPUT: windowname, objectname, objecttype, eventtype[, key[, data]]
+
+		OUTPUT: returns a string in the LDTP packet (XML lib2) format"""
+	
+		_xml = '<?xml version=\"1.0\"?>' ## should this header be there in the packets?
+		_xml += '<RESPONSE>'
+		# Fill action name
+		_xml = _xml + '<ID>' + requestId + '</ID>'
+		_xml = _xml + '<STATUS><CODE>' + str (status [0]) + '</CODE>'
+		if status [0] != 0:
+			_xml = _xml + '<MESSAGE>' + status [1] + '</MESSAGE>'
+		_xml = _xml + '</STATUS>'
+		if data:
+			_xml = _xml + '<DATA>' + saxutils.escape (data) + '</DATA>'
+		_xml += '</RESPONSE>'
+		return _xml
+
+	def getText (self, nodelist):
+		rc = ""
+		for node in nodelist:
+			if node.nodeType == node.TEXT_NODE:
+				rc = rc + node.data
+		return rc
+
+	def getCData (self, nodelist):
+		rc = ""
+		for node in nodelist:
+			if node.nodeType == node.CDATA_SECTION_NODE:
+				rc = rc + node.data
+		return rc
+
+	def parsexml (self, xmlpacket):
+		"""Returns the value obtained from the server's return LDTP packet"""
+		_requestCommand = 0
+		_name           = None
+		_requestId      = None
+		_requestObj     = None
+
+		try:
+			dom = parseString (xmlpacket)
+			try:
+				_requestObj  = dom.getElementsByTagName ('REQUEST')[0]
+			except IndexError:
+				if _ldtpDebug:
+					print 'Invalid request'
+				return None
+			try:
+				_requestCommand = int (self.getText (_requestObj.getElementsByTagName ('COMMAND') [0].childNodes))
+			except ValueError:
+				if _ldtpDebug:
+					print 'Invalid Command'
+				return None
+			except IndexError:
+				if _ldtpDebug:
+					print 'Invalid Command'
+				return None
+			try:
+				_name = self.getText (_requestObj.getElementsByTagName ('NAME') [0].childNodes)
+			except ValueError:
+				pass
+			except IndexError:
+				# Data tag may not be present
+				pass
+			try:
+				_requestId  = self.getText (_requestObj.getElementsByTagName ('ID') [0].childNodes)
+			except IndexError:
+				# On notification _requestId will be empty
+				pass
+		except ExpatError, msg:
+			if msg.code == xml.parsers.expat.errors.XML_ERROR_NO_ELEMENTS:
+				return None
+			if xml.parsers.expat.ErrorString (msg.code) == xml.parsers.expat.errors.XML_ERROR_NO_ELEMENTS:
+				return None
+		# Return all the respective values, let the calling function decide what to do with the values
+		return _requestId, _requestCommand, _name
+
+	# Send given packet to server
+	def sendpacket (self, msg):
+		global _clientFd
+		if _clientFd is None:
+			return
+		flag = False
+		try:
+			timedelay = os.getenv ('LDTP_DELAY_CMD')
+			_sendLck.acquire ()
+			if timedelay != None:
+				try:
+					# Delay each command by 'timedelay' seconds
+					time.sleep (int (timedelay))
+				except IndexError:
+					# Default to 5 seconds delay if LDTP_DELAY_CMD
+					# env variable is set
+					time.sleep (5)
+			flag = True
+			# Encode the message in UTF-8 so we don't break on extended
+			# characters in the application GUIs
+			if _ldtpDebug:
+				print 'packet:', msg
+			buf = ''
+			# FIXME: if a title has three dots '...', it raises an exception
+			# currently catching the exception and ignoring it
+			try:
+				buf = msg.encode ('utf-8')
+				"""
+				# for gedit, save as dialog box, with title 'Save As...'
+				#
+				# <?xml version="1.0"?><NOTIFICATION><WINDOWNAME>dlgSaveAs...</WINDOWNAME> \
+				# <OBJECTNAME>tbtnnags</OBJECTNAME><OBJECTTYPE>toggle button</OBJECTTYPE> \
+				# <EVENTTYPE>object:state-changed:checked</EVENTTYPE><TIMEELAPSED>0</TIMEELAPSED> \
+				# </NOTIFICATION>
+				#
+				# UnicodeDecodeError: 'ascii' codec can't decode byte 0xe2 in position 56: ordinal not in range(128)
+				"""
+			except UnicodeDecodeError:
+				buf = msg
+
+			_length =  len (buf)
+			# Pack length (integer value) in network byte order
+			format = '!i%ds' % _length
+			_msg = struct.pack (format, _length, buf)
+			# Send message
+			_clientFd.send (_msg)
+			if _ldtpDebug != None and _ldtpDebug == '2':
+				print 'Send packet', buf
+			#_sendLck.release ()
+		except socket.error, msg:
+			#raise LdtpExecutionError ('Client aborted')
+			return
+		finally:
+			if flag == True:
+				# Reason for using the flag:
+				# 'Do not call this method when the lock is unlocked.'
+				_sendLck.release ()
+				flag = False
+
+	def recvpacket (self, sockfd = None):
+		global _clientFd
+		flag = False
+		try:
+			_recvLck.acquire ()
+			flag = True
+			client = None
+			# Get client socket fd based on thread id
+			if sockfd == None:
+				client = _clientFd
+			else:
+				client = sockfd
+			_responsePacket = None
+			client.settimeout (5.0)
+			# Hardcoded 4 bytes, as the server sends 4 bytes as packet length
+			data = client.recv (4, 0)
+			if data == '' or data == None:
+				if flag == True:
+					# Reason for using the flag:
+					# 'Do not call this method when the lock is unlocked.'
+					_recvLck.release ()
+				return None
+			_packetSize, = struct.unpack('!i', data)
+			if _ldtpDebug != None and _ldtpDebug == '2':
+				print 'Received packet size', _packetSize
+			# MSG_PEEK
+			# This flag causes the receive operation to return data from the beginning
+			# of the receive queue without removing that data from  the  queue.
+			# Thus, a subsequent receive call will return the same data.
+
+			_responsePacket = client.recv (_packetSize, 0)
+			_pattern = re.compile ('\<\?xml')
+			_searchObj = re.search (_pattern, _responsePacket)
+			_finalPacket = _responsePacket[_searchObj.start () :]
+			_responsePacket = _finalPacket
+			#_recvLck.release ()
+			if _ldtpDebug != None and _ldtpDebug == '2':
+				print 'Received response Packet', _responsePacket
+			return _responsePacket
+		except struct.error, msg:
+			raise LdtpExecutionError ('Invalid packet length ' + str (msg))
+		except socket.timeout:
+			if _ldtpDebug != None and _ldtpDebug == '2':
+				print 'Timeout'
+			return ''
+		except:
+			raise LdtpExecutionError ('Error while receiving packet ' + str (traceback.print_exc ()))
+		finally:
+			if flag == True:
+				# Reason for using the flag:
+				# 'Do not call this method when the lock is unlocked.'
+				_recvLck.release ()
+				flag = False
+
+class PollServer (threading.Thread):
+	def __init__ (self):
+		threading.Thread.__init__ (self)
+		self._events = None
+	def run (self):
+		try:
+			self.start_polling_server ()
+		except:
+			try:
+				raise LdtpExecutionError (str (traceback.print_exc ()))
+			except AttributeError:
+				pass
+			except:
+				pass
+	def start_polling_server (self):
+		self._serverDisconnected = False
+		global _serverpoll, _mainsock, _clientFd
+		_serverpoll = select.poll ()
+		_serverpoll.register (_mainsock, select.POLLIN)
+
+		while True:
+			try:
+				self._events = _serverpoll.poll ()
+			except socket.error, msg:
+				break
+			except:
+				_serverpoll.unregister (_mainsock)
+				_mainsock = None
+				sys.exit ()
+			try:
+				if self._events == None:
+					break
+				for i in range (0, len (self._events)):
+					if (self._events [i][1] & select.POLLIN or self._events [i][1] & select.POLLPRI):
+						fd = socket.fromfd (self._events[i][0],
+								    socket.AF_UNIX,
+								    socket.SOCK_STREAM)
+						if self._events [i][0] == _mainsock.fileno ():
+							_clientFd, addr = _mainsock.accept ()
+							_serverpoll.register (_clientFd, select.POLLIN)
+							continue
+						try:
+							if self.handlePacket () == None:
+								_serverpoll.unregister (self._events[i][0])
+								continue
+						except LdtpExecutionError, msg:
+							self._serverDisconnected = True
+							break
+						except SystemExit:
+							break
+						except:
+							if _ldtpDebug:
+								print traceback.print_exc ()
+					elif (self._events[i][1] & select.POLLNVAL):
+						# Unregister newly created socket from polling once its completed
+						_serverpoll.unregister (self._events[i][0])
+					else:
+						self._serverDisconnected = True
+						break
+				if self._serverDisconnected == True:
+					break
+			# Checking this exception due to bug # 333090 comment # 6
+			except TypeError:
+				_serverpoll.unregister (_mainsock)
+				sys.exit ()
+	def handlePacket (self):
+		global _pckt, _recEngine
+		try:
+			self._packet = _pckt.recvpacket ()
+			if _ldtpDebug:
+				print 'handlePacket',  self._packet
+		except KeyboardInterrupt:
+			return None
+		except LdtpExecutionError:
+			return ''
+		try:
+			if self._packet == None:
+				return None
+			if self._packet != '':
+				_requestId, _commandCode, _name = _pckt.parsexml (self._packet)
+				if _commandCode == command.INVALID:
+					return ''
+				if _commandCode == command.STOP:
+					_status = {}
+					_status [0] = 0
+					_status [1] = 'Success'
+					_xml = _pckt.generateresponsexml (_requestId, _status)
+					_pckt.sendpacket (_xml)
+					stop ()
+					thread.exit ()
+				if _commandCode == command.WINDOWEXIST:
+					_status = {}
+					_status [0] = 0
+					_status [1] = 'Success'
+					_xml = ''
+					if ldtplib.ldtprecorder.recorder.doesWindowExist (_name):
+						_xml = _pckt.generateresponsexml (_requestId, _status)
+					else:
+						_status [0] = 1
+						_status [1] = 'Window does not exist'
+						_xml = _pckt.generateresponsexml (_requestId, _status)
+					_pckt.sendpacket (_xml)
+					return ''
+				if _commandCode == command.GETWINDOWNAME:
+					if _ldtpDebug:
+						print 'get window name'
+					return ''
+				if _commandCode == command.GETOBJECTNAME:
+					if _ldtpDebug:
+						print 'get object name'
+					_status = {}
+					_status [0] = 0
+					_status [1] = 'Success'
+					_xml = ''
+					_objName = ldtplib.ldtprecorder.recorder.getObjectName (_name)
+					if _ldtpDebug:
+						print '_objName',  _objName
+					if _objName != '':
+						_xml = _pckt.generateresponsexml (_requestId, _status, _objName)
+						if _ldtpDebug: print _xml
+					else:
+						_status [0] = 1
+						_status [1] = 'Object does not exist'
+						_xml = _pckt.generateresponsexml (_requestId, _status)
+					_pckt.sendpacket (_xml)
+					return ''
+		except TypeError:
+			return ''
+		except LdtpExecutionError:
+			return ''
+		except KeyboardInterrupt:
+			return None
+		except:
+			if _ldtpDebug:
+				print traceback.print_exc ()
+		return ''
+	def shutdown (self):
+		global _serverpoll, _mainsock
+		if _mainsock:
+			_mainsock.close ()
+			_mainsock = None
+
+class recorder:
+	def __init__ (self):
+		self.ldtpusetcp = False
+		self.ldtpserveraddr = None
+		self.ldtpserverport = None
+		self.socketpath = None
+		self.display = os.getenv ('DISPLAY')
+		if self.display == None:
+			raise LdtpExecutionError ('Missing DISPLAY environment variable. Running in text mode ?')	
+	def start (self):
+		self.socketpath = '/tmp/ldtp-record-' + os.getenv ('USER') + '-' + self.display
+
+		if os.environ.has_key("LDTP_SERVER_ADDR"):
+			self.ldtpserveraddr = os.environ ["LDTP_SERVER_ADDR"]
+			if os.environ.has_key ("LDTP_SERVER_PORT"):
+				self.ldtpserverport = int (os.environ["LDTP_SERVER_PORT"])
+			else:
+				self.ldtpserverport = 23457
+			self.ldtpusetcp = True
+		try:
+			# Create a client socket
+			_mainsock = None
+			if self.ldtpusetcp:
+				_mainsock = socket.socket (socket.AF_INET, socket.SOCK_STREAM)
+			else:
+				_mainsock = socket.socket (socket.AF_UNIX, socket.SOCK_STREAM)
+		except socket.error,msg:
+			if self.ldtpusetcp:
+				raise LdtpExecutionError ('Error while creating socket  ' + str (msg))
+			else:
+				raise LdtpExecutionError ('Error while creating UNIX socket  ' + str (msg))	
+
+		try:
+			_mainsock.setsockopt (socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+			# Connect to server socket
+			if self.ldtpusetcp:
+				_mainsock.bind ((self.ldtpserveraddr, self.ldtpserverport))
+			else:
+				_mainsock.bind (self.socketpath)
+			_mainsock.listen (5)
+			return _mainsock
+		except TypeError:
+			raise LdtpExecutionError ('Environment LDTP_AUTH_SOCK variable not set')
+		except socket.error, msg:
+			raise LdtpExecutionError ('Recording server could not be start ' + str (msg))
+	def stop (self):
+		global _mainsock
+		if _mainsock is not None:
+			_mainsock.close ()
+			_mainsock = None
+		if self.ldtpusetcp is False:
+			try:
+				os.unlink (self.socketpath)
+			except OSError:
+				pass
+
+def shutdown ():
+	global _mainsock, _recEngine
+	if threading.activeCount () > 1:
+		thread.exit ()
+	if _mainsock is not None:
+		_mainsock.close ()
+		_mainsock = None
+	try:
+		os.unlink (_recEngine.socketpath)
+	except OSError:
+		pass
+	sys.exit ()
+
+def __shutdownAndExit (signum, frame):
+	stop ()
+
+def start ():
+	global _mainsock, _recEngine, _pollThread, _pckt
+	_recEngine = recorder ()
+	_mainsock = _recEngine.start ()
+
+	# Start polling server
+	_pollThread = PollServer ()
+	_pollThread.setDaemon (True)
+	_pollThread.start ()
+	atexit.register (_pollThread.shutdown)
+	atexit.register (shutdown)
+	try:
+		ldtplib.ldtprecorder.start (_pckt)
+	except:
+		if _ldtpDebug:
+			print traceback.print_exc ()
+		stop ()
+
+def stop ():
+	global _mainsock, _recEngine
+	if _mainsock is not None:
+		_mainsock.close ()
+		_mainsock = None
+	try:
+		os.unlink (_recEngine.socketpath)
+	except OSError:
+		pass
+	ldtplib.ldtprecorder.stop ()
+	_recEngine.stop ()
+
+# Contains poll fd's
+_serverpoll = None
+_pollThread = None
+
+_clientFd  = None
+_mainsock  = None
+_recEngine = None
+
+# Send lock
+_sendLck = threading.Lock ()
+# Recieve lock
+_recvLck = threading.Lock ()
+
+signal.signal (signal.SIGINT, __shutdownAndExit)
+signal.signal (signal.SIGQUIT, __shutdownAndExit)
+_pckt = packet ()
+try:
+	# Start recording service
+	start ()
+except:
+	if _ldtpDebug:
+		print traceback.print_exc ()
+	stop ()

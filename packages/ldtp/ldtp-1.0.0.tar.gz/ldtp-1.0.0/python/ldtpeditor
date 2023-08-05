@@ -1,0 +1,408 @@
+#!/usr/bin/env python
+#############################################################################
+#
+#  Linux Desktop Testing Project http://ldtp.freedesktop.org
+# 
+#  Author:
+#     A. Nagappan <nagappan@gmail.com>
+#     Thanumalayan <madthanu@gmail.com>
+#     Vinod Kumar <vinod.gre@gmail.com>
+# 
+#  Copyright 2008 Nagappan Alagappan
+# 
+#  This program is free software; you can redistribute it and/or
+#  modify it under the terms of the GNU Library General Public
+#  License as published by the Free Software Foundation; either
+#  version 2 of the License, or (at your option) any later version.
+# 
+#  This library is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#  Library General Public License for more details.
+# 
+#  You should have received a copy of the GNU Library General Public
+#  License along with this library; if not, write to the
+#  Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+#  Boston, MA 02110, USA.
+#
+#############################################################################
+
+__author__ = "Nagappan A <nagappan@gmail.com>, Thanumalayan <madthanu@gmail.com>, Vinod Kumar <vinod.gre@gmail.com>"
+__maintainer__ = "Nagappan A <nagappan@gmail.com>"
+__version__ = "1.0.0"
+
+import os
+import re
+import sys
+import thread
+import traceback
+
+# Let us not register our application under at-spi application list
+os.environ ['GTK_MODULES'] = ''
+ldtpDebug = os.getenv ('LDTP_DEBUG')
+
+try:
+    import pygtk
+    # tell pyGTK, if possible, that we want GTKv2
+    pygtk.require ("2.0")
+except:
+    # Some distributions come with GTK2, but not pyGTK
+    pass
+try:
+    import gtk
+    import gtk.glade
+    import gnome
+    import gtk.keysyms
+except:
+    print "You need to install pyGTK or GTKv2 ",
+    print "or set your PYTHONPATH correctly."
+    print "try: export PYTHONPATH=",
+    print "/usr/lib/python/site-packages/"
+    sys.exit (1)
+
+isGtkSourceView = False
+try:
+    import gtksourceview
+    isGtkSourceView = True
+except:
+    if ldtpDebug:
+        print traceback.print_exc ()
+    pass
+
+try:
+	import ldtplib.libldtpcodegen
+except:
+    if ldtpDebug:
+        print traceback.print_exc ()
+    raise ImportError,  'libldtpcodegen not found'
+
+ldtplib.libldtpcodegen.calledFromGui = True
+
+def getSourceView (sourceType):
+    sourceManager = gtksourceview.SourceLanguagesManager ()
+    sourceLang = sourceManager.get_language_from_mime_type (sourceType)
+    buf = gtksourceview.SourceBuffer ()
+    sourceView = gtksourceview.SourceView (buf)
+    buf.set_language (sourceLang)
+    buf.set_highlight (True)
+    return sourceView
+
+class LdtpEditorGui (gnome.Program):
+    def __init__ (self):
+        """
+        In this init we are going to display the main
+        serverinfo window
+        """
+        gnome.Program.__init__ (self)
+        ldtpEditorApp = gnome.program_init ('LDTP Editor', '1.0.0')
+        gladeFileName = "ldtpeditor.glade"
+        gladeFilePath = './' + gladeFileName
+        if os.path.exists (gladeFileName):
+            gladeFilePath = sys.path [0] + '/' + gladeFileName
+        else:
+            gladeFilePath = '/usr/share/ldtp/glade/' + gladeFileName
+            if os.path.exists (gladeFilePath) is False:
+                gladeFilePath = '/usr/share/local/ldtp/glade/' + gladeFileName
+        self.wTree = gtk.glade.XML (gladeFilePath)
+
+        # we only have two callbacks to register, but
+        # you could register any number, or use a
+        # special class that automatically
+        # registers all callbacks. If you wanted to pass
+        # an argument, you would use a tuple like this:
+        # dic = { "on button1_clicked" : (self.button1_clicked, arg1,arg2) , ...
+    
+        dic = { "on_quit_activate" : self.quittingApplication,
+                "on_ldtpeditor_destroy_event" : self.quittingApplication,
+                "on_preference_clicked" : self.preferenceClicked,
+                "on_about_clicked" : self.aboutClicked,
+                "on_convert_clicked" : self.convert_clicked,
+                "on_save_clicked" : self.save_clicked,
+                "on_startstop_clicked" : self.record_clicked , 
+                "on_play_clicked" : self.play_clicked, 
+                "on_txtRecordedCode_copy_clipboard" : self.on_txtRecordedCode_copy_clipboard, 
+                "on_txtRecordedCode_cut_clipboard" : self.on_txtRecordedCode_cut_clipboard, 
+                "on_txtRecordedCode_paste_clipboard" : self.on_txtRecordedCode_paste_clipboard}
+        self.wTree.signal_autoconnect (dic)
+        self.txtGeneratedCode = self.wTree.get_widget ("txtGeneratedCode")
+        self.txtGeneratedCode.set_editable (False)
+        self.txtGeneratedXml = self.wTree.get_widget ("txtGeneratedXml")
+        self.txtGeneratedXml.set_editable (False)
+        self.wTree.get_widget ("chkListenKeyEvents").set_active (True)
+        self.wTree.get_widget ("chkListenMouseEvents").set_active (True)
+        self.wTree.get_widget ("chkGenerateLdtpCode").set_active (True)
+        self.chkGenerateDataXml   = False
+        self.recording = False
+        self.fileName = None
+        self.btnRecord = self.wTree.get_widget ("btnStartStop")
+        self.btnRecord.set_label ('Start')
+        self.btnPlay = self.wTree.get_widget ("btnPlay")
+        self.btnPlay.set_sensitive (False)
+        self.btnSave = self.wTree.get_widget ("btnSave")
+        self.btnSave.set_sensitive (False)
+        self.btnConvert = self.wTree.get_widget ("btnConvert")
+        self.btnConvert.set_sensitive (False)
+        self.txtRecordedCode = self.wTree.get_widget ("txtRecordedCode")
+        self.txtRecordedCode.set_editable (False)
+#        clipboard = self.txtRecordedCode.get_clipboard (gtk.gdk.SELECTION_CLIPBOARD)
+#        print dir (clipboard)
+#        print dir (self.txtRecordedCode)
+#        clipboard.cut_clipboard ()
+#        clipboard.copy_clipboard ()
+#        clipboard.paste_clipboard ()
+        if isGtkSourceView:
+            parent = self.txtRecordedCode.get_parent ()
+            parent.remove (self.txtRecordedCode)
+            txtView = getSourceView ('text/x-python')
+            parent.add (txtView)
+            txtView.show ()
+            self.txtRecordedCode = txtView
+            parent = self.txtGeneratedCode.get_parent ()
+            parent.remove (self.txtGeneratedCode)
+            txtCodeView = getSourceView ('text/x-python')
+            parent.add (txtCodeView)
+            txtCodeView.show ()
+            self.txtGeneratedCode = txtCodeView
+            parent = self.txtGeneratedXml.get_parent ()
+            parent.remove (self.txtGeneratedXml)
+            txtXmlView = getSourceView ('text/xml')
+            parent.add (txtXmlView)
+            txtXmlView.show ()
+            self.txtGeneratedXml = txtXmlView
+        self.recordedCodeView = self.txtRecordedCode.get_buffer ()
+        self.recordedCodeView.set_text ('')
+        self.generatedCodeView = self.txtGeneratedCode.get_buffer ()
+        self.generatedCodeView.set_text ('')
+        self.generatedXmlView = self.txtGeneratedXml.get_buffer ()
+        self.generatedXmlView.set_text ('')
+        self.recordedCode = ''
+        self.txtPlayOutput = self.wTree.get_widget ("txtPlayOutput")
+        self.txtPlayOutput.set_editable (False)
+        self.txtPlayOutputView = self.txtPlayOutput.get_buffer ()
+
+    ##### CALLBACKS
+
+    def quittingApplication (self, widget):
+        ldtplib.libldtpcodegen.stop ()
+        gtk.main_quit (self, widget)
+
+    def on_txtRecordedCode_cut_clipboard (self, widget):
+        clipboard = widget.get_clipboard (gtk.gdk.SELECTION_CLIPBOARD)
+        print 'cut_clipboard',  dir (clipboard)
+
+    def on_txtRecordedCode_copy_clipboard (self, widget):
+        clipboard = widget.get_clipboard (gtk.gdk.SELECTION_CLIPBOARD)
+        print 'copy_clipboard',  dir (clipboard)
+
+    def on_txtRecordedCode_paste_clipboard (self, widget):
+        clipboard = widget.get_clipboard (gtk.gdk.SELECTION_CLIPBOARD)
+        print 'paste_clipboard',  dir (clipboard)
+        self.txtRecordedCode.paste_clipbaord (clipboard)
+
+    def record_clicked (self, widget):
+        count = 0
+        if self.recording == False:
+            self.fileName = None
+            self.recording = True
+            self.btnRecord.set_label ('Stop')
+            self.recordedCodeView.set_text ('')
+            self.generatedCodeView.set_text ('')
+            self.generatedXmlView.set_text ('')
+            global app
+            ldtplib.libldtpcodegen.start (app.callbackFunc)
+            #thread.start_new_thread (ldtplib.libldtpcodegen.start, (app.callbackFunc,))
+
+            #if self.recordedCodeView.get_char_count() == 0:
+            #      self.recordedCodeView.set_text ('from ldtp import *\n\n')
+        else:
+            ldtplib.libldtpcodegen.stop ()
+            self.recording = False
+            self.btnRecord.set_label ('Start')
+            count = self.recordedCodeView.get_char_count ()
+        if count:
+            self.txtGeneratedCode.set_editable (True)
+            self.txtGeneratedXml.set_editable (True)
+            self.txtRecordedCode.set_editable (True)
+            self.txtRecordedCode.set_cursor_visible (True)
+            self.btnPlay.set_sensitive (True)
+            self.btnSave.set_sensitive (True)
+            self.btnConvert.set_sensitive (True)
+
+    def play_clicked (self, widget):
+        start,  end = self.generatedCodeView.get_bounds ()
+        generatedCode = ''
+        if end == start:
+            start, end = self.recordedCodeView.get_bounds ()
+            generatedCode = self.recordedCodeView.get_text (start, end)
+        else:
+            generatedCode = self.generatedCodeView.get_text (start, end)
+    
+        global app
+        thread.start_new_thread (app.playback, (generatedCode, ))
+        
+    def save_clicked (self, widget):
+        if self.fileName is None:
+            self.save_as ()
+        else:
+            self.save_file ()
+        
+    def save_file (self):
+        start,  end = self.generatedCodeView.get_bounds ()
+        txt2Copy = ''
+        if end == start:
+            start, end = self.recordedCodeView.get_bounds ()
+            txt2Copy = self.recordedCodeView.get_text (start, end)
+        else:
+            txt2Copy = self.generatedCodeView.get_text (start, end)
+        error_dialog = None
+
+        try:
+            file (self.fileName, "w"). write (txt2Copy)
+        except IOError, ex:
+            error_dialog = gtk.MessageDialog (self.wTree,
+                                             gtk.DIALOG_DESTROY_WITH_PARENT,
+                                             gtk.MESSAGE_ERROR,
+                                             gtk.BUTTONS_CLOSE,
+                                             "Error saving to file %s:\n%s" %
+                                             (open_filename,
+                                              str(ex)))
+            error_dialog.connect ("response", gtk.Widget.destroy)
+            error_dialog.show ()
+
+    def save_as (self):
+        dialog = gtk.FileChooserDialog ("Select file",
+                                        self.wTree.get_widget ('LDTPEditor'),
+                                        gtk.FILE_CHOOSER_CONFIRMATION_ACCEPT_FILENAME,
+                                        (gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL,
+                                        gtk.STOCK_SAVE, gtk.RESPONSE_OK))
+        dialog.set_default_response (gtk.RESPONSE_OK)
+        response = dialog.run ()
+
+        if response == gtk.RESPONSE_OK:
+            self.fileName = dialog.get_filename ()
+            self.save_file ()
+  
+        dialog.destroy()
+
+    def preferenceClicked (self, widget):
+        self.dlgPreferences = self.wTree.get_widget ("dlgPreferences")
+        response = self.dlgPreferences.run ()
+        if response == gtk.RESPONSE_OK:
+            self.chkListenKeyEvents   = self.wTree.get_widget ("chkListenKeyEvents").get_active ()
+            self.chkListenMouseEvents = self.wTree.get_widget ("chkListenMouseEvents").get_active ()
+        self.dlgPreferences.hide ()
+
+    def aboutClicked (self, widget):
+        self.dlgAbout = self.wTree.get_widget ("dlgAbout")
+        response = self.dlgAbout.run ()
+        if response == gtk.RESPONSE_OK:
+            pass
+        self.dlgAbout.hide ()
+
+    def convert_clicked (self, widget):
+        start, end = self.recordedCodeView.get_bounds ()
+        self.recordedCode = self.recordedCodeView.get_text (start, end, False)
+        if self.recordedCode != '':
+            self.chkGenerateLdtpCode  = self.wTree.get_widget ("chkGenerateLdtpCode").get_active ()
+            self.chkGenerateDataXml   = self.wTree.get_widget ("chkGenerateDataXml").get_active ()
+            self.chkGenerateKeyEvents = self.wTree.get_widget ("chkGenerateKeyEvents").get_active ()
+            self.chkGenerateWaitTime  = self.wTree.get_widget ("chkGenerateWaitTime").get_active ()
+            self.chkGenerateMemCpuStat = self.wTree.get_widget ("chkGenerateMemCpuStat").get_active ()
+            if self.chkGenerateLdtpCode == True:
+                xml = ''
+                lines = 'from ldtp import *\nfrom ldtputils import *\n\n'
+                if self.chkGenerateDataXml == True:
+                    lines += 'xmlParser = LdtpDataFileParser (datafilename)\n\n'
+                    xml += '<data>\n'
+                if self.chkGenerateMemCpuStat == True:
+                    lines += 'xstats = None\n'
+                lines += 'try:\n'
+                if self.chkGenerateMemCpuStat == True:
+                    lines += '\txstats = pstats (\"<INCLUDE YOUR APPLICATION NAME>\", 2)\n\txstats.start ()\n'
+                #lines += '\tlog (\"test script\", \"teststart\")\n\n'
+                _lastWaitTillGuiExist = []
+                _cmdRepeated = []
+                for line in self.recordedCode.split ('\n'):
+                    cmd = re.split ('\(',  line,  1)
+                    if cmd != None:
+                        if _cmdRepeated == []:
+                            _cmdRepeated  = cmd
+                        elif len (cmd) == 2 and len (_cmdRepeated) == 2 and \
+                            _cmdRepeated [0] == cmd [0] and _cmdRepeated [1] == cmd [1]:
+                            continue
+                        else:
+                            _cmdRepeated = cmd
+                    if len (cmd) < 2:
+                        continue
+                    if self.chkGenerateKeyEvents== False:
+                        if cmd != None and re.search ('enterstring',  cmd [0]) != None:
+                            continue
+                    if self.chkGenerateWaitTime== False:
+                        if cmd != None:
+                            match = re.match ('wait',  cmd [0])
+                            if match != None and len (cmd [0]) <= 5:
+                                continue
+                    if cmd != None and re.search ('waittillguiexist',  cmd [0]) != None:
+                        if _lastWaitTillGuiExist != [] and _lastWaitTillGuiExist [1] != cmd [1]:
+                            lines += '\t' + _lastWaitTillGuiExist [0] + '(' + _lastWaitTillGuiExist [1] + '\n'
+                        _lastWaitTillGuiExist = cmd
+                        continue
+                    if cmd != None and re.search ('waittillguinotexist',  cmd [0]) != None:
+                        if _lastWaitTillGuiExist != [] and _lastWaitTillGuiExist [1] == cmd [1]:
+                            _lastWaitTillGuiExist = []
+                            continue
+                    if _lastWaitTillGuiExist != []:
+                        lines += '\t' + _lastWaitTillGuiExist [0] + '(' + _lastWaitTillGuiExist [1] + '\n'
+                    _lastWaitTillGuiExist = []
+                    if self.chkGenerateDataXml == True:
+                        code= re.split (',', line, 2)
+                        if len (code) > 2:
+                            component = code [1][re.search ('\w+', code [1]).start () : len (code [1]) - 1]
+                            data = code [2][re.search ('\w+', code [2]).start () : len (code [2]) - 2]
+                            lines += '\t' + component + ' = xmlParser.gettagvalue (\"' + component + '\")\n'
+                            lines += '\t' + code [0] + ', \"' + component + '\", ' + component + ' [0])\n'
+                            xml += '<' + component + '>' + data  + '</' + component + '>\n'
+                            continue
+                    lines += '\t' + line + '\n'
+                #lines += '\n\tlog (\"test script\", \"pass\")\n'
+                #lines += '\tlog (\"test script\", \"testend\")\n'
+                lines += 'except LdtpExecutionError, msg:\n'
+                if self.chkGenerateMemCpuStat == True:
+                    lines += '\tif xstats is not None:\n\t\txstats.stop ()\n'
+                #lines += '\tlog (str (msg), \"cause\")\n'
+                #lines += '\tlog (\"test script\", \"fail\")\n'
+                #lines += '\tlog (\"test script\", \"testend\")\n'
+                lines += '\traise\n'
+                self.generatedCodeView.set_text (lines.encode ('utf-8'))
+                if self.chkGenerateDataXml == True:
+                    xml += '</data>\n'
+                    self.generatedXmlView.set_text (xml.encode ('utf-8'))
+
+    def callbackFunc (self, recordedData):
+        if self.recording == True:
+            self.recordedCodeView.insert (self.recordedCodeView.get_end_iter (), recordedData)
+        
+    def playback (self, generatedLDTPScript):
+        try:
+            if generatedLDTPScript == None or generatedLDTPScript == '':
+                raise LdtpExecutionError ('No code to replay')
+            exec (generatedLDTPScript)
+            self.txtPlayOutputView.set_text ('Success\n')
+        except:
+            self.txtPlayOutputView.set_text ('Failure\n\n' + str (traceback.print_exc ()))
+
+try:
+    # we start the app like this...
+    app = LdtpEditorGui ()
+except RuntimeError:
+    print 'Glade file not found'
+    sys.exit (0)
+
+try:
+    import gobject
+    gobject.threads_init ()
+    gtk.gdk.threads_enter ()
+    gtk.main ()
+    gtk.gdk.threads_leave ()
+except KeyboardInterrupt:
+    pass
