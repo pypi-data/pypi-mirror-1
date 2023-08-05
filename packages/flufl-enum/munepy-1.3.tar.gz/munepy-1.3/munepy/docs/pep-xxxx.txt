@@ -1,0 +1,379 @@
+PEP: XXXX
+Title: Enumerations in Python (an Alternative)
+Version: $Revision$
+Last-Modified: $Date$
+Author: Barry A. Warsaw <barry@python.org>
+Status: Draft
+Type: Standards Track
+Content-Type: text/x-rst
+Created: 30-Apr-2007
+Python-Version: 2.6
+Post-History:
+
+Abstract
+========
+
+This PEP specifies an enumeration data type for Python.  It is similar in
+intent to PEP 354 [#PEP354]_ which also specifies an enumeration data type,
+but this PEP proposes an alternative syntax and semantics.  This PEP accepts
+and acknowledges much of the motivation of that earlier PEP.
+
+An enumeration is a set of symbolic names bound to unique, constant
+integer values.  Within an enumeration, the values can be compared by
+identity, and the enumeration itself can be iterated over.
+Enumeration items can be converted to and from their integer
+equivalents; this useful for applications such as storing enumeration
+values in a database.
+
+The code in this PEP is described as coming from the munepy
+[#MUNEPY-PACKAGE]_ however, this is simply a convenient packaging
+detail.  PEP 354's sample implementation has already claimed the
+``enum`` package name, though it is expect that if ``munepy`` is
+accepted into the standard library, it will be renamed to ``enum``.
+
+
+Motivation
+==========
+
+[Lifted from PEP 354]
+
+The properties of an enumeration are useful for defining an immutable,
+related set of constant values that have a defined sequence but no
+inherent semantic meaning.  Classic examples are days of the week
+(Sunday through Saturday) and school assessment grades ('A' through
+'D', and 'F').  Other examples include error status values and states
+within a defined process.
+
+It is possible to simply define a sequence of values of some other
+basic type, such as ``int`` or ``str``, to represent discrete
+arbitrary values.  However, an enumeration ensures that such values
+are distinct from any others, and that operations without meaning
+("Wednesday times two") are not defined for these values.
+
+
+Specification
+=============
+
+Enumerations are created using the class syntax, which makes them easy to read
+and write.  Every enumeration value must have a unique integer value and the
+only restriction on their names is that they must be valid Python identifiers.
+To define an enum, derive from the Enum class.
+
+    >>> from munepy import Enum
+    >>> class Colors(Enum):
+    ...     red = 1
+    ...     green = 2
+    ...     blue = 3
+
+The way to test against enumeration values is comparison by identity.
+
+    >>> Colors.red is Colors.red
+    True
+    >>> Colors.blue is Colors.blue
+    True
+    >>> Colors.red is not Colors.blue
+    True
+    >>> Colors.blue is Colors.red
+    False
+
+The string representation of an enum has a nice, human readable format...
+
+    >>> print Colors.red
+    Colors.red
+
+...while the repr has more information
+
+    >>> print repr(Colors.red)
+    <EnumValue: Colors.red [int=1]>
+
+You can also print the members of the enumeration:
+
+    >>> print Colors.__members__
+    ['red', 'green', 'blue']
+
+Let's say you wanted to encode an enum value in a database.  You might want to
+get the enum class object from an enum value.
+
+    >>> cls = Colors.red.enumclass
+    >>> '%s.%s' % (cls.__module__, cls.__name__)
+    '__builtin__.Colors'
+
+Enums also have a property that contains just their item name.
+
+    >>> Colors.red.enumname
+    'red'
+    >>> Colors.green.enumname
+    'green'
+    >>> Colors.blue.enumname
+    'blue'
+
+The str and repr of the enumeration class also provides useful information.
+
+    >>> print Colors
+    <Colors {red: 1, green: 2, blue: 3}>
+    >>> print repr(Colors)
+    <Colors {red: 1, green: 2, blue: 3}>
+
+You can extend previously defined enums by subclassing.
+
+    >>> class MoreColors(Colors):
+    ...     pink = 4
+    ...     cyan = 5
+
+When extended in this way, the base enum's values are identical to the same
+named values in the derived class.
+
+    >>> Colors.red is MoreColors.red
+    True
+    >>> Colors.blue is MoreColors.blue
+    True
+
+However, these are not doing comparisons against the integer equivalent
+values, because if you define an enum with similar item names and integer
+values, they will not be identical.
+
+    >>> class OtherColors(Enum):
+    ...     red = 1
+    ...     blue = 2
+    ...     yellow = 3
+
+    >>> Colors.red is OtherColors.red
+    False
+    >>> Colors.blue is not OtherColors.blue
+    True
+
+Ordered comparisons between enum values are *not* supported.  Enums are not
+integers!
+
+    >>> Colors.red < Colors.blue
+    Traceback (most recent call last):
+    ...
+    NotImplementedError
+    >>> Colors.red <= Colors.blue
+    Traceback (most recent call last):
+    ...
+    NotImplementedError
+    >>> Colors.blue == Colors.blue
+    True
+    >>> Colors.green != Colors.blue
+    True
+    >>> Colors.blue > Colors.green
+    Traceback (most recent call last):
+    ...
+    NotImplementedError
+    >>> Colors.blue >= Colors.green
+    Traceback (most recent call last):
+    ...
+    NotImplementedError
+
+You also cannot compare enum values directly against their integer
+equivalents.
+
+    >>> Colors.red < 3
+    Traceback (most recent call last):
+    ...
+    NotImplementedError
+    >>> Colors.red <= 3
+    Traceback (most recent call last):
+    ...
+    NotImplementedError
+    >>> Colors.blue == 3
+    False
+    >>> Colors.green != 3
+    True
+    >>> Colors.blue > 2
+    Traceback (most recent call last):
+    ...
+    NotImplementedError
+    >>> Colors.blue >= 2
+    Traceback (most recent call last):
+    ...
+    NotImplementedError
+
+If you really want the integer equivalent values, you can convert enum values
+explicitly using the ``int()`` built-in.  This is quite convenient for storing
+enums in databases for example.
+
+    >>> int(Colors.red)
+    1
+    >>> int(Colors.green)
+    2
+    >>> int(Colors.blue)
+    3
+
+You can also convert back to the enum value by calling the Enum class,
+passing in the integer value for the item you want.
+
+    >>> Colors(1)
+    <EnumValue: Colors.red [int=1]>
+    >>> Colors(2)
+    <EnumValue: Colors.green [int=2]>
+    >>> Colors(3)
+    <EnumValue: Colors.blue [int=3]>
+    >>> Colors(1) is Colors.red
+    True
+
+The enum class also accepts the string name of the enum value.
+
+    >>> Colors('red')
+    <EnumValue: Colors.red [int=1]>
+    >>> Colors('blue') is Colors.blue
+    True
+
+You get exceptions though, if you try to use invalid arguments.
+
+    >>> Colors('magenta')
+    Traceback (most recent call last):
+    ...
+    ValueError: magenta
+    >>> Colors(99)
+    Traceback (most recent call last):
+    ...
+    ValueError: 99
+
+The Enum base class also supports getitem syntax, exactly equivalent to the
+class's call semantics.
+
+    >>> Colors[1]
+    <EnumValue: Colors.red [int=1]>
+    >>> Colors[2]
+    <EnumValue: Colors.green [int=2]>
+    >>> Colors[3]
+    <EnumValue: Colors.blue [int=3]>
+    >>> Colors[1] is Colors.red
+    True
+    >>> Colors['red']
+    <EnumValue: Colors.red [int=1]>
+    >>> Colors['blue'] is Colors.blue
+    True
+    >>> Colors['magenta']
+    Traceback (most recent call last):
+    ...
+    ValueError: magenta
+    >>> Colors[99]
+    Traceback (most recent call last):
+    ...
+    ValueError: 99
+
+The integer equivalent values serve another purpose.  You may not define two
+enum values with the same integer value.
+
+    >>> class Bad(Enum):
+    ...     cartman = 1
+    ...     stan = 2
+    ...     kyle = 3
+    ...     kenny = 3 # Oops!
+    ...     butters = 4
+    Traceback (most recent call last):
+    ...
+    TypeError: Multiple enum values: 3
+
+You also may not duplicate values in derived enums.
+
+    >>> class BadColors(Colors):
+    ...     yellow = 4
+    ...     chartreuse = 2 # Oops!
+    Traceback (most recent call last):
+    ...
+    TypeError: Multiple enum values: 2
+
+Enums support iteration.  Enum values are returned in the sorted order of
+their integer equivalent values.
+
+    >>> [v.enumname for v in MoreColors]
+    ['red', 'green', 'blue', 'pink', 'cyan']
+
+    >>> [int(v) for v in MoreColors]
+    [1, 2, 3, 4, 5]
+
+Enum values are hashable, so they can be used in dictionaries and sets.
+
+    >>> apples = {}
+    >>> apples[Colors.red] = 'red delicious'
+    >>> apples[Colors.green] = 'granny smith'
+    >>> [(c.enumname, apples[c]) for c in sorted(apples, key=int)]
+    [('red', 'red delicious'), ('green', 'granny smith')]
+
+
+Differences with PEP 354
+========================
+
+Unlike PEP 354, enumeration values are not defined as a sequence of strings,
+but as attributes of a class.  This design was chosen because it was felt that
+class syntax is more readable.
+
+Unlike PEP 354, enumeration values require an explicit integer value.  This
+difference recognizes that enumerations often represent real-world values, or
+must interoperate with external real-world systems.  For example, to store an
+enumeration in a database, it is better to convert it to an integer on the way
+in and back to an enumeration on the way out.  Providing an integer value also
+provides an explicit ordering.  However, there is no automatic conversion to
+and from the integer values, because explicit is better than implicit.
+
+Unlike PEP 354, this implementation does use a metaclass to define the
+enumeration's syntax, and allows for extended base-enumerations so that the
+common values in derived classes are identical (a singleton model).  While PEP
+354 dismisses this approach for its complexity, in practice any perceived
+complexity, though minimal, is hidden from users of the enumeration.
+
+Unlike PEP 354, enumeration values can only be tested by identity comparison.
+This is to emphasis the fact that enumeration values are singletons, much like
+None.
+
+
+Implementation
+==============
+
+Because PEP 354 was here first and claimed the package name ``enum``
+[#ENUM-PACKAGE]_, an alternative name for this alternative enum
+package was chosen.  The package name for this implementation of
+enumerations is ``munepy``.
+
+Development of this package is coordinated on Launchpad [#LAUNCHPAD]_.
+
+
+Acknowledgments
+===============
+
+The ``munepy`` implementation is based on an example by Jeremy Hylton.
+It has been modified and extended by Barry Warsaw for use in the GNU
+Mailman project.  Ben Finney is the author of the earlier enumeration
+PEP 354.
+
+
+References and Footnotes
+========================
+
+.. [#PEP354]
+   Enumerations in Python
+   <http://www.python.org/dev/peps/pep-0354/>
+
+.. [#MUNEPY-PACKAGE]
+   ``munepy`` -- yet another Python enum
+   <http://www.python.org/pypi/munepy>
+
+.. [#ENUM-PACKAGE]
+   Python Package Index, package ``enum``
+   <http://cheeseshop.python.org/pypi/enum/>
+
+.. [#LAUNCHPAD]
+   Launchpad project for ``munepy`` development
+   <http://launchpad.net/munepy>
+
+
+Copyright
+=========
+
+This document has been placed in the public domain.  The ``munepy``
+package source code is Copyright (C) 2004-2007 Barry A. Warsaw and is
+available under terms of the GNU Lesser General Public License.
+
+
+
+..
+   Local Variables:
+   mode: indented-text
+   indent-tabs-mode: nil
+   sentence-end-double-space: t
+   fill-column: 70
+   End:
