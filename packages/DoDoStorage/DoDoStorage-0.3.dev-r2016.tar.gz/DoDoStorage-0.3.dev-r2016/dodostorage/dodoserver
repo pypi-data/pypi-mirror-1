@@ -1,0 +1,392 @@
+#!/usr/bin/env python
+# encoding: utf-8
+"""
+RESTful Interface to DoDoStorage.
+
+
+/document/<dockey>/ represents document resources. When issuing a GET request you can retrive a document:
+
+GET /document/ed3c06186a135cbc53d71c42c40c68db2f5b053e/ HTTP/1.0
+
+HTTP/1.1 200 OK
+Date: Sun, 17 Jun 2007 05:04:48 GMT
+Content-Type: text/plain
+
+same testdata, same document
+
+
+To store Documents in DoDoStorage, POST them to /documents/ You must include a "Content-MD5" and a 
+"Content-Type" header:
+
+POST /document/ HTTP/1.0
+Content-MD5:
+Content-Type: text/plain
+
+same testdata, same document
+
+201 Created
+TODO: fully document
+
+You can get a list of recently changed documents by issuing a GET to /documents/. The information is ATOM 1.0
+encoded and attribute information is encoded as XHTML. There for you can nicely use this interface in
+ATOM-Enabled "Newsaggregator" Software, e.g. in Firefox.
+
+GET /documents/ HTTP/1.0
+
+HTTP/1.1 200 OK
+Date: Sun, 17 Jun 2007 05:04:48 GMT
+Content-Type: application/atom+xml
+Content-Length: 4298
+
+<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>DoDoStore</title>
+  <id>tag:id.23.nu,2007-05-01:/tauzero/127.0.0.1-8000/documents/</id>
+  <author><name>HUODORA DoDoStore</name></author>
+  <link href="http://127.0.0.1:8000/documents/" rel="self"/>
+  <entry>
+    <title>Document 7 (2007-06-17)</title>
+    <id>tag:id.23.nu,2007-05-01:/c3fce788158f0f0f4b365b98f5abd0ec/</id>
+    <updated>2007-06-17T05:52:16Z</updated>
+    <published>2007-06-17T05:52:16Z</published>
+    <link href="http://127.0.0.1:8000/document/c3fce788158f0f0f4b365b98f5abd0ec/"/>
+    <content type="xhtml">
+      <div xmlns="http://www.w3.org/1999/xhtml">
+        <span class="acontainer someattr">
+          <span class="adescription someattr">Someattr: </span>
+          <a class="alink someattr" href="http://127.0.0.1:8000/documents/search/someattr/bar/">bar</a>
+        </span>
+        <span class="acontainer otherattr">, 
+          <span class="adescription otherattr">Otherattr: </span>
+          <a class="alink otherattr"
+             href="http://127.0.0.1:8000/documents/search/otherattr/1182059536.47/">1182059536.47</a>
+        </span>
+      </div>
+    </content>
+  </entry>
+  <entry>
+    <title>Document 6 (2007-06-17)</title>
+    <id>tag:id.23.nu,2007-05-01:/tauzero/dc8e801aad938b542e45142bdb66c454/</id>
+    <updated>2007-06-17T05:52:16Z</updated>
+    <published>2007-06-17T05:52:16Z</published>
+    <link href="http://127.0.0.1:8000/document/dc8e801aad938b542e45142bdb66c454/"/>
+    <content type="xhtml">
+      <div xmlns="http://www.w3.org/1999/xhtml"/>
+    </content>
+  </entry>
+  [...]
+  <updated>2007-06-17T05:52:16Z</updated>
+</feed>
+
+
+You can search for certain attributes by issuing a request to /documents/search/<someattr>/<someval>/
+
+GET /documents/search/someattr/bar/ HTTP/1.0
+
+HTTP/1.0 200 OK
+Date: Sun, 17 Jun 2007 08:03:51 GMT
+Server: WSGIServer/0.1 Python/2.5.1
+Content-Type: application/atom+xml
+Content-Length: 2820
+
+<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>DoDoStore</title>
+  <id>tag:id.23.nu,2007-05-01:/tauzero/http-//127.0.0.1-8000/documents/search/someattr/bar/</id>
+  <author><name>HUODORA DoDoStore</name></author>
+  <link href="http://127.0.0.1:8000/documents/search/someattr/bar/" rel="self"/>
+  <entry>
+    <title>Document 3 (2007-06-17)</title>
+    <id>tag:id.23.nu,2007-05-01:/tauzero/127.0.0.1-8000/document/bfc36a4c9d6583aa161dfca273fa5f0d/</id>
+    <updated>2007-06-17T05:51:14Z</updated>
+    <published>2007-06-17T05:51:14Z</published>
+    <link href="http://127.0.0.1:8000/document/bfc36a4c9d6583aa161dfca273fa5f0d/"/>
+    <content type="xhtml">
+      <div xmlns="http://www.w3.org/1999/xhtml">
+        <span class="acontainer someattr">
+          <span class="adescription someattr">Someattr: </span>
+          <a class="alink someattr" href="http://127.0.0.1:8000/documents/search/someattr/bar/">bar</a>
+        </span>
+        <span class="acontainer otherattr">,
+          <span class="adescription otherattr">Otherattr: </span>
+          <a class="alink otherattr"
+             href="http://127.0.0.1:8000/documents/search/otherattr/1182059474.9/">1182059474.9</a>
+        </span>
+      </div>
+    </content>
+  </entry>
+  [...]
+  <updated>2007-06-17T05:52:16Z</updated>
+</feed>
+
+GET  /document/ed3c06186a135cbc53d71c42c40c68db2f5b053e/
+POST /documents/
+GET  /documents/
+GET  /documents/search/someattr/bar/
+
+
+Created by Maximillian Dornseif on 2007-06-13.
+Copyright (c) 2007 HUDORA GmbH. Published under a 'BSD License'.
+"""
+
+from pkg_resources import require
+require("huTools>=0.2.1.dev_r2005")
+
+import datetime, re, time, md5, email.utils, optparse, socket, cgi
+import xml.etree.cElementTree as ET
+from urlparse import urlparse
+from StringIO import StringIO
+from wsgiref.simple_server import make_server
+import simplejson, selector
+from huTools.calendar.formats import rfc3339_date, rfc2616_date, rfc2616_date_parse
+from dodostorage.backend import StorageEngine
+
+
+__revision__ = "$Revision: 1976 $"
+
+# TODO: implement service document
+# GET /servicedocument HTTP/1.1
+# Host: example.org
+# 
+# HTTP/1.1 200 OK
+# Date: ...
+# Content-Type: application/atomserv+xml; charset=utf-8
+# Content-Length: nnn
+# 
+# <service xmlns="..." xmlns:atom="http://www.w3.org/2005/Atom">
+#   <workspace>
+#     <atom:title>My Weblog</atom:title>
+#     <collection href="http://www.example.org/blog/entries">
+#       <atom:title>Entries</atom:title>
+#       <accept>entry</accept>
+#     </collection>
+#     <collection href="http://www.example.org/blog/photos">
+#       <atom:title>Photos</atom:title>
+#       <accept>image/*</accept>
+#     </collection>
+#   </workspace>
+# </service>
+
+# TODO: implement paging
+
+# TODO: implement media resources
+# <content type="image/png" 
+#    src="http://blog.example.org/photos/a_trip_to_the_beach" />
+#  <link rel="edit-media" type="image.png" 
+#    href="http://example.org/blog/photos/a_trip_to_the_beach?media" />
+#
+#
+# Category Documents are identified with the "application/atomcat+xml" media type (see Section 15).
+#     <?xml version="1.0" ?>
+#     <app:categories
+#         xmlns:app="http://purl.org/atom/app#"
+#         xmlns="http://www.w3.org/2005/Atom"
+#         fixed="yes" scheme="http://example.com/cats/big3">
+#       <category term="animal" />
+#       <category term="vegetable" />
+#       <category term="mineral" />
+#     </app:categories>
+
+
+def get_tag_uri(url):
+    "Creates a TagURI. See http://diveintomark.org/archives/2004/05/28/howto-atom-id"
+    tag = re.sub('^http://', '', url)
+    tag = 'id.23.nu,2007-05-01:/tauzero/%s' % url.replace('#', '-').replace(':', '-')
+    return 'tag:' + tag
+
+def atom_entry_from_document(root, doc):
+    """Formats a single document as a valid ATOM <entry>."""
+    entry = ET.SubElement(root, "entry")
+    ET.SubElement(entry, 'title').text = str(doc)
+    ET.SubElement(entry, "id").text = get_tag_uri(doc.link)
+    ET.SubElement(entry, 'category').set('term', str(doc.category))
+    ET.SubElement(entry, "updated").text = rfc3339_date(doc.created_at)
+    if doc.document_timestamp:
+        ET.SubElement(entry, "published").text = rfc3339_date(doc.document_timestamp)
+    lnelement = ET.SubElement(entry, "link")
+    lnelement.set('href', str(doc.link))
+    if doc.content_type:
+        lnelement.set('type', str(doc.content_type))
+    
+    content = ET.SubElement(entry, 'content')
+    content.set('type', 'xhtml')
+    xhtml = ET.SubElement(content, 'div')
+    xhtml.set('name', str(doc.key))
+    xhtml.set('xmlns', 'http://www.w3.org/1999/xhtml')
+    dlist = ET.SubElement(xhtml, 'dl')
+    dlist.set('class', 'attributes')
+    for attribute in doc.attributes:
+        dterm = ET.SubElement(dlist, 'dt')
+        dterm.set('class', '%s' % attribute.name)
+        dterm.text = str(attribute.name)
+        ddef = ET.SubElement(dlist, 'dd')
+        attrlink =  ET.SubElement(ddef, 'a')
+        attrlink.set('class', '%s' % attribute.name)
+        attrlink.set('href', str(attribute.link))
+        attrlink.text = str(attribute.value)
+    return entry
+    
+
+def feed_from_documents(doclist, link, title='DoDoStore'):
+    """Generates a valid ATOM feed from a list of documents."""
+    maxdate = datetime.datetime(2000, 1, 1)
+    feed = ET.Element("feed")
+    feed.set("xmlns", "http://www.w3.org/2005/Atom")
+    ET.SubElement(feed, "title").text = title
+    ET.SubElement(feed, "id").text = get_tag_uri(link)
+    ET.SubElement(ET.SubElement(feed, 'author'), 'name').text = 'HUODORA DoDoStore'
+    lnelement = ET.SubElement(feed, "link")
+    updatedelement = ET.SubElement(feed, "updated")
+    lnelement.set('rel', 'self')
+    lnelement.set('href', link)
+    for doc in doclist:
+        maxdate = max(maxdate, doc.created_at)
+        atom_entry_from_document(feed, doc)
+    updatedelement.text = rfc3339_date(maxdate)
+    
+    # wrap it in an ElementTree instance, and save as XML
+    tree = ET.ElementTree(feed)
+    stdout = StringIO()
+    tree.write(stdout, encoding='utf-8')
+    return stdout.getvalue()
+    
+
+def deliver_document(environ, start_response):
+    """Delivers the bytestream of a document back to the client."""
+    # TODO: add support for If-Modified-Since
+    docid = re.sub('[^a-zA-Z0-9]', '', environ['selector.vars']['key'])
+    doc = engine.get(docid)
+    etag = "%s-%s" % (doc.key, doc.id)
+    
+    incoming_etag = environ.get('HTTP_IF_NONE_MATCH', '')
+    if etag == incoming_etag:
+        start_response("304 Not Modified", [])
+        return []
+    
+    headers = []
+    if doc.content_type:
+        headers.append(('Content-Type', str(doc.content_type)))
+    else:
+        headers.append(('Content-Type', 'application/octet-stream'))
+    headers.append(('Content-MD5', str(doc.key)))
+    headers.append(('Content-Length', str(len(doc))))
+    headers.append(('Last-Modified', rfc2616_date(doc.document_timestamp)))
+    headers.append(('Etag', str(etag)))
+    start_response("200 OK", headers)
+    return doc.file
+
+
+def deliver_meta_document(environ, start_response):
+    """Delivers the Atom Document describing a Document back to the client."""
+    docid = re.sub('[^a-zA-Z0-9]', '', environ['selector.vars']['key'])
+    doc = engine.get(docid)
+    start_response("200 OK", [('Content-Type','application/atom+xml;charset=utf-8')])
+    return [feed_from_documents([doc], doc.link + 'metadata.atom', title=str(doc))]
+    
+
+def deliver_searchresults(environ, start_response):
+    """Delivers an ATOM feed representing documents where ttribute == searchterm."""
+    start_response("200 OK", [('Content-Type', 'application/atom+xml;charset=utf-8')])
+    return [feed_from_documents(engine.search_by_attributes(**{environ['selector.vars']['attribute']:
+                                                               environ['selector.vars']['searchterm']}),
+                                'http://%s%s' % (environ['HTTP_HOST'], environ['PATH_INFO']),
+                                title='Searching Attribute %s=%s' % (environ['selector.vars']['attribute'],
+                                                                     environ['selector.vars']['searchterm']))]
+    
+
+def deliver_overview(environ, start_response):
+    """Delivers the newest Documents as an aTOM feed."""
+    start_response("200 OK", [('Content-Type','application/atom+xml;charset=utf-8')])
+    # start_response("200 OK", [('Content-Type','text/html')])
+    return [feed_from_documents(engine.get_latest(), 'http://%s%s' % (environ['HTTP_HOST'],
+                                                                      environ['PATH_INFO']))]
+    
+
+def handle_upload(environ, start_response):
+    """Recives a document via POST and saves it in the document store."""
+    data = str(environ['wsgi.input'].read(int(environ['CONTENT_LENGTH'])))
+    content_type = environ['CONTENT_TYPE']
+    attributes = simplejson.loads(environ.get('HTTP_X_DE.HUDORA.DODOSTOR_ATTRIBUTES', '{}'))
+    docdate = environ.get('HTTP_X_DE.HUDORA.DODOSTOR_TIMESTAMP', None)
+    if docdate:
+        docdate = rfc2616_date_parse(docdate)
+    category = environ.get('HTTP_X_DE.HUDORA.DODOSTOR_CATEGORY', 'unknown')
+    if 'HTTP_CONTENT_MD5' in environ:
+        computed_md5 = md5.new(data).hexdigest().lower()
+        if environ['HTTP_CONTENT_MD5'].lower() != computed_md5:
+            raise RuntimeError, "wrong MD5 %s|%s" % (environ['HTTP_CONTENT_MD5'].lower(), computed_md5)
+    doc = engine.add(data, category=category, attributes=attributes, document_timestamp=docdate,
+                     content_type=content_type)
+    start_response("201 Created", [('Location', doc.link),
+                                   ('Content-Type','application/atom+xml;charset=utf-8')])
+    return [feed_from_documents([doc], doc.link + 'metadata.atom', title=str(doc))]
+    
+
+def deliver_index(environ, start_response):
+    """Show Index Page."""
+    
+    html = ['<html><head>',
+            '<link rel="alternate" type="application/atom+xml" title="Atom" href="/documents/" />',
+            '</head><body><h2>Attribute</h2><ul>\n']
+    for attribute in sorted(engine.get_attributes()):
+        html.append("""<li><form action="/redirect_to_attributefeed" method="get">%s:
+<input name="attribute" type="hidden" value="%s">
+<input name="searchterm"></form>
+</li>\n""" % (attribute, attribute))
+    html.append('</ul></body></html>\n')
+    start_response("200 OK", [('Content-Type', 'text/html;charset=utf-8')])
+    return [x.encode('utf-8') for x in html]
+
+def redirect_to_attributefeed(environ, start_response):
+    print environ
+    # This must be done to avoid a bug in cgi.FieldStorage
+    environ.setdefault('QUERY_STRING', '')
+    form = cgi.FieldStorage(environ=environ, keep_blank_values=1)
+    print form['attribute'].value, form['searchterm'].value
+    start_response("301 See %s", 
+                  [('Location', '/documents/search/%s/%s/' % (form['attribute'].value,
+                                                              form['searchterm'].value)),
+                   ('Content-Type', 'text/plain')])
+    return ['Go to %s !' % '/documents/search/%s/%s/' % (form['attribute'].value,
+                                                         form['searchterm'].value)]
+
+
+# dockey = re.sub('[^a-zA-Z0-9]', '', path_elements[2])
+
+
+parser = optparse.OptionParser(version=True)
+parser.version = "%%prog %s" % (__revision__.strip('$Revision: '),)
+parser.description = 'Server for the DoDoStorage RESTful API.'
+
+parser.set_usage('usage: %prog [options]')
+parser.add_option('--host', action='store', default=socket.gethostname(), help='IP to listen on. [%default]')
+parser.add_option('--port', action='store', type='int', default=8000, help='Port to listen on. [%default]')
+parser.add_option('--poolbase', action='store', default='./test',
+                  help='Location for storagepoos. [%default]')
+parser.add_option('--db', action='store', default='sqlite:///test.db',
+                  help='Database connection string. ' +
+                       'E.g. "postgres://user:pass@postgresql.23.nu/DoDoDtore". [%default]')
+
+options, args = parser.parse_args()
+if args:
+    parser.error("incorrect number of arguments")
+
+if __name__ == '__main__':
+    # engine = StorageEngine('postgres://tauzero:z.TBxU8t@postgresql.local.hudora.biz/tauzero')
+    engine = StorageEngine(serverurl='http://%s:%s/' % (options.host, options.port),
+                           connectionstring=options.db, poollocation=options.poolbase)
+    
+    s = selector.Selector()
+    s.add('/document/{key}/metadata.atom', GET=deliver_meta_document)
+    s.add('/document/{key}/', GET=deliver_document)
+    s.add('/documents/search/{attribute}/{searchterm}/', GET=deliver_searchresults)
+    s.add('/documents/', GET=deliver_overview, POST=handle_upload)
+    s.add('/redirect_to_attributefeed', GET=redirect_to_attributefeed)
+    s.add('/', GET=deliver_index)
+    
+    httpd = make_server(options.host, options.port, s)
+    print "Serving HTTP on %s:%s ..." % (options.host, options.port)
+    
+    # Respond to requests until process is killed
+    httpd.serve_forever()
+    
