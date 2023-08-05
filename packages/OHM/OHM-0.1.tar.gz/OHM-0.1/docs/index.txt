@@ -1,0 +1,229 @@
+The Object HTTP Mapper
+======================
+
+About & License
+---------------
+
+OHM is by Ian Bicking, and written for `The Open Planning Project
+<http://topp.openplans.org>`_.
+
+It is licensed under an `MIT-style license <license.html>`_.
+Questions can go to the `Paste mailing list
+</community/mailing-list.html>`_, and bugs can go on the `Paste Trac
+<http://trac.pythonpaste.org/>`_.
+
+This project is very young.  API changes are likely.  You might find
+the `To-Do list <todo.html>`_ interesting.  The server side of the API
+is more mature than the client side.
+
+What Is OHM?
+------------
+
+OHM is a library for serving Python objects as REST-style HTTP APIs,
+and for consuming REST-style APIs as Python objects.
+
+The basic idea is that an object exists at some base URL, which is a
+container.  (Getting the object there is outside of the scope of OHM,
+but WSGI-based dispatchers and frameworks can help you do this.)  Each
+attribute is a resource under this container.  E.g., if the object is
+at ``/article/1/``, then you might have resources like
+``/article/1/last_modified``, ``/article/1/body.html``, etc.
+
+This generally exposes every attribute as an independent resource,
+independently gettable and settable.  You can also serialize the
+entire object at once, and represent methods as POSTable objects
+(a borderline controller).
+
+
+How to use OHM
+--------------
+
+There's two parts: client and server.  These are generally symmetric,
+but use basic REST techniques and can thus connect easily to non-OHM
+sources of data, or non-OHM clients.
+
+See the `server section <server.html>`_ and the `client section
+<client.html>`_.
+
+Server
+~~~~~~
+
+You come up with your own object, typically one that is persistent.  A
+very simplistic persistence system is available on ``ohm.persist``
+(you might find ``test/test_persist.py`` helpful in understanding the
+persistence).
+
+You then define a wrapper around this object which will be the WSGI
+application.  The wrapper is a class, and instances of the wrapper are
+connected to a specific object (and serve as WSGI application wrapping
+that object).
+
+The basic pattern is::
+
+    from ohm import server
+    from formencode import validators
+
+    class MyWrapper(server.ApplicationWrapper):
+        simple_attr = server.Setter()
+        unicode_attr = server.Setter(unicode=True)
+        typed_attr = server.Setter(content_type='text/plain')
+        special_path_attr = server.Setter(uri_path='special-place.txt')
+        json_attr = server.JSONSetter()
+        int_attr = server.Setter(validator=validators.AsInt())
+
+Each attribute in the class is an attribute of the underlying object
+that is exposed.  In this case the object is assumed to have the
+attributes ``simple_attr``, ``unicode_attr``, etc.  By default the
+values are exposed at paths like ``/simple_attr``, etc. -- the
+exception in this example is ``special_path_attr`` which is exposed at
+``/special-place.txt``.
+
+If you don't give any other information, each is exposed as an 8-bit
+``str`` object.  With ``unicode=True`` they are exposed as encoded
+objects (with ``charset=utf8``).  The library is picky about unicode
+-- you can't put ``unicode`` objects in ``str`` attributes (even
+ASCII-safe unicode objects) and vice versa.
+
+You can provide a ``content_type`` -- otherwise every attribute will
+be served as ``application/octet-stream``.
+
+Any attribute can have a `FormEncode validator
+<http://formencode.org/Validator.html>`_.  These validators are
+basically two-way conversion routines.  In the example
+``validators.AsInt()`` turns strings into ints, and ints into strings.
+``JSONSetter()`` is a subclass of ``Setter()`` that uses the
+``ohm.validators.JSONConverter`` validator to encode and decode `JSON
+<http://www.json.org/>`_ (using `simplejson
+<http://undefined.org/python/#simplejson>`_).  Validators form the
+generic serialization support.  Notably ``JSONSetter`` also serves its
+content as ``application/json``.
+
+To use your wrapper do::
+
+    wsgi_app = MyWrapper(an_object)
+
+Now you can serve requests like ``wsgi_app(environ, start_response)``
+that will wrap the specific instance ``an_object``.
+
+A more practical example might be helpful for "why would I want to use
+this?"  Imagine you are exposing a database record (here expressed
+with `SQLObject <http://sqlobject.org>`_)::
+
+    from ohm import server
+    from sqlobject import *
+    from formencode import validators
+    from paste.urlmap import URLMap
+    from paste import httpserver
+
+    class Article(SQLObject):
+        created = DateTimeCol(default=datetime.now)
+        title = StringCol()
+        body = UnicodeCol()
+        # This creates a calculated .render attribute:
+        def _get_render(self):
+            return u'''<html><title>%(title)s</title>
+            <body><h1>%(title)s</h1>
+            <div><i>Created: %(created)s</i></div>
+            <div>%(body)s</div>
+            </body></html>''' % dict(
+                created=self.created, title=self.title,
+                body=self.body)
+
+    class ArticleApp(server.ApplicationWrapper):
+        created = server.Setter(
+            validator=validators.DateTimeConverter())
+        title = server.Setter()
+        body = server.Setter(unicode=True)
+        render = server.Setter(uri_path='article.html',
+                               content_type='text/html')        
+
+    a = Article(title='About Me', body='All about me...')
+    wsgi_app = ArticleApp(a)
+    mapper = URLMap()
+    mapper['/article/%s' % a.id] = a
+    httpserver.serve(mapper)    
+
+This will serve the ``mapper`` app on ``http://localhost:8080``, and
+say the article is the first article, id 1.  So the article has been
+mounted at ``http://localhost:8080/article/1``.  And lets say it's
+January 20, 2007.
+
+Now you can access several resources:
+
+* ``http://localhost:8080/article/1/created`` returns ``1/20/2007``.
+  you can also PUT a value there, like ``1/21/2007`` to update that
+  value.
+
+* ``http://localhost:8080/article/1/title`` returns ``About Me``.
+  Again, you can PUT a new value there to update.
+
+* ``http://localhost:8080/article/1/body`` returns ``All about me...``
+
+* ``http://localhost:8080/article/1/article.html`` returns that HTML
+  page (as rendered by ``_get_render``).  You can't PUT to this,
+  because the property itself is read-only.
+
+Client
+~~~~~~
+
+The client looks somewhat similar::
+
+    from ohm import client
+    from formencode import validators
+
+    class MyRemote(object):
+
+        def __init__(self, base_uri):
+            self.base_uri = base_uri
+
+        simple_attr = client.remote('simple_attr')
+        unicode_attr = client.remote('simple_attr', unicode=True)
+        typed_attr = client.remote('typed_attr', content_type='text/plain')
+        special_path_attr = client.remote('special-place.txt')
+        json_attr = client.json_remote('json_attr')
+        int_attr = client.remote('int_attr', validator=validators.AsInt())
+
+
+Unlike ``server.ApplicationWrapper`` ``client.remote`` does not pick
+up the attribute names automatically.  (This may be changed in the
+future, or it may not.)  ``client.remote`` requires the object it is
+attached to to have an attribute ``obj.base_uri`` (this is the
+container that holds all the sub-resources).  The attributes are
+simple `descriptors
+<http://users.rcn.com/python/download/Descriptor.htm>`_ and thus can
+be attached to any new-style class (be sure you subclass from
+``object``!)
+
+You can then use the object like::
+
+    my_remote = MyRemote('http://localhost:8080/myobj')
+    print my_remote.int_attr # etc...
+
+To extend the SQLObject example from above, here's how you might
+implement the client side of that::
+
+    from ohm import client
+    from formencode import validators
+
+    class Article(object):
+        container_uri = 'http://localhost:8080/article/%(id)s'
+        def __init__(self, base_uri):
+            self.base_uri = base_uri
+        @classmethod
+        def get(cls, id):
+            base_uri = cls.container_uri % dict(id=id)
+            return cls(base_uri)
+        created = client.remote('created', 
+                                validator=validators.DateConverter())
+        title = client.remote('title')
+        body = client.remote('body', unicode=True)
+        render = client.remote('article.html', 
+                               content_type='text/html')
+
+    a = Article.get(1)
+    print a.title
+
+This mimics the SQLObject API, but all the methods turn into HTTP
+calls, fetching the respective resources from the server.
+
+

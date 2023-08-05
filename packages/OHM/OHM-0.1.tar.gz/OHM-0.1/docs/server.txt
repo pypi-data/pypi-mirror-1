@@ -1,0 +1,209 @@
+Server
+======
+
+You come up with your own object, typically one that is persistent.  A
+very simplistic persistence system is available on ``ohm.persist``
+(you might find ``test/test_persist.py`` helpful in understanding the
+persistence, but it's incidental to the rest of this).
+
+You then define a wrapper around this object which will be the WSGI
+application.  The wrapper is a class, and instances of the wrapper are
+connected to a specific object (and serve as WSGI application wrapping
+that object).
+
+The basic pattern is::
+
+    from ohm import server
+    from formencode import validators
+
+    class MyWrapper(server.ApplicationWrapper):
+        simple_attr = server.Setter()
+        unicode_attr = server.Setter(unicode=True)
+        typed_attr = server.Setter(content_type='text/plain')
+        special_path_attr = server.Setter(uri_path='special-place.txt')
+        json_attr = server.JSONSetter()
+        int_attr = server.Setter(validator=validators.AsInt())
+
+Each attribute in the class is an attribute of the underlying object
+that is exposed.  In this case the object is assumed to have the
+attributes ``simple_attr``, ``unicode_attr``, etc.  By default the
+values are exposed at paths like ``/simple_attr``, etc. -- the
+exception in this example is ``special_path_attr`` which is exposed at
+``/special-place.txt``.
+
+If you don't give any other information, each is exposed as an 8-bit
+``str`` object.  With ``unicode=True`` they are exposed as encoded
+objects (with ``charset=utf8``).  The library is picky about unicode
+-- you can't put ``unicode`` objects in ``str`` attributes (even
+ASCII-safe unicode objects) and vice versa.
+
+You can provide a ``content_type`` -- otherwise every attribute will
+be served as ``application/octet-stream``.
+
+Any attribute can have a `FormEncode validator
+<http://formencode.org/Validator.html>`_.  These validators are
+basically two-way conversion routines.  In the example
+``validators.AsInt()`` turns strings into ints, and ints into strings.
+``JSONSetter()`` is a subclass of ``Setter()`` that uses the
+``ohm.validators.JSONConverter`` validator to encode and decode `JSON
+<http://www.json.org/>`_ (using `simplejson
+<http://undefined.org/python/#simplejson>`_).  Validators form the
+generic serialization support.  Notably ``JSONSetter`` also serves its
+content as ``application/json``.
+
+To use your wrapper do::
+
+    wsgi_app = MyWrapper(an_object)
+
+Now you can serve requests like ``wsgi_app(environ, start_response)``
+that will wrap the specific instance ``an_object``.
+
+A Better Example
+----------------
+
+A more practical example might be helpful for "why would I want to use
+this?"  Imagine you are exposing a database record (here expressed
+with `SQLObject <http://sqlobject.org>`_)::
+
+    from ohm import server
+    from sqlobject import *
+    from formencode import validators
+    from paste.urlmap import URLMap
+    from paste import httpserver
+
+    class Article(SQLObject):
+        created = DateTimeCol(default=datetime.now)
+        title = StringCol()
+        body = UnicodeCol()
+        # This creates a calculated .render attribute:
+        def _get_render(self):
+            return u'''<html><title>%(title)s</title>
+            <body><h1>%(title)s</h1>
+            <div><i>Created: %(created)s</i></div>
+            <div>%(body)s</div>
+            </body></html>''' % dict(
+                created=self.created, title=self.title,
+                body=self.body)
+
+    class ArticleApp(server.ApplicationWrapper):
+        created = server.Setter(
+            validator=validators.DateTimeConverter())
+        title = server.Setter()
+        body = server.Setter(unicode=True)
+        render = server.Setter(uri_path='article.html',
+                               content_type='text/html')        
+
+    a = Article(title='About Me', body='All about me...')
+    wsgi_app = ArticleApp(a)
+    mapper = URLMap()
+    mapper['/article/%s' % a.id] = a
+    httpserver.serve(mapper)    
+
+This will serve the ``mapper`` app on ``http://localhost:8080``, and
+say the article is the first article, id 1.  So the article has been
+mounted at ``http://localhost:8080/article/1``.  And lets say it's
+January 20, 2007.
+
+Now you can access several resources:
+
+* ``http://localhost:8080/article/1/created`` returns ``1/20/2007``.
+  you can also PUT a value there, like ``1/21/2007`` to update that
+  value.
+
+* ``http://localhost:8080/article/1/title`` returns ``About Me``.
+  Again, you can PUT a new value there to update.
+
+* ``http://localhost:8080/article/1/body`` returns ``All about me...``
+
+* ``http://localhost:8080/article/1/article.html`` returns that HTML
+  page (as rendered by ``_get_render``).  You can't PUT to this,
+  because the property itself is read-only.
+
+Getting and Updating an entire Object
+-------------------------------------
+
+What if you don't want to control attributes individually?  You won't
+get a single transaction (if there's a transaction on the backend),
+and it might feel a bit round-a-bout.
+
+Instead, lets say you want to represent the entire object as an XML
+document, and allow clients to PUT that same document to do an
+update.  What then?
+
+::
+
+    from ohm import server
+    from ohm import validators
+
+    class ArticleApp(server.ApplicationWrapper):
+        def get_state(obj):
+            return dict(created=obj.created, title=obj.title,
+                        body=obj.body)
+        def set_state(obj, value):
+            obj.created = value['created]
+            obj.title = value['title']
+            obj.body = value['body']
+        document = server.Setter(
+            uri_path='',
+            getter=get_state, setter=set_state,
+            validator=validators.XMLRPCConverter())
+
+By default ``getter`` is just ``getattr(obj, self.attr)`` and
+``setter`` is ``setattr(obj, self.attr, value)``.  In this example
+it's a function that gets and sets the entire state of the object.
+
+By putting it at ``uri_path=''`` we are making this attribute the
+index attribute -- it's what you get when you access the attribute
+directly (like at ``http://localhost:8080/article/1/``).
+
+Lastly we're using the ``XMLRPCConverter``, which uses the data
+representation of XMLRPC.  It doesn't wrap the data in the entire
+XMLRPC wrapper (which has nonsense stuff like "methods" in it), but
+just the data model which represents dicts (``<struct>``), lists
+(``<array>``), strings, ints, etc.  ``JSONConverter`` would probably
+be a better choice, as its data model is clearer and simpler.  Or you
+could provide your own serialzation routine.
+
+Supporting POST
+---------------
+
+So far we've only seen GET and PUT (and DELETE, but that's boring).
+These are very symmetric -- though some normalization might occur,
+whatever you PUT is more or less what you should GET back.
+
+POST doesn't have to fit into anything.  It doesn't really mean
+anything.  Well, it might mean "create", but OHM currently doesn't
+have any notion of creation.
+
+In OHM it basically means a function call.  You can attach these
+function calls to any attribute (they still GET and PUT like before).
+This looks like::
+
+    from ohm import server
+
+    class ArticleApp(server.ApplicationWrapper):
+        def make_now(obj, body):
+            # We ignore the body here
+            obj.created = datetime.now()
+        created = server.Setter(
+            validator=validators.DateTimeConverter(),
+            POST={'now': make_now})
+
+Now when you POST to ``http://localhost:8080/article/1/created?now``
+it will run that function.  You could also give a method name (which
+will be the name of a method on the original Article object).  It can
+return None, a text response, or ``({headers}, body)`` to be
+particularly explicit.
+
+By default both the request body and output will go through the
+validator you give.  You can also give something like ``(validator,
+make_now)`` to give a validator specific to that method.  ``None``
+will do no translation (regardless of the validator assotiated with
+the Setter).
+
+You can have multiple methods (like ``now`` in this case), which are
+controlled by the query string -- either the string should start with
+the method name, or ``command=now`` would be somewhere on the query
+string.  Use ``""`` for a method that requires no such command
+specifier (or if you give a non-dict argument to ``POST`` that'll be
+treated as the empty-command POST).
