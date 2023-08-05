@@ -1,0 +1,141 @@
+=======
+Plugins
+=======
+
+KSS is a framework which is meant to be extended. An extension is a
+simple Python package with some setuptools glue.
+
+Before any plugin can be used it must be activated. There is a
+function for this which will be shown later. We will now just query
+all activated plugins and show that it is empty.
+
+  >>> from kss.base.plugin import activated_plugins
+  >>> tuple(activated_plugins())
+  ()
+
+We will now create a sample registration. A registration consists of a
+class like you can see below.
+
+The first thing we need to do is import the `Plugin` base class. This
+contains a few methods used in registration.
+
+  >>> from kss.base.plugin import Plugin, file_below_module
+
+Now we can create our class. We will reuse the core commands in this
+example.
+
+  >>> import kss.base
+  >>> from kss.base.corecommands import KSSCoreCommands
+  >>> from kss.base.coreselectors import css
+
+  >>> class ExamplePlugin(Plugin):
+  ...     javascripts = [file_below_module(kss.base,
+  ...                                      'javascript/plugin.js')]
+  ...     extra_javascripts = []
+  ...     commandsets = {
+  ...         'example': KSSCoreCommands,
+  ...         }
+  ...     selectors = [css]
+
+As you can see from the lines above the registration has a few things
+in it. The first thing is registering the Javascripts. All items in
+the list to the `javascripts` variable should be full paths to your
+plugins Javascript. This should not list any third party Javascript
+files. For this you can use `extra_javascripts`.
+
+The `commandset` var is a dictionary containing the mapping with
+identifiers and the command set factory. When using KSS you would
+normally use this identifier for the lookup of command sets.
+
+We can also register additional selectors. 
+
+If we try the activate our plugin now it will not work.
+
+  >>> kss.base.load_plugins('kss-testing')
+  Traceback (most recent call last):
+  ...
+  KeyError: 'Plugin is not registered: kss-testing'
+
+Now that we have our registration it is time to hook it up with the
+setuptools registry.
+
+  >>> import pkg_resources
+
+  >>> class FakeEntryPoint(pkg_resources.EntryPoint):
+  ...     def load(self):
+  ...         return ExamplePlugin
+
+  >>> distribution = pkg_resources.Distribution(location='.')
+
+  >>> entry_point = FakeEntryPoint('testing', 'modname',
+  ...                              attrs=('somemethod',),
+  ...                              dist=distribution)
+
+  >>> distribution._ep_map = {'kss.plugin': {'kss-testing': entry_point}}
+
+  >>> pkg_resources.working_set.add(distribution)
+
+After this we can load our newly created plugin.
+
+  >>> kss.base.load_plugins('kss-testing')
+
+Now that we have activated our plugin it should show up as activated.
+
+  >>> tuple(activated_plugins())
+  (('kss-testing', <ExamplePlugin object at ...>),)
+
+Finally we will unregister our plugin to clean up.
+
+  >>> from kss.base.plugin import unload_plugins
+  >>> unload_plugins('kss-testing')
+
+-----------------
+Utility functions
+-----------------
+
+When you write a plugin you will need to do a few things. For some of
+these things there are helper functions available.
+
+Getting full path names for Javascripts
+---------------------------------------
+
+One of the helpers which is usefull mostly for extra Javascripts is
+`javascripts_from`. This function whill recursively generate an
+iterator of all javascripts from a certain path.
+
+  >>> from kss.base.plugin import javascripts_from, module_path
+  >>> javascripts_from(module_path(kss.base))
+  [.../kukit/kukit/serveraction.js', ...'.../kukit/kukit/dom.js'...]
+
+When we try to load from something which is not a directory we will
+get an error.
+
+  >>> import os
+  >>> javascripts_from(os.path.join(module_path(kss.base),
+  ...                               '__init__.py'))
+  Traceback (most recent call last):
+  ...
+  ValueError: Path is not a directory: .../kss/base/__init__.py
+
+
+All available plugins
+---------------------
+
+You might want to list all available plugins regardless of their
+activation state. This can be done using the `available_plugins`
+function.
+
+  >>> from kss.base.plugin import available_plugins
+
+Because we ship with the core plugin it should show up when we call
+it. Also the example plugin we make will show here.
+
+  >>> list(available_plugins())
+  [('kss-core', <kss.base.config.KSSCore ...), ('testing', <ExamplePlugin ...)]
+
+The sequence of this is based on the plugin priority. If we change the
+priority of the example plugin it will be the first one.
+
+  >>> ExamplePlugin.priority = -99999
+  >>> list(available_plugins())
+  [('testing', <ExamplePlugin ...>), ('kss-core', <kss.base.config.KSSCore ...>)]
