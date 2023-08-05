@@ -1,0 +1,333 @@
+from turbogears import config, database, controllers, testutil, startup
+from ${package} import register_controllers, model, register_model
+import cherrypy
+import urllib
+import unittest
+
+# please update these lines appropriately
+# config.update({'global':{'registration.mail.smtp_server':'smtp.example.com'}})
+# test_email = 'plewis@example.net'
+# new_email = 'pat.lewis@example.com'
+
+config.update({'global': {
+                    'visit.on':True,
+                    'visit.identity': '${identity}',
+                    'identity.on':True }
+                })
+
+RegistrationPendingUser = register_model.RegistrationPendingUser
+RegistrationUserEmailChange = register_model.RegistrationUserEmailChange
+
+class SharedMethods(object):
+    "Container for methods that can be shared in SQLAlchemy and SQLObject test cases."
+    
+    def create_pending_user_by_request(self):
+        req_str = ''.join(['/register/create?user_name=%s&email=%s&email2=%s',
+                            '&display_name=%s&password1=%s&password2=%s']) % \
+                            ('dschrute', test_email, test_email, 'Dwight+Schrute',
+                            'secret', 'secret')
+        testutil.createRequest(req_str)
+        
+    def assert_ok_response(self):
+        if cherrypy.response.status != '200 OK':
+            raise AssertionError, cherrypy.response.body[0]
+
+#if $identity=='sqlobject'
+database.set_db_uri('sqlite:///:memory:')
+
+config.update({'global': {
+                    'visit.soprovider.model':'turbogears.visit.sovisit.TG_Visit',
+                    'identity.soprovider.model.user':"${package}.model.User",
+                    'identity.soprovider.model.group':"${package}.model.Group",
+                    'identity.soprovider.model.permission':"${package}.model.Permission"
+                    }})
+
+
+
+class TestRegistrationModel(testutil.DBTest, SharedMethods):
+    model = register_controllers.register_model  # hopefully, register_model still imports model
+    
+    def setUp(self):
+        super(TestRegistrationModel, self).setUp()
+        self.create_identity_tables()
+        cherrypy.root = None
+        cherrypy.tree.mount_points = {}
+        cherrypy.tree.mount(RegTestController(), '/')
+        config.update({'global':{'registration.verified_user.groups':[],
+                                'registration.unverified_user.groups':[] }
+                        })
+        
+    def tearDown(self):
+        super(TestRegistrationModel, self).tearDown()
+        self.drop_identity_tables()
+        startup.stopTurboGears()
+        
+    def test_new_registration(self):
+        "A new pending user is created."
+        self.create_pending_user_by_request()
+        pend = RegistrationPendingUser.by_user_name('dschrute')
+        self.assert_ok_response()
+        assert(pend.email_address==test_email)
+        assert(register_model.user_class_finder.user_class.select().count()==0)
+        
+    def test_user_validation(self):
+        "A pending user is promoted to an actual user on validation."
+        self.create_pending_user()
+        assert(RegistrationPendingUser.select().count()==1)
+        req_str = '/register/validate_new_user?email=%s&key=%s' % (test_email, '0123456789')
+        testutil.createRequest(req_str)
+        self.assert_ok_response()
+        assert(RegistrationPendingUser.select().count()==0)
+        usr = register_model.user_class_finder.user_class.by_email_address(test_email)
+        assert(usr.user_name=='dschrute')
+        
+    def test_in_groups_on_validation(self):
+        "A new (validated) user is placed in the appropriate groups."
+        # create the Group 
+        model.Group(group_name='dojo_members', display_name='Members of the dojo')
+        config.update({'global':{'registration.verified_user.groups':['dojo_members']}})
+        self.create_pending_user()
+        req_str = '/register/validate_new_user?email=%s&key=%s' % (test_email, '0123456789')
+        testutil.createRequest(req_str)
+        usr = register_model.user_class_finder.user_class.by_email_address(test_email)
+        assert(len(usr.groups)==1)
+        assert(usr.groups[0].group_name=='dojo_members')
+        
+    def test_pending_user_groups(self):
+        "A unvalidated user is made a real user in the unvalidated group(s)."
+        # create the group
+        model.Group(group_name='dojo_visitors', display_name='Visitors to the dojo')
+        model.Group(group_name='dojo_members', display_name='Members of the dojo')
+        config.update({'global':{'registration.unverified_user.groups':['dojo_visitors'],
+                                    'registration.verified_user.groups':['dojo_members']}})
+        self.create_pending_user_by_request()
+        pend = RegistrationPendingUser.by_email_address(test_email)
+        # A new user should now be created, and should have the unverified groups
+        usr = register_model.user_class_finder.user_class.by_email_address(test_email)
+        assert(len(usr.groups)==1)
+        assert(usr.groups[0].group_name=='dojo_visitors')
+        # ok, now lets validate this user.
+        req_str = '/register/validate_new_user?email=%s&key=%s' % (test_email, pend.validation_key)
+        pend = None
+        testutil.createRequest(req_str)
+        usr.sync()
+        assert(RegistrationPendingUser.select().count()==0)
+        assert(len(usr.groups)==1)
+        assert(usr.groups[0].group_name=='dojo_members')
+        
+    def test_reset_password(self):
+        "A user can reset their password."
+        config.update({'global':{'registration.lost_password_policy' : 'reset'}})
+        usr = self.create_user()
+        req_str = '/register/recover_lost_password?email_or_username=%s' % test_email
+        testutil.createRequest(req_str)
+        usr.sync()
+        assert(usr.password != 'secret')
+        
+    def test_change_password(self):
+        "A logged in user can change their password."
+        usr = self.create_user()
+        params = dict(email=test_email,
+                        old_password='secret',
+                        password1='supersecret',
+                        password2='supersecret',
+                        # next three fields are to authenticate the user with identity
+                        user_name='dschrute',
+                        password='secret',
+                        login='login')
+        req_str = '/register/update_user?%s' % urllib.urlencode(params)
+        testutil.createRequest(req_str)
+        usr.sync()
+        assert(usr.password=='supersecret')
+        
+    def test_changed_email(self):
+        "A logged in user can change their email address."
+        usr = self.create_user()
+        params = dict(email=new_email,
+                        old_password='secret',
+                        password1='',
+                        password2='',
+                        user_name=usr.user_name,
+                        password=usr.password,
+                        login='login')
+        req_str = 'register/update_user?%s' % urllib.urlencode(params)
+        testutil.createRequest(req_str)
+        # email should still be unchanged at this point, but there should be an
+        # entry in the RegistrationUserEmailChange table
+        usr.sync()
+        assert(usr.email_address==test_email)
+        email_change = RegistrationUserEmailChange.by_new_email_address(new_email)
+        assert(email_change.user.user_name==usr.user_name)
+        # Ok, now the user validates his new email address
+        req_str = '/register/validate_email_change?%s' % \
+                    urllib.urlencode({'email':new_email, 'key':email_change.validation_key})
+        email_change = None
+        testutil.createRequest(req_str)
+        usr.sync()
+        assert(RegistrationUserEmailChange.select().count()==0)
+        assert(usr.email_address==new_email) 
+        
+        
+    def create_pending_user(self):
+        pend = RegistrationPendingUser(user_name='dschrute',
+                                        email_address=test_email,
+                                        display_name='Dwight Schrute',
+                                        password='secret',
+                                        validation_key='0123456789')
+        return pend
+        
+    def create_user(self):
+        usr = register_model.user_class_finder.user_class(user_name='dschrute',
+                                        email_address=test_email,
+                                        display_name='Dwight Schrute',
+                                        password='secret')
+        return usr
+        
+    def create_identity_tables(self):
+        register_model.user_class_finder.user_class.createTable(createJoinTables=False)
+        model.Permission.createTable(createJoinTables=False)
+        model.Group.createTable(createJoinTables=True)
+        model.VisitIdentity.createTable()
+        
+    def drop_identity_tables(self):
+        model.VisitIdentity.dropTable()
+        model.Group.dropTable()
+        model.Permission.dropTable()
+        register_model.user_class_finder.user_class.dropTable()
+
+#else if $identity=='sqlalchemy'
+
+# database.set_db_uri('sqlite:///:memory:', 'sqlalchemy')
+# session = database.session
+# config.update({'global': {
+#                     'identity.provider': '${identity}',
+#                     'visit.saprovider.model':'${package}.model.Visit',
+#                     'identity.saprovider.model.user':"${package}.model.User",
+#                     'identity.saprovider.model.group':"${package}.model.Group",
+#                     'identity.saprovider.model.permission':"${package}.model.Permission",
+#                     'identity.saprovider.model.visit':"${package}.model.VisitIdentity",
+#                     'sqlalchemy.echo': False,
+#                     }})
+#                     
+# class TestRegistrationModel(unittest.TestCase, SharedMethods):
+# 
+#     def setUp(self):
+#         database.create_session()
+#         self.create_identity_tables()
+#         register_model.create_registration_tables()
+#         cherrypy.server.stop()
+#         cherrypy.root = None
+#         cherrypy.tree.mount_points = {}
+#         cherrypy.tree.mount(RegTestController(), '/')
+#         config.update({'global':{'registration.verified_user.groups':[],
+#                                 'registration.unverified_user.groups':[] }
+#                         })
+# 
+#     def tearDown(self):
+#         database.rollback_all()
+#         self.drop_identity_tables()
+#         self.drop_registration_tables()
+#         #testutil.sqlalchemy_cleanup()
+#         startup.stopTurboGears()
+#         
+#     def test_new_registration(self):
+#         "A new pending user is created."
+#         self.create_pending_user_by_request()
+#         self.assert_ok_response()
+#         pend = RegistrationPendingUser.get_by_email_address(test_email)
+#         assert(pend.user_name=='dschrute')
+#         assert(register_model.user_class_finder.user_class.select().count('*')==0)
+#         
+#     def test_user_validation(self):
+#         "A pending user is promoted to an actual user on validation."
+#         self.create_pending_user()
+#         assert(session.query(RegistrationPendingUser).count()==1)
+#         req_str = '/register/validate_new_user?email=%s&key=%s' % (test_email, '0123456789')
+#         testutil.createRequest(req_str)
+#         self.assert_ok_response()
+#         assert(session.query(RegistrationPendingUser).count()==0)
+#         User = register_model.user_class_finder.user_class
+#         usr = session.query(User).get_by(email_address=test_email)
+#         assert(usr.user_name=='dschrute')
+#         
+#     def test_in_groups_on_validation(self):
+#         "A new (validated) user is placed in the appropriate groups."
+#         # create the Group 
+#         model.Group(group_name='dojo_members', display_name='Members of the dojo')
+#         config.update({'global':{'registration.verified_user.groups':['dojo_members']}})
+#         self.create_pending_user()
+#         req_str = '/register/validate_new_user?email=%s&key=%s' % (test_email, '0123456789')
+#         testutil.createRequest(req_str)
+#         self.assert_ok_response()
+#         User = register_model.user_class_finder.user_class 
+#         usr = session.query(User).get_by(email_address=test_email)
+#         assert(len(usr.groups)==1)
+#         assert(usr.groups[0].group_name=='dojo_members')
+#         
+#     def test_pending_user_groups(self):
+#         "A unvalidated user is made a real user in the unvalidated group(s)."
+#         # create the group
+#         g_visit = model.Group(group_name='dojo_visitors', display_name='Visitors to the dojo')
+#         g_member = model.Group(group_name='dojo_members', display_name='Members of the dojo')
+#         config.update({'global':{'registration.unverified_user.groups':['dojo_visitors'],
+#                                     'registration.verified_user.groups':['dojo_members']}})
+#         session.flush([g_visit, g_member])
+#         assert session.query(model.Group).count()==2
+#         print "Before create user"
+#         self.create_pending_user_by_request()
+#         print "After create user"
+#         assert getattr(cherrypy.request, 'identity', None)
+#         self.assert_ok_response()
+#         # assert 0
+#         pend = RegistrationPendingUser.get_by_email_address(test_email)
+#         # A new user should now be created, and should have the unverified groups
+#         User = register_model.user_class_finder.user_class 
+#         usr = session.query(User).get_by(email_address=test_email)
+#         assert(len(usr.groups)==1)
+#         assert(usr.groups[0].group_name=='dojo_visitors')
+#         # ok, now lets validate this user.
+#         req_str = '/register/validate_new_user?email=%s&key=%s' % (test_email, pend.validation_key)
+#         pend = None
+#         testutil.createRequest(req_str)
+#         session.refresh(usr)
+#         assert(session.query(RegistrationPendingUser).count()==0)
+#         assert(len(usr.groups)==1)
+#         assert(usr.groups[0].group_name=='dojo_members')
+#         
+#     def create_pending_user(self):
+#         pend = RegistrationPendingUser.new(user_name='dschrute',
+#                                         email_address=test_email,
+#                                         display_name='Dwight Schrute',
+#                                         password='secret',
+#                                         validation_key='0123456789')
+#         session.save(pend)
+#         session.flush()
+#         return pend
+#         
+#     def create_identity_tables(self):
+#         model.users_table.create()
+#         model.permissions_table.create()
+#         model.groups_table.create()
+#         model.user_group_table.create()
+#         model.group_permission_table.create()
+#         model.visits_table.create()
+#         model.visit_identity_table.create()
+#         
+#     def drop_identity_tables(self):
+#         model.users_table.drop()
+#         model.permissions_table.drop()
+#         model.groups_table.drop()
+#         model.user_group_table.drop()
+#         model.group_permission_table.drop()
+#         model.visits_table.drop()
+#         model.visit_identity_table.drop()
+#         
+#     def drop_registration_tables(self):
+#         register_model.registration_pending_user_table.drop()
+#         register_model.email_change_table.drop()
+        
+#end if
+
+class RegTestController(controllers.RootController):
+    
+    register = register_controllers.UserRegistration()
