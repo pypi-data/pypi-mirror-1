@@ -1,0 +1,120 @@
+#!/www/python/bin/python -i
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/bin/opendb $
+$Id: opendb 26302 2005-03-08 14:06:55Z dbinger $
+
+Opens a database and drops you into an interactive Python
+interpreter with full access to the DB.
+"""
+
+import os
+import sys
+try:
+    import readline, rlcompleter
+    readline.parse_and_bind("tab: complete")
+except ImportError:
+    pass
+
+from optparse import OptionParser, Option
+from dulcinea import local
+from dulcinea.site_util import get_dbspec, get_cache_size
+
+def main ():
+    usage = "usage: %prog [options] [site]"
+    parser = OptionParser(usage)
+    parser.add_option('-q', '--quiet',
+                      action='store_false', dest='verbose', default=1,
+                      help="run quietly (no help message)")
+    parser.add_option('-e', '--exec-file', dest='script_file',
+                      metavar="FILE",
+                      help="run FILE with execfile() after opening database")
+    parser.add_option('-d', '--dbspec',
+                      metavar="SPEC",
+                      help="open database specified by SPEC")
+    parser.add_option('-f', '--file',
+                      help=("open FileStorage database in FILE "
+                            "(conflicts with -d)"))
+    (options, args) = parser.parse_args()
+
+    if options.dbspec and options.file:
+        parser.error("options -d/--dbspec and -f/--file "
+                     "are mutually exclusive")
+
+    if args:
+        site = args[0]
+    else:
+        site = os.environ.get("SITE")
+        if not site:
+            parser.error("not enough arguments: must supply 'site' "
+                         "if $SITE not set")
+    os.environ["SITE"] = site
+
+    if options.dbspec:
+        dbspec = options.dbspec
+    elif options.file:
+        dbspec = "file:" + options.file
+    else:
+        dbspec = get_dbspec(site)
+    db = local.open_database(dbspec)
+    db.get_connection().set_cache_size(get_cache_size(site))
+
+    vardict = {}
+
+    startup = os.environ.get("PYTHONSTARTUP")
+    if startup and os.path.exists(startup):
+        execfile(startup, vardict)
+
+    print "database roots available:"
+    L = db.get_root_names()
+    L.sort()
+    vardict['db'] = db
+    for root_name in L:
+        root_var = root_name.replace('-', '_')
+        print "  %s" % root_var
+        cmd = "%s = db.get_root_object('%s')" % (root_var, root_name)
+        try:
+            exec cmd in vardict
+        except:
+            (exc_type, exc_value, tb) = sys.exc_info()
+            print "unable to access database root '%s':\n%s: %s" % (
+                   root_name, exc_type.__name__, exc_value)
+
+    print """
+other variables and functions:
+  db
+  connection
+  storage
+  root
+  load_object(oid : long) -> object
+  commit() = connection.commit()
+  abort()  = connection.abort()
+  """
+    conn = db.get_connection()
+    d = dict([('connection', conn),
+              ('storage', db.get_storage()),
+              ('root', db.get_root()),
+              ('load_object', conn.get),
+              ('commit', conn.commit),
+              ('abort', conn.abort),
+              ])
+    vardict.update(d)
+    if options.script_file:
+        print "executing %s..." % options.script_file
+        execfile(options.script_file, vardict)
+
+    try:
+        from pyrepl.python_reader import ReaderConsole
+        have_pyrepl = 1
+    except ImportError:
+        have_pyrepl = 0
+    if have_pyrepl:
+        from pyrepl.unix_console import UnixConsole
+	try:
+	    con = UnixConsole(1, None)
+	except AttributeError: 
+	    # new version of UnixConsole has a different signature.
+	    con = UnixConsole()
+        ReaderConsole(con, vardict).interact()
+        sys.exit()
+
+main()

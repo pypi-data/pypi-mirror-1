@@ -1,0 +1,209 @@
+'''$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/issues.ptl $
+$Id: issues.ptl 26341 2005-03-11 17:20:59Z dbinger $
+'''
+
+from dulcinea import local, local_ui
+from dulcinea.issue import Issue
+from dulcinea.sendmail import sendmail
+from dulcinea.site_util import get_base_path
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.lib.search import SearchForm
+from dulcinea.ui.user.util import text_format_user, ensure_admin_access
+from dulcinea.ui.util import none_quote, format_yes_or_no
+from quixote import get_path, redirect, get_user
+from quixote.form import Form
+from quixote.form.widget import CheckboxWidget, SubmitWidget
+from quixote.form.widget import StringWidget, TextWidget, RadiobuttonsWidget
+from quixote.html import href
+
+class IssueDirectory(DynamicExportingDirectory):
+
+    def get_exports(self):
+        ensure_admin_access()
+        yield ('', '_q_index', 'Issues', 'Current software issues')
+        yield ('new', 'new', 'New', 'Create a new issue')
+
+    def _q_index(self):
+        return IssueSearchForm(local.get_issue_db().get_issues(),
+                               match_substrings=True).handle()
+
+    def new(self):
+        return issue_form(Issue())
+
+    def _q_lookup(self, component):
+        issue = local.get_issue_db().get_issue(component)
+        if issue:
+            return issue_form(issue)
+        else:
+            return None
+
+def issue_link(issue):
+    return href(get_base_path() + '/issues/%s' % issue.get_key(),
+                issue.get_title())
+
+def format_priority (issue):
+    priority = issue.get_priority()
+    if priority:
+        return '%.2f' % priority
+
+def format_status [html] (issue):
+    approvers = issue.get_approvers()
+    if approvers:
+        'Approved by %d of %d' % (len(approvers), len(issue.get_voters()))
+    users = local.get_issue_db().get_users_on_issue(issue)
+    if users:
+        '<div>'
+        ', '.join([local_ui.format_user(user, name=False, email=False)
+                   for user in users])
+        '</div>'
+
+class IssueSearchForm(SearchForm):
+
+    def get_search_text_fields(self, issue):
+        return [issue.get_key(),
+                str(issue.get_timestamp()),
+                issue.get_title(),
+                (issue.get_description() or ''),
+                ' '.join([text_format_user(user)
+                          for user in issue.get_voters()])]
+
+    def get_title(self):
+        return 'Issues'
+
+    def format_search_results_headings [html] (self):
+        '''
+        <th>Title</th>
+        <th>Business Value</th>
+        <th>Cost</th>
+        <th>Priority</th>
+        <th>Status</th>
+        '''
+
+    def format_search_results_table_row [html] (self, issue):
+        '<th>%s</th>' % issue_link(issue)
+        '<td>%s</td>' % issue.get_bang_description(
+            issue.get_combined_bang())
+        '<td>%s</td>' % issue.get_buck_description(
+            issue.get_combined_buck())
+        '<td>%s</td>' % none_quote(format_priority(issue))
+        '<td>%s</td>' % none_quote(format_status(issue))
+
+    def footer [html] (self, title):
+        href('new', 'Report a new issue.')
+        SearchForm.footer(self, title)
+
+
+def issue_form(issue):
+    form = Form()
+    user = get_user()
+    form.add(StringWidget, 'title',
+             value=issue.get_title(),
+             title='Title',
+             size=70,
+             required=1)
+    form.add(TextWidget, 'description',
+             value=issue.get_description(),
+             title='Description and Comments',
+             rows=20, cols=80)
+    form.add(RadiobuttonsWidget, 'bang',
+             title='Business Value',
+             value=issue.get_individual_bang(user),
+             options=zip(issue.BANG_OPTIONS,
+                         issue.BANG_DESCRIPTIONS))
+    form.add(RadiobuttonsWidget, 'buck',
+             title='Cost Estimate',
+             value=issue.get_individual_buck(user),
+             options=zip(issue.BUCK_OPTIONS,
+                         issue.BUCK_DESCRIPTIONS))
+    form.add(CheckboxWidget,'approval',
+             title='Resolved?',
+             value=issue.is_approved_by(user))
+    if issue.get_key() is None:
+        form.add(SubmitWidget, 'save', 'Save')
+    else:
+        form.add(SubmitWidget, 'save', 'Update')
+    form.add(SubmitWidget, 'in_progress', 'I\'m on it!')
+    form.add(SubmitWidget, 'cancel', 'Return to issues')
+    if form.get('cancel'):
+        return redirect('.')
+    issue_db = local.get_issue_db()
+    if not form.is_submitted() or form.has_errors():
+        def render [html] ():
+            if issue.get_key():
+                title = 'Issue %s' % issue.get_key()
+            else:
+                title = 'New issue'
+            local_ui.header(title)
+            form.render()
+            voters = issue.get_voters()
+            if voters:
+                '<table class="shaded">'
+                '<tr>'
+                '<th>User</th>'
+                '<th>Business Value</th>'
+                '<th>Cost</th>'
+                '<th>Approved Resolution</th>'
+                '<th>They\'re on it!</th>'
+                '</tr>'
+                for user in voters:
+                    '<tr>'
+                    '<td>%s</td>' % local_ui.format_user(user,
+                                                         name=False,
+                                                         email=False)
+                    '<td>%s</td>' % issue.get_bang_description(
+                        issue.get_individual_bang(user))
+                    '<td>%s</td>' % issue.get_buck_description(
+                        issue.get_individual_buck(user))
+                    '<td>%s</td>' % format_yes_or_no(
+                        issue.is_approved_by(user))
+                    '<td>%s</td>' % format_yes_or_no(
+                        issue_db.get_issue_in_progress(user) is issue)
+                    '</tr>'
+                '<tr>'
+                '<th>Combined:</th>'
+                '<td>%s</td>' % issue.get_bang_description(
+                    issue.get_combined_bang())
+                '<td>%s</td>' % issue.get_buck_description(
+                    issue.get_combined_buck())
+                '<th>Priority:</th><td>%s</td>' % none_quote(
+                    format_priority(issue))
+                '</tr>'
+                '</table>'
+            local_ui.footer(title=title)
+        return render()
+    issue.set_title(form['title'])
+    issue.set_description(form['description'])
+    issue.set_bang(user, form['bang'])
+    issue.set_buck(user, form['buck'])
+    issue.set_approval(user, form['approval'])
+    if issue.is_approved_by(user):
+        issue_db.clear_issue_in_progress(user, issue)
+    if form.get('in_progress'):
+        issue_db.set_issue_in_progress(user, issue)
+    if issue.get_key() is None:
+        issue_db.add_issue(issue)
+        url = './' + issue.get_key()
+    else:
+        url = get_path()
+    if issue.is_resolved():
+        notify_issue_resolved(issue)
+        issue_db.remove_issue(issue)
+        url = '.'
+    return redirect(url)
+
+
+def notify_issue_resolved(issue):
+    """
+    Notify the involved parties that an issue has been resolved
+    """
+    to_addrs = [user.get_email() for user in issue.get_approvers()
+                if user.get_email()]
+    subject = "RESOLVED: %s" % issue.get_title()
+    body = ""
+    body += 'title: %s\n' % issue.get_title()
+    body += 'timestamp: %s\n' % issue.get_timestamp()
+    body += 'key: %s\n' % issue.get_key()
+    body += 'description:\n%s' % issue.get_description()
+    sendmail(subject, body, to_addrs)
+
+

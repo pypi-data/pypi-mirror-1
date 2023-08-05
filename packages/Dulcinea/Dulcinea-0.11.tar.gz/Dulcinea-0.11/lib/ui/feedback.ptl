@@ -1,0 +1,148 @@
+"""$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/feedback.ptl $
+$Id: feedback.ptl 26245 2005-02-25 14:45:59Z dbinger $
+
+"""
+
+import sys
+from urllib import unquote_plus
+from smtplib import SMTPResponseException, SMTPRecipientsRefused
+from traceback import print_exc
+
+from quixote import get_user, get_request, redirect
+from quixote.form import Form
+from quixote.form.widget import HiddenWidget, StringWidget, TextWidget
+from quixote.html import htmlescape, href
+from dulcinea import local_ui
+from dulcinea.sendmail import sendmail
+from dulcinea.ui.directory import DynamicExportingDirectory
+
+class FeedbackDirectory(DynamicExportingDirectory):
+
+    def get_exports(self):
+        yield ('', '_q_index', 'Feedback', None)
+
+    def _q_index(self):
+        return Feedback().form()
+
+
+class Feedback:
+
+    def form(self):
+        request = get_request()
+        if request.get_method() != 'POST':
+            # we use the query string to pass data but we don't want to
+            # have widgets parse themselves
+            request.form.clear()
+        form = Form()
+        form.add(HiddenWidget, "referrer",
+                 request.get_environ("HTTP_REFERER") or "/")
+        form.add(StringWidget, "subject", self.get_subject(),
+                 title="Subject", size=50)
+        user = get_user()
+        if user:
+            realname = user.format_realname()
+            email = user.get_email()
+        else:
+            realname = None
+            email = None
+        form.add(StringWidget, "real_name", realname,
+                 title="Your name", size=50)
+        form.add(StringWidget, "sender", email,
+                 title="Your e-mail address", size=50,
+                 required=True)
+        form.add(TextWidget, "message", title="Message", rows=10, cols=65,
+                 required=True, wrap='hard')
+
+        form.add_submit("send", "Send E-mail")
+        form.add_submit("cancel", "Cancel")
+        referrer = form['referrer']
+        if form.get('cancel'):
+            return redirect(referrer)
+        if not form.is_submitted() or form.has_errors():
+            return self.render(form)
+        try:
+            sendmail(
+                form["subject"] or "Site feedback",
+                (("Feedback from: %s\n\n" % (referrer or "(unknown)")) +
+                 form["message"]),
+                self.get_recipients(),
+                from_addr=(form["sender"], form.get("real_name", "")),
+                smtp_sender=form["sender"])
+        # Handling SMTP errors is a bit tricky because Exim doesn't
+        # always return an SMTP error at the obvious point.  (Eg. for
+        # bogus sender addresses, it might be configured to return the
+        # error right after the "MAIL FROM" command, or not until after
+        # the DATA command.  Currently the latter is the case on our server.
+        # It also seems to depend on whether there are one or multiple
+        # recipient addresses.)  I *think* these two "except" statements
+        # should handle all "bogus sender address" errors, which is what
+        # we're really concerned with here.
+
+        except SMTPResponseException, err:
+            # Currently, this happens (in the form of SMTPDataError) for
+            # bogus sender addresses with multiple recipients.
+            print_exc(1, sys.stderr)
+            form.set_error("sender", "We need your full email address here.")
+            return self.render(form)
+        except SMTPRecipientsRefused, err:
+            # This is the what happens for bogus *sender* addresses when
+            # there's *only one* recipient.  Note that err.recipients is
+            # a dictionary like this:
+            #  {'gw@not.org':
+            #   (550, 'cannot route to sender address <foo@sadfa.sdf.sdf.ca>')}
+            # so we have to dig around a bit to get the real error
+            # message.
+            print_exc(1, sys.stderr)
+            print err.recipients
+            form.set_error("sender", "We need your full email address here.")
+            return self.render(form)
+        return self.thanks(referrer)
+
+    def thanks [html] (self, referrer):
+        title = "Thank You"
+        local_ui.header(title)
+        "Thank you for your feedback.  "
+        if referrer:
+            "Please follow the link below to return to the page "
+            "you were reading. "
+            '<p align="center">'
+            href(referrer, referrer)
+            '</p>'
+        local_ui.footer(title)
+
+    def get_recipients(self):
+        query_list = get_request().get_query().split(',')
+        if len(query_list) == 1:
+            addresses = query_list
+        else:
+            addresses = query_list[:-1]
+        full_addresses = ["%s@%s" % (address, local_ui.FEEDBACK_DOMAIN)
+                          for address in addresses
+                          if address in local_ui.VALID_FEEDBACK_ADDRESSES]
+        if not full_addresses:
+            full_addresses = ["webmaster@%s" % local_ui.FEEDBACK_DOMAIN]
+        return full_addresses
+
+    def get_subject(self):
+        query_list = get_request().get_query().split(',')
+        if len(query_list) > 1:
+            return unquote_plus(query_list[-1])
+        else:
+            return ""
+
+    def render [html] (self, form):
+        title = "Feedback"
+        local_ui.header(title)
+        '<p>'
+        '<strong>Email to:</strong> '
+        ', '.join([htmlescape(addr).replace("@", "&#64;")
+                   for addr in self.get_recipients()])
+        '</p>'
+        form.render()
+        # catch nasty robots (target should easy to find even for stupid
+        # parsers)
+        '<noscript><div style="font-size: 1px"><p align="right">\n'
+        '<a href="/restricted/spidermine">&nbsp;</a>\n'
+        '</p></div></noscript>\n'
+        local_ui.footer(title)
+

@@ -1,0 +1,319 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/category.ptl $
+$Id: category.ptl 27554 2005-10-13 13:42:37Z dbinger $
+
+UI utilities for formatting a category hierarchy.
+"""
+
+from dulcinea import local_ui
+from dulcinea.category import Category
+from dulcinea.sort import method_sort, str_sort
+from dulcinea.spec import require, match
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.form2.select_widget import BigMultipleSelectWidget
+from dulcinea.ui.user.util import ensure_admin_access
+from dulcinea.util import is_new
+from quixote import redirect
+from quixote.form import Form
+from quixote.form.widget import StringWidget, TextWidget
+from quixote.html import htmlescape, href
+
+def default_decorate [html] (categories, body, title=None):
+    local_ui.header(title)
+    '<div style="margin:1em">'
+    body
+    '</div>'
+    local_ui.footer(title)
+
+class CategoryDirectory(DynamicExportingDirectory):
+
+    def __init__(self, title='Categories', decorate=default_decorate):
+        """(title : str)
+        """
+        self.title = title
+        self.decorate = decorate
+
+    def get_exports(self):
+        ensure_admin_access()
+        yield ('', '_q_index', 'Categories', None)
+        yield ('new', 'new', 'New Category', 'Add a new Category')
+
+    def get_category_db(self):
+        """() -> CategoryDatabase
+        """
+        raise NotImplementedError
+
+    def get_categories(self):
+        """() -> [(category_name, [Category])]
+        """
+        yield ('Categories', self.get_category_db().get_categories())
+
+    def get_new_category(self):
+        return Category()
+
+    def _q_index(self):
+
+        def format_category_list [html] (categories, title):
+            '''
+              <tr>
+                <th>%s</th>
+                <th>Label</th>
+                <th>Description</th>
+              </tr>
+            ''' % title
+            if categories:
+                for category in str_sort(categories):
+                    '''
+                    <tr>
+                      <td>%s</td>
+                      <td>%s</td>
+                      <td>%s</td>
+                    </tr>
+                    ''' % (href(category.get_name() + '/',
+                                category.get_name()),
+                           category.get_label(),
+                           category.get_description())
+            else:
+                '''
+                  <tr>
+                    <td colspan="3"><em>None</em></td>
+                  </tr>
+                '''
+        def format_body [html] ():
+            '''
+            <table class="boxbody">
+            '''
+            for category_name, categories in self.get_categories():
+                format_category_list(categories, category_name)
+            '</table>'
+
+        return self.decorate(self.get_categories(), format_body(), self.title)
+
+    def new(self):
+        category = self.get_new_category()
+        category_db = self.get_category_db()
+        form = category_form(category, category_db)
+        if form.get('cancel'):
+            return redirect('.')
+
+        if not form.is_submitted() or form.has_errors():
+            return self.decorate([category], form.render(), 'New Category')
+
+        assert form.get('add')
+        category.set_name(form.get('name'))
+        category_db.add_category(category)
+        category.set_label(form.get('label'))
+        category.set_description(form.get('description'))
+        category.set_parents(form.get('parents') or [])
+        return redirect(category.get_name())
+
+    def get_category_edit_ui(self, category):
+        return CategoryEditDirectory(category, self.get_category_db())
+
+    def _q_lookup(self, component):
+        category = self.get_category_db().get_category(component)
+        if category is None:
+            return None
+        return self.get_category_edit_ui(category)
+
+
+class CategoryEditDirectory(DynamicExportingDirectory):
+
+    def __init__(self, category, category_db, decorate=default_decorate):
+        self.category = category
+        self.category_db = category_db
+        self.decorate = decorate
+
+    def get_exports(self):
+        ensure_admin_access()
+        yield ('', '_q_index', self.category.get_name(), None)
+        yield ('edit', 'edit', 'Edit', 'Edit this category.')
+
+    def format_category [html] (self):
+        '''<table class="boxbody">
+           <tr>
+             <th>Name</th>
+             <td>%s</td>
+             <th>Label</th>
+             <td>%s</td>
+           </tr>
+           <tr>
+             <th>Description</th>
+             <td colspan="3">%s</td>
+           </tr>
+        </table>''' % (self.category.get_name(),
+                       self.category.get_label(),
+                       self.category.get_description())
+
+    def _q_index(self):
+        return self.decorate(
+            [self.category], self.format_category(),
+            '%s: %s' % (self.category.get_name(), self.category.get_label()))
+
+    def edit(self):
+        form = category_form(self.category, self.category_db)
+        if form.get('cancel'):
+            return redirect('.')
+
+        if not form.is_submitted() or form.has_errors():
+            return self.decorate([self.category], form.render(),
+                                 '%s: Edit' % self.category.get_name())
+
+        assert form.get('update')
+        if self.category.get_name() != form.get('name'):
+            self.category_db.rename_category(self.category, form.get('name'))
+        self.category.set_label(form.get('label'))
+        self.category.set_description(form.get('description'))
+        self.category.set_parents(form.get('parents') or [])
+        return redirect('../%s/' % self.category.get_name())
+
+def category_form(category, category_db):
+    form = Form()
+    if is_new(category):
+        form.add_submit('add', 'Add')
+    else:
+        form.add_submit('update', 'Update')
+    form.add(StringWidget, 'name',
+             title='Name',
+             value=category.get_name(),
+             hint=('Name must contain only alphanumeric '
+                   'characters, dashes and underscores.'),
+             size=20,
+             required=1)
+    form.add(StringWidget, 'label',
+             title='Label',
+             value=category.get_label(),
+             size=30)
+
+    form.add(TextWidget, 'description',
+             title='Description',
+             value=category.get_description(),
+             rows=8, cols=80)
+
+    category_options = [(grp, grp.get_label())
+               for grp in category_db.get_categories()
+               if not category.is_ancestor_of(grp)]
+    if category_options:
+        form.add(BigMultipleSelectWidget, 'parents',
+                 title='Parents',
+                 value=list(category.get_parents()),
+                 options=category_options,
+                 required=1)
+
+    form.add_submit('cancel', 'Cancel')
+
+    if not match(form.get('name'), category.name_is):
+        form.set_error('name', 'Invalid name')
+    elif ((form.get('add') or category.get_name() != form.get('name')) and
+          category_db.get_category(form.get('name'))):
+        form.set_error('name', 'This name is already used')
+
+    return form
+
+
+def format_hierarchy [html] (category, selections, base_url=None, label=None):
+    # category: the children of category will be displayed
+    # selections: the list of categories to be highlighted (parents of these
+    #             categories will also be highlighted)
+    # base_url: the fragment of URL starting at the root and ending where
+    #           this hierarchy begins in the URL namespace
+    # label: label to place above the list of children-of-category
+    require(category, Category)
+    require(selections, ([Category], None))
+    '<table class="hierarchy">'
+    if label:
+        '<tr><th>%s</th></tr>' % label
+    _format_hierarchy(category, selections or [], base_url or '')
+    '</table>'
+
+def _format_hierarchy [html] (category, selections, base_url, level=0):
+    children = method_sort(category.get_children(), str('get_label'))
+    for child in children:
+        url = base_url + child.get_name() + '/'
+        label = child.get_label()
+        hint = 'view all %s' % label.lower()
+        indent = '&nbsp;' * (3 * level)
+        link = href(url, htmlescape(label).replace(' ', '&nbsp;'), hint)
+
+        if selections:
+            for selection in selections:
+                if child.is_ancestor_of(selection):
+                    '<tr><td class="selected">%s%s</td></tr>\n' % (indent, link)
+                    _format_hierarchy(child, selections, base_url,
+                                      level=level+1)
+                    break
+            else:
+                '<tr><td>%s%s</td></tr>\n' % (indent, link)
+        else:
+            '<tr><td>%s%s</td></tr>\n' % (indent, link)
+
+def hierarchy_header [html] (category, selections=None, title='Categories',
+                             base_url=None, label=None, show_sidebar=0):
+    # category: the children of category will be displayed
+    # selections: the list of categories to be highlighted (parents of these
+    #             categories will also be highlighted)
+    # title: the title of the page
+    # base_url: the fragment of URL starting at the root and ending where
+    #           this hierarchy begins in the URL namespace
+    # label: label to place above the list of children-of-category
+    local_ui.header(title, show_sidebar=show_sidebar)
+    '<table><tr><td>'
+    format_hierarchy(category, selections, base_url=base_url, label=label)
+    '</td><td>'
+
+
+def hierarchy_footer [html] (title='Categories'):
+    '''
+        </td>
+      </tr>
+    </table>
+    '''
+    local_ui.footer(title)
+
+def format_hierarchy_css [plain] (color_map):
+    # Requires:
+    # BODY_FG SELECTED_BG CRUMBS_BG LIGHT_A LIGHT_A_HOVER LIGHT_A_VISITED
+    #   to be defined in color_map
+    """
+table.hierarchy {
+   font-size: x-small;
+   width: 100%%;
+}
+
+@media print {
+    table.hierarchy {
+        display: none;
+    }
+}
+
+table.hierarchy th {
+    font-weight: bold;
+    color: %(BODY_FG)s;
+}
+
+table.hierarchy tr td {
+    background: %(CRUMBS_BG)s;
+}
+
+table.hierarchy td.selected {
+    font-weight: bold;
+    background: %(SELECTED_BG)s;
+}
+
+table.hierarchy a:link,
+table.hierarchy a:visited,
+table.hierarchy a:active {
+    color: %(LIGHT_A)s;
+    text-decoration: none;
+}
+
+table.hierarchy a:hover {
+    color: %(LIGHT_A_HOVER)s;
+    text-decoration: underline;
+}
+
+table.hierarchy a:visited {
+    color: %(LIGHT_A_VISITED)s;
+}
+""" % color_map
+

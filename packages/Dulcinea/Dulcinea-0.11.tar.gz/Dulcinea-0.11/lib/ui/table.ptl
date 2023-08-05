@@ -1,0 +1,191 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/table.ptl $
+$Id: table.ptl 26793 2005-05-12 20:49:33Z rmasse $
+"""
+from cStringIO import StringIO
+from csv import DictWriter
+from quixote.html import htmltag, href, htmltext
+from quixote.util import randbytes
+from quixote import get_request
+from dulcinea.sort import function_sort
+
+class Table (object):
+
+    maximum_rows_for_client_side_sorting = 500
+
+    def __init__(self):
+        self.headings = []
+        self.rows = []
+        self.caption = ''
+        self.footer = ''
+        self.tbody_id = 'T' + randbytes(4)
+
+    def column(self, **name_content):
+        assert len(name_content) == 1
+        assert self.rows == []
+        self.headings += name_content.items()
+
+    def row(self, **args):
+        assert len(args) == len(self.headings)
+        self.rows.append(args)
+
+    def get_rows(self):
+        return self.rows
+
+    def set_caption(self, arg):
+        self.caption = arg
+
+    def set_footer(self, arg):
+        """
+        The argument should be a rendered tbody element.
+        """
+        self.footer = arg
+
+
+    def render [html] (self, **attrs):
+        if len(self.rows) <= self.maximum_rows_for_client_side_sorting:
+            self.render_for_client_side_sorting(**attrs)
+        else:
+            self.render_for_server_side_sorting(**attrs)
+
+    def render_csv(self):
+        s = StringIO()
+        dict_writer = DictWriter(
+            s, fieldnames=[key for key, value in self.headings])
+        dict_writer.writerow(dict(self.headings))
+        for row in self.rows:
+            dict_writer.writerow(row)
+        return s.getvalue()
+
+    def render_for_server_side_sorting [html] (self, **attrs):
+        htmltag('table', **attrs)
+        if self.caption:
+            '<caption>%s</caption>' % self.caption
+        '<thead><tr>'
+        for name, content in self.headings:
+            '<th class="%s">%s</th>' % (
+                name,
+                href('?' + name, content,
+                     title="sort table using this column"))
+        '</tr></thead>'
+        '<tbody>'
+        keys = [key for (key, value) in self.headings]
+        query = get_request().get_query()
+        if query in keys:
+            self.rows = function_sort(self.rows, lambda row: row.get(query))
+        for row in self.rows:
+            '<tr>'
+            for key in keys:
+                '<td class="%s">%s</td>' % (key, row[key])
+            '</tr>'
+        '</tbody>'
+        self.footer
+        '</table>'
+
+    def render_for_client_side_sorting [html] (self, **attrs):
+        htmltag('table', **attrs)
+        if self.caption:
+            '<caption>%s</caption>' % self.caption
+        '<thead id="%sH"><tr>' % self.tbody_id
+        for index, heading in enumerate(self.headings):
+            '<th class="%s" onclick="tbody_sort(%r, %d)">' % (
+                heading[0], self.tbody_id, index)
+            '<a href="#" title="sort table using this column">'
+            heading[1]
+            '<span class="uparrow">&uarr;</span>'
+            '<span class="downarrow">&darr;</span>'
+            '</a>'
+            '</th>'
+        '</tr></thead>'
+        '<tbody id="%s">' % self.tbody_id
+        keys = [key for (key, value) in self.headings]
+        for row in self.rows:
+            '<tr>'
+            for key in keys:
+                '<td class="%s">%s</td>' % (key, row[key])
+            '</tr>'
+        '</tbody>'
+        self.footer
+        '</table>'
+        '<script type="text/javascript"><!--\n%s\n//--></script>' % htmltext(
+            self.javascript)
+
+
+    javascript = '''
+        function tbody_sort(id, col) {
+            var tbody = document.getElementById(id)
+            function get_key(node) {
+                if (node.childNodes.length == 0) {
+                    return ""
+                }
+                node = node.firstChild
+                while (!node.data && node.firstChild) {
+                    node = node.firstChild
+                }
+                var data = node.data
+                if (data.length == 0) {
+                    return ""
+                }
+                if (data.charAt(0) == '$') {
+                    var num = parseFloat(data.substring(1))
+                    if (!isNaN(num)) {
+                        return num
+                    }
+                }
+                if (!data.match(/\d+[-\/]\d+[-\/]\d+/)) {
+                    var num = parseFloat(data)
+                    if (!isNaN(num)) {
+                        return num
+                    }
+                }
+                return data
+            }
+            var n = tbody.rows.length
+            var sdata = new Array()
+            for (var j=0;j<n;j++) {
+                sdata.push([get_key(tbody.rows.item(j).cells.item(col)),
+                            tbody.rows.item(j)])
+            }
+            var tmp, changed = 0
+            for (var j=0;j<n;j++) {
+                for (var k=1;k<n-j;k++) {
+                    if (sdata[k-1][0] > sdata[k][0]) {
+                        changed = 1
+                        tmp = sdata[k]
+                        sdata[k] = sdata[k-1]
+                        sdata[k-1] = tmp
+                    }
+                }
+            }
+            var headcells = document.getElementById(id+"H").firstChild.childNodes
+            for (var j=0;j < headcells.length;j++) {
+                child = headcells.item(j)
+                child.className = ""
+            }
+            if (changed == 1) {
+                headcells.item(col).className = "increasing"
+            } else {
+                headcells.item(col).className = "decreasing"
+                sdata.reverse()                     
+            }
+            for (var j=0;j<n;j++) {
+                tbody.appendChild(sdata[j][1])
+            }
+            tbody.normalize()
+        }
+        '''
+
+def format_table_css [plain] ():
+    '''
+    span.uparrow, span.downarrow {
+        display: none;
+    }
+    thead th.increasing span.downarrow,
+    thead th.decreasing span.uparrow {
+        display: inline;
+    }
+    thead th.increasing span.uparrow,
+    thead th.decreasing span.downarrow {
+        display: none;
+    }    
+    '''

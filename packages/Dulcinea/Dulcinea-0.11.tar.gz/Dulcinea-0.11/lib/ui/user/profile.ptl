@@ -1,0 +1,123 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/user/profile.ptl $
+$Id: profile.ptl 27498 2005-09-29 19:57:40Z rmasse $
+"""
+from dulcinea import local_ui, local
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.permission import UserPermissionUI
+from dulcinea.ui.user.password import change_password_form
+from dulcinea.ui.user.password import change_user_password_form
+from dulcinea.ui.user.password import new_password_form
+from dulcinea.ui.user.register import contact_edit_form
+from dulcinea.ui.user.util import ensure_signed_in, allow_act_as
+from dulcinea.ui.user.util import ensure_create_users_access
+from dulcinea.ui.util import format_history
+from dulcinea.ui.util import page, none_quote, format_address
+from quixote import get_user, get_session, get_field, redirect
+from quixote.html import href
+
+class Profile (DynamicExportingDirectory):
+
+    def __init__(self, user=None):
+        self.user = user
+
+    def get_user(self):
+        return self.user or get_user()
+
+    def get_exports(self):
+        ensure_signed_in()
+        realname = self.get_user().format_realname()
+        yield ('', 'index', 'Profile', "%s's Personal Profile" % realname)
+        yield ('edit', 'edit', 'Edit Profile', "Edit %s's Profile" % realname)
+        yield ('history', 'history', 'Login History',
+               "View the record of login activity for %s." % realname)
+        yield ('change_password', 'change_password', 'Password Change',
+               'Change your password')
+        if get_user().is_admin():
+            yield (
+                'reset_password', 'reset_password', 'Password Reset',
+                'Mail a new random password to %s.' % self.get_user().get_id())
+        if get_user().can_manage_permissions():
+            yield ('permission', None, 'Permissions', 'Manage permissions')
+        if allow_act_as():
+            yield ('act_as', 'act_as', 'Act as', 'Act as %s' % realname)
+        yield ('un_act_as', 'un_act_as', None, None)
+
+    def format_user_profile(self):
+        return getattr(local_ui, 'format_user_profile', format_user_profile)(
+            self.get_user())
+
+    def index [html] (self):
+        page("%s's Personal Profile" % (self.get_user().format_realname() or
+                                        self.get_user().get_id()),
+             self.format_user_profile())
+
+    def edit [html] (self):
+        return contact_edit_form(self.get_user())
+
+    def history [html] (self):
+        page('Login History for %s' % self.get_user().format(),
+             format_history(self.get_user().get_history()))
+
+    def change_password [html] (self):
+        if get_user() is self.get_user():
+            change_password_form()
+        else:
+            change_user_password_form(self.get_user())
+
+    def reset_password [html] (self):
+        return new_password_form(self.get_user())
+
+    def un_act_as(self):
+        session = get_session()
+        actual_user = session.actual_user
+        if session.user is not actual_user:
+            session.set_user(actual_user)
+            session.clear_app_state()
+        url = get_field('url', ".")
+        return redirect(url)
+
+    def act_as(self):
+        session = get_session()
+        session.set_user(self.get_user())
+        session.clear_app_state()
+        url = get_field('url', ".")
+        return redirect(url)
+
+    def _q_lookup(self, component):
+        if component == 'permission':
+            return UserPermissionUI(self.get_user(), True, 'Global')
+
+
+class ProfileDirectory (DynamicExportingDirectory):
+
+    profile_class = Profile
+
+    def get_exports(self):
+        return []
+
+    def _q_lookup(self, component):
+        user = local.get_user_db().get_user(component)
+        if user:
+            return self.profile_class(user)
+
+def format_user_profile [html] (user):
+    if get_user() is not user:
+        ensure_create_users_access()
+    dulcinea_user_profile(user)
+
+def dulcinea_user_profile [html] (user):
+    email = user.get_email()
+    if email:
+        email = href('mailto:%s' % email, email)
+    '<table class="boxbody">'
+    '<tr><th>Name</th><td>%s</td></tr>' % local_ui.format_user(user)
+    '<tr><th>Organization</th><td>%s</td></tr>' % none_quote(
+        user.get_company_name())
+    '<tr><th>Address</th><td>%s</td></tr>' % format_address(user.get_address())
+    '<tr><th>Phone</th><td>%s</td></tr>' % none_quote(user.get_phone())
+    '<tr><th>Email</th><td>%s</td></tr>' % email
+    if user.is_disabled():
+        '<tr><th>Disabled Password</th><td>Yes</td></tr>'
+    '</table>'
+

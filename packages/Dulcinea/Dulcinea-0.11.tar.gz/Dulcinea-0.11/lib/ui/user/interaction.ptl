@@ -1,0 +1,114 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/user/interaction.ptl $
+$Id: interaction.ptl 27144 2005-08-02 19:53:52Z dbinger $
+"""
+from dulcinea import local_ui
+from quixote import redirect, get_user
+from quixote.form import Form
+from quixote.form.widget import SingleSelectWidget, TextWidget
+
+def interaction_form(interactable, formatter, title='Interaction'):
+    """(interactable : Interactable, formatter : FunctionType, title : str)
+    """
+    form = Form()
+    form.add(SingleSelectWidget, 'code',
+             options=interactable.get_interaction_codes())
+
+    form.add(TextWidget, 'comment', title='Comments', rows=4, cols=60)
+    form.add_submit('save', 'Save')
+    form.add_submit('cancel', 'Cancel')
+    if form.get('cancel'):
+        return redirect('.')
+
+    def render [html] ():
+        local_ui.header(title)
+        '''
+        <table class="boxbody">
+          <tr><th>%s</td></tr>
+        </table>
+        ''' % formatter(interactable)
+        form.render()
+        _format_interactable(interactable)
+        local_ui.footer(title)
+
+    if not form.is_submitted():
+        return render()
+
+    interactable.record_interaction(get_user(), form['code'], form['comment'])
+    return redirect('')
+
+
+def _format_interactable [html] (interactable):
+    interactions = list(interactable.get_interaction_history())
+    if interactions:
+        '''
+        <div class="boxtitle">Interactions</div>
+        <table class="boxbody">
+          <tr>
+            <th>Date/time</th><th>User</th><th>Interaction</th><th>Comment</th>
+          </tr>
+        '''
+        interactions = list(interactable.get_interaction_history())
+        interactions.reverse()
+        for interaction in interactions:
+            '''
+            <tr>
+              <td class="nowrap">%s</td>
+              <td>%s</td>
+              <td>%s</td>
+              <td>%s</td>
+            </tr>
+            ''' % (local_ui.format_date_time(interaction.timestamp),
+                   local_ui.format_user(interaction.get_user(),
+                                        name=False, email=False),
+                   interaction.event_code,
+                   interaction.message)
+        '</table>'
+    else:
+        '<div class="boxtitle">No existing interactions</div>'
+
+def gen_all_interactions(user, interactables):
+    """
+    Generates (intractable:Interactable, interactions:[Event]) for each
+    interactable for which 'user' has posted some interaction.
+    Each returned list of interactions is in reverse-chronological order.
+    """
+    for interactable in interactables:
+        interactions = [interaction
+                        for interaction in interactable.get_interaction_history()
+                        if interaction.get_user() is user]
+        if interactions:
+            interactions.reverse()
+            yield interactable, interactions
+
+def format_interaction_rows [html] (user, interactables, formatter):
+    # (user : Contact, interactables : [Interactable], formatter : FunctionType)
+    for interactable, interactions in gen_all_interactions(user, interactables):
+        '''
+        <tr>
+          <th colspan="3">%s</th>
+        </tr>
+        ''' % formatter(interactable)
+        for interaction in interactions:
+            '''
+            <tr>
+              <td class="nowrap">%s</td>
+              <td>%s</td>
+              <td>%s</td>
+            </tr>
+            ''' % (local_ui.format_date_time(interaction.timestamp),
+                   interaction.event_code,
+                   interaction.message)
+
+def format_interactions [html] (*args):
+    if args:
+        '''
+        <div class="boxtitle">Interactions</div>
+        <table class="boxbody">
+          <tr>
+            <th>Date/time</th><th>Interaction</th><th>Comment</th>
+          </tr>
+        '''
+        for rows in args:
+            rows
+        '</table>'

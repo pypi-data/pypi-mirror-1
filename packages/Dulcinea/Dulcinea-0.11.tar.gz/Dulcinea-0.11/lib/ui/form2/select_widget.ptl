@@ -1,0 +1,164 @@
+"""$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/form2/select_widget.ptl $
+$Id: select_widget.ptl 27545 2005-10-12 15:55:56Z rmasse $
+
+"""
+
+from sets import Set
+from quixote import get_response
+from quixote.html import htmltext, stringify
+from quixote.form.widget import CompositeWidget, MultipleSelectWidget, \
+     SingleSelectWidget, HiddenWidget, subname, SubmitWidget, Widget
+
+def get_int_set(comma_separated_int_str):
+    if not comma_separated_int_str:
+        return Set()
+    else:
+        return Set([int(j) for j in comma_separated_int_str.split(',') if j])
+
+
+class PossiblyEmptySingleSelectWidget(SingleSelectWidget):
+
+    def __init__(self, name, value=None, options=None, **kwargs):
+        Widget.__init__(self, name, value, **kwargs)
+        self.set_options(options)
+        self.verify_selection = False
+
+class NoScriptSubmitWidget(SubmitWidget):
+
+    # We must override ButtonWidget's render_content here to place the
+    # noscript tags inside of all of the CSS block elements
+    def render_content [html] (self):
+        '<noscript>%s</noscript>' % SubmitWidget.render_content(self)
+
+class BigMultipleSelectWidget (MultipleSelectWidget, CompositeWidget):
+
+    def __init__(self, name, value=None, options=None, size=6,
+                 sort=True,
+                 unselected_title='Available',
+                 selected_title='Selected',
+                 **kwargs):
+
+        CompositeWidget.__init__(self, name, **kwargs)
+        MultipleSelectWidget.__init__(self, name, value=value,
+                                      options=options, sort=sort, **kwargs)
+        assert Set(value).issubset(Set([opt[0] for opt in self.options]))
+        if self.value is None:
+            hidden_value = ''
+        else:
+            hidden_value = ','.join([
+                option[2] for option in self.options
+                if option[0] in self.value])
+        self.add(HiddenWidget, 'selected_keys', value=hidden_value)
+        selected_keys = Set((self.get('selected_keys') or '').split(','))
+
+        def split_options():
+            unselected = []
+            selected = []
+            for option in self.options:
+                if option[2] in selected_keys:
+                    selected.append(option)
+                else:
+                    unselected.append(option)
+            return unselected, selected
+
+        width = max([len(stringify(option[1])) for option in self.options])
+        fontsize = 12
+        width = min(400, fontsize*width)
+        style='font-size: %dpx; width: %dpx' % (fontsize, width)
+        unselected_options, selected_options = split_options()
+        self.add(PossiblyEmptySingleSelectWidget, 'unselected',
+                 options=unselected_options, style=style,
+                 title=unselected_title + htmltext('&nbsp;'*2),
+                 size=size, render_br=False, onclick=(
+            'select_move(this, this.form.%s, true, this.form.%s)' %
+            (subname(name, 'selected'), subname(name, 'selected_keys'))))
+        self.add(NoScriptSubmitWidget, 'move', 'Move', render_br=False)
+
+        self.add(PossiblyEmptySingleSelectWidget, 'selected',
+                 options=selected_options, style=style,
+                 title=selected_title, size=size, onclick=(
+            'select_move(this, this.form.%s, false, this.form.%s)' %
+            (subname(name, 'unselected'), subname(name, 'selected_keys'))))
+
+        def key_for_item(item):
+            for option in self.options:
+                if option[0] == item:
+                    return option[2]
+            return None
+
+        if self.get('move'): # javascript not enabled.
+            remove_item = self.get('selected')
+            if remove_item is not None:
+                selected_keys.discard(key_for_item(remove_item))
+            add_item = self.get('unselected')
+            if add_item is not None:
+                selected_keys.add(key_for_item(add_item))
+            self.get_widget('selected_keys').set_value(
+                ','.join(selected_keys))
+            unselected_options, selected_options = split_options()
+            self.get_widget('unselected').set_options(unselected_options)
+            self.get_widget('selected').set_options(selected_options)
+
+    def _parse(self, request):
+        if not self.get('move'): # moving should not set the value
+            selected_keys = Set((self.get('selected_keys') or '').split(','))
+            self.value = list(Set([option[0]
+                                   for option in self.options
+                                   if option[2] in selected_keys])) or None
+
+    def render_content [html] (self):
+        self._add_javascript()
+        CompositeWidget.render_content(self)
+
+    def _add_javascript(self):
+        get_response().add_javascript("big_multiple_select", """\
+            function select_move(from, to, selecting, hidden) {
+                if (!(to.insertBefore &&
+                      navigator.appVersion.indexOf("MSIE 5.0") < 0
+                      )) {
+                    // Catch broken DOM implementations.  
+                    to.form.submit(); // do it the painful way
+                    return;
+                }
+                if (from.selectedIndex < 0) return;
+                var item = from.options[from.selectedIndex];
+                // find insertion point so ordering is preserved
+                for (opt=to.firstChild; opt && opt.text; opt = opt.nextSibling) {
+                    if (item.text.toLowerCase() < opt.text.toLowerCase()) {
+                        break;
+                    }
+                }
+                to.insertBefore(item, opt);
+                item.selected = false;
+                // update hidden.value
+                if (selecting) {
+                    if (hidden.value != "") {
+                        hidden.value = hidden.value + ",";
+                    }
+                    hidden.value = hidden.value + item.value;
+                } else {
+                    var indices = hidden.value.split(",");
+                    for (i=0; i < indices.length; i++) {
+                        if (indices[i] == item.value) {
+                            // 'del indices[i]'
+                            if (indices.splice) {
+                                // NS extension, works in IE 6 too
+                                indices.splice(i, 1);
+                            } else {
+                                indices[i] = "";
+                            }
+                            break;
+                        }
+                    }
+                    hidden.value = indices.join(",")
+                }
+            }
+            """)
+
+
+def format_big_multiple_select_widget_css [plain] ():
+    '''
+form div.BigMultipleSelectWidget div.NoScriptSubmitWidget {
+    margin-top: 1.4em; /* below title */
+}
+'''

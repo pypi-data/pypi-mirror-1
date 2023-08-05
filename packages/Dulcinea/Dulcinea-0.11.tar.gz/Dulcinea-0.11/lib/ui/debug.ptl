@@ -1,0 +1,315 @@
+"""$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/debug.ptl $
+$Id: debug.ptl 26769 2005-05-10 13:44:11Z dbinger $
+"""
+
+import os
+import time
+from commands import getoutput
+from pprint import pformat
+from cStringIO import StringIO
+import site_config
+from quixote import get_session_manager, get_publisher, get_request
+from quixote import get_field, get_response, get_session, redirect
+from quixote.directory import Directory
+from quixote.html import url_quote, href, htmltext, nl2br
+from dulcinea import local, local_ui
+from dulcinea.site_util import get_config_value
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.errors import not_found
+from dulcinea.ui.crumbs import get_exports
+from dulcinea.ui.user.util import ensure_admin_access
+from durus.persistent import Persistent
+from dulcinea.ui.util import item_list, dl, boxtitle
+from dulcinea.site_util import get_root_directory, get_base_path, is_live
+
+class DurusDirectory(DynamicExportingDirectory):
+
+    def __init__(self, obj=None):
+        self.obj = obj
+
+    def get_exports(self):
+        ensure_admin_access()
+        yield ('', '_q_index', self.get_object().__class__.__name__, None)
+
+    def get_object(self):
+        if self.obj is None:
+            return local.get_connection().get_root()
+        else:
+            return self.obj
+
+    def _q_index [html] (self):
+        self.display(self.get_object())
+
+    def _q_lookup(self, component):
+        try:
+            return DurusDirectory(local.get_connection()[int(component)])
+        except:
+            return None
+
+    def display [html] (self, obj):
+        if is_live():
+            return "Not available on a live site."
+        def ref_repr(obj):
+            return str(href(obj._p_format_oid() + '/', obj._repr()))
+        str_obj = str(obj)
+        def format(value):
+            pformatted = pformat(value)
+            if " at " in pformatted:
+                return htmltext('<pre>%s</pre>') % pformatted
+            else:
+                return nl2br(htmltext(pformat(value)))
+        Persistent._repr = Persistent.__repr__
+        Persistent.__repr__ = ref_repr
+        try:
+            title = "Object: %s" % obj._p_format_oid()
+            local_ui.header(title)
+            boxtitle(str_obj)
+            dl([(attr, format(value))
+                for attr, value in vars(obj).iteritems()])
+            local_ui.footer(title)
+        finally:
+            Persistent.__repr__ = Persistent._repr
+            del Persistent._repr
+
+class DebugDirectory(DynamicExportingDirectory):
+
+    def get_exports(self):
+        ensure_admin_access()
+        yield ('', '_q_index', 'Debug', 'Debugging Tools')
+        yield ('dumpenv', 'dumpenv', 'Environment',
+               'Dump request environment variables')
+        yield ('exception', 'exception', 'Exception', 'Raise an exception')
+        yield ('browse_sessions', 'browse_sessions', 'Browse Sessions',
+               'Browse open sessions')
+        yield ('leave_session', 'leave_session', '', '')
+        yield ('join_session', 'join_session', '', '')
+        yield ('view_publisher_config', 'view_publisher_config',
+               'Publisher Config', 'View publisher configuration')
+        yield ('view_site_config', 'view_site_config',
+               'Site Config', 'View site configuration')
+        yield ('browse', 'browse', 'Browse Exports',
+               'Browse exported names')
+        yield ('error_log', 'error_log', 'Error Log',
+               'The tail of the error log.')
+        if not is_live():
+            yield ('durus', 'durus', 'Browse Durus', 'Browse Durus Database')
+
+
+    def _q_index [html] (self):
+        title = "Debugging Tools"
+        local_ui.header(title)
+        item_list(
+            ('dumpenv', 'Dump request environment variables'),
+            ('exception', 'Raise an exception'),
+            ('browse_sessions', 'Browse open sessions'),
+            ('view_publisher_config', 'View publisher configuration'),
+            ('view_site_config', 'View site configuration'),
+            ('browse', 'Browse Exports'),
+            ('error_log', 'Error log'),
+            ('durus', 'Browse Durus Database'),
+            )
+        local_ui.footer(title)
+
+    def _q_lookup(self, component):
+        get_response().set_header('Content-type', 'text/plain')
+        f = StringIO()
+        session = get_session_manager().get(component)
+        if session is None:
+            not_found('No %s resource found.' % component)
+        else:
+            f.write("%s:\n%s\n\n" % (pformat(session),
+                                     pformat(vars(session))))
+        f.write("\n")
+        return f.getvalue()
+
+    def dumpenv [html] (self):
+        import os
+        title = 'Enviroment Dump'
+        local_ui.header(title)
+        lines = []
+        '<h1><tt>request.environ</tt>:</h1>'
+        request = get_request()
+        _dumpenv(request.environ)
+
+        '<h1><tt>os.environ</tt>:</h1>'
+        if os.environ is request.environ:
+            '(identical to <tt>request.environ</tt>)'
+        elif os.environ == request.environ:
+            '(equal to <tt>request.environ</tt>)'
+        else:
+            _dumpenv(os.environ)
+        local_ui.footer(title=title)
+
+    def exception(self):
+        assert 0, 'relax, just testing'
+
+    def browse_sessions [html] (self):
+        local_ui.header('Open Sessions')
+        sessions = [(session.get_access_time(), session)
+                    for session in get_session_manager().values()]
+        if sessions:
+            sessions.sort()
+            sessions = [session
+                        for (_, session) in sessions]
+            '''
+            <p>Sessions:</p>
+            <table border="5">
+              <tr>
+                <th>ID</th>
+                <th>Action</th>
+                <th>User</th>
+                <th>Remote IP</th>
+                <th>Accessed</th>
+                <th>Created</th>
+              </tr>
+            '''
+
+            for session in sessions:
+                # First col: session ID
+                '<tr>'
+                '<td>'
+                href(url_quote(session.id), session.id)
+                '</td>'
+
+                # Second col: action ('Join' or 'Leave')
+                '<td>'
+                if get_session().id == session.id:
+                    href('leave_session', 'Leave')
+                else:
+                    href('join_session?session_id=%s' % url_quote(session.id),
+                         'Join')
+                '</td>'
+
+                # Third col: user
+                '<td>'
+                local_ui.format_user(session.user, name=0, email=0)
+                '</td>'
+
+                # remote addr
+                '<td>%s</td>' % session.get_remote_address()
+
+
+                # Access age
+                '<td>'
+                a_age = session.get_access_age()
+                if a_age < 24*3600:
+                    round(a_age/3600, 1); ' hr. ago'
+                else:
+                    date = time.asctime(time.localtime(time.time() - a_age))
+                    date
+                '</td>'
+
+                # Creation age
+                c_age = session.get_creation_age()
+                '<td>'
+                if c_age < 24*3600:
+                    round(c_age/3600, 1); ' hr. ago'
+                else:
+                    date = time.asctime(time.localtime(time.time() - c_age))
+                    date
+                '</td>'
+                '</tr>'
+
+            '</table>'
+        else:
+            '<p>No open sessions.</p>'
+
+        local_ui.footer(title='Open Sessions')
+
+
+    def join_session(self):
+        """Give the user a cookie corresponding to the given session
+        """
+        session_id = get_field('session_id')
+        get_session_manager().set_session_cookie(session_id)
+        return redirect('browse_sessions')
+
+
+    def leave_session(self):
+        """Revoke the user's session cookie.  Subtly different from
+        user.logout(): the session isn't deleted, and we don't
+        redirect to the home page.
+        """
+        get_session_manager().revoke_session_cookie()
+        return redirect('browse_sessions')
+
+    def view_publisher_config [html] (self):
+        title = 'Publisher Config'
+        local_ui.header(title)
+        '<dl>'
+        items = vars(get_publisher().config).items()
+        items.sort()
+        for item in items:
+            '<dt>%s</dt><dd>%r</dd>' % item
+        '</dl>'
+        local_ui.footer(title)
+
+    def view_site_config [html] (self):
+        title = 'Site Config'
+        local_ui.header(title)
+        '<dl>'
+        items = site_config.config[os.environ['SITE']].items()
+        items.sort()
+        for item in items:
+            '<dt>%s</dt><dd>%r</dd>' % item
+        '</dl>'
+        local_ui.footer(title)
+
+    def error_log(self):
+        log_directory = get_config_value('log_directory')
+        site = os.environ.get('SITE', None)
+        if not (log_directory and site):
+            not_found()
+        error_log = "%s/%s/error.log" % (log_directory, site)
+        get_response().set_content_type('text/plain')
+        return getoutput("tail -1000 %s" % error_log)
+
+
+    def browse [html] (self):
+        title = 'Browse'
+        local_ui.header(title)
+        form = get_request().form
+        if form:
+            return redirect(str(form.get('path') + '/' + form.get('component')))
+        def process [html] (directory, base_path):
+            exports = [export[0] for export in get_exports(directory)]
+            exports.sort()
+            for name in exports:
+                objname = directory._q_translate(name)
+                if objname is None:
+                    obj = directory._q_lookup(name)
+                else:
+                    obj = getattr(directory, objname)
+                if isinstance(obj, (Directory, DynamicExportingDirectory)):
+                    process(obj, base_path + '/' + name)
+                else:
+                    full_name = base_path +'/' + name
+                    href(full_name, full_name)
+                    '<br />'
+                    if (name == ''and
+                        hasattr(directory, str('_q_lookup')) and
+                        getattr(directory, str('_q_lookup')).im_func not in
+                        (Directory._q_lookup.im_func,
+                         DynamicExportingDirectory._q_lookup.im_func)):
+                        '<form style="display:inline" action="browse" '
+                        'method="post">'
+                        full_name
+                        '<input name="path" type="hidden" '
+                        'value="%s" />' % base_path
+                        '<input name="component" type="string" size="20" '
+                        'style="display:inline"/>'
+                        '</form>'
+                        '<br />'
+        '<div style="font-size:smaller; margin:2em">'
+        process(get_root_directory(), get_base_path())
+        '</div>'
+        local_ui.footer(title)
+
+    durus = DurusDirectory()
+
+def _dumpenv [html] (env):
+    vars = env.keys()
+    vars.sort()
+    for var in vars:
+        '%s=%s<br />' % (var, env[var])
+

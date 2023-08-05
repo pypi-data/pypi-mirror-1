@@ -1,0 +1,240 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/outline.ptl $
+$Id: outline.ptl 27456 2005-09-22 13:22:17Z dbinger $
+"""
+from copy import deepcopy
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.util import page
+from dulcinea.outline import Outline
+from quixote import get_request, redirect, get_session, get_user
+from quixote.form.form import Form
+from quixote.form.widget import SubmitWidget, TextWidget
+
+def button [html] (action, fragment, title=None):
+    if get_user():
+        '<form method="post" action="#id%s" class="button">' % fragment
+        '<button type="submit" name="%s %s" class="%s">' % (
+            action, fragment, action)
+        title or action.capitalize()
+        '</button>'
+        '</form>'
+
+def get_button(key):
+    if get_request().get_method() == 'POST' and get_user():
+        for name in get_request().get_fields():
+            split = name.split()
+            if len(split) == 2 and key in split:
+                split.remove(key)
+                return split[0]
+    return None
+
+
+class OutlineUI(DynamicExportingDirectory):
+
+    def __init__(self, outline, prefix=''):
+        self.outline = outline
+        self.prefix = prefix
+
+    def get_exports(self):
+        if not self.prefix:
+            yield ('', '_q_index', 'Outline', None)
+        else:
+            yield ('', '_q_index', self.prefix, None)
+        if self.get_clipboard() is not None:
+            yield ('clear', 'clear', 'Clear Clipboard', None)
+            yield ('paste', 'paste', 'Paste', 'Paste item from clipboard')
+        else:
+            yield ('edit', 'edit', 'Edit', 'Edit')
+            yield ('new', 'new', 'New', 'New')
+
+    def clear(self):
+        self.set_clipboard(None)
+        redirect('.')
+
+    def paste(self):
+        self.outline.append(self.get_clipboard())
+        self.set_clipboard(None)
+        redirect('.')
+
+    def _q_lookup(self, component):
+        result = self.outline.get(component)
+        if not self.prefix:
+            prefix = component
+        else:
+            prefix = "%s.%s" % (self.prefix, component)
+        if result is not None:
+            return OutlineUI(result, prefix=prefix)
+
+    def format_outline_item [html] (self, outline_item, index):
+        str_index = Outline.index_to_string(index)
+        name = 'id' + str_index
+        '<div id="%s" class="o%s">' % (name, len(index))
+        if index:
+            self.format_index_item(str_index, outline_item, name)
+        else:
+            outline_item.get_text() 
+        if isinstance(outline_item, Outline) and len(outline_item) > 0:
+            '<div class="i%s">' % len(index)
+            for j, item in enumerate(outline_item):
+                item_index = index + [j]
+                self.format_outline_item(item, index=item_index)
+            '</div>'
+        '<div style="clear:both"></div>'
+        '</div>'
+
+    def _q_index [html] (self):
+        if self.prefix:
+            title = "%s" % self.prefix
+        else:
+            title = "Outline"
+        return page(title,
+                    self.format_outline_item(self.outline, []),
+                    style=STYLE)
+
+    def edit(self):
+        form = Form()
+        form.add(SubmitWidget, 'save', 'Save')
+        form.add(SubmitWidget, 'cancel', 'Cancel')
+        if form.get('cancel'):
+            redirect('.')
+        form.add(TextWidget, 'text', value=self.outline.get_text(),
+                 title="Text", rows=30, cols=80)
+        if not form.is_submitted():
+            return page('Edit %s' % self.prefix, form.render())
+        self.outline.set_text(form.get('text'))
+        redirect('..')
+
+    def new(self):
+        self.outline.append(self.outline.__class__())
+        redirect('.')
+
+    def get_clipboard(self):
+        return getattr(get_session(), 'clipboard', None)
+
+    def set_clipboard(self, item):
+        get_session().clipboard = item
+
+    def format_index_item [html] (self, str_index, item, name):
+        pressed = get_button(str_index)
+        print repr(pressed)
+        if pressed == 'edit':
+            redirect('%s/edit' % str_index)
+        if pressed == 'clear':
+            self.set_clipboard(None)
+            redirect('#id%s' % str_index)
+        if pressed == 'copy':
+            self.set_clipboard(deepcopy(item))
+            redirect('#id%s' % str_index)
+        if pressed == 'cut':
+            self.set_clipboard(item)
+            target = ''
+            last = None
+            for k, x in self.outline.iteritems():
+                if x is item:
+                    if last:
+                        target = self.outline.index_to_string(last)
+                    break
+                last = k
+            del self.outline[str_index]
+            redirect('#id%s' % target)
+        if pressed == 'paste_before' and self.get_clipboard() is not None:
+            self.outline.insert(str_index, self.get_clipboard())
+            self.set_clipboard(None)
+            redirect('#id%s' % str_index)
+        if pressed == 'paste_after' and self.get_clipboard() is not None:
+            index = self.outline.string_to_index(str_index)
+            if isinstance(index, list):
+                index[-1] += 1
+            else:
+                index += 1
+            self.outline.insert(index, self.get_clipboard())
+            self.set_clipboard(None)
+            redirect('#id%s' % str_index)
+        self.format_index(str_index, item)
+        self.format_item(str_index, item)
+
+    def format_index [html] (self, str_index, item):
+        '\n<div class="index">'
+        number = '<a href="%s">%s</a>' % (str_index, str_index)
+        if self.get_clipboard() is not None:
+            button('paste_before', str_index, "paste")
+            number
+            '<br />'
+            button('paste_after', str_index, "paste")
+        else:
+            number
+        '</div>'
+
+    def format_item [html] (self, str_index, item):
+        '<div class="item">'
+        if self.get_clipboard() is not None:
+            button('clear', str_index, "Clear clipboard")
+        elif not get_request().get_fields():
+            button('cut', str_index)
+            button('copy', str_index)
+            button('edit', str_index)
+        item.get_text()
+        '<br style="clear:both" />'
+        '</div>' # end item
+
+
+STYLE = """
+
+div.o1  {
+  position: relative;
+  z-index: 0;
+  border: thin solid black;
+  background: #ccc;
+  margin-top: 1ex;
+}
+
+div.index {
+    font-weight: bold;
+    width: 5em;
+    float: left;
+    clear: both;
+    background: #eee;
+    border: 2px outset #aaa;
+    padding: 2px;
+    margin: 0.5em;
+    position: relative;
+    z-index: 2;    
+}
+
+div.index button {
+    padding: 0;
+    font-size: xx-small;
+    margin-right: 2px;
+    background: yellow;
+}
+
+div.i1 {
+    clear: both;
+    margin-top: 1em;
+    font-size: smaller;
+    font-weight: normal;
+    padding-left: 3em;
+}
+
+div.item {
+    background: #ddd;
+    padding-left: 6.5em;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    padding-right: 2px;
+}
+
+div.item button {
+    float: right;
+    font-size: smaller;
+    margin-bottom: 4px;
+    padding: 0;
+    position: relative;
+    z-index: 2;
+}
+
+form.button {
+    display: inline;
+}
+"""
+

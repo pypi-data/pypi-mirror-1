@@ -1,0 +1,174 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/tabs.ptl $
+$Id: tabs.ptl 26734 2005-05-03 15:21:46Z dbinger $
+"""
+
+from dulcinea import local_ui
+from quixote import get_request
+from quixote.html import href, htmlescape, htmltext
+
+class Tab:
+
+    def __init__(self, name, title, index_url, content):
+        self.name = name
+        self.title = title
+        self.index_url = index_url
+        self.content = content
+
+    def get_name(self):
+        return self.name
+
+    def get_title(self):
+        return htmlescape(self.title).replace(' ', htmltext('&nbsp;'))
+
+    def get_index_url(self):
+        return self.index_url
+
+    def format_content(self):
+        raise NotImplementedError
+
+
+class ItemTab(Tab):
+
+    def format_content [html] (self):
+        '<dl>'
+        for item in self.content:
+            '\n<dt>%s</dt>' % item.get_title()
+            '\n<dd class="date">%s</dd>' % local_ui.format_date(
+                item.get_timestamp())
+            '\n<dd>%s %s</dd>' % (item.get_subhead() or '',
+                                  href(item.get_local_url(),
+                                       '...&nbsp;read&nbsp;more'))
+        '</dl>'
+
+class RSSTab(Tab):
+
+    def __init__(self, name, title, feed):
+        self.name = name
+        self.title = title
+        self.feed = feed
+
+    def format_content [html] (self):
+        '<dl>'
+        for item_node in self.feed.get_item_nodes():
+            title, description, link = \
+                   self.feed.get_title_description_link_for_item(item_node)
+            '\n<dt>'
+            title
+            '\n</dt>\n<dd>'
+            description
+            ' '
+            href(link, '...&nbsp;read&nbsp;more')
+            '</dd>'
+        '</dl>'
+
+    def get_index_url(self):
+        return self.feed.get_channel_link()
+
+def format_tabs [html] (tabs):
+    selected_name = get_request().get_query()
+    for tab in tabs:
+        if tab.get_name() == selected_name:
+            selected = tab
+            break
+    else:
+        selected = tabs[0]
+    '<ul class="tabbox">'
+    for tab in tabs:
+        if tab is selected:
+            '<li class="selected">%s</li>' % href(tab.get_index_url(),
+                                                  tab.get_title())
+        else:
+            '<li>%s</li>' % href('?' + tab.get_name(),
+                                 tab.get_title())
+    '</ul>\n'
+    '<div class="tabcontents">'
+    selected.format_content()
+    href(selected.get_index_url(), '... more ' + selected.get_title().lower())
+    '</div>\n'
+
+
+def format_tabs_css [plain] (color_map):
+    """\
+ul.tabbox {
+    margin: 0;
+    padding: 10px 10px 0;
+    list-style: none;
+    font-size: smaller;
+}
+
+ul.tabbox li {
+    float: left;
+    margin: 0;
+    padding: 0 0 0 9px;
+    background: url("/images/tab/l.gif") no-repeat left top;
+}
+
+ul.tabbox li a {
+    float: left;
+    /* Backslash Hack hides from IE5-Mac \*/ float:none; /* end hack */
+    display: block;
+    text-decoration: none;
+    color: %(LIGHT_A)s;
+    padding: 5px 15px 4px 6px;
+    background: url("/images/tab/r.gif") no-repeat right top;
+}
+
+ul.tabbox li.selected {
+    border-width: 0;
+    background: url("/images/tab/sl.gif") no-repeat left top;
+}
+
+ul.tabbox li.selected a {
+    padding-bottom: 5px;
+    color: black;
+    font-weight: bold;
+    background: url("/images/tab/sr.gif") no-repeat right top;
+
+}
+
+div.tabcontents {
+    background: #b7c8e2;
+    color: black;
+    margin-top: -1px;
+    clear: both;
+}
+
+div.tabcontents dl {
+      font-size: small;
+      margin: 0;
+      padding: 1ex;
+}
+
+div.tabcontents dt {
+    font-weight: bold;
+    padding-bottom: 0;
+}
+
+div.tabcontents dd {
+    padding-top: 0;
+}
+
+div.tabcontents dd.date {
+    margin-top: 0;
+    padding-bottom: 0;
+    display:inline;
+    font-size: 80%%;
+}
+
+div.tabcontents a,
+div.tabcontents a:link {
+    color: %(DARK_A)s;
+    text-decoration: none;
+}
+
+div.tabcontents a:hover {
+    color: %(DARK_A_HOVER)s;
+    text-decoration: underline;
+}
+
+div.tabcontents a:visited {
+    color: %(DARK_A_VISITED)s;
+    text-decoration: none;
+}
+""" % color_map

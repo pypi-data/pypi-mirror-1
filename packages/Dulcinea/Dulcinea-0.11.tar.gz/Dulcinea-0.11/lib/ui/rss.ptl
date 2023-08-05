@@ -1,0 +1,79 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/rss.ptl $
+$Id: rss.ptl 26729 2005-05-02 16:49:01Z rmasse $
+"""
+
+from xml.dom.minidom import parse
+from urllib2 import urlopen
+from datetime import datetime, timedelta
+
+class RSSFeed:
+
+    def __init__(self, url, delta=None):
+        self.url = str(url)
+        if delta:
+            self.delta = delta
+        else:
+            self.delta = timedelta(minutes=5)
+        self.read_and_parse_url()
+
+    def read_and_parse_url(self):
+        try:
+            self.content = parse(urlopen(self.url))
+        except:
+            self.content = None
+            self.timestamp = None
+        else:
+            self.timestamp = datetime.now()
+
+    def is_stale(self):
+        return (self.timestamp is None or
+                datetime.now() > self.timestamp + self.delta)
+
+    def get_content(self):
+        if self.is_stale():
+            self.read_and_parse_url()
+        return self.content
+
+    def get_children_of_type(self, node, type):
+        return [child for child in node and node.childNodes or []
+                if child.nodeName == type]
+
+    def get_rss_node(self):
+        return self.get_children_of_type(self.get_content(), 'rss')[0]
+
+    def get_channel_node(self):
+        return self.get_children_of_type(self.get_rss_node(), 'channel')[0]
+
+    def get_channel_link(self):
+        try:
+            channel_node = self.get_channel_node()
+        except IndexError:
+            return None
+        try:
+            link_node = self.get_children_of_type(channel_node, 'link')[0]
+        except IndexError:
+            return None
+        try:
+            return link_node.firstChild.nodeValue
+        except AttributeError:
+            return None
+
+    def get_item_nodes(self):
+        try:
+            channel_node = self.get_channel_node()
+        except IndexError:
+            return []
+        return self.get_children_of_type(channel_node, 'item')
+
+    def get_title_description_link_for_item(self, item_node):
+        title = description = link = None
+        if item_node and item_node.nodeName == 'item':
+            for child in item_node.childNodes:
+                if child.nodeName == 'title':
+                    title = child.firstChild.nodeValue
+                elif child.nodeName == 'description':
+                    description = child.firstChild.nodeValue
+                elif child.nodeName == 'link':
+                    link = child.firstChild.nodeValue
+        return title, description, link

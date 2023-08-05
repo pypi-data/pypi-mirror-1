@@ -1,0 +1,166 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/news.ptl $
+$Id: news.ptl 27564 2005-10-13 16:30:00Z rmasse $
+"""
+
+from datetime import datetime, timedelta
+from dulcinea import local_ui, local
+from dulcinea.news import NewsItem
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.errors import access_denied, not_found
+from dulcinea.ui.user.util import ensure_admin_access
+from quixote import get_user, redirect
+from quixote.form import Form
+from quixote.html import href, htmltext
+
+class NewsDirectory(DynamicExportingDirectory):
+
+    def get_exports(self):
+        yield ('', '_q_index', 'News', 'News items')
+        if get_user().is_admin():
+            yield ('add', 'add', 'Add', 'Add a new news item')
+
+    def _q_index [html] (self):
+        title = 'News'
+        local_ui.header(title)
+        '<div style="margin:1em">'
+        _format_news_items(local.get_news_db().get_sorted_news_items())
+        '</div>'
+        local_ui.footer(title)
+
+    def add(self):
+        if not get_user().is_admin():
+            access_denied('Only admin users are permitted to post news items')
+        news_item = NewsItem()
+        form = _news_item_form(news_item)
+        if form.get("cancel"):
+            return redirect(".")
+
+        if form.has_errors() or not form.is_submitted():
+            return _news_item_form_render(form, 'New News Item', news_item)
+
+        news_item.set_title(form['title'])
+        news_item.set_subtitle(form['subtitle'] or '')
+        news_item.set_text(form['text'])
+
+        if form.get("preview"):
+            return _news_item_form_render(form, 'Confirm New News Item',
+                                          news_item)
+
+        local.get_news_db().add(news_item)
+        return redirect(".")
+
+    def _q_lookup(self, component):
+        try:
+            key = int(component)
+        except ValueError:
+            not_found(repr(component))
+        try:
+            item = local.get_news_db().get_news_item(key)
+        except KeyError:
+            not_found("Not found: %r" % key)
+        return NewsUI(item)
+
+def _format_news_items [html] (items):
+    if items:
+        one_item = len(items) == 1
+        six_months_ago = datetime.now() - timedelta(182)
+        '<dl class="news">'
+        for item in items:
+            subtitle = item.get_subtitle()
+            '<dt>'
+            if one_item:
+                item.get_title()
+            else:
+                href('%s/' % item.get_key(), item.get_title())
+            if subtitle:
+                '<br /><span class="subtitle">%s</span>' % subtitle
+            '</dt>'
+            if item.get_timestamp() > six_months_ago:
+                '<dd class="date">%s</dd>' % local_ui.format_date(
+                    item.get_timestamp())
+            '<dd>%s</dd>' % htmltext(item.get_text())
+        '</dl>'
+    else:
+        'No news items.'
+
+def summary [html] (user):
+    '<ul>'
+    for item in local.get_news_db().get_sorted_news_items():
+        '<li>%s</li>' % href('/news/%s/' % item.get_key(), item.get_title())
+    '</ul>'
+
+
+class NewsUI(DynamicExportingDirectory):
+
+    def __init__(self, item):
+        self.item = item
+
+    def get_exports(self):
+        yield ('', '_q_index', self.item.get_title(), '')
+        if get_user().is_admin():
+            yield ('edit', 'edit', 'Edit', 'Edit news item')
+
+    def _q_index [html] (self):
+        title = self.item.get_title()
+        local_ui.header(title)
+        _format_news_items([self.item])
+        local_ui.footer(title)
+
+    def edit(self):
+        ensure_admin_access()
+        form = _news_item_form(self.item)
+        if form.get("cancel"):
+            return redirect(".")
+        if form.has_errors() or not form.is_submitted():
+            return _news_item_form_render(form, 'Edit News Item', self.item)
+        self.item.set_title(form['title'])
+        self.item.set_subtitle(form['subtitle'] or '')
+        self.item.set_text(form['text'])
+        self.item.set_timestamp()
+        if form.get("preview"):
+            return _news_item_form_render(form, 'Confirm News Item', self.item)
+        return redirect(".")
+
+def _news_item_form(news_item):
+    form = Form()
+    form.add_string('title', value=news_item.title, title='Title',
+                    size=90, required=1)
+    form.add_string('subtitle', value=news_item.subtitle, title='Subtitle',
+                    size=90)
+    form.add_text('text', value=news_item.text, title='Text of news item',
+                  required=1, rows=30, cols=80)
+    form.add_submit("preview", "Preview")
+    form.add_submit("submit", "Submit")
+    form.add_submit("cancel", "Cancel")
+    return form
+
+def _news_item_form_render [html] (form, title, news_item):
+    local_ui.header(title)
+    if form.get("preview"):
+        _format_news_items([news_item])
+    form.render()
+    local_ui.footer(title)
+
+def format_news_css [plain] ():
+    '''
+    dl.news dt {
+        background: rgb(1, 36, 117);
+        padding: 0.5ex;
+    }
+
+    dl.news dt span.subtitle {
+        font-size: smaller;
+        font-weight: normal;
+    }
+
+    dl.news dt span.actionlinks {
+        font-weight: normal;
+    }
+
+    dl.news dd.date {
+        font-size: smaller;
+        padding-bottom: 0;
+        margin-bottom: 0;
+    }
+    '''

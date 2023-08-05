@@ -1,0 +1,105 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/item.ptl $
+$Id: item.ptl 27478 2005-09-27 21:08:50Z dbinger $
+"""
+
+from dulcinea import local_ui
+from dulcinea.attachable import Attachable
+from dulcinea.ui.util import page
+from quixote import get_user, get_request, get_response, redirect
+from quixote.form import Form
+from quixote.html import href
+
+def delete_item_form(item, item_db):
+    """(item : Item, item_db : ItemFolder)
+    """
+    form = Form()
+    form.add_submit("delete", "Delete")
+    form.add_submit("cancel", "Cancel")
+
+    if form.get("cancel"):
+        return redirect(".")
+
+    def render [html] (title):
+        local_ui.header(title=title)
+        '<p>Delete item "%s"?</p>' % item.get_title()
+        form.render()
+        local_ui.footer(title)
+
+    if not form.is_submitted():
+        return render("Delete %s" % item.get_title())
+
+    item_db.delete_item(item)
+    return redirect("..")
+
+
+def format_action_links [html] (item):
+    '<span class="boxsubtitle">'
+    href('edit', '[Edit]')
+    '&nbsp;'
+    href('delete', '[Delete]')
+    if isinstance(item, Attachable):
+        '&nbsp;'
+        href('file/', '[Files]')
+
+def item_page [html] (item, formatted_item):
+    if get_user().is_admin():
+        return page(item.get_title(), format_action_links(item), formatted_item)
+    else:
+        return page(item.get_title(), formatted_item)
+
+def sort_by_timestamp(L):
+    # sort_by_timestamp(L:list)
+    # Sort the provided list of objects by timestamp,  mutating the list that's
+    # passed in.
+
+    L.sort(lambda i1, i2: cmp(i2.get_timestamp(), i1.get_timestamp()))
+
+def list_dated_items [html] (items, format_html):
+    #(items : [Items])
+    #
+    #   Category the items into regions posted on the same day
+
+    last_date = None
+    categorized_list = []
+
+    sort_by_timestamp(items)
+    for item in items:
+        if item.get_timestamp().date() != last_date:
+            # Different date?  If so, create a new sublist
+            categorized_list.append( [] )
+            last_date = item.get_timestamp().date()
+
+        categorized_list[-1].append(item)
+
+    # Now that we've categorized them, display them.
+    for day_list in categorized_list:
+        '<h4>%s</h4>' % day_list[0].get_timestamp().date()
+        "<ul>"
+        for item in day_list:
+            "<li>"
+            format_html(item)
+            '</li>'
+        "</ul>"
+
+def list_to_oldest_date [html] (what, item_db, interval,
+                                oldest_date, format_html):
+    items = item_db.get_recent_items(include_unapproved=get_user().is_admin())
+    if oldest_date is not None:
+        items = [item for item in items if oldest_date <= item.get_timestamp()]
+        "<p>%s postings for %s.</p>" % (what.capitalize(), interval)
+    list_dated_items(items, format_html)
+
+
+def display_rss [html] (item_db, format_item_rss, site_preamble):
+    items = item_db.get_recent_items(count=10)
+    get_response().set_content_type('text/xml')
+    """<?xml version="1.0" encoding="ISO-8859-1" ?>
+    <rss version="0.92">
+    <channel>
+    """
+    site_preamble
+    servername = get_request().get_server()
+    for item in items:
+        format_item_rss(item, servername)
+    "</channel></rss>"

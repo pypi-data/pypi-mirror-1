@@ -1,0 +1,441 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/links.ptl $
+$Id: links.ptl 27506 2005-09-30 18:49:55Z dbinger $
+"""
+
+from dulcinea import local, local_ui
+from dulcinea.category import remove_ancestors
+from dulcinea.links import LinkItem, LinkFolder, sort_by_title
+from dulcinea.site_util import get_base_path
+from dulcinea.spec import require
+from dulcinea.util import format_text
+from dulcinea.ui.attachment import AttachmentUI
+from dulcinea.ui.category import CategoryDirectory, CategoryEditDirectory
+from dulcinea.ui.category import hierarchy_header, hierarchy_footer
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.errors import not_found
+from dulcinea.ui.form2.select_widget import BigMultipleSelectWidget
+from dulcinea.ui.user.util import ensure_admin_access
+from quixote import get_user, get_request, redirect
+from quixote.form import Form
+from quixote.form.widget import CompositeWidget, SubmitWidget
+from quixote.form.widget import StringWidget, TextWidget, CheckboxWidget
+from quixote.html import href, htmltext
+from types import FunctionType
+
+class LinkTripleWidget(CompositeWidget):
+    """
+    value: (url:str, text:str, title:str)
+    """
+
+    def __init__(self, name, value=None,
+                 url_hint=('Where you go when this link is clicked. '
+                           'e.g. /tool/34/ or http://google.com'),
+                 text_hint=('The hypertext for this link. i.e. the '
+                            '"clickable" part'),
+                 title_hint=('Title is displayed when the cursor hovers on '
+                             'the link'),
+                 **kwargs):
+        CompositeWidget.__init__(self, name, value=value, **kwargs)
+        self.add(StringWidget, 'url', title='URL', value=value and value[0],
+                 size=60, hint=url_hint)
+        self.add(StringWidget, 'text', title='Text', value=value and value[1],
+                 size=60, hint=text_hint)
+        self.add(StringWidget, 'title', title='Title', value=value and value[2],
+                 size=60, hint=title_hint)
+
+    def _parse(self, request):
+        if self.get('url') and self.get('text'):
+            self.value = self.get('url'), self.get('text'), self.get('title')
+        else:
+            self.value = None
+
+class LinkTripleDirectory(DynamicExportingDirectory):
+
+    def get_exports(self):
+        yield ('', '_q_index', 'SideBar Links', None)
+        yield ('new', 'new', 'New', 'Make a new sidebar link.')
+
+    def _q_index [html] (self):
+        ensure_admin_access()
+        title = 'SideBar Links'
+        local_ui.header(title)
+        links = local.get_link_triple_db().get_links()
+        if links:
+            '<dl>'
+            for index, triple in enumerate(links):
+                '<dt>%s</dt>' % href('new?%d' % index, '[Insert New Link]',
+                                     css_class="smallaction")
+                '<dd>%s</dd>' % _format_link_triple(triple, index)
+            '</dl>'
+        else:
+            '<p>No sidebar links defined</p>'
+        href('new', '[Append New Link]', css_class="smallaction")
+        local_ui.footer(title)
+
+    def new(self):
+        ensure_admin_access()
+        form = Form()
+        form.add(LinkTripleWidget, 'link', title='Link')
+        form.add(SubmitWidget, 'submit', 'Submit')
+        form.add(SubmitWidget, 'cancel', 'Cancel')
+        if form.get('cancel'):
+            return redirect('.')
+        if not form.is_submitted() or form.has_errors():
+            def render [html] (title):
+                local_ui.header(title)
+                form.render()
+                local_ui.footer(title)
+            return render('New SideBar Link')
+        link = form.get('link')
+        if link:
+            try:
+                index = int(get_request().get_query())
+            except ValueError:
+                index = None
+            local.get_link_triple_db().insert_link(link, index)
+        return redirect('.')
+
+    def _q_lookup(self, component):
+        try:
+            index = int(component) - 1
+            triple = local.get_link_triple_db()[index]
+            return LinkTripleEditDirectory(index, triple)
+        except (ValueError, KeyError):
+            return None
+
+
+class LinkTripleEditDirectory(DynamicExportingDirectory):
+
+    def __init__(self, index, triple):
+        self.index = index
+        self.triple = triple
+
+    def get_exports(self):
+        yield ('edit', 'edit', self.triple[1], None)
+        yield ('delete', 'delete', None, None)
+
+    def edit(self):
+        ensure_admin_access()
+        form = Form()
+        form.add(LinkTripleWidget, 'link', value=self.triple, title='Link')
+        form.add(SubmitWidget, 'submit', 'Save Changes')
+        form.add(SubmitWidget, 'cancel', 'Cancel')
+        if form.get('cancel'):
+            return redirect('..')
+        if not form.is_submitted() or form.has_errors():
+            def render [html] (title):
+                local_ui.header(title)
+                form.render()
+                local_ui.footer(title)
+            return render('Edit SideBar Link')
+        link = form.get('link')
+        if link:
+            local.get_link_triple_db()[self.index] = link
+        return redirect('..')
+
+    def delete(self):
+        ensure_admin_access()
+        form = Form()
+        form.add(SubmitWidget, 'delete', 'Delete')
+        form.add(SubmitWidget, 'cancel', 'Cancel')
+        if form.get('cancel'):
+            return redirect('..')
+        if not form.is_submitted():
+            def render [html] (title):
+                local_ui.header(title)
+                _format_link_triple(self.triple)
+                form.render()
+                local_ui.footer(title)
+            return render("Delete SideBar Link")
+        del local.get_link_triple_db()[self.index]
+        return redirect('..')
+
+
+def _format_link_triple [html] (triple, index=None):
+    # If index is provided, it must be an int, and actions are rendered.
+    '<table class="shaded">'
+    '<tr><th colspan="2">'
+    href(*triple)
+    if index is not None:
+        href('%d/edit' % (index + 1), '[Edit]', css_class="smallaction")
+        href('%d/delete' % (index + 1), '[Delete]', css_class="smallaction")
+    '</th></tr>'
+    """
+    <tr><th>URL</th><td>%s</td></tr>
+    <tr><th>Text</th><td>%s</td></tr>
+    <tr><th>Title</th><td>%s</td></tr>
+    </table>""" % triple
+
+class LinkDirectory(CategoryDirectory):
+
+    def __init__(self, link_db, format_link=None):
+        CategoryDirectory.__init__(self, title='Links')
+        require(link_db, LinkFolder)
+        require(format_link, (FunctionType, None))
+        self.link_db = link_db
+        self.format_link = format_link or _format_link
+
+    def get_exports(self):
+        yield ('', '_q_index', 'Links', 'View all links')
+        if get_user().is_admin():
+            yield ('new_link', 'new_link', 'New Link', 'Submit a new link')
+            yield ('new', 'new', 'New Category', 'Create a new Category')
+
+    def get_category_db(self):
+        """() -> CategoryDatabase
+        """
+        return self.link_db
+
+    def new_link [html] (self):
+        return _link_form(self.link_db, title="New Link")
+
+    def _q_index [html] (self):
+        links = self.link_db.get_items()
+        title = "All Links: %d" % len(links or [])
+        _show_links_index(links, self.link_db, self.format_link, title=title)
+
+    def _q_lookup(self, component):
+        try:
+            link = self.link_db.get_item(component)
+        except KeyError:
+            category = self.link_db.get_category(component)
+            if category is None:
+                not_found("Bad Link key: %s" % component)
+            return LinksInCategoryDirectory(
+                category, self.link_db, self.format_link)
+        return LinkEditDirectory(link, self.link_db, self.format_link)
+
+
+class LinksInCategoryDirectory(CategoryEditDirectory):
+
+    def __init__(self, category, category_db, format_link):
+
+        def _show_category [html] (categories, body, title=category.get_label()):
+            _show_links_page(categories, category_db, body, title=title,
+                             selections=categories)
+
+        CategoryEditDirectory.__init__(self, category, category_db,
+                                       decorate=_show_category)
+        self.format_link = format_link
+
+    def get_exports(self):
+        yield ('', '_q_index', self.category.get_label(), None)
+        if get_user().is_admin():
+            yield ('edit', 'edit', 'Edit Category', None)
+
+    def _q_index [html] (self):
+        links = self.category_db.links_with_category(self.category)
+        title = "%s: %d" % (self.category.get_label(), len(links or []))
+        _show_links_index(links, self.category_db, self.format_link,
+                          selections=[self.category], title=title)
+
+    def _q_lookup(self, component):
+        return redirect('../%s/' % component)
+
+class LinkEditDirectory(DynamicExportingDirectory):
+
+    def __init__(self, link, link_db, format_link):
+        self.link = link
+        self.link_db = link_db
+        self.format_link = format_link
+
+    def get_exports(self):
+        yield ('', '_q_index', self.link.get_title(), '')
+        yield ('goto', 'goto', 'Goto', 'Go to this links web site')
+        if get_user().is_admin():
+            yield ('edit', 'edit', 'Edit', 'Edit this link')
+            yield ('delete', 'delete', 'Delete', 'Delete this link')
+            yield ('file', None, 'Files', 'Access files for this link')
+
+    def _q_index [html] (self):
+        selections=self.link.get_categories()
+        _show_links_page([self.link], self.link_db,
+                         self.format_link(self.link, selections=selections),
+                         title="Link: %s" % self.link.get_title(),
+                         selections=selections)
+
+    def goto(self):
+        return redirect(self.link.get_link_url())
+
+    def edit [html] (self):
+        _link_form(self.link_db, link=self.link,
+                   title="Edit Link: %s" % self.link.get_title(),
+                   selections=self.link.get_categories())
+
+    def delete [html] (self):
+        _delete_link_form(self.link, self.link_db,
+                          title="Delete Link: %s" % self.link.get_title(),
+                          selections=self.link.get_categories())
+
+    def _q_lookup(self, component):
+        if component == 'file':
+            def _show_attachments [html] (link, body, title="Attached Files"):
+                _show_links_page([link], self.link_db, body, title=title,
+                                 selections=link.get_categories())
+            return AttachmentUI(self.link, decorate=_show_attachments,
+                                multiple=1)
+
+
+def _show_links_index [html] (links, link_db, format_link, title='Links',
+                              selections=None):
+    links.sort(sort_by_title)
+    formatted_links = [format_link(link, selections=selections)
+                       for link in links]
+    _show_links_page(links, link_db, ''.join(formatted_links), title=title,
+                     selections=selections)
+
+def _show_links_page [html] (links, link_db, body, title='Links',
+                             selections=None):
+    hierarchy_header(link_db.get_category('all'),
+                     selections=selections, show_sidebar=0, title=title,
+                     base_url=get_base_path() + '/links/',
+                     label='Link Categories')
+    '<dl class="links">%s</dl>' % body
+    hierarchy_footer(title=title)
+
+def img_href [html] (link, width=None):
+    files = link.get_attached_files()
+    if files:
+        href("%sgoto" % link.get_local_url(),
+             '<img src="%sfile/%s" %s class="sponsor" alt="%s" />' % (
+            link.get_local_url(), files[0].get_id(),
+            width and 'width="%s"' % width or '', link.get_title()))
+
+def _format_link [html] (link, selections=None):
+    if link.is_approved() or get_user().is_admin():
+        '<dt>'
+        href("%sgoto" % link.get_local_url(), link.get_title())
+        if not link.is_approved():
+            ' '
+            href("%sedit" % link.get_local_url(), "(Unapproved)")
+        if get_user().is_admin():
+            ' '
+            format_action_links(link)
+        '</dt>'
+        body = img_href(link) or ''
+        body += format_text(link.get_text()) or ''
+        if body:
+            '<dd>%s</dd>' % body
+
+def format_action_links [html] (link):
+    url = link.get_local_url()
+    '<span class="boxsubtitle">'
+    '&nbsp;'.join([href(url, '[Categories]'),
+                   href('%sfile/' % url, '[Files]'),
+                   href('%sedit' % url, '[Edit]'),
+                   href('%sdelete' % url, '[Delete]')])
+    '</span>'
+
+def _link_form(link_db, link=None, title='', selections=None):
+    form = Form()
+    form.add(StringWidget, 'title', title='Title', required=1,
+             value=(link and link.get_title()) or None, size=51)
+    form.add(StringWidget, 'url', title='URL', required=1,
+             value=(link and link.get_link_url()) or None, size=51)
+    form.add(TextWidget, 'text', title='Description',
+             value=(link and link.get_text()) or None, cols=56, rows=15)
+    form.add(StringWidget, 'email', title='Contact email', required=1,
+             value=(link and link.get_email()) or None, size=51)
+    form.add(BigMultipleSelectWidget, 'categories', title='Link Categories',
+             value=(link and link.get_categories()) or None, required=1,
+             options=[(category, category.get_label(), category.get_name())
+                      for category in link_db.get_category('all').expand().keys()
+                      if category.get_name() != 'all'],
+             size=10,
+             hint=('Please select one or two categories that best '
+                   'describe the area of relevance for this link'))
+    form.add(CheckboxWidget, 'approved', title='Approved',
+             value=(link and link.is_approved()) or None)
+    form.add(CheckboxWidget, 'first_class', title='First Class',
+             value=(link and link.is_first_class()) or None)
+    if link is None:
+        form.add_submit('save', 'Save')
+    else:
+        form.add_submit('update', 'Update')
+    form.add_submit("cancel", "Cancel")
+
+    url = '.'
+    submit = form.get_submit()
+    if submit == 'cancel':
+        return redirect(url)
+
+    if submit == True or not form.is_submitted() or form.has_errors():
+        return _show_links_page([link], link_db,
+                                htmltext('<dd>%s</dd>') % form.render(),
+                                title=title,
+                                selections=selections)
+    if submit == 'save' or submit == 'update':
+        if link is None:
+            link = LinkItem()
+            link_db.add_item(link)
+        else:
+            link.set_timestamp()
+        link.set_link_url(form.get('url'))
+        link.set_title(form.get('title'))
+        link.set_text(form.get('text'))
+        link.set_email(form.get('email'))
+        link.set_categories(remove_ancestors(form.get('categories')))
+        link.set_first_class(form.get('first_class'))
+        approved = form.get('approved')
+        if approved is not None:
+            link.set_approved(approved)
+
+    return redirect(url)
+
+def _delete_link_form(link, link_db, title='', selections=None):
+    form = Form()
+    form.add_submit('delete', 'Delete')
+    form.add_submit("cancel", "Cancel")
+    submit = form.get_submit()
+    path = '.'
+    if submit == 'cancel':
+        return redirect(path)
+    if not form.is_submitted() or form.has_errors():
+        body = htmltext("<p>Delete Link record: %s?</p>") % link.get_title()
+        return _show_links_page(
+            [link], link_db, body + form.render(), title=title,
+            selections=selections)
+    if submit == 'delete':
+        link_db.delete_item(link)
+        path = '..'
+    return redirect(path)
+
+def format_links_css [plain] (color_map):
+    # Requires:
+    # SHADED_BG to be defined in color_map
+    """
+dl.links dt {
+    padding-top: 2px;
+    padding-bottom: 2px;
+    margin-top: 2px;
+    padding-left: 2ex;
+    background: %(SHADED_BG)s;
+    clear: left;
+}
+
+dl.links a,
+dl.links a:link,
+dl.links a:visited {
+    text-decoration: none;
+}
+
+dl.links a:hover { 
+    text-decoration: underline;
+}
+
+dl.links dd {
+    position: relative;
+}
+
+dl.links dd a {
+    text-decoration: underline;
+}
+
+dl.links img {
+    float: left;
+    margin-right: 1ex;
+    margin-bottom: 1ex;
+    border: none;
+}
+""" % color_map

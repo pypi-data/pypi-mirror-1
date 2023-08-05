@@ -1,0 +1,177 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/inquiry.ptl $
+$Id: inquiry.ptl 27248 2005-08-25 15:19:46Z rmasse $
+"""
+from dulcinea import local, local_ui
+from dulcinea.site_util import get_base_path
+from dulcinea.ui.attachment import AttachmentUI
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.form2.search_widget import SearchSelectOneWidget
+from dulcinea.ui.lib.search import SearchForm
+from dulcinea.ui.user.interaction import interaction_form
+from dulcinea.ui.user.util import ensure_admin_access
+from dulcinea.ui.util import page
+from dulcinea.util import activate_links
+from quixote import redirect, get_path
+from quixote.form import Form
+from quixote.form.widget import StringWidget, TextWidget, RadiobuttonsWidget
+from quixote.form.widget import SingleSelectWidget, SubmitWidget
+from quixote.html import nl2br, href
+
+class InquiryDirectory(DynamicExportingDirectory):
+
+
+    def get_exports(self):
+        ensure_admin_access()
+        yield ('', '_q_index', 'Inquiries', None)
+        yield ('file', None, 'Files', 'Attached Files')
+
+    def _q_index(self):
+        return InquirySearchForm(local.get_inquiry_db().get_inquiries(),
+                                 match_substrings=True).handle()
+
+    def _q_lookup(self, component):
+        if component == 'file':
+            return AttachmentUI(local.get_inquiry_db())
+        try:
+            inquiry = local.get_inquiry_db().get(int(component))
+        except ValueError:
+            return None
+        if inquiry is None:
+            return None
+        return InquiryEditDirectory(inquiry)
+
+
+class InquiryEditDirectory(DynamicExportingDirectory):
+
+    def __init__(self, inquiry):
+        self.inquiry = inquiry
+
+    def get_exports(self):
+        yield ('', '_q_index', self.inquiry.get_title(), None)
+        yield ('edit', 'edit', 'Edit', None)
+        yield ('delete', 'delete', 'Delete', None)
+        yield ('raw', 'raw', 'Raw', None)
+        yield ('interactions', 'interactions', 'Interactions', None)
+
+    def _q_index [html] (self):
+        page('Inquiry: %s' % self.inquiry.get_title(),
+             '<dl>', format_inquiry(self.inquiry, full=True), '</dl>')
+
+    def edit(self):
+        return inquiry_form(self.inquiry)
+
+    def delete [html] (self):
+        form = Form()
+        form.add(SubmitWidget, 'delete', 'Delete')
+        form.add(SubmitWidget, 'cancel', 'Cancel')
+        if form.get('cancel'):
+            return redirect('.')
+        if not form.is_submitted():
+            return page(
+                'Confirm Delete Inquiry',
+                '<p>Really delete Inquiry: %s?</p>' % self.inquiry.get_title(),
+                form.render())
+        if form.get('delete'):
+            del local.get_inquiry_db().get_mapping()[self.inquiry.get_key()]
+        return redirect('..')
+
+    def raw [html] (self):
+        page('Raw Inquiry: %s' % self.inquiry.get_title(),
+              nl2br(self.inquiry.get_msg()))
+
+    def interactions(self):
+        return interaction_form(
+                self.inquiry, formatter=format_inquiry,
+                title='Interaction: %s' % self.inquiry.get_title())
+
+
+
+class InquirySearchForm(SearchForm):
+
+    def get_search_text_fields(self, inquiry):
+        return [inquiry.get_text()]
+
+    def get_title(self):
+        return 'Inquiries'
+
+    def format_search_results_headings [html] (self):
+        '''
+        <th>Title</th>
+        <th>From</th>
+        <th>Date</th>
+        <th>Status</th>
+        '''
+
+    def format_search_results_table_row [html] (self, inquiry):
+        '<td>%s</td>' % inquiry_link(inquiry, inquiry.get_title())
+        '<td>%s</td>' % inquiry.get_from_address()
+        '<td>%s</td>' % local_ui.format_date(inquiry.get_timestamp())
+        '<td>%s</td>' % format_inquiry_status(inquiry)
+
+def inquiry_form(inquiry):
+    form = Form()
+    form.add_submit('submit', 'Submit')
+    form.add_submit('cancel', 'Cancel')
+    if form.get('cancel'):
+        return redirect('..')
+
+    form.add(StringWidget, 'title',
+             value=inquiry.get_title(),
+             title='Title',
+             size=80,
+             required=1)
+    form.add(StringWidget, 'from_address',
+             value=inquiry.get_from_address(),
+             title='From Address', size=80)
+    form.add(TextWidget, 'text',
+             value=inquiry.get_text(),
+             title='Full Text',
+             rows=20, cols=80)
+    form.add(SearchSelectOneWidget, 'user',
+             select_widget_class=SingleSelectWidget,
+             title="Associated User", value=inquiry.get_user(),
+             hint=href('/user/new', '[Add]') + ' new user')
+    form.add(RadiobuttonsWidget, 'status', value=inquiry.is_open(),
+             title='Status', options=((True, 'Open'), (False, 'Closed')))
+
+    if (not form.is_submitted() or
+        form.has_errors() or
+        form.get_widget('user').get_submit()):
+        return page('Edit: %s' % inquiry.get_title(), form.render())
+
+    inquiry.set_title(form['title'])
+    inquiry.set_from_address(form['from_address'])
+    inquiry.set_text(form['text'])
+    inquiry.set_user(form['user'])
+    inquiry.set_open(form['status'])
+    return redirect('..')
+
+def format_inquiry [html] (inquiry, full=False):
+    sub_title = ' (%s)' % local_ui.format_date(inquiry.get_timestamp())
+    '<dt class="inquiry">%s %s</dt>' % (
+        inquiry_link(inquiry, inquiry.get_title()),
+        '<span style="font-size: smaller">%s</span>' % sub_title)
+    if full:
+        '<dd><table class="boxbody">'
+        '<tr><th>From</th><td>%s</td></tr>' % inquiry.get_from_address()
+        '<tr><th>Text</th><td>%s</td></tr>' % nl2br(
+            activate_links(inquiry.get_text()))
+        '<tr><th>Associated User</th><td>%s</td></tr>' % (
+            inquiry.get_user() and local_ui.format_user(inquiry.get_user()))
+        '</table></dd>'
+
+def format_inquiry_status [html] (inquiry):
+    '<dl>'
+    '<dt class="inquiry">%s</dt>' % (inquiry.is_open() and 'Open' or 'Closed')
+    interactions = inquiry.get_interaction_history()
+    if interactions:
+        '<dd>%s</dd>' % interactions.find_event(latest=True).get_user().get_id()
+    '</dl>'
+
+def inquiry_link [html] (inquiry, text, ext=''):
+    path = get_base_path() + '/inquiry/%s/%s'  % (inquiry.get_key(), ext)
+    if get_path() == path:
+        text
+    else:
+        '<span style="font-weight: normal">%s</span>' % href(path, text)

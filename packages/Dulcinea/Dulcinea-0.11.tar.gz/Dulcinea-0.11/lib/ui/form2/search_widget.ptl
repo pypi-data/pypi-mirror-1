@@ -1,0 +1,159 @@
+"""$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/form2/search_widget.ptl $
+$Id: search_widget.ptl 27498 2005-09-29 19:57:40Z rmasse $
+"""
+
+from sets import Set
+from quixote.form.widget import CompositeWidget, StringWidget, \
+     SubmitWidget, SingleSelectWidget
+from dulcinea.ui.form2.select_widget import BigMultipleSelectWidget
+from dulcinea import local
+
+def get_user_search_domain():
+    for user in local.get_user_db().get_users():
+        yield (user, ' '.join((user.get_id(),
+                               user.format_realname() or '',
+                               user.get_email() or '')))
+
+class SearchWidget(CompositeWidget):
+    """
+    This widget provides a simple mechanism for choosing objects based
+    on word matching.
+    """
+
+    def __init__(self, name, value, get_domain=get_user_search_domain,
+                 **keywords):
+        """
+        get_domain(), when called, must return or generate a sequence of
+        (obj, text) tuples.  The value of the widget is the list of all
+        of the objs for which the corresponding text contains a word in
+        the value of the keywords subwidget.
+        """
+        CompositeWidget.__init__(self, name, value, **keywords)
+        self.add(StringWidget, "keywords", size=30)
+        self.add(SubmitWidget, "submit_search", value="Search")
+        self.get_domain = get_domain
+
+    def _parse(self, request):
+        CompositeWidget._parse(self, request)
+        domain = [domain_pair for domain_pair in self.get_domain()]
+        self.value = [obj for obj, text in domain]
+        # if self.get('submit_search'):
+        keywords = self.get("keywords")
+        if keywords:
+            keyword_list = [keyword.lower() for keyword in keywords.split()]
+            matches = []
+            for obj, text in domain:
+                text = text.lower()
+                for keyword in keyword_list:
+                    if keyword in text:
+                        matches.append(obj)
+                        break
+            if matches:
+                self.value = matches
+            else:
+                self.set_error("No matches found for %r." % keywords)
+                self.get_widget("keywords").set_value(None)
+
+    def get_submit(self):
+        return self.get("submit_search")
+
+class SearchSelectOneWidget(CompositeWidget):
+    """
+    This widget provides a simple mechanism for choosing objects based
+    on word matching followed by direct selection by the user.
+    """
+
+    def __init__(self, name, value=None, get_domain=get_user_search_domain,
+                 title=None, required=False, **keywords):
+        """
+        get_domain(), when called, must return or generate a sequence of
+        (obj, text) tuples.  The value of the widget is the list of all
+        of the objs for which the corresponding text contains a word in
+        the value of the keywords subwidget.
+        """
+        CompositeWidget.__init__(self, name, title=title)
+        if value:
+            options = [value, None]
+        else:
+            options = [value]
+        self.add(SingleSelectWidget, "select", value=value, options=options,
+                 verify_selection=True, sort=True, required=required)
+        self.add(SearchWidget, "search", value=None, get_domain=get_domain,
+                 **keywords)
+        search_widget = self.get_widget("search")
+        select_widget = self.get_widget("select")
+        if search_widget.get_submit():
+            options = self.get("search")
+            keywords = search_widget.get('keywords')
+            if keywords:
+                select_widget.set_hint("list includes search results for %r" %
+                                       keywords)
+        else:
+            options = [obj for obj, text in get_domain()]
+        if value not in options:
+            options.append(value)
+        if None not in options:
+            options.append(None)
+        select_widget.set_options(options, sort=True)
+
+    def _parse(self, request):
+        CompositeWidget._parse(self, request)
+        self.value = self.get("select")
+
+    def get_submit(self):
+        return self.get_widget("search").get_submit()
+
+
+class SearchSelectWidget(CompositeWidget):
+    """
+    This widget provides a simple mechanism for choosing objects based
+    on word matching followed by direct selection by the user.
+    """
+
+    def __init__(self, name, value=None, get_domain=get_user_search_domain,
+                 size=6, **keywords):
+        """
+        get_domain(), when called, must return or generate a sequence of
+        (obj, text) tuples.  The value of the widget is the list of all
+        of the objs for which the corresponding text contains a word in
+        the value of the keywords subwidget.
+
+        if add_select_button is True, a submit widget is added just
+        below the search widget that when pressed has the effect of
+        setting the value of the search widget so that forms can
+        re-rendered based on the value of the search widget.
+        """
+        CompositeWidget.__init__(self, name, value)
+        self.add(SearchWidget, "search", value=None, get_domain=get_domain,
+                 **keywords)
+        search_results = self.get("search")
+        options = list(Set(search_results).union(Set(value)))
+        if options:
+            self.add(BigMultipleSelectWidget, "select", value=value,
+                     options=options, title="Matches", size=size)
+            self.add(SubmitWidget, "submit_selection", value="Select")
+            self._force_select_to_show_current_selected(get_domain)
+
+    def _force_select_to_show_current_selected(self, get_domain):
+        """Force the selected sub-widget of the BigMultipleSelect
+        to always represent the current selection in the face of
+        possibly shrinking options
+        """
+        all_options = SingleSelectWidget(
+            'all_options', value=None, options=list(get_domain())).options
+        select_widget = self.get_widget('select')
+        selected_widget = select_widget.get_widget('selected')
+        keys = Set((select_widget.get('selected_keys') or '').split(','))
+        if len(keys) > len(selected_widget.options):
+
+            def by_description(option1, option2):
+                return cmp(str(option1[0]).lower(), str(option2[0]).lower())
+
+            selected_widget.options = list(Set(selected_widget.options).union(
+                Set([(option[0], option[0], option[2]) for option in all_options
+                     if option[2] in keys])))
+            selected_widget.options.sort(by_description)
+
+    def _parse(self, request):
+        CompositeWidget._parse(self, request)
+        self.value = self.get("select")

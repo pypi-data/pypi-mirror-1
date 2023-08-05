@@ -1,0 +1,456 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/attachment.ptl $
+$Id: attachment.ptl 27144 2005-08-02 19:53:52Z dbinger $
+"""
+from dulcinea import local_ui
+from dulcinea.attachable import Attachment
+from dulcinea.stored_file import new_file
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.errors import access_denied, not_found
+from dulcinea.ui.thumbnail import thumbnail_response
+from dulcinea.ui.user.util import ensure_signed_in
+from dulcinea.ui.util import boxtitle, format_file_size
+from dulcinea.ui.browse import ImageArchiveDirectory
+from mimetypes import guess_type
+from quixote import get_user, get_path, redirect, get_response, get_session
+from quixote.form import Form
+from quixote.form.widget import CompositeWidget
+from quixote.form.widget import StringWidget, TextWidget, FileWidget
+from quixote.html import href, htmltag, htmltext
+from quixote.util import FileStream
+
+
+def default_decorate [html] (attachable, body, title=None):
+    local_ui.header(title)
+    '<div style="margin:1em">'
+    body
+    '</div>'
+    local_ui.footer(title)
+
+class AttachmentUI(DynamicExportingDirectory):
+
+    def __init__(self, attachable, decorate=default_decorate, multiple=5):
+        """(attachable:Attachable)"""
+        self.attachable = attachable
+        self.decorate = decorate
+        self.multiple = multiple
+
+    def get_exports(self):
+        yield ('', '_q_index', 'Files', 'Attached Files')
+        if get_user():
+            yield ('upload', 'upload', 'Upload', 'Upload new file attachment')
+        if get_session().get_attachments():
+            yield ('attach', 'attach', 'Paste',
+                   'Attach file attachments from clipboard here')
+            yield ('clear', 'clear', 'Clear',
+                   'Clear file attachments on clipboard')
+
+    def _q_index [html] (self):
+        title = 'Attached Files'
+        self.decorate(self.attachable,
+                      self.render_attachments(),
+                      title=title)
+
+    def render_attachments [html] (self):
+        _format_clipboard_attachments(self.attachable)
+        user = get_user()
+        attachments = self.attachable.get_attachments()
+        if len(attachments) == 0:
+            '<p>No attached files.</p>'
+        else:
+            format_attachments(self.attachable, '',
+                               show_action_links=bool(user))
+
+    def clear(self):
+        get_session().clear_attachments()
+        return redirect('.')
+
+    def upload(self):
+        ensure_signed_in()
+        return  upload_form(self.attachable, decorate=self.decorate,
+                            multiple=self.multiple)
+
+    def attach(self):
+        for attachment in get_session().get_attachments():
+            new_attachment = Attachment(attachment.get_file(), get_user())
+            new_attachment.set_filename(attachment.get_filename())
+            new_attachment.set_description(attachment.get_description())
+            self.attachable.add_attachment(new_attachment)
+        get_session().clear_attachments()
+        return redirect('.')
+
+    def _q_lookup(self, component):
+        attachment = (self.attachable.get_attachment(component) or
+                      get_session().get_attachment(component))
+        if attachment is not None:
+            return DataUI(self.attachable, attachment, decorate=self.decorate)
+
+def _format_clipboard_attachments [html] (attachable):
+    if get_session().get_attachments():
+        '<div class="clipboard">'
+        boxtitle('Clipboard')
+        format_attachments(get_session(), '')
+        ' '.join([href('attach', '[Paste]'), href('clear', '[Clear]')])
+        '</div>'
+
+
+class UploadWidget(CompositeWidget):
+
+    def __init__(self, *args, **kwargs):
+        CompositeWidget.__init__(self, *args, **kwargs)
+        self.add(FileWidget, 'upload_file', size=60)
+        self.add(TextWidget, 'description', title='Description',
+                 cols=70, rows=2)
+
+    def _parse(self, request):
+        if self['upload_file'] is not None:
+            self.value = (self['upload_file'], self['description'])
+        else:
+            self.value = None
+
+class MultipleUploadWidget(CompositeWidget):
+
+    def __init__(self, name, multiple=3, **kwargs):
+        CompositeWidget.__init__(self, name, **kwargs)
+        for k in xrange(multiple):
+            self.add(UploadWidget, str(k))
+
+    def _parse(self, request):
+        values = [widget.parse() for widget in self.get_widgets()]
+        self.value = None
+        for value in values:
+            if value:
+                self.value = values
+                break
+
+    def render_content [html] (self):
+        '<br />'.join([widget.render() for widget in self.get_widgets()])
+
+
+def upload_form(attachable, decorate=default_decorate, multiple=1):
+    form = Form(enctype='multipart/form-data')
+    for k in xrange(multiple):
+        form.add(UploadWidget, str(k))
+
+    if multiple > 1:
+        uploading = "files"
+    else:
+        uploading = "file"
+    hint = htmltext(
+        "When you press this, the your browser will start sending "
+        "the %s you have selected, and "
+        "it may take a while. "
+        "<strong>Please wait for the upload to complete</strong>, "
+        "or else it will be cancelled. ") % uploading
+    form.add_submit('upload', 'Upload', hint=hint)
+    form.add_submit('cancel', 'Cancel')
+    if form.get('cancel'):
+        return redirect('.')
+
+    if form.has_errors() or not form.get('upload'):
+        def render_body [html] ():
+            if multiple > 1:
+                '''
+                <p>
+                You can upload up to %s files at a time.
+                </p>
+                ''' % multiple
+            form.render()
+        return decorate(attachable, render_body(), title='Upload File')
+
+    for k in xrange(multiple):
+        stored_file = create_stored_file_from_upload(
+            form.get(str(k)), attachable.get_allowed_mime_types(get_user()))
+        if stored_file:
+            attachable.attach_file(stored_file, get_user())
+    return redirect('.')
+
+
+def create_stored_file_from_upload(upload_description, allowed_mime_types):
+    stored_file = None
+    if upload_description is not None:
+        upload, description = upload_description
+        mime_type = (guess_type(upload.base_filename)[0] or
+                     'application/octet-stream')
+        if allowed_mime_types and mime_type not in allowed_mime_types:
+            access_denied("Uploading %r files is not allowed." % mime_type)
+        stored_file = new_file(upload.fp)
+        stored_file.set_mime_type(mime_type)
+        stored_file.set_filename(upload.base_filename)
+        stored_file.set_owner(get_user())
+        stored_file.set_description(description)
+    return stored_file
+
+def is_browsable(mimetype, filename):
+    return (mimetype in ("application/x-gtar",
+                         "application/x-tar",
+                         "application/zip") or
+            filename.endswith('.tgz') or
+            filename.endswith('.tar.gz') or
+            filename.endswith('.zip'))
+
+
+def format_file [html] (file_obj, url, show_thumbnail=True,
+                        show_name_size_type=True,
+                        thumbnail_size=None,
+                        show_action_links=False):
+    '\n<dt style="clear:left">'
+    if not url.endswith(str('/')):
+        url += str('/')
+
+    if show_name_size_type:
+        size = format_file_size(file_obj.get_size())
+
+    filename = file_obj.get_filename()
+
+    # Add an unused query string so that renaming the file will invalidate
+    # the attachment in the browser cache.  Browsers don't make it easy to
+    # force a reload of files that cannot be displayed (e.g. Word documents,
+    # PDFs).
+
+    if show_thumbnail:
+        if file_obj.get_mime_type().startswith(str('image/')):
+            thumbnail = url + 'thumbnail'
+            if thumbnail_size:
+                thumbnail += '?%s' % thumbnail_size
+            href(url + 'view',
+                 htmltag('img',
+                         src=thumbnail,
+                         alt='[Thumbnail]',
+                         css_class="thumbnail",
+                         xml_end=True))
+
+    if show_name_size_type:
+        href(url, '<code>%s</code>' % filename)
+        ' <span style="font-size:80%">'
+        '(%s, %s)' % (size, file_obj.get_mime_type())
+        '</span>'
+
+    def get_actions [html] ():
+        if is_browsable(file_obj.get_mime_type(), filename):
+            ' '
+            href('%sbrowse/' % url, '[Browse]')
+
+        if show_action_links:
+            ' '
+            href('%scopy' % url, '[Copy]')
+            if file_obj.has_manage_access(get_user()):
+                ' '
+                href('%sdetach' % url, '[Detach]')
+                ' '
+                href('%sedit' % url, '[Edit Properties]')
+
+    actions = get_actions()
+    if actions:
+        '<span style="font-weight: normal">%s</span>' % actions
+
+    '</dt>'
+
+    if show_action_links:
+        '''
+        <dd>
+        attached by %s on %s
+        </dd>
+        ''' % (local_ui.format_user(file_obj.get_owner(), email=False),
+               local_ui.format_date_time(file_obj.get_date()))
+
+    if file_obj.get_description():
+        '\n<dd>%s</dd>' % file_obj.get_description()
+
+
+def format_attachments [html] (attachable, path, show_action_links=False,
+                               show_name_size_type=True, thumbnail_size=50):
+    '<dl>'
+    for attachment in attachable.get_attachments():
+        format_file(attachment, '%s%s/' % (path, attachment.get_file_id()),
+                    thumbnail_size=thumbnail_size,
+                    show_name_size_type=show_name_size_type,
+                    show_thumbnail=True, show_action_links=show_action_links)
+    '</dl>'
+
+class DataUI(DynamicExportingDirectory):
+
+    cache_time = 24*3600 # seconds to cache _q_index and thumbnail
+
+    def __init__(self, attachable, attachment, decorate=default_decorate):
+        self.attachable = attachable
+        self.attachment = attachment
+        self.decorate = decorate
+
+    def get_exports(self):
+        yield ('', '_q_index', self.attachment.get_filename(),
+               self.attachment.get_description())
+        yield ('view', 'view', 'View', None)
+        yield ('copy', 'copy', None, None)
+        yield ('thumbnail', 'thumbnail' , None, None)
+        if self.attachment.has_manage_access(get_user()):
+            yield ('detach', 'detach', 'Detach', 'Detach file')
+            yield ('edit', 'edit', 'Edit', 'Edit file properties')
+        if self.attachment.get_mime_type() in ("application/x-gtar",
+                                               "application/x-tar"
+                                               "application/zip"):
+            yield ('browse', None, 'Browse', 'Browse into this archive')
+
+    def _q_index(self):
+        response = get_response()
+        response.set_expires(seconds=self.cache_time)
+        try:
+            fp = self.attachment.open()
+        except IOError:
+            not_found()
+        response.set_content_type(self.attachment.get_mime_type())
+        response.set_header('Content-Disposition',
+                            'inline; filename="%s"'
+                            % self.attachment.get_filename())
+        return FileStream(fp)
+
+    def _q_lookup(self, name):
+        if name == 'browse':
+            return ImageArchiveDirectory(
+                self.attachment.get_file().get_full_path(),
+                decorate=self.decorate, obj=self.attachable)
+
+    def __call__(self):
+        """
+        Use _q_index after the last component is traversed,
+        even if the last component is not empty.
+        This makes it so that the URL for a file within a
+        tar archive does not need to end with a slash.
+        """
+        return self._q_index()
+
+    def copy(self):
+        get_session().add_attachment(self.attachment)
+        return redirect('..')
+
+    def detach(self):
+        return detach_confirm_form(self.attachable,
+                                   self.attachment,
+                                   decorate=self.decorate)
+
+    def edit(self):
+        return edit_properties_form(self.attachable,
+                                    self.attachment,
+                                    decorate=self.decorate)
+
+    def thumbnail(self):
+        if not self.attachment.is_image():
+            return None
+        try:
+            fp = self.attachment.open()
+        except IOError:
+            # attachment file is probably missing
+            not_found('attached file not found')
+        # Manufacture a thumbnail image
+        return thumbnail_response(fp, cache_time=self.cache_time)
+
+    def view(self):
+        def body [html] ():
+            '<div style="margin-bottom: 1ex">'
+            self.attachment.get_description()
+            '</div>'
+            if self.attachment.is_image():
+                href('./?%s' % self.attachment.get_filename(),
+                     '<img src="thumbnail?600" alt="thumbnail" />')
+        return self.decorate(self.attachable, body(),
+                             self.attachment.get_filename())
+
+def detach_confirm_form(attachable, attachment,
+                        decorate=default_decorate):
+    if not attachment.has_manage_access(get_user()):
+        access_denied('you are not allowed to detach files owned by others')
+    form = Form()
+    redirect_path = '..'
+
+    form.add_submit('detach', 'Detach')
+    if form['detach']:
+        attachable.detach_attachment(attachment)
+        return redirect(redirect_path)
+
+    form.add_submit('cancel', 'Cancel')
+    if form['cancel']:
+        return redirect(redirect_path)
+
+    def render [html] ():
+        '<p>Detach the file below?</p>'
+        '<dl>'
+        format_file(attachment, get_path(1), show_thumbnail=True)
+        '</dl>'
+        form.render()
+
+    return decorate(attachable, render(),
+                    title='Confirm: Detach file?')
+
+def edit_properties_form(attachable, attachment,
+                         decorate=default_decorate):
+    if not attachment.has_manage_access(get_user()):
+        access_denied('you are not allowed to edit files owned by others')
+
+    form = Form()
+    redirect_path = '..'
+
+    form.add_submit('update', 'Update')
+    form.add_submit('cancel', 'Cancel')
+    if form['cancel']:
+        return redirect(redirect_path)
+
+    form.add(StringWidget, 'filename',
+             value=attachment.get_filename(),
+             title='Filename',
+             required=1)
+    form.add(TextWidget, 'description',
+             value=attachment.get_description(),
+             title='Description',
+             cols=40, rows=2)
+
+    if not form.is_submitted() or form.has_errors():
+        def render [html] ():
+            '''
+            <p>
+            Note that the file properties are stored as part of the file
+            object and will be the same wherever this file is attached.
+            </p>
+            '''
+            form.render()
+        return decorate(attachable, render(),
+                        title='Edit File Properties')
+
+    # XXX perhaps this modification should not happen in-place
+    attachment_modified = False
+    file_name = form['filename']
+    if attachment.get_filename() != file_name:
+        attachment.set_filename(file_name)
+        attachment_modified = True
+    description = form['description']
+    if attachment.get_description() != description:
+        attachment.set_description(description)
+        attachment_modified = True
+    # If the attachment has been modified, notify the attachable
+    if attachment_modified:
+        attachable.attachment_modified(attachment, get_user())
+    return redirect(redirect_path)
+
+class ClipboardUI (DataUI):
+    """Show object currently on clipboard.
+    """
+    def get_exports(self):
+        yield ('thumbnail', 'thumbnail', None, None)
+
+    cache_time = -1 # don't cache since it changes
+
+
+def format_attachment_css [plain] ():
+    """
+    div.clipboard {
+        margin: 1em 0em 1em;
+        background-color: #ffd865;
+        color: black;
+    }
+    div.clipboard a {
+        color: blue;
+    }
+    div.clipboard div.boxtitle {
+        color: darkblue;
+        margin-bottom: 1em;
+    }
+    """

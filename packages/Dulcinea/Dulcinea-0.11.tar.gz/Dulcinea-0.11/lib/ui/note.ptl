@@ -1,0 +1,78 @@
+"""
+$Id: note.ptl 27142 2005-08-02 19:23:07Z rmasse $
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/note.ptl $
+"""
+
+from dulcinea.note import Note, Notable
+from dulcinea.spec import require
+from dulcinea.ui.attachment import AttachmentUI
+from dulcinea.ui.attachment import format_attachments
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.util import page
+from quixote import redirect
+from quixote.form import Form
+from quixote.form.widget import TextWidget, SubmitWidget
+
+
+def default_decorate [html] (note, body, title='Note'):
+    page(title, '<div style="margin:1em">', body, '</div>')
+
+def format_note [html] (note, path='file/'):
+    if note:
+        if note.get_text():
+            '<p>%s</p>' % note.get_text()
+        format_attachments(note, path)
+
+class NotableDirectory(DynamicExportingDirectory):
+
+    def __init__(self, notable, decorate=None):
+        require(notable, Notable)
+        self.notable = notable
+        self.note = notable.get_note() or Note()
+        self.decorate = decorate or default_decorate
+
+    def get_exports(self):
+        yield ('', '_q_index', 'Note', None)
+        if self.notable.get_note():
+            yield ('edit', 'edit', 'Edit', None)
+            yield ('file', None, 'Files', 'Attach files')
+            yield ('delete', 'delete', 'Delete', 'Delete this note')
+        else:
+            yield ('edit', 'edit', 'Add', None)
+
+    def _q_index (self):
+        return self.decorate(self.note, format_note(self.note), title='View')
+
+    def edit(self):
+        form = Form()
+        form.add(TextWidget, 'text', value=self.note.get_text(),
+                 rows=30, cols=100)
+        form.add(SubmitWidget, 'save', 'Save')
+        form.add(SubmitWidget, 'cancel', 'Cancel')
+        if form.get('cancel'):
+            return redirect('.')
+        if not form.is_submitted():
+            return self.decorate(self.notable, form.render(), 'Edit')
+        self.note.set_text(form['text'])
+        if self.notable.get_note() is None and not self.note.is_empty():
+            self.notable.set_note(self.note)
+        elif self.notable.get_note() is not None and self.note.is_empty():
+            self.notable.set_note(None)
+        return redirect('.')
+
+    def delete [html] (self):
+        form = Form()
+        form.add(SubmitWidget, 'delete', 'Delete')
+        form.add(SubmitWidget, 'cancel', 'Cancel')
+        if form.get('cancel'):
+            return redirect('.')
+        if not form.is_submitted():
+            return page('Confirm Delete',
+                        '<p>Really delete Note?</p>', form.render())
+        if form.get('delete'):
+            self.notable.set_note(None)
+        return redirect('.')
+
+    def _q_lookup(self, component):
+        if component == 'file':
+            return AttachmentUI(self.note, decorate=self.decorate)

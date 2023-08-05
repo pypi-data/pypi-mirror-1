@@ -1,0 +1,296 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/user/register.ptl $
+$Id: register.ptl 27431 2005-09-15 17:00:50Z rmasse $
+"""
+
+from dulcinea import local, local_ui
+from dulcinea.address import Address, is_valid_phone_number
+from dulcinea.site_util import get_base_path
+from dulcinea.ui.form2.address_widget import AddressWidget
+from dulcinea.ui.user.util import allow_act_as, user_admin_path
+from dulcinea.ui.user.util import can_create_users
+from dulcinea.ui.util import page
+from quixote import get_request, get_user, redirect, get_session
+from quixote.form import Form
+from quixote.form.widget import SingleSelectWidget, CompositeWidget
+from quixote.form.widget import StringWidget
+from quixote.html import href, htmltext
+import dulcinea.ui.user.password
+import re
+
+class PersonNameWidget(CompositeWidget):
+
+    prefix_options = ['', 'Mr', 'Ms', 'Dr']
+
+    def __init__(self, name, value=(None, None, None), required=0,
+                 require_first_name=True, **kwargs):
+        CompositeWidget.__init__(self, name, value, **kwargs)
+        self.add(SingleSelectWidget, 'prefix',
+                 value=value[0],
+                 title=htmltext('&nbsp;'),
+                 options=self.prefix_options,
+                 render_br=False)
+        self.add(StringWidget, 'first',
+                 value=value[1],
+                 title='First',
+                 size=32, maxlength=32,
+                 required=require_first_name,
+                 render_br=False)
+        self.add(StringWidget, 'last',
+                 value=value[2],
+                 title='Last',
+                 size=32, maxlength=32,
+                 required=required)
+
+    def _parse(self, request):
+        self.value = (self.get('prefix'),
+                      self.get('first'),
+                      self.get('last'))
+
+
+class UserIDWidget(StringWidget):
+
+    id_re = re.compile("[a-zA-Z0-9][a-zA-Z0-9-_.]*$")
+
+    forbidden_ids = ('none', '', 'system', 'root', 'login_as')
+
+    def _parse(self, request):
+        StringWidget._parse(self, request)
+        if not self.has_error():
+            if self.value in self.forbidden_ids:
+                self.set_error('User ID %r is not allowed.' % self.value)
+            elif self.value is None:
+                pass # Required-ness is handled by superclass.
+            elif not self.id_re.match(self.value):
+                self.set_error(
+                    'User ID %r is not allowed. '
+                    'Characters in a User ID must be '
+                    'letters, digits, "-", "_", or "."' % self.value)
+            elif local.get_user_db().get_user(self.value) is not None:
+                self.set_error('User ID %r already exists.' % self.value)
+
+class EmailWidget(StringWidget):
+
+    def _parse(self, request):
+        StringWidget._parse(self, request)
+        if not self.has_error():
+            if self.value is not None and '@' not in self.value:
+                self.set_error('Invalid e-mail address')
+
+
+def _add_user_id_widget(form):
+    form.add(UserIDWidget, 'user_id',
+             title='User ID',
+             size=15, maxlength=32,
+             hint='Make up a user id.',
+             required=1)
+
+def _add_user_to_database(user, id):
+    user.set_id(id)
+    local.get_user_db().add_user(user)
+
+def _add_contact_widgets(form, user, required=True, set_password=False):
+    form.add(PersonNameWidget, 'name',
+             value=(user.get_prefix(),
+                    user.get_first_name(),
+                    user.get_last_name()),
+             title='Name',
+             required=required)
+    if set_password:
+        form.add(dulcinea.ui.user.password.NewPasswordWidget, 'password',
+                 title='Password',
+                 size=32, maxlength=32,
+                 required=required,
+                 hint='Make up a password.',
+                 validation_function=user.check_new_password)
+    form.add(EmailWidget, 'email',
+             value=user.get_email(),
+             title='E-mail address',
+             size=30, maxlength=64,
+             required=required)
+    form.add(StringWidget, 'phone',
+             value=user.get_phone(),
+             title='Phone',
+             size=20, maxlength=20,
+             required=required)
+    form.add(StringWidget, 'fax',
+             value=user.get_fax(),
+             title='Fax',
+             size=20, maxlength=20)
+    form.add(StringWidget, 'company_name',
+             value=user.get_company_name(),
+             title='Organization',
+             size=35, maxlength=35)
+    form.add(AddressWidget, 'address',
+             value=user.get_address(),
+             title='Address',
+             required=required)
+
+def _modify_contact(form, user, set_password=False):
+    prefix, first_name, last_name = form['name']
+    user.set_prefix(prefix)
+    user.set_first_name(first_name)
+    user.set_last_name(last_name)
+    if set_password:
+        password = form['password']
+        if password:
+            user.set_password(password)
+    user.set_email(form['email'])
+    user.set_company_name(form['company_name'])
+    user.set_phone(form['phone'])
+    user.set_fax(form['fax'])
+    user.set_address(form['address'] or Address())
+
+
+def _check_for_duplicate_email(form):
+    email = form.get('email')
+    if email:
+        duplicate_user = local.get_user_db().get_matching_user(email)
+        if duplicate_user:
+            error = htmltext("email address in use by ")
+            if allow_act_as():
+                error += local_ui.format_user(duplicate_user, email=False)
+            else:
+                error += htmltext("'%s'. %s" % (
+                    duplicate_user, href(user_admin_path(duplicate_user),
+                                         "Sign in as %s" % duplicate_user)))
+            form.set_error('email', error)
+
+def _check_for_valid_phone_numbers(form, *args):
+    address = form.get('address')
+    country_code = address and address.get_country_code() or None
+    for name in args:
+        number = form.get(name)
+        if number and not is_valid_phone_number(number, country_code):
+            form.set_error(name, 'bad %s number' % name)
+
+def create_contact_form(new_user, notification=None):
+    assert new_user.get_id() is None
+    form = Form()
+
+    form.add_submit('register', 'Submit')
+    form.add_submit('cancel', 'Cancel')
+    if form['cancel']:
+        return redirect(get_base_path() + '/user/search')
+
+    _add_user_id_widget(form)
+    form.add(PersonNameWidget, 'name',
+             value=(new_user.get_prefix(),
+                    new_user.get_first_name(),
+                    new_user.get_last_name()),
+             title='Name')
+    form.add(EmailWidget, 'email',
+             title='E-mail address',
+             size=30, maxlength=64)
+
+    def render [html] ():
+        page('New User Registration', form.render())
+
+    if not form.is_submitted() or form.has_errors():
+        return render()
+
+    _check_for_duplicate_email(form)
+
+    if form.has_errors():
+        return render()
+
+    _add_user_to_database(new_user, form['user_id'])
+    prefix, first_name, last_name = form['name']
+    new_user.set_prefix(prefix)
+    new_user.set_first_name(first_name)
+    new_user.set_last_name(last_name)
+    new_user.set_email(form['email'])
+    new_user.record_registration(get_request().get_environ('REMOTE_ADDR'))
+    if notification:
+        notification(new_user)
+    return redirect(get_base_path() + '/my/')
+
+def contact_registration_form(new_user, notification=None, success_text=None):
+    form = Form()
+    login_agreement = local_ui.format_login_agreement()
+    if login_agreement:
+        additional_button_text = ' (subject to agreement below)'
+    else:
+        additional_button_text = ''
+
+    form.add_submit('register', 'Submit%s' % additional_button_text)
+    form.add_submit('cancel', 'Cancel')
+    if form['cancel']:
+        return redirect(get_base_path() + '/')
+
+    _add_user_id_widget(form)
+    _add_contact_widgets(form, new_user, set_password=True)
+
+    def render [html] ():
+        title = 'New User Registration'
+        local_ui.header(title)
+        if can_create_users():
+            '<p>You can register a new user by completing this form.</p>'
+        else:
+            '<p>You can get a user ID by completing this form.</p>'
+        form.render()
+        if login_agreement:
+            login_agreement
+        local_ui.footer(title)
+
+    if not form.is_submitted() or form.has_errors():
+        return render()
+
+    _check_for_duplicate_email(form)
+    _check_for_valid_phone_numbers(form, 'phone', 'fax')
+
+    if form.has_errors():
+        return render()
+
+    _add_user_to_database(new_user, form['user_id'])
+    _modify_contact(form, new_user, set_password=True)
+    new_user.record_registration(get_request().get_environ('REMOTE_ADDR'))
+    if notification:
+        notification(new_user)
+
+    if can_create_users():
+        def _proxy_success_page [html] ():
+            title = 'Registration Completed'
+            local_ui.header(title)
+            '''
+            <p><big>Success!</big></p>
+            <p>Registration for %s is now complete.</p>
+            ''' % new_user.get_id()
+            if new_user.is_disabled():
+                '''
+                <p>They have been added to the user database with user ID
+                '%s' with their password disabled.  They may not log into
+                the system until a password has been assigned to them.
+                ''' % new_user.get_id()
+            else:
+                '''
+                <p>They may now log into the system with user ID '%s' and the
+                password you have entered for them.</p>
+                ''' % new_user.get_id()
+            local_ui.footer(title)
+        return _proxy_success_page()
+
+    def success_page [html] ():
+        title = 'Registration Completed'
+        local_ui.header(title)
+        '<p><big>Welcome %s!</big></p>' % new_user.get_id()
+        '<p>Your registration is now complete.</p>'
+        if success_text:
+            success_text(new_user)
+        local_ui.footer(title)
+    get_session().set_actual_user(new_user) # login
+    return success_page()
+
+def contact_edit_form(new_user):
+    form = Form()
+    form.add_submit('edit', 'Submit')
+    form.add_submit('cancel', 'Cancel')
+    if form['cancel']:
+        return redirect(".")
+    _add_contact_widgets(form, new_user, required=not get_user().is_admin())
+    if not form.is_submitted() or form.has_errors():
+        return page('Edit Personal Profile for %s' % new_user.get_id(),
+                    form.render())
+    _modify_contact(form, new_user)
+    new_user.record_change(get_user(), get_request().get_environ('REMOTE_ADDR'))
+    return redirect(".")

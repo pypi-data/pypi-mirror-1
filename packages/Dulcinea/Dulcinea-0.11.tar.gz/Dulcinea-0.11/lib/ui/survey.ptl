@@ -1,0 +1,267 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/survey.ptl $
+$Id: survey.ptl 27568 2005-10-13 18:12:25Z dbinger $
+"""
+from dulcinea import local_ui
+from dulcinea.spec import require
+from dulcinea.survey import Survey, Surveyable
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.errors import not_found
+from dulcinea.ui.form2.date_time_widget import get_date_pair_form
+from dulcinea.ui.form2.survey_widget import get_widget_class, SurveyWidget
+from dulcinea.ui.table import Table
+from dulcinea.ui.util import page, set_csv_headers
+from quixote import get_user, redirect
+from quixote.form import Form
+from quixote.form.widget import SubmitWidget, StringWidget, TextWidget
+from quixote.html import htmltext, stringify
+from types import FunctionType
+
+class SurveyableUI(DynamicExportingDirectory):
+
+    def __init__(self, surveyable, decorate=None):
+        require(surveyable, Surveyable)
+        self.surveyable = surveyable
+        self.decorate = decorate
+
+    def get_exports(self):
+        if get_user().is_admin():
+            yield ('', '_q_index', 'Surveys', 'View all surveys')
+            yield ('new', 'new', 'New', 'New survey')
+        else:
+            yield ('new', 'new', None, None)
+
+    def new [html] (self):
+        survey = self.surveyable.get_new_survey()
+        show_surveys_page([survey], "New Survey",
+                          question_form(survey, self.surveyable),
+                          self.decorate)
+
+    def survey_index [html] (self, title):
+        form = get_date_pair_form()
+        if form.has_errors() or not form.get('date_pair'):
+            return page('Error', form.render())
+        start, end = form.get('date_pair')
+        surveys = [survey for survey in self.surveyable.get_surveys()
+                   if start <= survey.get_timestamp() <= end]
+        questions = list(set([question for survey in surveys for question in
+                              survey.get_questions()]))
+        questions.sort()
+        table = Table()
+        table.column(date="Date")
+        table.column(user="User")
+        for j, question in enumerate(questions):
+            table.column(**{str("q%s" % j): stringify(question)})
+        for survey in surveys:
+            row = dict(date=local_ui.format_date(survey.get_timestamp()),
+                       user=survey.get_user().get_id())
+            for j, question in enumerate(questions):
+                row[str("q%s" % j)] = survey.get_answer_for_question_key(
+                    question.get_key())
+            table.row(**row)
+
+        def csv [plain] ():
+            set_csv_headers('survey_data.csv')
+            table.render_csv()
+
+        if form.get('csv'):
+            return csv()
+
+        def render [html] ():
+            form.render()
+            if not surveys:
+                '<div>No matches</div>'
+            else:
+                table.render(css_class="boxbody")
+        show_surveys_page(surveys, title,
+                          render(),
+                          self.decorate)
+
+    def _q_index(self):
+        num_surveys = len(self.surveyable.get_surveys() or [])
+        return self.survey_index("%d Surveys" % num_surveys)
+
+    def _q_lookup(self, component):
+        try:
+            index = int(component)
+        except ValueError:
+            not_found("Bad survey index: %s" % component)
+        if not (0 < index <= len(self.surveyable.get_surveys())):
+            not_found("Bad survey index: %d" % index)
+        return SurveyUI(self.surveyable, index-1, self.decorate)
+
+class SurveyUI(DynamicExportingDirectory):
+
+    def __init__(self, surveyable, index, decorate):
+        self.survey = surveyable.get_survey(index)
+        self.index = index
+        self.decorate = decorate
+
+    def get_exports(self):
+        yield ('', '_q_index', "Survey: %d" % (self.index+1),
+               "Taken by %s on %s" % (self.survey.get_user(),
+                                      self.survey.get_timestamp().strftime(
+            "%Y-%m-%d %H:%M")))
+
+    def _q_index [html] (self):
+        show_surveys_page([self.survey], "Survey: %d" % (self.index+1),
+                          question_form(self.survey, None),
+                          self.decorate)
+
+class SurveysAndQuestionsUI(SurveyableUI):
+
+    def get_exports(self):
+        for export in SurveyableUI.get_exports(self):
+            yield export
+        yield ('thanks', 'thanks', '', '')
+        if get_user().is_admin():
+            yield('edit', 'edit', 'Edit', None)
+
+    def new [html] (self):
+        survey = self.surveyable.get_new_survey()
+        page(self.surveyable.get_title(),
+             '<div style="margin-left:1em;margin-right:1em">',
+             question_form(survey, self.surveyable,
+                           description=htmltext(
+            self.surveyable.get_description()),
+                           redirect_to=str('thanks')), '</div>')
+
+    def edit(self):
+        return surveys_and_questions_form(self.surveyable)
+
+    def thanks [html] (self):
+        form = Form()
+        form.add(SubmitWidget, 'submit', 'Done')
+        if form.is_submitted():
+            return redirect(str('/'))
+        page('Thanks', '<p>Your answers have been recorded.</p>', form.render())
+
+    def _q_index (self):
+        if not get_user().is_admin():
+            return redirect('new')
+        else:
+            surveys = self.surveyable.get_surveys()
+            title = "%s: %d Surveys" % (
+                self.surveyable.get_id().replace('_', ' ').capitalize(),
+                len(surveys or []))
+            return self.survey_index(title)
+
+def show_surveys_page [html] (surveys, title, body, decorate):
+    if decorate is None:
+        local_ui.header(title)
+        body
+        local_ui.footer(title=title)
+    else:
+        decorate(surveys, body, title=title)
+
+
+def question_form(survey, surveyable, description=None, redirect_to=".",
+                  **kwargs):
+    """(survey : Survey)
+
+    Manage a series of question widgets individually
+    """
+    form = Form()
+    for index, answer in enumerate(survey.get_answers()):
+        form.add(get_widget_class(answer.get_question()), str(index),
+                 value=answer,
+                 title=htmltext(answer.get_question().get_title()),
+                 disabled=(survey.has_answers() or None))
+
+    if not survey.has_answers():
+        form.add_submit('submit', 'Submit')
+        form.add_submit('cancel', 'Cancel')
+        if form.get('cancel'):
+            return redirect('/')
+
+    if not form.is_submitted() or form.has_errors():
+        def render [html] ():
+            description
+            form.render()
+        return render()
+    else:
+        process_survey_answers(form, survey, surveyable)
+
+    return redirect(redirect_to)
+
+def process_survey_answers(form, survey, surveyable):
+    require(form, Form)
+    require(survey, Survey)
+    require(surveyable, Surveyable)
+    answers = []
+    for index in range(len(survey.get_answers())):
+        answer = form.get(str(index))
+        if answer and answer.has_answer():
+            answers.append(answer)
+    if answers:
+        survey.set_answers(answers, get_user())
+        surveyable.add_survey(survey)
+
+def survey_form(surveyables):
+    """(surveyables : [(surveyable:Surveyable, decorator:FunctionType)])
+
+    Manage a list of surveys using a survey widget
+    """
+    for surveyable, decorator in surveyables:
+        require(surveyable, Surveyable)
+        require(decorator, (FunctionType, None))
+    form = Form()
+    for index, (surveyable, decorator) in enumerate(surveyables):
+        survey = surveyable.get_new_survey()
+        form.add(SurveyWidget, "survey%d" % index,
+                 value=survey, decorator=decorator)
+
+    form.add_submit('submit', 'Submit')
+    form.add_reset('cancel', 'Cancel')
+
+    if not form.is_submitted() or form.has_errors():
+        return form.render()
+    else:
+        for index, (surveyable, decorator) in enumerate(surveyables):
+            survey = form.get("survey%d" % index)
+            if survey and survey.has_answers():
+                surveyable.add_survey(survey)
+    return redirect("./")
+
+def surveys_and_questions_form(surveys_and_questions):
+    form = Form()
+    form.add(SubmitWidget, 'save', 'Save')
+    form.add(SubmitWidget, 'cancel', 'Cancel')
+    if form.get('cancel'):
+        return redirect('.')
+    form.add(StringWidget, 'title', value=surveys_and_questions.get_title(),
+             title='Title', size=102)
+    form.add(TextWidget, 'description', title='Description',
+             value=surveys_and_questions.get_description(), rows=30, cols=90)
+    if not form.is_submitted():
+        return page('Edit %s' % surveys_and_questions.get_id(), form.render())
+
+    surveys_and_questions.set_title(form.get('title'))
+    surveys_and_questions.set_description(form.get('description'))
+
+    return redirect('.')
+
+def format_survey_css [plain] ():
+    """
+div.survey {
+    margin-left: 2em;
+}
+
+.survey-sub-title {
+    font-size: small;
+}
+
+table.survey  {
+    padding: 0;
+    margin: 0;
+    vertical-align: middle;
+    text-align: left;
+    font-size: small;
+    margin-left: 2em;
+}
+
+table.survey th.right {
+    text-align: right;
+    padding-right: 1ex;
+}
+"""

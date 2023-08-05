@@ -1,0 +1,560 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/form2/date_time_widget.ptl $
+$Id: date_time_widget.ptl 27509 2005-10-03 12:37:22Z dbinger $
+"""
+from datetime import datetime, timedelta
+from dulcinea.spec import require, boolean
+from dulcinea.ui.form2.widget import PairWidget
+from quixote import get_response
+from quixote.form import Form
+from quixote.form.widget import IntWidget, SingleSelectWidget, Widget
+from quixote.form.widget import OptionSelectWidget, CompositeWidget
+from quixote.form.widget import WidgetValueError, CompositeWidget
+from quixote.html import htmltag
+
+
+class MinuteWidget(IntWidget):
+
+    TYPE_ERROR = 'minute must be a number between 0 and 59'
+
+    def _parse(self, request):
+        IntWidget._parse(self, request)
+        if self.value is None:
+            self.error = None
+            self.value = 0
+        if not self.error and not 0 <= self.value <= 59:
+            self.error = self.TYPE_ERROR
+
+
+    def render_content(self):
+        try:
+            rendered_value = "%02d" % (self.value or 0)
+        except TypeError:
+            rendered_value = str(self.value)
+        return htmltag("input", xml_end=True,
+                       type=self.HTML_TYPE,
+                       name=self.name,
+                       value=rendered_value,
+                       **self.attrs)
+
+    def render(self):
+        return self.render_content()
+
+
+class HourWidget(IntWidget):
+
+    TYPE_ERROR = 'hour must be a number between 0 and 23'
+
+    def _parse(self, request):
+        IntWidget._parse(self, request)
+        if not self.error and not 0 <= self.value <= 23:
+            self.error = self.TYPE_ERROR
+
+class DateTimeWidget (CompositeWidget):
+
+    year_offsets = (-1, 5)
+
+    months = [(1, "January"),
+              (2, "February"),
+              (3, 'March'),
+              (4, 'April'),
+              (5, 'May'),
+              (6, 'June'),
+              (7, 'July'),
+              (8, 'August'),
+              (9, 'September'),
+              (10, 'October'),
+              (11, 'November'),
+              (12, 'December' )]
+
+
+    def __init__ (self, name, value=None, **kwargs):
+        if value is None:
+            value = datetime.now()
+        CompositeWidget.__init__(self, name, value, **kwargs)
+        self.add(IntWidget, 'year', value=value.year, size=4, maxlength=4)
+        self.add(SingleSelectWidget, 'month', value=value.month,
+                 options=self.months, sort=False)
+        self.add(IntWidget, 'day', value=value.day, size=2, maxlength=2)
+        self.add(HourWidget, 'hour', value=value.hour, size=2, maxlength=2)
+        self.add(MinuteWidget, 'minute', value=value.minute,
+                 size=2, maxlength=2)
+
+    def _parse (self, request):
+        self.value = None
+        if self.name in request.form:
+            try:
+                # The value is being provided directly (from a query string)
+                # and not from the subwidgets.
+                value = datetime.fromtimestamp(int(request.form[self.name]))
+            except (ValueError, TypeError):
+                self.set_error("bad date value")
+            else:
+                for widget in self.get_widgets():
+                    widget.clear_error(request)
+                self.set_value(value)
+            return
+        year = self.get('year')
+        month = self.get('month')
+        day = self.get('day')
+        hour = self.get('hour')
+        minute = self.get('minute') or 0
+        if None in (year, month, day, hour):
+            self.set_error("incomplete date")
+            return
+        this_year = datetime.now().year
+        min_year = this_year + self.year_offsets[0]
+        max_year = this_year + self.year_offsets[1]
+        if not min_year <= year <= max_year:
+            self.set_error('year must be between %s and %s' % (
+                min_year, max_year))
+            return
+        try:
+            self.value = datetime(year, month, day, hour, minute)
+        except (ValueError, TypeError), err:
+            self.set_error(str(err))
+
+    def set_value (self, value):
+        self.value = value
+        if value is not None:
+            self.get_widget('year').set_value(value.year)
+            self.get_widget('month').set_value(value.month)
+            self.get_widget('day').set_value(value.day)
+            self.get_widget('hour').set_value(value.hour)
+            self.get_widget('minute').set_value(value.minute)
+
+    def render_content [html] (self):
+        self.get_widget('day').render_content()
+        self.get_widget('month').render_content()
+        self.get_widget('year').render_content()
+        ' at&nbsp;'
+        self.get_widget('hour').render_content()
+        '&nbsp;:&nbsp;'
+        self.get_widget('minute').render_content()
+
+
+class DateTimeSelectWidget(Widget):
+    """\
+    DateTimeSelectWidget
+
+    Quixote form2 date selection widget ported from the version that's
+    was written to work with the Quixote form1 framework.  The UI components
+    of DateTimeSelectWidget SingleSelectWidgets arraigned in a compound widget
+    fashion and as a result tends to be more friendly to "clickers" rather
+    than "typers".  DateTimeSelectWidget has a fair bit of available magic
+    that can minimize the amount of clicks needed to enter a date and time.
+    All the magical bits are off by default.
+
+    'value' is either a Python datetime instance or None.
+
+    The 'show_none' boolean keyword argument is on by default.  With
+    'show_none' enabled, each of the SingleSelect subwidgets will have
+    a blank choice.  If the 'value' is None, the widget will render itself
+    with all blanks.  When the widget is parsed with each subwidget in
+    this None postion, the value of the parsed widget is None.  If the
+    'show_none' is disabled (meaning there is no way for the user to make
+    the value of the widget None) and the 'value' passed in is None,
+    the widget will render itself with a date corresponding to now as
+    the default.
+
+    DateTimeSelectWidget also takes a boolean 'JS_fix' keyword argument
+    that is off by default.  This will construct a short
+    JavaScript function that will be inserted into the HTML (as a
+    comment) that will correct invalid dates on-the-fly, without
+    needing the containing form to be submitted (i.e. 2000-Feb-31 is
+    changed to 2000-Feb-29).
+
+    Once the form is submitted if the 'auto_fix' boolean keyword
+    is True, the same behaviour that 'JS_fix' implements is performed
+    on the server, that is to automatically correct invalid dates.
+    If 'auto_fix' is False, a WidgetValueError is raised if the
+    widget contains an illegal date. The exception contains the
+    information that would be used for the correction. The latter is the
+    default behavior.
+
+    DateTimeSelectWidget takes a 'show_hour_min' boolean keyword argument
+    that is False by default.  When enabled, additional HTML will be
+    generated to display the Hour and Minute (in 15 minute increments)
+    AM or PM.  This information will be used to apply more detail
+    to the datetime object that's displayed and returned.
+
+    DateTimeSelectWidget takes a 'JS_time' argument which is None by
+    default.  If this argument is non-None, it is expected to be an
+    int value that is interpreted as the number of minutes to add or
+    subtract from the time that the *client* thinks it is via a Javascript
+    query.  If we're able to get a date & time from the client, then
+    this time (with the hours adjustment applied) overrides what is
+    displayed for the time when the widget is rendered.  If there's
+    an error obtaining the date & time via Javascript, then the
+    JS_time argument is ignored.
+
+    DateTimeSelectWidget takes optional 'start_year' and 'end_year' keyword
+    arguments.  When specified, the years that are displayed as selectable
+    items will be years between 'start_year' and 'end_year' inclusive.
+    The default is to display 3 years ahead and 3 years behind the year
+    corresponding to the widget's initial value.
+    """
+
+    MONTH_NAMES = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
+    def __init__(self, name, value=None, JS_fix=False, JS_time=None,
+                 auto_fix=False, show_hour_min=False, show_none=True,
+                 start_year=None, end_year=None, **kwattrs):
+
+        require(value, (datetime, None))
+        require(JS_time, (int, None))
+        require(auto_fix, boolean)
+        require(show_hour_min, boolean)
+        require(show_none, boolean)
+        require(start_year, (int, None))
+        require(end_year, (int, None))
+
+        self.auto_fix = auto_fix          # correct the date like 'JS_fix' does
+                                          #  otherwise raise WidgetValueError
+        self.JS_fix = JS_fix              # insert Javascript for on-the-fly
+                                          #  client-side date/time validation
+        self.JS_time = JS_time            # use client's version of date/time
+                                          #  adjusted by the value of this arg
+        self.show_none = show_none        # show empty selection in options
+        self.show_hour_min = show_hour_min
+        self.start_year = start_year
+        self.end_year = end_year
+        Widget.__init__(self, self.safe_name(name), value=value, **kwattrs)
+
+        self.year_name = self.safe_name(name + "_year")
+        self.month_name = self.safe_name(name + "_month")
+        self.day_name = self.safe_name(name + "_day")
+        if show_hour_min:
+            self.hour_name = self.safe_name(name + "_hour")
+            self.min_name = self.safe_name(name + "_min")
+            self.am_pm_name = self.safe_name(name + "_am_pm")
+
+    def safe_name(self, name):
+        """return a name that is safe to use with subwidgets (no '.')
+        """
+        return "_".join(name.split('.'))
+
+    def render(self):
+        if self.JS_fix:
+            self._add_JS_fix()
+        if self.JS_time is not None:
+            self._add_JS_time()
+            self._add_JS_time_call()
+        return Widget.render(self)
+
+    def _parse(self, request):
+        year_str = request.form.get(self.year_name)
+        mon_str = request.form.get(self.month_name)
+        day_str = request.form.get(self.day_name)
+        if self.show_hour_min:
+            hour_str = request.form.get(self.hour_name)
+            min_str = request.form.get(self.min_name)
+            am_pm = request.form.get(self.am_pm_name)
+
+        # look for the 'not-selected' option
+        if not year_str and not mon_str and not day_str:
+            self.value = None
+            return self.value
+
+        # user has tried to select a date
+        try:
+            year = int(year_str)
+            mon = int(mon_str)
+            day = int(day_str)
+        except ValueError:
+            raise WidgetValueError("year, month, and day must all be set")
+
+        if self.show_hour_min:
+            # capture potential specification of hours and minutes
+            try:
+                hour = int(hour_str)
+            except (ValueError, TypeError):
+                hour = 0
+            try:
+                min = int(min_str)
+            except (ValueError, TypeError):
+                min = 0
+            if am_pm == 'PM' and hour != 12:
+                hour += 12
+        else:
+            hour = min = 0
+
+        self.value = self._new_datetime(year, mon, day, hour, min)
+        return self.value
+
+    def _new_datetime(self, year, mon, day, hour, min):
+        """(year : int, month : int, day : int, hour : int, min : int)
+            -> datetime
+        Create and return a datetime instance based on the
+        year, month, day arguments.  Adjust the day to be
+        within the legal range of days for that particular
+        month/year combination.  Account for a leap-year.
+        """
+        require(year, int)
+        require(mon, int)
+        require(day, int)
+        require(hour, int)
+        require(min, int)
+        adjusted_day = day
+
+        if mon == 2: # feb
+            # check for a leap-year
+            if ((year % 4) == 0 and (year % 100) > 0) or (year % 400) == 0:
+                if day > 29:
+                    adjusted_day = 29;
+            elif day > 28:
+                adjusted_day = 28;
+        elif (mon == 4 or mon == 6 or mon == 9 or mon == 11) and day > 30:
+            adjusted_day = 30;
+
+        # Report an error if not auto_correcting and correction is needed
+        if not self.auto_fix and adjusted_day <> day:
+            raise WidgetValueError("The last day in %s, %d is %d"
+                                   % (self.MONTH_NAMES[mon - 1],
+                                      year, adjusted_day))
+        return datetime(year, mon, adjusted_day, hour, min)
+
+    def render_content [html] (self):
+        value = self.value
+        now = datetime.now()
+        if value is None:
+            selected = ' selected="selected"'
+        else:
+            selected = ""
+        if self.show_none:
+            not_selected_option = '<option value=""%s></option>' % selected
+        else:
+            not_selected_option = ''
+            if value is None:
+                value = now
+        if self.JS_fix:
+            script_ref = ('onchange="date_select_fix_day(this.form.%s,'
+                          'this.form.%s,this.form.%s,%s)"') % (
+                self.year_name, self.month_name, self.day_name,
+                int(bool(not_selected_option)))
+        else:
+            script_ref = ''
+
+        # year select
+        """<span class="nowrap"><select size="1" name="%s" %s>
+            %s
+        """ % (self.year_name, script_ref, not_selected_option)
+        base_year = (value or now).year
+        start_year = self.start_year or (base_year - 10)
+        end_year = self.end_year or (base_year + 10)
+        years = range(start_year, end_year+1)
+        if value is not None and value.year not in years:
+            # ensure that current value is always an option
+            years.append(value.year)
+            years.sort()
+        for year in years:
+            if value and year == value.year and not selected:
+                select_ref = ' selected="selected"'
+            else:
+                select_ref = ''
+            """    <option value="%d"%s>%s</option>
+            """ % (year, select_ref, year)
+        """
+        </select>
+        """
+
+        def date_in_month(date, month):
+            try:
+                return date and date.strftime("%b") == month
+            except ValueError, exc:
+                self.set_error(exc)
+
+        # month select
+        """<select size="1" name="%s" %s>
+            %s
+            """ % (self.month_name, script_ref, not_selected_option)
+        for index, month in enumerate(self.MONTH_NAMES):
+            select_ref = ""
+            if date_in_month(value, month) and not selected:
+                select_ref = ' selected="selected"'
+            """<option value="%d"%s>%s</option>
+            """ % (index+1, select_ref, month)
+        """
+        </select>
+        """
+
+        # day select
+        """<select size="1" name="%s" %s>
+            %s
+        """ % (self.day_name, script_ref, not_selected_option)
+        select_ref = ""
+        for i in range(1, 32):
+            select_ref = ""
+            if value and value.day == i and not selected:
+                select_ref = ' selected="selected"'
+            """<option value="%d"%s>%d</option>
+            """ % (i, select_ref, i)
+        """
+        </select>
+        """
+
+        if self.show_hour_min:
+
+            # hour:min select
+            """- <select size="1" name="%s">
+               %s
+               """ % (self.hour_name, not_selected_option)
+            hour = (value and value.hour) or 0
+            if 0 <= hour < 12:
+                am_pm = 'AM'
+            else:
+                hour -= 12
+                if hour == 0:
+                    hour = 12
+                am_pm = 'PM'
+            for i in [12] + range(1, 12):
+                select_ref = ""
+                if hour == i and not selected:
+                    select = ' selected="selected"'
+                """<option value="%d"%s>%d</option>
+                """ % (i, select_ref, i)
+            """
+            </select>:<select size="1" name="%s">
+                       %s
+                       """ % (self.min_name, not_selected_option)
+            for i in [0, 15, 30, 45]:
+                select_ref = ""
+                if value and i <= value.minute < i+15 and not selected:
+                    select_ref = ' selected="selected"'
+                """<option value="%d"%s>%02d</option>
+                """ % (i, select_ref, i)
+            """
+            </select>
+            """
+            # AM/PM select
+            """<select size="1" name="%s">
+                %s
+                """ % (self.am_pm_name, not_selected_option)
+            for val in ['AM', 'PM']:
+                select_ref = ""
+                if am_pm == val and not selected:
+                    select = ' selected="selected"'
+                """<option value="%s"%s>%s</option>
+                """ % (val, select_ref, val)
+            """
+            </select>
+            """
+        '</span>'
+
+    def _add_JS_fix(self):
+        # Add a javascript function that mimicks the auto_fix behavior of
+        # the self._new_datetime method on the client side
+        get_response().add_javascript('_date_select_fix', """\
+            function date_select_fix_day(ys, ms, ds, size) {
+                var y = parseInt(ys.options[ys.selectedIndex].value)
+                var m = parseInt(ms.options[ms.selectedIndex].value)
+                var d = parseInt(ds.options[ds.selectedIndex].value)
+
+                if (isNaN(y))
+                    ms.selectedIndex = ds.selectedIndex = 0
+                else if (m == 2) {
+                    if (((y % 4) == 0) &&
+                            (((y % 100) > 0) || ((y % 400) == 0))) {
+                        if (d > 29)
+                            ds.selectedIndex = size + 28;
+                    } else if (d > 28)
+                        ds.selectedIndex = size + 27;
+                } else if ((m == 4 || m == 6 || m == 9 || m == 11) && d > 30)
+                    ds.selectedIndex = size + 29;
+            }
+            """)
+
+    def _add_JS_time(self):
+        # Add a javascript function that allows the javascript Date
+        # object (modifyable by a minutes delta) to be used to set the time
+        get_response().add_javascript('_date_select_time', """
+
+            function set_selected (form, widget, selected_value) {
+                for (i = 0; i < form.elements.length; i++)
+                    if (form.elements[i] == widget)
+                        for (j = 0; j < widget.options.length; j++)
+                            if (widget.options[j].value == selected_value)
+                                widget.options[j].selected = true;
+            }
+
+            function date_select_set_time (minutes_delta, form, year_select,
+                                           month_select, day_select,
+                                           hour_select, min_select,
+                                           am_pm_select) {
+                var d1 = new Date();
+                var date = new Date(d1.getTime() + (minutes_delta * 60000));
+                var ampm = "AM";
+                var hours = date.getHours();
+                var minutes = date.getMinutes();
+
+                if (hours == 0) hours = 12;
+                if (hours > 11) ampm = "PM";
+                if (hours > 12) hours -= 12;
+
+                if (0 < minutes && minutes < 15) minutes = 0;
+                else if (15 < minutes && minutes < 30) minutes = 15;
+                else if (30 < minutes && minutes < 45) minutes = 30;
+                else if (45 < minutes && minutes <= 59) minutes = 45;
+
+                set_selected(form, year_select, date.getFullYear());
+                set_selected(form, month_select, date.getMonth()+1);
+                set_selected(form, day_select, date.getDate());
+                set_selected(form, hour_select, hours);
+                set_selected(form, min_select, minutes);
+                set_selected(form, am_pm_select, ampm);
+            }
+            """)
+
+    def _add_JS_time_call(self):
+        get_response().add_javascript(self.name, """
+            date_select_set_time(%d, document.forms[0],
+                                     document.forms[0].%s,
+                                     document.forms[0].%s,
+                                     document.forms[0].%s,
+                                     document.forms[0].%s,
+                                     document.forms[0].%s,
+                                     document.forms[0].%s)
+                                 """ % (self.JS_time, self.year_name,
+                                        self.month_name, self.day_name,
+                                        self.hour_name, self.min_name,
+                                        self.am_pm_name))
+
+
+class DatePairWidget(PairWidget):
+
+    def __init__(self, name, value=None, **kwargs):
+        PairWidget.__init__(self, name, value,
+                            element_type=DateTimeSelectWidget,
+                            element1_kwargs=dict(title='Start Date',
+                                                 show_none=False),
+                            element2_kwargs=dict(title='End Date',
+                                                 show_none=False),
+                            **kwargs)
+
+    def _parse(self, request):
+        PairWidget._parse(self, request)
+        if self.value:
+            self.value = (self.value[0].replace(hour=0, minute=0),
+                          self.value[1].replace(hour=23, minute=59))
+
+def get_date_pair_form():
+    form = Form()
+    now = datetime.now()
+    form.add(DatePairWidget, 'date_pair', value=(now - timedelta(30), now))
+    form.add_submit('search', 'Search')
+    form.add_submit(
+        'csv', 'Spreadsheet',
+        attrs=dict(title='Download as a spread sheet file (CSV format)'))
+    return form
+
+def get_period_select_form():
+    form = Form()
+    now = datetime.now()
+    dates = [(now - timedelta(30), "Past 30 days"),
+             (now - timedelta(60), "Past 60 days"),
+             (now - timedelta(90), "Past 90 days"),
+             (now - timedelta(182), "Past 6 months"),
+             (now - timedelta(365), "Past year")]
+    form.add(OptionSelectWidget, "date", options=dates, title='Timeframe')
+    return form

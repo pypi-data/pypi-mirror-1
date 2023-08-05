@@ -1,0 +1,97 @@
+"""$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/user/user.ptl $
+$Id: user.ptl 27324 2005-09-07 18:28:21Z rmasse $
+"""
+
+from dulcinea import local
+from dulcinea.site_util import is_email_enabled, get_config_value, get_base_path
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.user.motd import MotdUI
+from dulcinea.ui.user.password import new_password_form
+from dulcinea.ui.user.search import DisabledDulcineaUserSearchForm
+from dulcinea.ui.user.search import DulcineaUserSearchForm
+from dulcinea.ui.user.util import can_create_users
+from dulcinea.ui.user.util import enabling_cookies
+from dulcinea.ui.util import index_page
+from quixote import get_user, get_request, get_session, redirect
+
+
+class UserDirectory (DynamicExportingDirectory):
+
+    def get_exports(self):
+        yield ('', 'index', 'Users', None)
+        if get_user().is_admin():
+            yield ('disabled', 'disabled', 'Disabled Users',
+                   'Search for Disabled Users')
+        if not get_request().get_cookies():
+            yield ('enabling_cookies', 'enabling_cookies',
+                   'Cookies', 'Browser Cookies')
+        if is_email_enabled():
+            yield ('forgot', 'forgot', 'Forgot?',
+                   'Have a new password emailed to the address you '
+                   'gave when you registered.')
+        if not get_user() and get_config_value('allow_anonymous_registration'):
+            yield ('register', 'register', 'Register',
+                   'Get a username and password for this site.')
+        elif get_user():
+            yield ('register', 'register', None, None) #success response.
+        if can_create_users():
+            yield ('register', 'register', 'Full Register',
+                   'Full Registeration for a new user')
+        if get_user().is_admin():
+            yield ('search', 'search', 'Search', 'Search for users')
+        if ((get_user() and local.get_user_db().get_motd()) or
+            get_user().is_admin()):
+            yield ('motd', 'motd', 'Sign in Message', None)
+        if can_create_users():
+            yield ('new', 'new', 'Quick Register',
+                   'Quick Registration for a new user')
+        if get_user():
+            yield ('logout', 'logout', 'Sign out', None)
+            yield ('login', 'login', None, None) # for the success page.?
+        else:
+            yield ('login', 'login', "Sign in", None)
+            yield ('logout', 'logout', None, None)
+
+    def index [html] (self):
+        return index_page(self)
+
+    def new(self):
+        from dulcinea.ui.user.register import create_contact_form
+        return create_contact_form(local.get_user_db().user_class())
+
+    def register(self):
+        from dulcinea.ui.user.register import contact_registration_form
+        return contact_registration_form(local.get_user_db().user_class())
+
+    def enabling_cookies(self):
+        return enabling_cookies()
+
+    def forgot(self):
+        return new_password_form(get_user())
+
+    def search(self):
+        return DulcineaUserSearchForm(
+            local.get_user_db().get_users(sort=1),
+            match_substrings=True).handle()
+
+    def disabled(self):
+        return DisabledDulcineaUserSearchForm(
+            local.get_user_db().get_disabled_users(sort=1),
+            match_substrings=True).handle()
+
+    def login (self):
+        return redirect(get_base_path() + '/my/')
+
+    def logout(self):
+        if not get_user():
+            return redirect(get_base_path() + '/')
+        session = get_session()
+        if session.actual_user is not get_user(): # end impersonation
+            session.set_actual_user(session.actual_user) # also sets .user
+            return redirect('')
+        get_user().record_logout(get_request().get_environ('REMOTE_ADDR'))
+        null_user = local.get_user_db().get_null_user()
+        session.set_actual_user(null_user)
+        return redirect(get_base_path() + '/')
+
+    motd = MotdUI()

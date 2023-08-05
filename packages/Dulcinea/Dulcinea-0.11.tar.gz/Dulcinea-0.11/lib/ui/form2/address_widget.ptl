@@ -1,0 +1,118 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/form2/address_widget.ptl $
+$Id: address_widget.ptl 27506 2005-09-30 18:49:55Z dbinger $
+"""
+from dulcinea.address import Address, ContactAddress
+from dulcinea.country import get_country_list, get_country_name
+from dulcinea.spec import require
+from quixote.form import CompositeWidget, StringWidget, SingleSelectWidget
+
+class AddressWidget (CompositeWidget):
+
+    def __init__(self, name, value=None, allowed_countries=None,
+                 default_country='US', **kwargs):
+        require(value, (Address, None))
+        require(allowed_countries, (list, None))
+        if default_country is None:
+            self.default_country = default_country
+        else:
+            self.default_country = default_country.upper()
+        self.allowed_countries = allowed_countries
+        CompositeWidget.__init__(self, name, value, **kwargs)
+        self._add_subwidgets()
+
+    def _add_subwidgets(self):
+        self.add(StringWidget, "street1", self.value and self.value.street1,
+                 title='Street', size=35, maxlength=35,
+                 required=self.required)
+        self.add(StringWidget, "street2", self.value and self.value.street2,
+                 size=35, maxlength=35)
+        self.add(StringWidget, "city", self.value and self.value.city,
+                 title='City', size=35, maxlength=35,
+                 required=self.required)
+
+        us_only = self.allowed_countries == ['US']
+        self.add(StringWidget, "state", self.value and self.value.state,
+                 title='State/province', size=2, maxlength=14,
+                 required=self.required and us_only)
+
+        if self.allowed_countries is None:
+            options = [(code, name, code) for code, name in get_country_list()]
+        else:
+            options = [(code, get_country_name(code), code)
+                       for code in self.allowed_countries]
+        self.add(SingleSelectWidget, "country_code",
+                 self.value and self.value.country_code or self.default_country,
+                 title='Country', options=options)
+        self.add(StringWidget, "zip", self.value and self.value.zip,
+                 title='Postal/ZIP code', size=11, maxlength=15,
+                 required=self.required and us_only)
+
+    def _parse(self, request):
+        CompositeWidget._parse(self, request)
+        country_code = self['country_code']
+        if country_code:
+            country_code = country_code.upper()
+        else:
+            country_code = None
+        state = self['state']
+        if state and country_code == 'US':
+            state = state.upper()
+        address = Address(
+            street1=self['street1'],
+            street2=self['street2'],
+            city=self['city'],
+            country_code=country_code,
+            state=state,
+            zip=self['zip'])
+        if state and not address.has_valid_state():
+            self.set_widget_error('state', 'invalid state')
+        if self['zip'] and not address.has_valid_zip():
+            self.set_widget_error('zip', 'invalid ZIP code')
+        if self.value != address:
+            # Addresses are treated as immutable.
+            # We only replace them when they change.
+            self.value = address
+
+
+class ContactAddressWidget (CompositeWidget):
+
+    def __init__(self, name, value=None, require_company_name=False,
+                 title=None, **kwargs):
+        require(value, (ContactAddress, None))
+        CompositeWidget.__init__(self, name, value=value, title=title,
+                                 **kwargs)
+        self.add(StringWidget, 'contact_name',
+                 self.value and self.value.get_contact_name(),
+                 title="Contact name",
+                 size=35, maxlength=35,
+                 required=self.required)
+        self.add(StringWidget, 'contact_phone_number',
+                 self.value and self.value.get_contact_phone_number(),
+                 title="Phone number",
+                 size=20, maxlength=20,
+                 required=self.required)
+        self.add(StringWidget, 'company_name',
+                 self.value and self.value.get_company_name(),
+                 title="Company",
+                 size=35, maxlength=35,
+                 required=self.required and require_company_name)
+        self.add(AddressWidget, 'address',
+                 self.value and self.value.get_address(), **kwargs)
+
+    def _parse(self, request):
+        CompositeWidget._parse(self, request)
+        contact_address = ContactAddress(
+            contact_name=self['contact_name'],
+            contact_phone_number=self['contact_phone_number'],
+            company_name=self['company_name'],
+            address=self['address'])
+        if not contact_address.has_valid_phone_number():
+            self.set_widget_error('contact_phone_number',
+                                  'invalid phone number')
+        if self.value != contact_address:
+            # ContactAddresses are treated as immutable.
+            # We only replace them when they change.            
+            self.value = contact_address
+
+

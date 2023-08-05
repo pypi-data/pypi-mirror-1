@@ -1,0 +1,383 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/user/util.ptl $
+$Id: util.ptl 27520 2005-10-06 13:32:38Z dbinger $
+"""
+
+from dulcinea import local, local_ui
+from dulcinea.site_util import get_base_path, get_config_value, is_email_enabled
+from dulcinea.ui.errors import access_denied
+from dulcinea.ui.user.motd import format_motd
+from dulcinea.ui.util import get_site_url, none_quote, respond
+from dulcinea.ui.util import safe_respond, page
+from quixote import get_user, get_request, get_path, get_session, get_path
+from quixote.form.form import Form
+from quixote.form.widget import HiddenWidget
+from quixote.form.widget import StringWidget, PasswordWidget, SubmitWidget
+from quixote.html import href, url_quote, htmltext
+
+def get_user_id_hint [html] ():
+    '<br />Enter your user ID'
+    if get_config_value('allow_email_login'):
+        ' or email address'
+        '.'
+    if (not get_user() and
+        get_config_value('allow_anonymous_registration')):
+        " If you do not have a user account, %s." % (
+            href(get_base_path() + '/user/register', 'register here'))
+
+def get_password_hint [html] ():
+    if is_email_enabled():
+        "<br />Forgot your password?  "
+        "We can %s." % href(get_base_path() + '/user/forgot',
+                            'mail you a new one')
+
+def get_signin_hint [html] ():
+    if local_ui.format_login_agreement():
+        "subject to agreement below"
+
+def _get_href(path):
+    """
+    If the site offers an https_address, and the current scheme
+    is not https, this returns a full url using https as the scheme
+    with the given path.
+    Otherwise, this just returns the path as it is given.
+    """
+    request = get_request()
+    https_address = get_config_value('https_address')
+    if https_address and request.get_scheme() != 'https':
+        server, port = (https_address or '0:443').split(':')
+        server = request.get_environ('SERVER_NAME', server)
+        if port != '443':
+            server += ':' + port
+        return 'https://%s%s' % (server, path)
+    return path
+
+def ensure_signed_in(msg="Please sign in."):
+    if not get_user():
+        form = Form(use_tokens=False,
+                    action=_get_href(get_path()),
+                    **{'class':'signin quixote'})
+        form.add(StringWidget, 'user_id',
+                 title='User',
+                 value=get_session().get_last_user().get_id(),
+                 size=30, required=1,
+                 hint=get_user_id_hint(), tabindex='1')
+        form.add(PasswordWidget, 'password',
+                 title='Password', size=30, required=1,
+                 hint=get_password_hint(), tabindex='2')
+        form.add(SubmitWidget, 'signin', 'Sign in',
+                 hint=get_signin_hint(), tabindex='3')
+        if hasattr(local_ui, 'format_login_agreement'):
+            login_agreement = local_ui.format_login_agreement()
+        else:
+            login_agreement = None
+        if not form.is_submitted() or form.has_errors():
+            safe_respond(msg, msg, form.render(), login_agreement)
+        if get_config_value('allow_email_login'):
+            user = local.get_user_db().get_matching_user(form['user_id'])
+        else:
+            user = local.get_user_db().get_user(form['user_id'])
+        if not user or user.is_disabled():
+            form.set_error('user_id', 'User %r not found' % form['user_id'])
+        elif not user.valid_password(form.get('password')):
+            form.set_error('password', 'That password was wrong.')
+            form.get_widget('password').set_value(None)
+        if form.has_errors():
+            safe_respond(msg, msg, form.render(), login_agreement)
+        get_session().set_actual_user(user)
+        user.record_login(get_request().get_environ('REMOTE_ADDR'))
+        if local.get_user_db().get_motd():
+            form = Form(use_tokens=False)
+            form.add_submit('ok', 'OK')
+            respond('Signin Message',
+                    format_motd(local.get_user_db().get_motd()),
+                    form.render())
+
+def allow_tiny_signin(user):
+    return user.is_admin()
+
+def signin_link [html] ():
+    '<div class="signin_link">'
+    user = get_user()
+    if not user:
+        last_user = get_session().get_last_user()
+        if allow_tiny_signin(last_user):
+            form = Form(use_tokens=False,
+                        action=_get_href(get_base_path() + str('/my/')),
+                        **{str('class'):'tiny_signin'})
+            form.add(HiddenWidget, 'user_id', value=last_user.get_id())
+            form.add(PasswordWidget, 'password',
+                     title="%s's password:" % last_user.get_id(),
+                     size=10, maxlength=32,
+                     hint=href(get_base_path() + '/my/', '...more options'))
+            form.render()
+        else:
+            href(get_base_path() + '/user/register', 'Register')
+            '&nbsp;or&nbsp;'
+            href(get_base_path() + '/my/', 'Sign&nbsp;in')
+    elif user is not get_session().actual_user:
+        actual_user = get_session().actual_user
+        href(un_act_as_path(), actual_user.get_id())
+        ' acting as '
+        href(get_base_path() + '/my/', user.get_id())
+    elif get_path() == '/my/':
+        "%s's&nbsp;page" %  user.get_id()
+    else:
+        href(get_base_path() + '/my/', 'go to %s\'s&nbsp;page' %  user.get_id())
+    '</div>'
+
+
+def signout_link [html] ():
+    signout = get_base_path() + '/user/logout'
+    '<form action="%s" method="post" class="signout">' % signout
+    '<input type="submit" value="Sign out" /></form>'
+
+def ensure_admin_access():
+    ensure_signed_in()
+    if not get_user().is_admin():
+        access_denied("This is only for administrative users.")
+
+def ensure_create_users_access():
+    if not can_create_users():
+        access_denied('You do not have permission to access other users.')
+
+def can_create_users():
+    return get_user().is_granted('create-users')
+
+def about_ssl [html] ():
+    title = "Staying Secure"
+    local_ui.header(title)
+    '''
+    <p>
+    For greater security you should use a secure connection (SSL) to access
+    this web site.  Some web browsers have bugs in their SSL
+    implementation (notably, versions of Internet Explorer older than
+    5.5).  By disabling this option, SSL will not be used after sign in
+    (SSL is still used for sign in to prevent passing your plaintext
+    password over the network).
+    </p>
+
+    <p>
+    If you experience problems when using secure mode and you are using an
+    old browser we recommend that you upgrade.  If you are using Internet
+    Explorer you can download an upgrade from Microsoft\'s
+    <a href="http://www.microsoft.com/windows/ie/">web site</a>.
+    Alternatively you could try a recent version of
+    <a href="http://www.netscape.com/">Netscape</a> (version 6.1 or better),
+    <a href="http://www.mozilla.org/">Mozilla</a> or
+    <a href="http://www.opera.com/">Opera</a> (all of which seem to have
+    working SSL implementations).
+    </p>
+    '''
+    local_ui.footer(title)
+
+
+def enabling_cookies [html] ():
+
+    title = 'Enabling Cookie Support'
+    site = local.SITE_NAME
+    browser, version = get_request().guess_browser_version()
+
+    if browser and version:
+        if browser == 'Mozilla' and version[0] == '4':
+            return page(title, '''<p>
+            In Netscape Navigator 4.x, you can enable cookie support under
+            the Edit menu; select Preferences, then go to Advanced.  You
+            should choose either "Only accept cookies originating from the
+            same server as the page being viewed" or "Accept all cookies".
+            You can also ask Netscape to warn you before accepting a
+            cookie; if you do this, be sure to accept all cookies from the
+            %s site, or you might have subtle problems.</p>
+            ''' % site)
+        if browser == 'Mozilla' and version[0] == '5':
+            return page(title, '''<p>
+            In Netscape 6.x, you can enable cookie support under
+            the Edit menu; select Preferences, Privacy &amp; Security; then go to
+            Cookies.  You should choose either "Enable cookies from the
+            originating web site only" or "Enable all cookies".  You can also ask
+            Netscape to warn you before accepting a cookie; if you do this, be
+            sure to accept all cookies from the %s site, or you might have subtle
+            problems.</p>''' % site)
+        if browser == 'Mozilla' and version[0] in ('1', '2', '3'):
+            return page(title, '''<p>
+            You\'re using a very old version of Netscape Navigator.  We
+            recommend that you upgrade to a more recent version and enable
+            cookie support.</p>''')
+        if browser == 'MSIE' and version[0] in ('5', '6'):
+            return page(title, '''<p>
+            In Internet Explorer 5 and 6, you can enable cookie support
+            under the Tools menu: select Internet Options, and then hit
+            the Security tab.  There are a number of ways to enable cookie
+            support at this point; the easiest is to enable cookies for
+            all web sites by setting the security level for the "Internet
+            zone" to Medium, Medium-low, or Low. </p>''')
+        if browser == 'MSIE' and version[0] == '4':
+            return page(title, '''<p>
+            In Internet Explorer 4, you can enable cookie support under
+            the View menu: select Internet Options, and then hit the
+            Advanced tab.  Scroll down to Security, and then look for
+            Cookies.  Select either "Prompt before accepting a cookie" or
+            "Accept all cookies". </p>''')
+        if browser == 'MSIE' and version[0] < '4':
+            return page('''<p>
+            You\'re using a very old version of Internet Explorer.  We
+            recommend that you upgrade to a more recent version and enable
+            cookie support.</p>''')
+
+    return page(title, '''<p>You\'re using a web browser (%s %s)
+    that hasn\'t been tested on the %s site. You\'ll have to consult your
+    browser\'s documentation for information about cookie support.</p>
+    ''' % (browser, version, site))
+
+def user_admin_path(user, full=False):
+    if full:
+        path = get_site_url()
+    else:
+        path = get_base_path() + '/'
+    if user:
+        path += 'profile/' + url_quote(user.get_key()) + '/'
+    return path
+
+def allow_act_as():
+    return get_user().is_granted('act-as')
+
+def act_as_path(user):
+    return user_admin_path(user) + 'act_as?url=' + get_path()
+
+def un_act_as_path():
+    return user_admin_path(get_user()) + 'un_act_as?url=' + get_path()
+
+def format_act_as(user):
+    """(user : DulcineaUser) -> htmltext
+
+    Caller provides user that is not None and has appropriate privilege.
+    """
+    return htmltext('<a href="%s" title="act as %s">'
+                    '<img alt="" src="%s/images/act_as.png" />'
+                    '</a>') % (act_as_path(user), user, get_base_path())
+
+def format_act_as_css [plain] ():
+    """\
+span.actas {
+    white-space: nowrap;
+}
+span.actas img {
+    border: none;
+    padding: 1px;
+}
+@media print {
+    span.actas {
+        display: none;
+    }
+}
+"""
+
+def format_user [html] (user, name=1, email=1):
+    #(user : Contact,
+    # name : boolean = 1
+    # email : boolean = 1) -> htmltext
+    if not user:
+        none_quote()
+    else:
+        user_id = user.get_id()
+        real_user = get_user()
+        if real_user and real_user.is_admin():
+            '<span class="actas">'
+            href(user_admin_path(user), user_id)
+            if real_user.is_granted('act-as'):
+                format_act_as(user)
+            '</span>'
+        else:
+            user_id
+        name_email = []
+        if name:
+            name_email.append(none_quote(user.format_realname()))
+        if email:
+            email = user.get_email()
+            if email:
+                name_email.append(href('mailto:' + email, email))
+            else:
+                name_email.append(none_quote())
+        name_email = [w for w in name_email if w]
+        if name_email:
+            ' ('
+            ', '.join(name_email)
+            ')'
+
+def text_format_user(user):
+    if not user:
+        return 'None'
+    realname = user.format_realname()
+    if realname:
+        text = '%s (%s)' % (realname, user.get_id())
+    else:
+        text = user.get_id()
+    email = user.get_email()
+    if email:
+        text += ' <%s>' % email
+    return text
+
+def format_signin_css [plain] ():
+    """\
+form.signin { /* The form floats left and the widgets don't float. */
+    float: left;
+}
+
+form.signin div.widget {
+    margin-bottom: 0;   
+    float: none;
+}
+
+form.signin div.widget div.hint { /* inline hints. */
+    padding-left: 1em;
+    display: inline;  
+}
+
+form.signin br.widget {
+    display: none;
+}
+
+form.tiny_signin {
+    float: right;
+}
+
+form.tiny_signin div,
+form.tiny_signin input
+{
+    margin: 0;
+    padding: 0;
+    font-weight: normal;
+    display: inline; 
+    background: inherit;
+}
+
+form.tiny_signin {
+    margin: 0;
+}
+
+form.tiny_signin div.content input {
+    font-size: xx-small;
+    vertical-align: top;
+}
+
+div.signin_link {
+    text-align: right;
+    font-size: small;
+    padding-left: 1em;
+    padding-right: 1em;
+}
+
+div.signin_link a {
+    text-decoration: none;
+    padding: 2px;
+}
+
+div.signin_link a:hover {
+    text-decoration: underline;
+}
+
+form.signout {
+    display: inline;
+}
+"""
+

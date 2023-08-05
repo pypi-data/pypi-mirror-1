@@ -1,0 +1,47 @@
+"""$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/user/motd.ptl $
+$Id: motd.ptl 26364 2005-03-16 18:47:54Z dbinger $
+"""
+
+from quixote import redirect, get_user
+from quixote.form import Form
+from dulcinea import local
+from dulcinea.util import format_text, SAFE_TAGS
+from dulcinea.ui.util import page
+from dulcinea.ui.directory import DynamicExportingDirectory
+
+def format_motd [html] (motd):
+    '<div class="motd">%s</div>' % format_text(motd)
+
+class MotdUI(DynamicExportingDirectory):
+
+    def get_exports(self):
+        if get_user():
+            yield ('', '_q_index', 'Signin Message', 'Message-of-the-day')
+            if get_user().is_admin():
+                yield ('edit', 'edit', 'Edit', 'Edit message-of-the-day')
+
+    def _q_index [html] (self):
+        return page('Signin Message',
+                    format_motd(local.get_user_db().get_motd()))
+
+    def edit(self):
+        form = Form()
+        form.add_text('motd', value=local.get_user_db().get_motd(),
+                      rows=30, cols=90,
+                      hint=("The message-of-the-day may include the following "
+                            "HTML tags: %s. " % ', '.join(SAFE_TAGS)))
+        form.add_submit('update', 'Update')
+        form.add_submit('preview', 'Preview')
+        form.add_submit('cancel', 'Cancel')
+        if form.get('cancel'):
+            return redirect('.')
+        if not form.is_submitted() or form.has_errors():
+            return page('Edit: Message of the Day', form.render())
+        if form.get('preview'):
+            return page('Preview: Message of the Day',
+                        format_motd(form['motd']),
+                        form.render())
+        if form.get('update'):
+            local.get_user_db().set_motd(form['motd'])
+        return redirect('.')
+

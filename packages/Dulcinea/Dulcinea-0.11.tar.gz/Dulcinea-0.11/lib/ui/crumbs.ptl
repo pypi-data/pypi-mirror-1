@@ -1,0 +1,238 @@
+"""$Id: crumbs.ptl 27258 2005-08-30 16:36:01Z dbinger $
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/crumbs.ptl $
+"""
+
+from quixote import get_request, get_response, get_path
+from quixote.util import get_directory_path
+from quixote.html import href
+from dulcinea.ui.directory import DynamicExportingDirectory
+
+def get_path_directory_list():
+    app_root = get_request().get_environ('SCRIPT_NAME', '')
+    path = get_path()
+    path_components = path[len(app_root):].split('/')
+    namespace_stack = get_directory_path()
+    if get_response().get_status_code() == 200:
+        offset = -1
+    else:
+        offset = 0
+    return [('./' + '../' * (len(namespace_stack) - k + offset),
+             namespace_stack[k])
+            for k in range(min(len(path_components), len(namespace_stack)))]
+
+def get_crumb_tree():
+    """() - > [[(path:str, crumb:str, title:str)]]
+    """
+    crumb_tree = []
+    for path, directory in get_path_directory_list():
+        menu = []
+        for component, name, crumb, title in get_exports(directory):
+            if crumb: # skip crumbs and menus if no crumb
+                if component == '':
+                    menu.insert(0, (path + component, crumb, title))
+                else:
+                    menu.append((path + component, crumb, title))
+            elif component == '':
+                menu = []
+                break
+        if menu:
+            crumb_tree.append(menu)
+    return crumb_tree
+
+
+def get_exports(directory):
+    """(Directory) -> [(component:str, name:str, crumb:str, title:str)]
+    """
+    if isinstance(directory, DynamicExportingDirectory):
+        return directory.get_exports()
+
+    # Backwards compatibility with _q_exports and get_crumb
+    result = []
+    for export in getattr(directory, '_q_exports', []):
+        if type(export) is tuple:
+            component, name = export
+            crumb = ''
+        elif export == '':
+            component, name = '', '_q_index'
+            get_crumb = getattr(directory, 'get_crumb', None)
+            crumb = get_crumb and get_crumb() or None
+        else:
+            component, name = export, export
+            crumb = ''
+        title = ''
+        result.append((component, name, crumb, title))
+    return result
+
+def format_crumbs [html] (delim=None):
+    format_crumb_tree(delim=delim)
+
+def format_crumb_tree [html] (delim=None):
+    # For this to work you will need the crumb tree javascript
+    if delim is None:
+        delim = '&gt;'
+    '<div class="navigation">'
+    crumb_tree = get_crumb_tree()
+    if len(crumb_tree) > 1:
+        '\n<ul id="sfish" class="suckerfish">'
+        for menu in crumb_tree[:-1]:
+            '\n<li class="level1">'
+            path, crumb, title = menu[0]
+            href(path, crumb, title=title)
+            delim
+            if menu[1:]:
+                '\n<ul>'
+                for path, crumb, title in menu[1:]:
+                    '\n<li class="level2">%s</li>' % href(path, crumb,
+                                                          title=title)
+                '</ul>'
+            '</li>'
+        '</ul>'
+    def get_menu_css_class(path):
+        return "menu_" + path.split('/')[-1].replace('.', '_')
+    if (crumb_tree and len(crumb_tree[-1]) > 0 and
+        get_response().get_status_code() == 200):
+        '\n<ul class="crumbmenu navigation">'
+        component = get_path().split(str('/'))[-1]
+        selected_path = './' + component
+        for path, crumb, title in crumb_tree[-1]:
+            css_class = get_menu_css_class(path)
+            if path == selected_path:
+                '\n<li class="selected %s">%s</li>' % (
+                    css_class, href(path, crumb, title=title))
+            if path != selected_path:
+                '\n<li class="%s">%s</li>' % (
+                    css_class, href(path, crumb, title=title))
+        '</ul>'
+    '<br style="clear:left" />'
+    '</div>'
+    '''
+    <script type="text/javascript"><!--
+        if (document.all && document.getElementById) { // Only for poor IE5
+            startList = function() {
+                navigationRoot = document.getElementById("sfish");
+                for (i=0; i < navigationRoot.childNodes.length; i++) {
+                    node = navigationRoot.childNodes[i];
+                    if (node.nodeName == "LI") {
+                        node.onmouseover = function() {
+                            this.className += " over";
+                        }
+                        node.onmouseout = function() {
+                            this.className = this.className.replace(" over", "");
+                        }
+                    }
+                }
+            }
+            window.onload = startList;
+        }
+    -->
+    </script>
+    '''
+
+
+
+def format_crumbs_css [plain] (color_map):
+    '''
+.navigation {
+    color: %(CRUMBS_FG)s;
+    background: %(CRUMBS_BG)s;
+    font-size: small;
+}
+
+.navigation a:link,
+.navigation a:visited,
+.navigation a:active {
+    margin-left: 0.5ex;
+    margin-right: 0.5ex;
+    text-decoration: none;
+    color: %(LIGHT_A)s;
+}
+
+.navigation a:hover {
+    margin-left: 0.5ex;
+    margin-right: 0.5ex;
+    color: %(LIGHT_A_HOVER)s;
+    text-decoration: underline;
+}
+
+    ''' % color_map
+
+    '''
+ul.suckerfish, ul.suckerfish ul {
+    padding: 0;
+    margin: 0;
+    list-style: none;
+    z-index: +1;
+}
+
+ul.suckerfish li.level1 {
+    float: left;
+    z-index: +1;
+}
+
+ul.suckerfish li {
+    position: relative;
+    margin: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+ul.suckerfish li.level2 {
+    background: %(CRUMBS_BG)s;    
+    float: none;
+    border-bottom: 1px solid %(BODY_BG)s;
+    width: 100%%;
+}
+
+ul.suckerfish li ul { /* second-level lists */
+    width: 9em;
+    display: none;
+    position: absolute; 
+    top: 0.9em;
+    left: 0;
+    padding-top: 0.3em;;
+}
+
+
+/* to override top and left in browsers other than IE, which will position
+ * to the top right of the containing li, rather than bottom left */
+li > ul {         
+    top: auto;
+    left: auto;
+}
+
+ul.suckerfish li.over ul, ul.suckerfish li:hover ul {
+    display: block;
+}
+
+ul.crumbmenu {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    float: right;
+    position: relative;
+    right: 0;
+    width: 9em;
+}
+
+ul.crumbmenu li {
+    border-bottom: 1px solid %(BODY_BG)s;
+    width: 9em;
+    background: %(CRUMBS_BG)s;
+}
+
+ul.crumbmenu li.selected {
+    background: white;
+}
+
+ul.crumbmenu li.selected a,
+ul.crumbmenu li.selected a:link,
+ul.crumbmenu li.selected a:visited,
+ul.crumbmenu li.selected a:active,
+ul.crumbmenu li.selected a:hover {
+    color: %(CRUMBS_BG)s;
+    text-decoration: none;
+    display: block;
+}
+
+''' % color_map
+

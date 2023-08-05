@@ -1,0 +1,127 @@
+"""$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/form2/number_widget.ptl $
+$Id: number_widget.ptl 25355 2004-10-14 19:42:56Z nascheme $
+"""
+
+import re
+from types import NoneType
+from quixote.html import htmltext
+from quixote.form.widget import StringWidget, CompositeWidget, WidgetValueError
+from dulcinea.range_value import RangeValue
+
+_NUMBER_PAT = r'[+-]? ( \d+(\.\d*)? | \.\d+ ) ([Ee][+-]?\d+)?'
+
+class NumberWidget (CompositeWidget):
+    """
+    Instance attributes:
+      value : int, float, RangeValue, [int, float]
+    """
+
+    range_re = re.compile(r'(?P<lo>%s) \s* (\.\.|-) \s* (?P<hi>%s)'
+                          % (_NUMBER_PAT, _NUMBER_PAT),
+                          re.VERBOSE)
+
+    def __init__(self, name, value=None,
+                 is_scalar=1, accept_range=0, accept_float=1,
+                 size=None, **kwargs):
+        assert (type(value) in (NoneType, int, float, list, tuple) or
+                isinstance(value, RangeValue)), (
+            'form value %r not a number or list: got %r' % (name, value))
+
+        if type(value) in (list, tuple):
+            for val in value:
+                assert (type(val) in (int, float) or
+                        isinstance(val, RangeValue)), (
+                    'form value %r not a number: got %r' % (name, val))
+            str_value = ', '.join(map(str, value))
+
+        elif value is None:
+            str_value = ""
+
+        else:
+            str_value = str(value)
+
+        CompositeWidget.__init__(self, name, value, **kwargs)
+
+        if size is None:
+            if accept_range:
+                size = 16
+            else:
+                size = 8
+            if not is_scalar:
+                size += 8
+
+        self.add(StringWidget, 'value', value=str_value,
+                 size=size)
+
+        self.is_scalar = is_scalar
+        self.accept_range = accept_range
+        self.accept_float = accept_float
+
+    def _parse_singleton(self, converter, value, msg=None):
+        if msg is None:
+            msg = "invalid number: %s"
+        try:
+            return converter(value)
+        except ValueError:
+            raise WidgetValueError(msg % value)
+
+    def _parse_range(self, converter, match):
+        # 'match' must be from self.range_re!
+        values = match.group("lo", "hi")
+        lo = self._parse_singleton(converter, values[0])
+        hi = self._parse_singleton(converter, values[1])
+        try:
+            return RangeValue(lo, hi)
+        except ValueError, exc:
+            raise WidgetValueError, str(exc)
+
+    def _parse_set(self, converter, values):
+        values = values.split(",")
+        parsed_values = []
+        for v in values:
+            match = self.range_re.match(v)
+            if match:
+                parsed_values.append(self._parse_range(converter, match))
+            else:
+                parsed_values.append(self._parse_singleton(converter, v))
+        return parsed_values
+
+    def _parse(self, request):
+        value = self.get('value')
+        if value is None:
+            self.value = None
+        else:
+            if self.accept_float:
+                converter = float
+            else:
+                converter = int
+
+            value = value.replace(" ", "")
+            is_set = "," in value
+            range_match = self.range_re.match(value)
+
+            if is_set:
+                if self.is_scalar:
+                    self.error = 'set not allowed'
+                else:
+                    value = self._parse_set(converter, value)
+            elif range_match:
+                if not self.accept_range:
+                    self.error = 'range not allowed'
+                else:
+                    value = self._parse_range(converter, range_match)
+            else:
+                if not self.is_scalar and self.accept_range:
+                    msg = "invalid number, set, or range: %s"
+                elif not self.is_scalar:
+                    msg = "invalid number or set: %s"
+                elif self.accept_range:
+                    msg = htmltext('invalid number or range: %s '
+                                   '(try a number, or specify a numeric range '
+                                   ' with something like '
+                                   '"2.5 .. 3")')
+                else:
+                    msg = None
+
+                value = self._parse_singleton(converter, value, msg)
+            self.value = value

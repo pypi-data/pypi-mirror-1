@@ -1,0 +1,119 @@
+"""$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/form2/physical_value_widget.ptl $
+$Id: physical_value_widget.ptl 25355 2004-10-14 19:42:56Z nascheme $
+"""
+
+from types import ListType
+from quixote.form.widget import SingleSelectWidget, CompositeWidget, \
+     WidgetValueError
+from dulcinea.physical_unit import PhysicalUnit
+from dulcinea.physical_value import PhysicalValue
+from dulcinea.ui.form2.number_widget import NumberWidget
+
+class PhysicalValueWidget(CompositeWidget):
+
+    def __init__(self, name, value=None,
+                 is_scalar=1, accept_range=0,
+                 size=10, maxlength=None,
+                 default_unit=None,
+                 allowed_units=None, **kwargs):
+        CompositeWidget.__init__(self, name, value, **kwargs)
+        # Check units.
+        assert default_unit is None or isinstance(default_unit,
+                                                  PhysicalUnit), (
+            'form element %r default unit must be None nor a PhysicalUnit: '
+            'got %r' % (name, default_unit))
+        if type(allowed_units) is ListType:
+            assert allowed_units, (
+                'form element %r allowed units must not be an empty '
+                'list' % name)
+            for allowed_unit in allowed_units:
+                assert (allowed_unit is None or
+                        isinstance(allowed_unit, PhysicalUnit)), (
+                    'form element %r allowed units includes an element '
+                    'that is neither None nor a PhysicalUnit: '
+                    'got %r' % (name, allowed_unit))
+
+            if default_unit is None or default_unit not in allowed_units:
+                default_unit = allowed_units[0]
+
+        else:
+            assert allowed_units is None, (
+                'form element %r allowed units is neither a list nor none: '
+                'got %r' % (name, allowed_units))
+
+        # Check value type.
+        if type(value) is ListType:
+            assert value, (
+                'form element %r value must not be an empty '
+                'list' % name)
+            number = []
+            unit = value[0].get_unit()
+            if allowed_units and unit not in allowed_units:
+                unit = default_unit
+            for val in value:
+                assert isinstance(val, PhysicalValue), (
+                    'form element %r value not a PhysicalValue: '
+                    'got %r' % (name, val))
+                number.append(val.convert(unit).get_value())
+
+        elif value is not None:
+            assert isinstance(value, PhysicalValue), (
+                'form element %r value not a PhysicalValue or list: '
+                'got %r' % (name, value))
+            unit = value.get_unit()
+            if allowed_units and unit not in allowed_units:
+                unit = default_unit
+            number = value.convert(unit).get_value()
+
+        else:
+            number = None
+            unit = default_unit
+
+        # Set self.allowed_units.
+        if allowed_units:
+            self.allowed_units = allowed_units
+        else:
+            self.allowed_units = [unit]
+
+        show_unit = self.allowed_units != [None]
+        self.add(NumberWidget, 'value', value=number,
+                 is_scalar=is_scalar, accept_range=accept_range,
+                 size=size, maxlength=maxlength, render_br=not show_unit)
+
+        # Set self.unit_widget.
+        if show_unit:
+            options = []
+            for allowed_unit in self.allowed_units:
+                if allowed_unit is None:
+                    options.append((allowed_unit, '', ''))
+                else:
+                    options.append((allowed_unit,
+                                    allowed_unit.get_name(html=1),
+                                    allowed_unit))
+            self.add(SingleSelectWidget, 'unit', value=unit,
+                     options=options, sort=1)
+
+    def _parse(self, request):
+        value = self.get('value')
+        if self.get_widget('unit'):
+            unit = self.get('unit')
+        else:
+            unit = None
+
+        if value is None:
+            self.value = None
+        elif type(value) is ListType:
+            self.value = [PhysicalValue(val, unit)
+                          for val in value]
+        else:
+            try:
+                self.value = PhysicalValue(value, unit)
+            except TypeError, exc:
+                raise WidgetValueError(exc)
+
+def format_physical_value_css [plain] ():
+    """
+div.PhysicalValueWidget div {
+    white-space: nowrap;
+}
+"""

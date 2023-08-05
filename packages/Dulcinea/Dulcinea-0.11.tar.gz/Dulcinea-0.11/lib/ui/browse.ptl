@@ -1,0 +1,246 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/browse.ptl $
+$Id: browse.ptl 27204 2005-08-12 17:46:38Z rmasse $
+"""
+from cStringIO import StringIO
+from dulcinea import local_ui
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.errors import not_found
+from dulcinea.ui.thumbnail import thumbnail_response
+from quixote import get_request, get_response
+from quixote.html import href, htmltag
+from quixote.util import FileStream
+import mimetypes
+import tarfile
+import zipfile
+
+mimetypes.add_type('text/plain', '.py')
+
+def guess_mime_type(name, fallback=''):
+    return mimetypes.guess_type(name.lower())[0] or fallback
+
+class ArchiveDirectory (DynamicExportingDirectory):
+
+    def __init__(self, path_to_archive, path_in_archive='',
+                 archive_wrapper=None, decorate=None, obj=None):
+        self.path_to_archive = path_to_archive
+        self.path_in_archive = path_in_archive
+        self.archive_wrapper = archive_wrapper
+        self.obj = obj
+        if decorate:
+            self.decorate = decorate
+
+    def get_archive_wrapper(self):
+        if not self.archive_wrapper:
+            if zipfile.is_zipfile(self.path_to_archive):
+                self.archive_wrapper = ZipFileWrapper(self.path_to_archive)
+            else:
+                self.archive_wrapper = TarFileWrapper(self.path_to_archive)
+        return self.archive_wrapper
+
+    def get_exports(self):
+        if self.path_in_archive:
+            crumb = self.path_in_archive.split('/')[-2]
+        else:
+            crumb = 'Browse'
+        yield ('', '_q_index', crumb, None)
+
+    def __call__(self):
+        if not self.path_in_archive:
+            get_response().set_content_type('application/octet-stream')
+            return FileStream(open(self.path_to_archive, 'rb'))
+
+    def _q_lookup(self, component):
+        member_name = self.path_in_archive + component
+        if self.get_archive_wrapper().has_member(member_name): # file
+            return self.file_response(member_name)
+        member_name += '/'
+        if not self.get_archive_wrapper().has_member(member_name): # not found
+            return None
+        # directory
+        return self.__class__(self.path_to_archive,
+                              path_in_archive=member_name,
+                              archive_wrapper=self.archive_wrapper,
+                              decorate=self.decorate,
+                              obj=self.obj)
+
+    def file_response(self, member_name):
+        mime_type = guess_mime_type(member_name, fallback='text/plain')
+        get_response().set_content_type(mime_type)
+        return self.get_archive_wrapper().get_member_response(member_name)
+
+    def get_children(self):
+        child_name_slashes = self.path_in_archive.count('/')
+        children = [
+            name[len(self.path_in_archive):]
+            for name in self.get_archive_wrapper().get_names()
+            if (name.startswith(self.path_in_archive) and
+                child_name_slashes == name[:-1].count('/'))]
+        children.sort()
+        return children
+
+    def _q_index(self):
+        def directory [html] ():
+            for child in self.get_children():
+                href(child,
+                     child, css_class="filename")
+                '<br />'
+        return self.decorate(self.obj,
+                             directory(),
+                             title=self.path_in_archive)
+
+    def decorate [html] (self, obj, content, title=None):
+        local_ui.header(title)
+        '<div style="margin:1em">'
+        content
+        '</div>'
+        local_ui.footer(title)
+
+class ArchiveWrapper:
+
+    def __init__(self, path_to_archive):
+        self.path_to_archive = path_to_archive
+        self.archive = None
+
+    def get_archive(self):
+        if not self.archive:
+            self.archive = self.open_archive(self.path_to_archive)
+        return self.archive
+
+    def open_archive(self, path_to_archive):
+        """(path_to_archive : str)
+
+        Return a reference to archive reading class saved on self.archive
+        """
+        raise NotImplementedError
+
+    def get_names(self):
+        """() -> [str]
+
+        Return a list of file and directory names in the order they appear in
+        the archive.  Directory names end with a slash '/' character.
+        """
+        raise NotImplementedError
+
+    def has_member(self, member_name):
+        """(name : str) -> bool
+
+        True if member is in the archive
+        """
+        raise NotImplementedError
+
+    def get_member_file(self, member_name):
+        """(member_name : str) -> file
+        """
+        raise NotImplementedError
+
+    def get_member_response(self, member_name):
+        """(member_name : str) -> str | Stream
+
+        Return the member named by member_name as a string or if member is
+        streamable as a Stream
+        """
+        raise NotImplementedError
+
+
+class TarFileWrapper (ArchiveWrapper):
+
+    def open_archive(self, path_to_archive):
+        try:
+            return tarfile.open(path_to_archive, 'r:gz')
+        except tarfile.ReadError:
+            try:
+                return tarfile.open(path_to_archive, 'r:')
+            except:
+                not_found("Can't open tar file")
+
+    def get_names(self):
+        return self.get_archive().getnames()
+
+    def has_member(self, member_name):
+        try:
+            return bool(self.get_archive().getmember(member_name))
+        except KeyError:
+            return False
+
+    def get_member_file(self, member_name):
+        return self.get_archive().extractfile(member_name)
+
+    def get_member_response(self, member_name):
+        return FileStream(self.get_member_file(member_name))
+
+
+class ZipFileWrapper (ArchiveWrapper):
+
+    def open_archive(self, path_to_archive):
+        if not zipfile.is_zipfile(path_to_archive):
+            not_found('Not a zip file')
+        try:
+            return zipfile.ZipFile(path_to_archive, 'r')
+        except zipfile.error:
+            not_found("Can't open zip file")
+
+    def get_names(self):
+        return self.get_archive().namelist()
+
+    def has_member(self, member_name):
+        try:
+            return bool(self.get_archive().getinfo(member_name))
+        except KeyError:
+            return False
+
+    def get_member_file(self, member_name):
+        return StringIO(self.get_member_response(member_name))
+
+    def get_member_response(self, member_name):
+        return self.get_archive().read(member_name)
+
+
+class ImageArchiveDirectory (ArchiveDirectory):
+
+    def file_response(self, member_name):
+        mime_type = guess_mime_type(member_name, fallback='text/plain')
+        if mime_type.startswith('image/') and get_request().get_query():
+            return thumbnail_response(
+                self.get_archive_wrapper().get_member_file(member_name))
+        get_response().set_content_type(mime_type)
+        return self.get_archive_wrapper().get_member_response(member_name)
+
+    def _q_index(self):
+        def directory [html] ():
+            for child in self.get_children():
+                member_name = self.path_in_archive + child
+                '<div class="archive_file">'
+                if not child.endswith(str('/')):
+                    if guess_mime_type(child).startswith(str('image/')):
+                        href(child,
+                             htmltag('img',
+                                     src='%s?50' % child,
+                                     alt='[Thumbnail]',
+                                     xml_end=True))
+                href(child, child, css_class="filename")
+                '</div>'
+        return self.decorate(self.obj,
+                             directory(),
+                             title=self.path_in_archive)
+
+class IndexArchiveDirectory (ArchiveDirectory):
+
+    def _q_index(self):
+        index_html = self._q_lookup('index.html')
+        if index_html:
+            return index_html
+        return ArchiveDirectory._q_index(self)
+
+def format_browse_css [plain] ():
+    """
+div.archive_file {
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
+}
+
+div.archive_file img {
+    margin-right: 1ex;  
+    vertical-align: top;
+}
+"""

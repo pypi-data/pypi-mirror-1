@@ -1,0 +1,208 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/form2/survey_widget.ptl $
+$Id: survey_widget.ptl 27509 2005-10-03 12:37:22Z dbinger $
+"""
+from dulcinea.spec import require
+from dulcinea.survey import ContactAddressAnswer
+from dulcinea.survey import Question, TextAnswer, SelectAnswer, Survey
+from dulcinea.ui.form2.address_widget import ContactAddressWidget
+from quixote import get_user
+from quixote.form import CompositeWidget, TextWidget, CheckboxWidget
+from quixote.form import RadiobuttonsWidget, StringWidget
+from types import FunctionType
+
+class ContactAddressQuestionWidget(CompositeWidget):
+
+    def __init__(self, name, value=None, **kwargs):
+        """(name : str, value : Answer, ...)
+        """
+        require(value, ContactAddressAnswer)
+        value = value.copy()
+        CompositeWidget.__init__(self, name, value=value, **kwargs)
+        self.add(ContactAddressWidget,
+                 'address', value=value.get_answer(),
+                 **kwargs)
+
+    def _parse(self, request):
+        CompositeWidget._parse(self, request)
+        self.value.set_answer(self.get('address'))
+
+    def render_content [html] (self):
+        self.get_widget('address').render_content()
+
+
+class TextQuestionWidget(CompositeWidget):
+
+    def __init__(self, name, value=None, **kwargs):
+        """(name : str, value : Answer, ...)
+        """
+        require(value, TextAnswer)
+        value = value.copy()
+        CompositeWidget.__init__(self, name, value=value, **kwargs)
+        rows, cols = value.get_question().get_dimensions()
+        if rows > 1:
+            self.add(TextWidget, 'text', value=value.get_answer(),
+                     rows=rows, cols=cols, **kwargs)
+        else:
+            self.add(StringWidget, 'text', value=value.get_answer(),
+                     size=cols, **kwargs)
+
+    def _parse(self, request):
+        CompositeWidget._parse(self, request)
+        self.value.set_answer(self.get('text'))
+
+    def render_content [html] (self):
+        '<p>'
+        display_sub_title(self.value.get_question().get_sub_title())
+        '</p>'
+        self.get_widget('text').render_content()
+        '<br />'
+
+
+
+class SelectQuestionWidget(CompositeWidget):
+
+    def __init__(self, name, value=None, **kwargs):
+        """(name : str, value : SelectAnswer=None, ...)
+        """
+        require(value, SelectAnswer)
+        value = value.copy()
+        CompositeWidget.__init__(self, name, value=value, **kwargs)
+        question = value.get_question()
+        column_headings = question.get_column_headings()
+        self.row_headings = question.get_row_headings()
+        if len(column_headings) > 1:
+            self.is_checkbox = False
+            options = [
+                (col_heading, '', index)
+                for index, col_heading in enumerate(column_headings)]
+            for row_index in range(len(self.row_headings) or 1):
+                self.add(RadiobuttonsWidget, str(row_index), options=options,
+                         value=(value.has_answer() and
+                                value.get_answer()[row_index]) or None,
+                         sort=False, **kwargs)
+        else:
+            self.is_checkbox = True
+            for row_index in range(len(self.row_headings) or 1):
+                self.add(CheckboxWidget, str(row_index),
+                         value=(value.has_answer() and
+                                value.get_answer()[row_index]) or None,
+                         **kwargs)
+        if question.last_row_has_text:
+            self.add(TextWidget, 'text',
+                     value=(value.has_answer() and value.get_other_text()),
+                     rows=2, cols=35, **kwargs)
+
+    def _parse(self, request):
+        CompositeWidget._parse(self, request)
+        answer = []
+        for row_index in range(len(self.row_headings) or 1):
+            widget = self.get_widget(str(row_index))
+            answer.append(widget.parse())
+        if answer:
+            # don't set a answer if *nothing* has been marked
+            if sum([bool(value) for value in answer]):
+                self.value.set_answer(answer)
+
+        if self.get_widget('text'):
+            self.value.set_other_text(self.get('text'))
+
+
+    def render_content [html] (self):
+        question = self.value.get_question()
+        '<p>'
+        display_sub_title(question.get_sub_title())
+        '</p>'
+        column_headings = question.get_column_headings()
+        row_headings = question.get_row_headings()
+        range_labels = question.get_range_labels()
+        '\n<table class="survey">'
+        if column_headings:
+            '<tr>'
+            if row_headings:
+                '<th class="blank"></th>'
+            if range_labels: # range labels on top of column headings if present
+                '<th align=left colspan=%d>%s</th>' % (
+                    len(column_headings) / 2, range_labels[0])
+                '<th class="right" colspan=%d>%s</th>' % (
+                    len(column_headings) / 2 + len(column_headings) % 2,
+                    range_labels[-1])
+                '</tr><tr>'
+                if row_headings:
+                    '<th class="blank"></th>'
+            for column_heading in column_headings:
+                '<th>'
+                column_heading
+                '</th>'
+            '</tr>'
+        other_text = self.get_widget('text')
+        for index, widget in enumerate(self.widgets):
+            '<tr>'
+            if row_headings:
+                '<th>'
+                if other_text and index == len(self.widgets) - 1:
+                    '<br />'
+                    other_text.render_content()
+                    '</th></tr>'
+                    break
+                else:
+                    row_headings[index]
+                '</th>'
+            '<td><center>'
+            widget.delim = '</center></td><td><center>'
+            widget.render_content()
+            '</center></td>'
+            '</tr>'
+        '</table>'
+        '<br />'
+
+class SurveyWidget(CompositeWidget):
+
+    def __init__(self, name, value=None, decorator=None, **kwargs):
+        """(name : str,
+            value : Survey,
+            decorator : FunctionType, ...)
+        """
+        require(value, Survey)
+        require(decorator, (FunctionType, None))
+        value = value.copy()
+        CompositeWidget.__init__(self, name, value=value, **kwargs)
+        if decorator is not None:
+            self.decorator = decorator
+        answers = value.get_answers()
+        self.widgets = []
+        for index, answer in enumerate(answers):
+            self.add(get_widget_class(answer.get_question()),
+                     str(index), value=answer,
+                     title=answer.get_question().get_title(),
+                     **kwargs)
+
+    def decorator [html] (self, decorated):
+        decorated
+
+    def _parse(self, request):
+        CompositeWidget._parse(self, request)
+        answers = []
+        for widget in self.get_widgets():
+            answer = widget.parse()
+            if answer and answer.has_answer():
+                answers.append(answer)
+        self.value.set_answers(answers, get_user())
+
+    def render(self):
+        return self.decorator(CompositeWidget.render(self))
+
+def display_sub_title [html] (sub_title):
+    if sub_title:
+        '<span class="survey-sub-title">%s</span>' % sub_title
+
+def get_widget_class(question):
+    """(question : Question) -> class
+
+    Return a string representing the widget name corresponding to the type
+    of the question.  i.e. if question is a TextQuestion instance,
+    return the TextQuestionWidget class
+    """
+    require(question, Question)
+    return globals().get(question.__class__.__name__ + 'Widget')
+

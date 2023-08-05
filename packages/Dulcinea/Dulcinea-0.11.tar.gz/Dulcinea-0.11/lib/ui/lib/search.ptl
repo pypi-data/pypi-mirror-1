@@ -1,0 +1,191 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/lib/search.ptl $
+$Id: search.ptl 27440 2005-09-20 13:40:50Z dbinger $
+"""
+from dulcinea import local_ui
+from quixote import get_path
+from quixote.form.form import Form
+from quixote.form.widget import HiddenWidget
+from quixote.form.widget import StringWidget, CheckboxWidget, SubmitWidget
+from quixote.html import href, url_with_query
+import re
+
+def tiny_search_form [html] (action_url):
+    '''
+    <form action="%s" method="get">
+    <input type="text" name="keywords" size="10" />
+    </form>
+    ''' % action_url
+
+class SearchForm (object):
+
+    def __init__(self, search_space,
+                 matches_per_page=20, require_keywords=False,
+                 match_substrings=False):
+        self.form = Form(method='get', use_tokens=False)
+        self.form.add(StringWidget, 'keywords', size=30)
+        self.keywords = self.form.get('keywords')
+
+        if match_substrings:
+            self.form.add(CheckboxWidget, 'match_substrings',
+                          hint='Match substrings')
+            match_substrings = self.form.get('match_substrings')
+
+        self.form.add(SubmitWidget, 'submit_search', 'Search')
+
+        if require_keywords and not self.keywords:
+            matches = []
+        elif not self.keywords or self.keywords == '*':
+            matches = list(search_space)
+        else:
+            keywords = []
+            for keyword in self.keywords.split():
+                if match_substrings:
+                    pat = re.escape(keyword)
+                else:
+                    pat = r'\b%s\b' % re.escape(keyword)
+                keywords.append(re.compile(pat, re.I).search)
+            matches = []
+            for item in search_space:
+                text = ' '.join(self.get_search_text_fields(item))
+                for keyword_search in keywords:
+                    if not keyword_search(text):
+                        break
+                else:
+                    matches.append(item)
+
+        self.pages = []
+        page = []
+        for item in matches:
+            page.append(item)
+            if len(page) == matches_per_page:
+                self.pages.append(page)
+                page = []
+        if page:
+            self.pages.append(page)
+
+        pages = len(self.pages)
+        if pages == 0:
+            self.page_number = None
+        elif pages == 1:
+            self.page_number = 0
+        else:
+            self.form.add(HiddenWidget, 'page_number', value='0')
+            try:
+                self.page_number = int(self.form.get('page_number') or '0')
+            except ValueError:
+                self.page_number = 0
+            else:
+                if self.page_number >= pages or self.page_number < 0:
+                    self.page_number = 0
+
+    def get_search_text_fields(self, item):
+        raise RuntimeError('Abstract get_search_text_fields() method called')
+
+    def get_title(self):
+        raise RuntimeError('Abstract get_title() method called')
+
+    def header(self, title):
+        return local_ui.header(title)
+
+    def format_no_matches [html] (self):
+        if self.form.is_submitted():
+            '''
+            <p>
+            There are no results that match your search terms.
+            </p>
+            '''
+        else:
+            '''
+            <p>
+            Enter one or more search terms separated by spaces.
+            </p>
+            '''
+
+    def format_search_results_headings [html] (self):
+        raise RuntimeError('Abstract format_search_results_headings() method '
+                           'called')
+
+    def format_search_results_table_row [html] (self, item):
+        raise RuntimeError('Abstract format_search_results_table_row() method '
+                           'called')
+
+    def footer(self, title):
+        return local_ui.footer(title)
+
+    def render [html] (self):
+        if self.page_number is None:
+            title = self.get_title()
+            self.header(title)
+            self.format_no_matches()
+        else:
+            title = '%s: Page %d of %d' % (self.get_title(),
+                                           self.page_number + 1,
+                                           len(self.pages))
+            self.header(title)
+            '<table class="shaded">'
+            '<tr>'
+            self.format_search_results_headings()
+            '</tr>'
+            for item in self.pages[self.page_number]:
+                '<tr>'
+                self.format_search_results_table_row(item)
+                '</tr>'
+            '</table>'
+            if len(self.pages) > 1:
+                def page_index_link [html] (page_index, title):
+                    href(url_with_query(get_path(),
+                                        keywords=self.keywords or '',
+                                        page_number=page_index), title)
+                last_index = len(self.pages)
+                start_index_range = self.page_number - (self.page_number % 10)
+                end_index_range = min(start_index_range + 10, last_index)
+
+                '<div class="searchresultspage">Results Page:'
+                if start_index_range != 0:
+                    page_index_link(0, '|<<')
+                    ' '
+                    page_index_link(start_index_range - 1, '<<')
+                for page_index in range(start_index_range, end_index_range):
+                    if page_index == self.page_number:
+                        '<span class="selectedsearchresultspage">'
+                        page_index + 1
+                        '</span>'
+                    else:
+                        page_index_link(page_index, '%d' % (page_index + 1))
+                    ' '
+                ' '
+                if end_index_range < last_index:
+                    page_index_link(end_index_range, '>>')
+                    ' '
+                    page_index_link(last_index - 1 , '>>|')
+                '</div>'
+        '<div class="search">'
+        self.form.render()
+        '</div>'
+        self.footer(title)
+
+    def handle(self):
+        return self.render()
+
+def format_search_css [plain] (color_map):
+    # Requires: SELECTED_BG to be defined in color_map
+    """
+div.searchresultspage {
+    margin: 0;
+    padding: 0.2ex;
+    background: #098282;
+    font-size: small;
+}
+
+div.searchresultspage a {
+    margin: 0;
+    padding: 0.2ex;
+}
+
+span.selectedsearchresultspage {
+    margin: 0;
+    padding: 0.2ex;
+    background: %(SELECTED_BG)s;
+}
+""" % color_map

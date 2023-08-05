@@ -1,0 +1,307 @@
+#!/www/python/bin/python
+
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/bin/site $
+$Id: site 26324 2005-03-09 21:32:54Z dbinger $
+
+The site command script.
+This controls the starting and stopping of durus, scgi, and apache servers.
+"""
+from dulcinea.site_util import any_staging_sites, list_sites, get_pid_file_name
+from dulcinea.site_util import get_config_value, is_local, any_live_sites 
+from dulcinea.site_util import is_live, is_staging
+from dulcinea.site_util import is_running
+import errno
+import os
+import os.path
+import signal
+import sys
+import time
+
+valid_actions = ['start', 'stop', 'restart', 'status', 'help']
+valid_sites = list_sites()
+assert valid_sites, "You must have at least one site defined"
+valid_daemons = ['durus', 'apache', 'scgi']
+
+def get_start_script_name(site, daemon):
+    start_script_dir = get_config_value('start_script_directory',
+                                        site=site or valid_sites[0])
+    return os.path.join(start_script_dir, 'start-%s.py' % daemon)
+
+def usage(msg=None):
+    def alts(lst):
+        return ' | '.join(lst)
+    if msg:
+        sys.stderr.write('error: %s\n' % msg)
+    sys.stderr.write('Usage: %s [ <action> | <site> | <daemon ]*\n' %
+                     sys.argv[0])
+    sys.stderr.write('where:\n')
+    sys.stderr.write('       <action> = %s\n' % alts(valid_actions))
+    sys.stderr.write('           default is status\n')
+    sys.stderr.write('       <site> = %s\n' % alts(valid_sites))
+    sys.stderr.write('           to specify some subset of all sites\n')
+    sys.stderr.write('           default is all sites\n')
+    sys.stderr.write('       <daemon> = %s\n' % alts(valid_daemons))
+    sys.stderr.write('           to specify some subset of all daemons\n')
+    sys.stderr.write('           default is all daemons\n')
+    sys.exit(1)
+
+def write(*args):
+    sys.stdout.write(' '.join(args))
+    sys.stdout.flush()
+
+def sanitize_environment(env):
+    if env is None:
+        env = {}
+    for name in ['PATH', 'LOGNAME']:
+        if name not in env and name in os.environ:
+            env[name] = os.environ[name]
+    site_conf = os.environ.get('SITE_CONF')
+    if site_conf:
+        env['SITE_CONF'] = site_conf
+    return env
+
+def fork_child(exe, args=(), env=None, wd=None):
+    pid = os.fork()
+    if pid == 0:
+        for i in range(4, 256):
+            try:
+                os.close(i)
+            except:
+                pass
+        if wd:
+            os.chdir(wd)
+        env = sanitize_environment(env)
+        try:
+            os.execve(exe, [exe] + map(str, args), env)
+        except OSError, err:
+            sys.stderr.write("couldn't exec %s: %s\n" % (exe, err.strerror))
+        except:
+            sys.stderr.write("couldn't exec %s\n" % exe)
+        os._exit(2)
+    (pid, status) = os.wait()
+    if status:
+        print >>sys.stderr, "%s returned error status %s" % (exe, status)
+
+
+def start_daemon(daemon, site='', exe=None, args=None, env=None):
+    pid_file = get_pid_file_name(daemon, site)
+    if os.path.isfile(pid_file):
+        pid = open(pid_file).read().strip()
+        if is_running(pid):
+            write('\n%s %s appears to be running, not starting.\n' % (
+                site, daemon))
+            return
+        else:
+            write('\nPID file for %s %s appears obsolete, removing it.\n' % (
+                site, daemon))
+            os.unlink(pid_file)
+    fork_child(exe, args, env, os.path.dirname(pid_file))
+
+def kill_daemon(daemon, site):
+    pid_file = get_pid_file_name(daemon, site)
+    pid = open(pid_file).read().strip()
+    try:
+        os.kill(int(pid), signal.SIGTERM)
+    except OSError, e:
+        if errno.ESRCH == e.errno:
+            write('%s %s (%s) process not found.' % (daemon, site, pid))
+        else:
+            write('\nkill failed: %s %s (%s)\n' % (daemon, site, pid))
+            write('%s\n' % os.strerror(e.errno))
+    else:
+        for i in range(10):
+            if not is_running(pid):
+                break
+            time.sleep(1)
+        else:
+            write('\nkill failed: %s %s (%s)\n' % (daemon, site, pid))
+    if os.path.exists(pid_file):
+        os.unlink(pid_file)
+
+def stop_daemon(daemon, site='', script='', args=(), env=None):
+    pid_file = get_pid_file_name(daemon, site or valid_sites[0])
+    if os.path.isfile(pid_file):
+        if script:
+            fork_child(script, args, env)
+            os.unlink(pid_file)
+        else:
+            kill_daemon(daemon, site)
+    else:
+        write('\n%s %s does not appear to be running.\n' % (site, daemon))
+
+def start(daemon, site=None):
+    start_daemon(daemon, site,
+                 get_start_script_name(site, daemon),
+                 (site,))
+
+def start_durus(sites):
+    for site in sites:
+        durus_address = get_config_value('durus_address', site=site)
+        if not durus_address:
+            continue
+        if is_local(durus_address):
+            write(' ' + site)
+            start_daemon('durus', site,
+                         get_start_script_name(site, 'durus'),
+                         (site, 'start'))
+
+def stop_durus(sites):
+    for site in sites:
+        durus_address = get_config_value('durus_address', site=site)
+        if not durus_address:
+            continue
+        if is_local(durus_address):
+            write(' ' + site)
+            stop_daemon('durus', site,
+                         get_start_script_name(site, 'durus'),
+                        (site, 'stop'))
+
+def start_scgi(sites):
+    for site in sites:
+        scgi_address = get_config_value('scgi_address', site=site)
+        if not scgi_address:
+            continue
+        if is_local(scgi_address):
+            write(' ' + site)
+            start('scgi', site)
+
+def stop_scgi(sites):
+    for site in sites:
+        scgi_address = get_config_value('scgi_address', site=site)
+        if not scgi_address:
+            continue
+        if is_local(scgi_address):
+            write(' ' + site)
+            stop_daemon('scgi', site)
+
+def restart_scgi(sites):
+    for site in sites:
+        scgi_address = get_config_value('scgi_address', site=site)
+        if not scgi_address:
+            continue
+        if not is_local(scgi_address):
+            continue
+        pid_file = get_pid_file_name('scgi', site)
+        if not os.path.isfile(pid_file):
+            write('\n%s %s does not appear to be running.\n' % (site, 'scgi'))
+            continue
+        pid = int(open(pid_file, 'r').read())
+        os.kill(pid, signal.SIGHUP)
+        write(" %s" % site)
+
+def _apache_required(sites):
+    for site in sites:
+        if get_config_value('httpd', site=site):
+            return True
+    return False
+
+def start_apache(sites):
+    start('apache', sites[0])
+
+def stop_apache(sites):
+    stop_daemon('apache', sites[0])
+
+def show_status():
+    cmd = 'ps xo pid,command | grep "\\(start-\||scgi\\|durus\\|apache\\|httpd\\)" | grep -v grep'
+    os.system(cmd)
+
+def main():
+    action = 'status'
+    for act in valid_actions:
+        if act in sys.argv:
+            action = act
+            break
+
+    sites = ([ site for site in valid_sites if site in sys.argv ] or
+             valid_sites)
+    if any_live_sites():
+        # Exclude all sites that aren't live
+        sites = [site for site in sites if is_live(site)]
+    elif any_staging_sites():
+        # Exclude all sites that aren't staging
+        sites = [site for site in sites if is_staging(site)]
+    if not _apache_required(sites):
+        valid_daemons.remove('apache')
+    daemons = ([ daemon for daemon in valid_daemons if daemon in sys.argv ] or
+               valid_daemons)
+
+    def start_daemons():
+        if 'durus' in daemons:
+            write('Starting Durus servers:')
+            start_durus(sites)
+            write('\n')
+        if 'scgi' in daemons:
+            write('Starting SCGI servers:')
+            start_scgi(sites)
+            write('\n')
+        if 'apache' in daemons:
+            write('Starting Apache:')
+            start_apache(sites)
+            write('done\n')
+
+    def stop_daemons():
+        if 'apache' in daemons:
+            write('Stopping Apache:')
+            stop_apache(sites)
+            write('done\n')
+        if 'scgi' in daemons:
+            write('Stopping SCGI servers:')
+            stop_scgi(sites)
+            write('\n')
+        if 'durus' in daemons:
+            write('Stopping Durus servers:')
+            stop_durus(sites)
+            write('\n')
+
+    def restart_daemons():
+        if 'durus' in daemons:
+            write('Starting Durus servers:')
+            start_durus(sites)
+            write('\n')
+        if 'scgi' in daemons:
+            write('Starting SCGI servers:')
+            start_scgi(sites)
+            write('\n')
+        if 'apache' in daemons:
+            write('Starting Apache:')
+            start_apache(sites)
+            write('done\n')
+
+    def restart_daemons():
+        if 'apache' in daemons:
+            write('Stopping Apache:')
+            stop_apache(sites)
+            write('done\n')
+        if 'durus' in daemons:
+            write('Stopping Durus servers:')
+            stop_durus(sites)
+            write('\n')
+            write('Starting Durus servers:')
+            start_durus(sites)
+            write('\n')
+        if 'scgi' in daemons:
+            write('restarting SCGI servers:')
+            restart_scgi(sites)
+            write('\n')
+        if 'apache' in daemons:
+            write('Starting Apache:')
+            start_apache(sites)
+            write('done\n')
+
+    if action == 'start':
+        start_daemons()
+
+    elif action == 'stop':
+        stop_daemons()
+
+    elif action == 'restart':
+        restart_daemons()
+
+    elif action == 'status':
+        show_status()
+
+    elif action == 'help':
+        usage()
+
+main()

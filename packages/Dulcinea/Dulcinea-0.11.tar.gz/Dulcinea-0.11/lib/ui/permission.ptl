@@ -1,0 +1,109 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/permission.ptl $
+$Id: permission.ptl 27498 2005-09-29 19:57:40Z rmasse $
+"""
+
+from dulcinea import local
+from dulcinea.ui.directory import DynamicExportingDirectory
+from dulcinea.ui.form2.search_widget import SearchSelectOneWidget
+from dulcinea.ui.util import page
+from quixote import get_user, redirect
+from quixote.form import Form
+from quixote.form.widget import SubmitWidget, RadiobuttonsWidget
+
+
+def default_decorate(obj, body, title='Permissions'):
+    return page(title, body)
+
+class PermissionUI(DynamicExportingDirectory):
+
+    def get_exports(self):
+        yield ('', '_q_index', 'Permissions', 'Manage permissions')
+
+    def __init__ (self, granter, granter_title, decorate=default_decorate):
+        self.granter = granter
+        self.granter_title = granter_title
+        self.decorate = decorate
+
+    def _q_index [html] (self):
+        return user_select_form(self.granter, decorate=self.decorate)
+
+    def _q_lookup(self, component):
+        user = local.get_user_db().get_user(component)
+        if user:
+            return UserPermissionUI(user, self.granter, self.granter_title,
+                                    decorate=self.decorate)
+
+class UserPermissionUI(DynamicExportingDirectory):
+
+    def get_exports(self):
+        yield ('', '_q_index', 'View', 'View permissions')
+        if get_user().can_manage_permissions():
+            yield ('edit', 'edit', 'Edit', 'Edit permissions')
+
+    def __init__(self, user, granter, granter_title, decorate=default_decorate):
+        self.user = user
+        self.granter = granter
+        self.title = "%s: %s's Permissions" % (
+            granter_title, user.format_realname() or user.get_id())
+        self.decorate = decorate
+
+    def _q_index [html] (self):
+        self.decorate(self.user, display_permissions(self.user, self.granter),
+                      title=self.title)
+
+    def edit(self):
+        return edit_permission_form(self.user, self.granter, self.title,
+                                    self.decorate)
+
+def display_permissions [html] (user, granter):
+    '<dl>'
+    for permission, description in sorted(
+        get_valid_permissions(user, granter).items()):
+        '<dt>%s: %s</dt>' % (
+            permission, user.is_granted(permission, granter) and 'YES' or 'NO')
+        '<dd>%s</dd>' % description
+    '</dl>'
+
+def user_select_form(granter, decorate):
+    form = Form()
+    form.add(SubmitWidget, 'select', 'Select')
+    form.add(SubmitWidget, 'cancel', 'Cancel')
+    if form.get('cancel'):
+        redirect('.')
+    form.add(SearchSelectOneWidget, "user",
+             title="Search for a user", required=1,
+             hint=("Locate a user you want to consider for permissions."))
+    if (not form.is_submitted() or
+        form.has_errors() or
+        form.get_widget('user').get_submit()):
+        return decorate(None, form.render(), title='Select User')
+    redirect('%s/' % form.get('user').get_key())
+
+def get_valid_permissions(user, granter):
+    if granter is True:
+        return user.global_permissions
+    else:
+        return granter.valid_permissions
+
+def edit_permission_form(user, granter, title, decorate):
+    form = Form()
+    form.add(SubmitWidget, 'save', 'Save')
+    form.add(SubmitWidget, 'cancel', 'Cancel')
+    if form.get('cancel'):
+        redirect('.')
+    valid_permission_items = sorted(get_valid_permissions(user, granter).items())
+    for permission, description in valid_permission_items:
+        form.add(RadiobuttonsWidget, permission,
+                 value=user.is_granted(permission, granter),
+                 hint=description, title=permission,
+                 options=[(True, 'Yes'), (False, 'No')])
+    if not form.is_submitted():
+        return decorate(user, form.render(), title=title)
+    if form.get('save'):
+        for permission, description in valid_permission_items:
+            if form.get(permission) is True:
+                user.get_permissions().grant(permission, granter)
+            elif form.get(permission) is False:
+                user.get_permissions().ungrant(permission, granter)
+    redirect('.')

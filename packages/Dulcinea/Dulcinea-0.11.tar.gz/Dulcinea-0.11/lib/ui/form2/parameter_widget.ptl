@@ -1,0 +1,481 @@
+"""$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/form2/parameter_widget.ptl $
+$Id: parameter_widget.ptl 26678 2005-04-25 13:13:22Z dbinger $
+
+Widgets for editing parameter values and parameter templates.
+"""
+
+from dulcinea import local
+from dulcinea.param.errors import ParamTypeError, ConstraintError
+from dulcinea.param.parameter import Parameter
+from dulcinea.param.parameter_template import MasterTemplate, InputTemplate
+from dulcinea.param.parameter_template import ParameterTemplate
+from dulcinea.tolerance import Tolerance
+from dulcinea.ui.form2.number_widget import NumberWidget
+from dulcinea.ui.form2.physical_value_widget import PhysicalValueWidget
+from dulcinea.ui.form2.select_widget import BigMultipleSelectWidget
+from quixote.form.widget import CompositeWidget, WidgetList, WidgetDict
+from quixote.form.widget import HiddenWidget, OptionSelectWidget
+from quixote.form.widget import MultipleSelectWidget, SubmitWidget
+from quixote.form.widget import SingleSelectWidget, RadiobuttonsWidget
+from quixote.form.widget import StringWidget, TextWidget, CheckboxWidget
+from quixote.form.widget import WidgetValueError
+from sets import Set
+from types import ListType
+import re
+
+def get_param_widget_args(value,
+                          param_type,
+                          constraint=None,
+                          allowed_units=None):
+    kwargs = {}
+
+    if param_type.is_table():
+        widget_type = WidgetDict
+
+        def set_table_sub_type_args(name_diff, sub_type):
+            if sub_type.is_material():
+                constraint = local.get_material_db().get_materials()
+            else:
+                constraint = None
+
+            sub_widget_type, sub_widget_kwargs = get_param_widget_args(
+                None,
+                sub_type,
+                constraint=constraint,
+                allowed_units=allowed_units)
+            kwargs['element_%s_type' % name_diff] = sub_widget_type
+            kwargs['element_%s_kwargs' % name_diff] = sub_widget_kwargs
+
+        set_table_sub_type_args('key', param_type.get_key_type())
+        set_table_sub_type_args('value', param_type.get_element_type())
+
+    else:
+        if param_type.is_boolean():
+            widget_type = RadiobuttonsWidget
+            kwargs['options'] = [(True, 'yes'),
+                                 (False, 'no')]
+
+        elif constraint:
+            if param_type.is_list():
+                widget_type = BigMultipleSelectWidget
+                kwargs['options'] = list(Set(constraint).union(Set(value)))
+                kwargs['size'] = min(8, len(constraint))
+            else:
+                widget_type = SingleSelectWidget
+                kwargs['options'] = list(Set([None, value] + constraint))
+                kwargs['sort'] = 1
+
+        elif param_type.is_string():
+            if param_type.is_atomic():
+                widget_type = StringWidget
+                kwargs['size'] = 20
+            else:
+                widget_type = WidgetList
+                kwargs['element_kwargs'] = dict(size=20)
+
+        elif param_type.is_int():
+            widget_type = NumberWidget
+            kwargs['is_scalar'] = (not param_type.is_list())
+            kwargs['accept_float'] = 0
+
+        elif param_type.is_physical_value():
+            widget_type = PhysicalValueWidget
+            kwargs['default_unit'] = param_type.get_unit()
+            kwargs['is_scalar'] = param_type.is_atomic()
+            kwargs['accept_range'] = 1
+            kwargs['allowed_units'] = allowed_units
+
+        else:
+            assert False, 'unknown param_type for %r' % param_type
+
+    return widget_type, kwargs
+
+
+class ToleranceWidget (CompositeWidget):
+
+    PAT = re.compile(r'''
+                     \s*
+                     \+?
+                     ([\d.]+)
+                     (?:
+                        \s+
+                        \-?
+                        ([\d.]+))?
+                     \s*
+                     $
+                     ''', re.VERBOSE)
+
+    def __init__(self, name, value=None, **kwargs):
+        assert value is None or isinstance(value, Tolerance), (
+            'form value %r not a Tolerance: got %r' % (name, value))
+        if value is None:
+            str_value = ''
+        elif value.is_symmetric():
+            str_value = '%g' % value.get_hi()
+        else:
+            str_value = '+%g -%g' % (value.get_hi(), value.get_lo())
+
+        CompositeWidget.__init__(self, name, value, **kwargs)
+
+        self.add(StringWidget, 'value', value=str_value, render_br=0, size=8)
+
+    def render_content(self):
+        return CompositeWidget.render_content(self) + '%'
+
+    def _parse (self, request):
+        value = self.get('value')
+        if value is None:
+            self.value = None
+        else:
+            m = self.PAT.match(value)
+            if not m:
+                raise WidgetValueError('invalid tolerance %r' % value)
+            hi = m.group(1)
+            lo = m.group(2)
+            if not lo:
+                lo = hi
+            try:
+                hi = float(hi)
+                lo = float(lo)
+            except ValueError:
+                raise WidgetValueError('invalid tolerance %r' % value)
+            self.value = Tolerance(hi, lo)
+
+
+class ParameterWidget (CompositeWidget):
+
+    def __init__(self, name, value=None,
+                 template=None, show_material_categories=0,
+                 allow_tolerance=False, **kwargs):
+        if value is None:
+            assert isinstance(template, ParameterTemplate), (
+                'form value %r value is None and template not a '
+                'ParameterTemplate: got %r' % (name, template))
+            value = template.create_value()
+        else:
+            assert isinstance(value, Parameter), (
+                'form value %r not a Parameter: got %r' % (name, value))
+            value = value.copy()
+
+        CompositeWidget.__init__(self, name, value, **kwargs)
+        param_type = value.get_type()
+
+        if value.is_discrete():
+            if param_type.is_material() and show_material_categories:
+                constraint = value.get_material_constraint()
+            else:
+                constraint = value.get_constraint()
+        else:
+            constraint = None
+
+        widget_type, value_widget_args = get_param_widget_args(
+            value.get_value(),
+            param_type,
+            constraint=constraint,
+            allowed_units=value.get_allowed_units())
+
+        self.add(widget_type, 'value', value=value.get_value(),
+                 **value_widget_args)
+
+        if allow_tolerance and param_type.allow_tolerance():
+            self.tolerance_widget = 'tolerance'
+            self.add(ToleranceWidget, self.tolerance_widget,
+                     value=value.get_tolerance(),
+                     title='Tolerance')
+        else:
+            self.tolerance_widget = False
+
+    def has_constraint_error (self):
+        return self.value and self.error
+
+    def _parse (self, request):
+        value = self.get('value')
+        if value is None or self.get_widget('value').has_error():
+            self.value = None
+        else:
+            if self.value.get_type().is_list() and type(value) is not ListType:
+                value = [value]
+            self.value.set_value(value)
+            if self.tolerance_widget:
+                self.value.set_tolerance(self.get(self.tolerance_widget))
+            try:
+                self.value.check_value()
+            except ConstraintError, exc:
+                raise WidgetValueError(exc)
+
+
+class ConstraintWidget (CompositeWidget):
+
+    def __init__(self, name, value=None,
+                 template=None, **kwargs):
+        assert value is None or type(value) is ListType, (
+            'form value %r not a ListType: got %r' % (name, value))
+        assert isinstance(template, ParameterTemplate), (
+            'form value %r template not a ParameterTemplate: '
+            'got %r' % (name, template))
+
+        if value is None:
+            value = template.get_constraint()
+
+        CompositeWidget.__init__(self, name, value, **kwargs)
+
+        param_type = template.get_type()
+        assert param_type.supports_constraints(), (
+            'cannot handle template %r' % template)
+
+        value_widget_args = {}
+        if template.is_discrete():
+            widget_type = BigMultipleSelectWidget
+            template_constraint = template.get_constraint()
+            value_widget_args['options'] = template_constraint
+            value_widget_args['size'] = min(8, len(template_constraint))
+
+        elif param_type.is_string():
+            widget_type = WidgetList
+            value_widget_args['element_kwargs'] = dict(size=20)
+
+        elif param_type.is_int():
+            widget_type = NumberWidget
+            value_widget_args['is_scalar'] = 0
+            value_widget_args['accept_range'] = 1
+            value_widget_args['accept_float'] = 0
+            value_widget_args['size'] = 24
+
+        elif param_type.is_physical_value():
+            widget_type = PhysicalValueWidget
+            value_widget_args['default_unit'] = param_type.get_unit()
+            value_widget_args['is_scalar'] = 0
+            value_widget_args['accept_range'] = 1
+            value_widget_args['allowed_units'] = template.get_allowed_units()
+
+        else:
+            assert False, 'unknown parameter type for %r' % template
+
+        self.add(widget_type, 'value', value=value, **value_widget_args)
+
+    def _parse (self, request):
+        self.value = self.get('value')
+        if self.value is not None:
+            if type(self.value) is ListType:
+                self.value = self.value
+            else:
+                self.value = [self.value]
+
+
+class InputTemplateWidget (CompositeWidget):
+
+    def __init__(self, name, value=None,
+                 template=None, **kwargs):
+        if value is None:
+            assert isinstance(template, ParameterTemplate), (
+                'form value %r value is None and template not a '
+                'ParameterTemplate: got %r' % (name, template))
+            value = template.create_input_template()
+        else:
+            assert isinstance(value, InputTemplate), (
+                'form value %r value not an InputTemplate: '
+                'got %r' % (name, value))
+            assert value.get_template(), (
+                'form value %r can not be a masterless InputTemplate' % name)
+            value = value.copy()
+
+        CompositeWidget.__init__(self, name, value, **kwargs)
+
+        param_type = value.get_type()
+
+        if value.get_type().supports_constraints():
+            self.constraint_widget = 'constraint'
+            self.add(ConstraintWidget, self.constraint_widget,
+                     value=value.get_constraint(),
+                     title='Constraint',
+                     template=value.get_template())
+        else:
+            self.constraint_widget = False
+
+        if (param_type.is_physical_value() and
+            param_type.get_unit() is not None):
+            options = [(unit, unit.get_name(html=1))
+                       for unit in value.get_master().get_allowed_units()]
+            self.allowed_units_widget = 'allowed_units'
+            self.add(MultipleSelectWidget, self.allowed_units_widget,
+                     value=value.get_allowed_units(),
+                     title='Allowed units',
+                     options=options,
+                     size=min(6, len(options)),
+                     sort=1)
+        else:
+            self.allowed_units_widget = False
+
+        self.add(ParameterWidget, 'default_value',
+                 value=value.create_default_value(),
+                 title='Default value')
+
+        self.add(TextWidget, 'description', value=value.get_description(),
+                 title='Description',
+                 rows=2, cols=40)
+
+        self.add(CheckboxWidget, 'required', value=value.is_required(),
+                 title='Required')
+
+    def _parse (self, request):
+        if self.constraint_widget:
+            constraint = self.get(self.constraint_widget)
+        else:
+            constraint = None
+        if self.allowed_units_widget:
+            allowed_units = self.get(self.allowed_units_widget) or []
+            if (constraint is not None and
+                constraint[0].get_unit() not in allowed_units):
+                allowed_units.append(constraint[0].get_unit())
+            self.value.set_allowed_units(allowed_units)
+        try:
+            self.value.set_constraint(constraint)
+        except ConstraintError, exc:
+            raise WidgetValueError(exc)
+        default_value = self.get('default_value')
+        if not default_value:
+            self.get_widget('default_value').set_error(
+                'Input template missing default value')
+        else:
+            try:
+                self.value.set_default_value(default_value.get_value())
+            except (ConstraintError, ParamTypeError), exc:
+                self.get_widget('default_value').set_error(exc)
+        self.value.set_description(self.get('description'))
+        self.value.set_required(self.get('required'))
+
+
+class ParameterSwitchWidget (CompositeWidget):
+
+    def __init__ (self, name, value=None,
+                  template=None, **kwargs):
+        if value is None:
+            assert isinstance(template, ParameterTemplate), (
+                'form value %r value is None and template not a '
+                'ParameterTemplate: got %r' % (name, template))
+        else:
+            assert (isinstance(value, Parameter) or
+                    isinstance(value, InputTemplate)), (
+                'form value %r value is not a Parameter or InputTemplate: '
+                'got %r' % (name, value))
+            template = value.get_template()
+
+        CompositeWidget.__init__(self, name, value, **kwargs)
+
+        self.add(OptionSelectWidget, 'switch',
+                 value=isinstance(value, InputTemplate),
+                 options=[(False, 'Value'), (True, 'Constraint')])
+
+        is_template = self.get('switch')
+
+        if is_template:
+            if isinstance(value, Parameter):
+                value = None
+            self.add(InputTemplateWidget, 'value',
+                     value=value,
+                     template=template)
+
+        else:
+            if isinstance(value, InputTemplate):
+                value = None
+            self.add(ParameterWidget, 'value',
+                     value=value,
+                     template=template,
+                     show_material_categories=1)
+
+    def _parse (self, request):
+        self.value = self.get('value')
+
+
+
+class MasterSelectWidget(CompositeWidget):
+
+    def __init__ (self, name, value=None,
+                  master=None, used_templates=None, **kwargs):
+        if value is None:
+            assert master is None or isinstance(master, MasterTemplate), (
+                'form value %r master is not a MasterTemplate: '
+                'got %r' % (name, value))
+        else:
+            assert (isinstance(value, Parameter) or
+                    isinstance(value, InputTemplate)), (
+                'form value %r value is not a Parameter or InputTemplate: '
+                'got %r' % (name, value))
+            master = value.get_master()
+            value = value.copy()
+
+        if used_templates is not None:
+            assert type(used_templates) is ListType, (
+                'form value %r used_templates is not a list: '
+                'got %r' % (name, used_templates))
+            for used_template in used_templates:
+                assert isinstance(used_template, MasterTemplate), (
+                    'form value %r used_templates is not a list of '
+                    'MasterTemplate: got %r' % (name, used_template))
+        else:
+            used_templates = []
+
+        CompositeWidget.__init__(self, name, value, **kwargs)
+
+        self.master = master
+        self.used_templates = used_templates
+
+        options = [
+            (master, master.get_title())
+            for master in local.get_parameter_db().get_master_templates()]
+
+        self.add(OptionSelectWidget, 'master',
+                 value=self.master,
+                 title='Select master template',
+                 options=options,
+                 sort=1)
+
+        self.master = self.get('master')
+
+        if self.value is not None:
+            self.value.template = self.master
+            try:
+                if isinstance(value, InputTemplate):
+                    self.value.check_constraint()
+                    self.value.check_default_value()
+                else:
+                    self.value.check_type()
+            except (ParamTypeError, ConstraintError):
+                self.value = None
+
+        self.add(ParameterSwitchWidget, 'value',
+                 value=self.value,
+                 template=self.master)
+
+    def _parse (self, request):
+        self.value = self.get('value')
+        if self.value is not None:
+            if self.master in self.used_templates:
+                raise WidgetValueError(
+                    '%s already used' % self.master.get_title())
+
+
+class DeletableWidget(CompositeWidget):
+
+    def __init__(self, name, value=None,
+                 element_type=StringWidget,
+                 element_kwargs={}, **kwargs):
+        CompositeWidget.__init__(self, name, value=value, **kwargs)
+        self.add(HiddenWidget, 'deleted', value='0')
+        if not self.get('deleted') == '1':
+            self.add(element_type, 'element', value=value, **element_kwargs)
+            self.add(SubmitWidget, 'delete', value='Delete')
+            if self.get('delete'):
+                self.get_widget('deleted').set_value('1')
+
+    def _parse(self, request):
+        if self.get('deleted') == '1':
+            self.value = None
+        else:
+            self.value = self.get('element')
+
+    def render(self):
+        if self.get('deleted') == '1':
+            return self.get_widget('deleted').render()
+        else:
+            return CompositeWidget.render(self)

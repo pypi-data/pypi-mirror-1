@@ -1,0 +1,251 @@
+"""
+$URL: svn+ssh://svn.mems-exchange.org/repos/trunk/dulcinea/lib/ui/util.ptl $
+$Id: util.ptl 27528 2005-10-07 20:50:40Z dbinger $
+"""
+
+from cStringIO import StringIO
+from csv import DictWriter
+from datetime import datetime
+from dulcinea import local_ui
+from dulcinea.site_util import get_base_path
+from quixote import get_request, get_user, get_response, get_publisher
+from quixote.directory import Directory
+from quixote.html import htmltag, url_quote, nl2br, href, stringify
+from quixote.http_request import HTTPRequest
+from quixote.logger import DefaultLogger
+from quixote.publish import Publisher
+import quixote.publish
+import sys
+
+def get_site_url():
+    request = get_request()
+    scheme = request.get_scheme()
+    server = request.get_server()
+    return "%s://%s%s/" % (scheme, server, get_base_path())
+
+def none_quote [html] (value=None):
+    return value or ''
+
+def li [html] (*args, **kwargs):
+    htmltag('li', **kwargs)
+    if type(args[0]) is tuple:
+        data = args[0]
+    else:
+        data = args
+
+    fields = len(data)
+    if fields == 1:
+        data[0]
+    elif fields == 2:
+        href(data[0], data[1])
+    elif len(data) == 3:
+        data[0] % href(data[1], data[2])
+    else:
+        raise TypeError, 'too many fields for list_item(): %d' % fields
+    '</li>'
+
+def item_list [html] (*args, **kwargs):
+    if kwargs.get('ordered_list', False) is True:
+        start_list = '<ol>'
+        end_list = '</ol>'
+    else:
+        start_list = '<ul>'
+        end_list = '</ul>'
+    start_list
+    for data in args:
+        li(data)
+    end_list
+
+def format_date(date):
+    """(date : datetime) -> str
+    """
+    return none_quote(date and date.strftime('%Y-%m-%d'))
+
+def format_date_time(date):
+    """(date : datetime) -> str
+    """
+    return none_quote(date and date.strftime('%Y-%m-%d %H:%M'))
+
+def warningbox [html] (message, label='Warning'):
+    '''
+    <div class="warning">
+    <span style="font-size: x-large;">%s:</span>
+    ''' % label
+    message
+    '</div>'
+
+def format_address(address):
+    if address:
+        return nl2br(address.format())
+    else:
+        return none_quote()
+
+def feedback_link(recipients, subject, text):
+    if not local_ui.FEEDBACK_DOMAIN:
+        return ''
+
+    if not recipients:
+        user_names = ['webmaster']
+    else:
+        user_names = [url_quote(stringify(user_name).split('@')[0])
+                      for user_name in recipients]
+    return href(
+        get_base_path() + '/feedback/?%s,%s' % (
+        ','.join(user_names), url_quote(stringify(subject))),
+        text, title='contact %s@%s' % (user_names[0], local_ui.FEEDBACK_DOMAIN))
+
+def format_yes_or_no [html] (switch):
+    if switch:
+        '<span class="yes">Yes</span>'
+    else:
+        '<span class="no">No</span>'
+
+def format_history_event [html] (event):
+    '<td class="nowrap">%s</td>' % none_quote(
+        local_ui.format_date_time(event.timestamp))
+    '<td>%s</td>' % local_ui.format_user(
+        event.get_user(), name=False, email=False)
+    message = event.get_message()
+    if get_user().is_admin():
+        message += " (%s)" % event.get_event_code()
+    '<td>%s</td>' % message
+
+def format_history [html] (history, title='History'):
+    if title:
+        boxtitle(title)
+    '''
+    <table class="boxbody">
+      <tr>
+        <th>Date/time</th><th>User ID</th><th>Message</th>
+      </tr>
+    '''
+    for event in history:
+        if (not get_user().is_admin() and
+            event.get_event_code() in ('act_as_start', 'email_retrieved')):
+            continue
+        '<tr>'
+        format_history_event(event)
+        '</tr>'
+    '</table>'
+
+
+def boxtitle [html] (arg, *args):
+    '<div class="boxtitle">'
+    arg
+    for a in args:
+        if a:
+            ' '
+            a
+    '</div>'
+
+
+def csv(fieldnames, dict_list, filename="data.csv", add_header=True):
+    """(fieldnames:[str], dict_list:[dict], filename:str="data.csv",
+        add_header:bool=True) -> str
+    Returns csv file version of the date.
+    Has side effect of setting the response content type and
+    naming the download file.
+
+    Each dict in dict_list should have keys from fieldnames.
+    """
+    set_csv_headers(filename)
+    s = StringIO()
+    dict_writer = DictWriter(s, fieldnames=fieldnames)
+    if add_header:
+        dict_writer.writerow(dict(zip(fieldnames, fieldnames)))
+    for row in dict_list:
+        dict_writer.writerow(row)
+    return s.getvalue()
+
+def set_csv_headers(filename):
+    response = get_response()
+    response.set_content_type('text/comma-separated-values')
+    response.set_header('Content-Disposition',
+                        'inline; filename="%s"' % filename)
+
+def anchor [html] (name=None, content=None, **kwargs):
+    htmltag('a', name=name, **kwargs)
+    content
+    '</a>'
+
+def dl [html] (tuples, **kwargs):
+    htmltag('dl', **kwargs)
+    for title, description in tuples:
+        if title:
+            '<dt>%s</dt>' % title
+        if description:
+            '<dd>%s</dd>' % description
+
+    '</dl>'
+
+def ul [html] (items, **kwargs):
+    htmltag('ul', **kwargs)
+    for item in items:
+        '<li>%s</li>' % item
+    '</ul>'
+
+def ol [html] (items, **kwargs):
+    htmltag('ol', **kwargs)
+    for item in items:
+        '<li>%s</li>' % item
+    '</ol>'
+
+def page [html] (title, *content, **kwargs):
+    local_ui.header(title, **kwargs)
+    for item in content:
+        item
+    local_ui.footer(title)
+
+def index_page(directory, title=None):
+    page_title = title
+    href_args = []
+    for component, name, crumb, link_title in directory.get_exports():
+        if component == '':
+            page_title = title or link_title or crumb or 'Index'
+        elif crumb:
+            href_args.append((component, crumb, link_title))
+    return page(page_title,
+                ul([href(*href_arg) for href_arg in href_args]))
+
+def respond(title, *content, **kwargs):
+    get_response().set_body(page(title, *content, **kwargs))
+    get_publisher().respond_now()
+
+def safe_respond(title, *content):
+    respond(title, crumbs='', *content)
+
+def format_file_size(size):
+    if size is None:
+        return 'file missing'
+    elif size > 1024*1024:
+        return '%.1f MB' % (size/1024.0/1024)
+    elif size > 4096:
+        return '%.1f KB' % (size/1024.0)
+    else:
+        return ('%i bytes') % size
+
+def webstats_page [html] (web_address, title='Webstats'):
+    month_tag = datetime.now().strftime(stringify("%Y%m"))
+    page(title, '<div style="margin: 1em">',
+         '<img src="/misc/webstats/%s/usage.png" alt="usage">' % web_address,
+         '</div><div style="margin: 1em">',
+         '<img src="/misc/webstats/%s/daily_usage_%s.png" alt="%s_usage">' % (
+        web_address, month_tag, month_tag),
+         '<div>[%s]</div>' % href('/misc/webstats/', 'Full website statistics'),
+         '</div>')
+
+class PrintLogger(DefaultLogger):
+    def __init__(self):
+        self.error_log = sys.stdout
+        self.access_log = None
+        self.error_email = None
+
+def set_environment(script_name='', path_info='/', **kwargs):
+    clear_environment()
+    publisher = Publisher(Directory(), logger=PrintLogger())
+    publisher._set_request(HTTPRequest(
+            None, dict(SCRIPT_NAME=script_name, PATH_INFO=path_info, **kwargs)))
+
+def clear_environment():
+    quixote.publish._publisher = None
+
