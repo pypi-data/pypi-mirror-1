@@ -1,0 +1,148 @@
+PARLEY - Python Actor Runtime LibrarY (the "E" is for Erlang)
+
+http://osl.cs.uiuc.edu/parley/
+
+Version 0.2
+
+Jacob Lee <jelee2@uiuc.edu>
+
+README
+======
+1. Introduction
+2. Usage
+3. Full Documentation
+4. Known Bugs/Limitations
+5. License
+
+
+1. Introduction
+
+PARLEY is an API for writing Python programs that implement the Actor
+model of distributed systems, in which lightweight concurrent
+processes communicate through asynchronous message-passing. Actor
+systems typically are easier to write and debug than traditional
+concurrent programs that use locks and shared memory.
+
+PARLEY can run using either traditional native threads or user-space
+threads (i.e. the "tasklets" implemented by Stackless Python). A
+program written using PARLEY can choose between the two by changing
+a single line of code.
+
+2. Usage
+
+Messages in PARLEY can be arbitrary objects, but typically, a message
+will be a 4-tuple: (tag, sender, args, kwargs). A typical way to
+handle such a message is to look up a function based on the tag; pass
+args and kwargs as parameters to the function (args being position
+parameters, and kwargs being keyword parameters); and to send the
+return value of the function as a message to the original sender.
+
+Here is a basic server that accepts two values and returns their sum:
+
+from parley import *
+
+def adder():
+    while True:
+        msg, sender, args, kwargs = recv()
+        if msg == 'quit':
+            break
+        elif msg == 'add':
+            ret = args[0] + args[1]
+            sender.send('reply', me(), ret)
+
+The module parley.helpers contains a number of classes and function
+decorators that simplify writing typical "server" actors. The above
+function could instead be written as:
+
+from parley.helpers import function_actor
+
+@function_actor
+def adder2(op1, op2):
+    return op1 + op2
+
+And here is a complete program that spawns the adder actor, send it
+ten requests, and then stops.
+
+from parley import *
+
+def main():
+    # a is an actor proxy object that can be used to communicate with
+    # the spawned actor.
+    a = spawn_link(adder2)
+    for i in range(10):
+        # This method call is equivalent to the following:
+        # a.send('add', me(), i, i+2)
+        print a.add(i, i+2)
+
+if __name__=='__main__':
+    start_thread_controller(main)
+
+To use tasklets instead of threads, simply change the startup code to
+the following:
+
+if __name__=='__main__':
+    start_tasklet_controller(main)
+
+Tasklets have very low overhead compared to threads; using the tasklet
+execution model, it should be possible to start arbitrarily many
+actors without a significant performance penalty.
+
+3. Full documentation
+
+PARLEY version 0.2 contains other features not described above, such as:
+- the ability to register an actor at a global name
+- linking actors together to be alerted about normal and abnormal
+  termination of linked actors.
+- the ability to record sent messages to a file or to stdout
+
+The best source of documentation for these features and others is
+currently the docstrings contained in the source code. To see them,
+run the following at the interactive Python console:
+
+>>> import parley, parley.proxy, parley.helpers
+>>> help(parley)
+>>> help(parley.proxy.ActorProxy)
+>>> help(parley.helpers)
+
+The same documentation is also available as automatically generated
+HTML files, located in the docs/ directory.
+
+4. Known Bugs/Limitations
+
+PARLEY is still beta. Some parts have been tested less
+than others; expect to find bugs.
+
+The threaded execution model should work on all version of Python that
+support threads. The tasklet execution model should work with
+Stackless Python and PyPy; it has been tested under stackless 2.4 and
+PyPy 1.0 (on Linux).
+
+Many discrepancies still remain between the thread execution model and
+the tasklet execution model. Most notably, tasklets cannot make
+blocking function calls without suspending the entire program. There
+are several ways around this:
+- one solution is to write wrappers that use select() or poll() (or the
+equivalent windows functions); there already exists a library for
+stackless python that uses this method to provide a drop-in
+replacement for the socket module.
+- another solution is to keep a thread pool with which to execute
+blocking calls. The downside is that interactions between threads and
+tasklets can be somewhat complicated.
+A future version of PARLEY, likely version 0.3, will incorporate
+some solution to this problem.
+
+The ID of an actor is currently local to its controller. A future
+version will test whether an actor is local or remote and forward
+messages appropriately. Being able to network-enable PARLEY may depend
+on resolving the problem of blocking calls described above.
+
+PARLEY would benefit from additional tests and improved documentation.
+
+5. License
+
+Unless specified otherwise, all code is copyright (C) 2007 by Jacob Lee.
+
+PARLEY is licensed under the GNU Lesser General Public License
+(LGPL). Essentially, one can use the library in both free and
+proprietary applications, but any modifications made to the library
+itself must be made available under the LGPL.
