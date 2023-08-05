@@ -1,0 +1,423 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="Docutils 0.4: http://docutils.sourceforge.net/" />
+<title>Changelog for processing</title>
+<link rel="stylesheet" href="html4css1.css" type="text/css" />
+</head>
+<body>
+<div class="document" id="changelog-for-processing">
+<h1 class="title">Changelog for processing</h1>
+<div class="section">
+<h1><a id="changes-in-0-40" name="changes-in-0-40">Changes in 0.40</a></h1>
+<ul>
+<li><p class="first">Removed <cite>SimpleQueue</cite> and <cite>PosixQueue</cite> types.  Just use <cite>Queue</cite> instead.</p>
+</li>
+<li><p class="first">Previously if you forgot to use the</p>
+<pre class="literal-block">
+if __name__ == '__main__':
+    freezeSupport()
+    ...
+</pre>
+<p>idiom on Windows then processes could be created recursively
+bringing the computer to its knees.  Now <cite>RuntimeError</cite> will be
+raised instead.</p>
+</li>
+<li><p class="first">Some refactoring of the code.</p>
+</li>
+<li><p class="first">A Unix specific bug meant that a child process might fail to start a
+feeder thread for a queue if its parent process had already started
+its own feeder thread.  Fixed.</p>
+</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-39" name="changes-in-0-39">Changes in 0.39</a></h1>
+<ul>
+<li><p class="first">One can now create one-way pipes by doing
+<cite>reader, writer = Pipe(duplex=False)</cite>.</p>
+</li>
+<li><p class="first">Rewrote code for managing shared memory maps.</p>
+</li>
+<li><p class="first">Added a <cite>sharedctypes</cite> module for creating <cite>ctypes</cite> objects allocated
+from shared memory.  On Python 2.4 this requires the installation of
+<cite>ctypes</cite>.</p>
+<p><cite>ctypes</cite> objects are not protected by any locks so you will need to
+synchronize access to them (such as by using a lock).  However they
+can be much faster to access than equivalent objects allocated using
+a <cite>LocalManager</cite>.</p>
+</li>
+<li><p class="first">Rearranged documentation.</p>
+</li>
+<li><p class="first">Previously the C extension caused a segfault on 64 bit machines with
+Python 2.5 because it used <cite>int</cite> instead of <cite>Py_ssize_t</cite> in certain
+places.  This is now fixed.  Thanks to Alexy Khrabrov for the report.</p>
+</li>
+<li><p class="first">A fix for <cite>Pool.terminate()</cite>.</p>
+</li>
+<li><p class="first">A fix for cleanup behaviour of <cite>Queue</cite>.</p>
+</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-38" name="changes-in-0-38">Changes in 0.38</a></h1>
+<ul>
+<li><p class="first">Have revamped the queue types.  Now the queue types are
+<cite>Queue</cite>, <cite>SimpleQueue</cite> and (on systems which support it)
+<cite>PosixQueue</cite>.</p>
+<p>Now <cite>Queue</cite> should behave just like Python's normal <cite>Queue.Queue</cite>
+class except that <cite>qsize()</cite>, <cite>task_done()</cite> and <cite>join()</cite> are not
+implemented.  In particular, if no maximum size was specified when
+the queue was created then <cite>put()</cite> will always succeed without
+blocking.</p>
+<p>A <cite>SimpleQueue</cite> instance is really just a pipe protected by a couple
+of locks.  It has <cite>get()</cite>, <cite>put()</cite> and <cite>empty()</cite> methods but does
+not not support timeouts or non-blocking.</p>
+<p><cite>BufferedPipeQueue()</cite> and <cite>PipeQueue()</cite> remain as deprecated
+aliases of <cite>Queue()</cite> but <cite>BufferedPosixQueue()</cite> has been removed.
+(Not sure if we really need to keep <cite>PosixQueue()</cite>...)</p>
+</li>
+<li><p class="first">Previously the <cite>Pool.shutdown()</cite> method was a little dodgy -- it
+could block indefinitely if <cite>map()</cite> or <cite>imap*()</cite> were used and did
+not try to terminate workers while they were doing a task.</p>
+<p>Now there are three new methods <cite>close()</cite>, <cite>terminate()</cite> and
+<cite>join()</cite> -- <cite>shutdown()</cite> is retained as a deprecated alias of
+<cite>terminate()</cite>.  Thanks to Gerald John M. Manipon for feature
+request/suggested patch to <cite>shutdown()</cite>.</p>
+</li>
+<li><p class="first"><cite>Pool.imap()</cite> and <cite>Pool.imap_unordered()</cite> has gained a <cite>chunksize</cite>
+argument which allows the iterable to be submitted to the pool in
+chunks.  Choosing <cite>chunksize</cite> appropriately makes <cite>Pool.imap()</cite>
+almost as fast as <cite>Pool.map()</cite> even for long iterables and cheap
+functions.</p>
+</li>
+<li><p class="first">Previously on Windows when the cleanup code for a <cite>LocalManager</cite>
+attempts to unlink the name of the file which backs the shared
+memory map an exception is raised if a child process still exists
+which has a handle open for that mmap.  This is likely to happen if
+a daemon process inherits a <cite>LocalManager</cite> instance.</p>
+<p>Now the parent process will remember the filename and attempt to
+unlink the file name again once all the child processes have been
+joined or terminated.  Reported by Paul Rudin.</p>
+</li>
+<li><p class="first"><cite>types.MethodType</cite> is registered with <cite>copy_reg</cite> so now instance
+methods and class methods should be picklable.  (Unfortunately there is
+no obvious way of supporting the pickling of staticmethods since
+they are not marked with the class in which they were defined.)</p>
+<p>This means that on Windows it is now possible to use an instance
+method or class method as the target callable of a Process object.</p>
+</li>
+<li><p class="first">On Windows <cite>reduction.fromfd()</cite> now returns true instances of
+<cite>_socket.socket</cite>, so there is no more need for the
+<cite>_processing.falsesocket</cite> type.</p>
+</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-37" name="changes-in-0-37">Changes in 0.37</a></h1>
+<ul class="simple">
+<li>Updated metadata and documentation because the project is now hosted
+at <cite>developer.berlios.de/projects/pyprocessing</cite>.</li>
+<li>The <cite>Pool.join()</cite> method has been removed.  <cite>Pool.shutdown()</cite> will
+now join the worker processes automatically.</li>
+<li>A pool object no longer participates in a reference cycle so
+<cite>Pool.shutdown()</cite> should get called as soon as its reference count
+falls to zero.</li>
+<li>On Windows if <cite>enableLogging()</cite> was used at module scope then the
+logger used by a child process would often get two copies of the
+same handler.  To fix this, now specifiying a handler type in
+<cite>enableLogging()</cite> will cause any previous handlers used by the
+logger to be discarded.</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-36" name="changes-in-0-36">Changes in 0.36</a></h1>
+<ul>
+<li><p class="first">In recent versions on Unix the finalizers in a manager process were
+never given a chance to run before <cite>os._exit()</cite> was called, so old
+unlinked AF_UNIX sockets could accumulate in '/tmp'.  Fixed.</p>
+</li>
+<li><p class="first">The shutting down of managers has been cleaned up.</p>
+</li>
+<li><p class="first">In previous versions on Windows trying to acquire a lock owned by a
+different thread of the current process would raise an exception.
+Fixed.</p>
+</li>
+<li><p class="first">In previous versions on Windows trying to use an event object for
+synchronization between two threads of the same process was likely
+to raise an exception.  (This was caused by the bug described
+above.)  Fixed.</p>
+</li>
+<li><p class="first">Previously the arguments to <cite>processing.Semaphore()</cite> and
+<cite>processing.BoundedSemaphore()</cite> did not have any defaults.  The
+defaults should be 1 to match <cite>threading</cite>.  Fixed.</p>
+</li>
+<li><p class="first">It should now be possible for a Windows Service created by using
+<cite>pywin32</cite> to spawn processes using the <cite>processing</cite> package.</p>
+<p>Note that <cite>pywin32</cite> apparently has a bug meaning that <cite>Py_Finalize()</cite>
+is never called when the service exits so functions registered with
+<cite>atexit</cite> never get a chance to run.  Therefore it is advisable to
+explicitly call <cite>sys.exitfunc()</cite> or <cite>atexit._run_exitfuncs()</cite> at the
+end of <cite>ServiceFramework.DoSvcRun()</cite>.  Otherwise child processes are
+liable to survive the service when it is stopped.  Thanks to Charlie
+Hull for the report.</p>
+</li>
+<li><p class="first">Added <cite>getLogger()</cite> and <cite>enableLogging()</cite> to support logging.</p>
+</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-35" name="changes-in-0-35">Changes in 0.35</a></h1>
+<ul>
+<li><p class="first">By default processes are no longer be stoppable using the <cite>stop()</cite>
+method: one must call <cite>setStoppable(True)</cite> before <cite>start()</cite> in order
+to use the <cite>stop()</cite> method.  (Note that <cite>terminate()</cite> will work
+regardless of whether the process is marked as being &quot;stoppable&quot;.)</p>
+<p>The reason for this is that on Windows getting <cite>stop()</cite> to work
+involves starting a new console for the child process and installing
+a signal handler for the <cite>SIGBREAK</cite> signal.  This unfortunately
+means that Ctrl-Break cannot not be used to kill all processes of
+the program.</p>
+</li>
+<li><p class="first">Added <cite>setStoppable()</cite> and <cite>getStoppable()</cite> methods -- see above.</p>
+</li>
+<li><p class="first">Added <cite>BufferedQueue</cite>/<cite>BufferedPipeQueue</cite>/<cite>BufferedPosixQueue</cite>.
+Putting an object on a buffered queue will always succeed without
+blocking (just like with <cite>Queue.Queue</cite> if no maximum size is
+specified).  This makes them potentially safer than the normal queue
+types provided by <cite>processing</cite> which have finite capacity and may
+cause deadlocks if they fill.</p>
+<p><cite>test/test_worker.py</cite> has been updated to use <cite>BufferedQueue</cite> for
+the task queue instead of explicitly spawning a thread to feed tasks
+to the queue without risking a deadlock.</p>
+</li>
+<li><p class="first">Now when the NO_SEM_TIMED macro is set polling will be used to get
+around the lack of <cite>sem_timedwait()</cite>.  This means that
+<cite>Condition.wait()</cite> and <cite>Queue.get()</cite> should now work with timeouts
+on Mac OS X.</p>
+</li>
+<li><p class="first">Added a <cite>callback</cite> argument to <cite>Pool.apply_async()</cite>.</p>
+</li>
+<li><p class="first">Added <cite>test/test_httpserverpool.py</cite> which runs a pool of http
+servers which share a single listening socket.</p>
+</li>
+<li><p class="first">Previously on Windows the process object was passed to the child
+process on the commandline (after pickling and hex encoding it).
+This caused errors when the pickled string was too large.  Now if
+the pickled string is large then it will be passed to the child
+over a pipe or socket.</p>
+</li>
+<li><p class="first">Fixed bug in the iterator returned by <cite>Pool.imap()</cite>.</p>
+</li>
+<li><p class="first">Fixed bug in <cite>Condition.__repr__()</cite>.</p>
+</li>
+<li><p class="first">Fixed a handle/file descriptor leak when sockets or connections are
+unpickled.</p>
+</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-34" name="changes-in-0-34">Changes in 0.34</a></h1>
+<ul>
+<li><p class="first">Although version 0.33 the C extension would compile on Mac OSX
+trying to import it failed with &quot;undefined symbol: _sem_timedwait&quot;.
+Unfortunately the <cite>ImportError</cite> exception was silently swallowed.</p>
+<p>This is now fixed by using the <cite>NO_SEM_TIMED</cite> macro.  Unfortunately
+this means that some methods like <cite>Condition.wait()</cite> and
+<cite>Queue.get()</cite> will not work with timeouts on Mac OS X.  If you
+really need to be able to use timeouts then you can always use the
+equivalent objects created with a manager.  Thanks to Doug Hellmann
+for report and testing.</p>
+</li>
+<li><p class="first">Added a <cite>terminate()</cite> method to process objects which is more
+forceful than <cite>stop()</cite>.</p>
+</li>
+<li><p class="first">Fixed bug in the cleanup function registered with <cite>atexit</cite> which on
+Windows could cause a process which is shutting down to deadlock
+waiting for a manager to exit.  Thanks to Dominique Wahli for report
+and testing.</p>
+</li>
+<li><p class="first">Added <cite>test/test_workers.py</cite> which gives an example of how to create
+a collection of worker processes which execute tasks from one queue
+and return results on another.</p>
+</li>
+<li><p class="first">Added <cite>processing.Pool()</cite> which returns a process pool object.  This
+allows one to execute functions asynchronously.  It also has a
+parallel implementation of the <cite>map()</cite> builtin.  This is still
+<em>experimental</em> and undocumented --- see <cite>test/test_pool.py</cite> for
+example usage.</p>
+</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-33" name="changes-in-0-33">Changes in 0.33</a></h1>
+<ul>
+<li><p class="first">Added a <cite>recvbytes_into()</cite> method for receiving byte data into
+objects with the writable buffer interface.  Also renamed the
+<cite>_recv_string()</cite> and <cite>_send_string()</cite> methods of connection objects
+to <cite>recvbytes()</cite> and <cite>sendbytes()</cite>.</p>
+</li>
+<li><p class="first">Some optimizations for the transferring of large blocks of data
+using connection objects.</p>
+</li>
+<li><p class="first">On Unix <cite>os.sysconf()</cite> is now used by default to determine whether
+to compile in support for posix semaphores or posix message queues.</p>
+<p>By using the <cite>NO_SEM_TIMED</cite> and <cite>NO_MQ_TIMED</cite> macros (see
+<cite>INSTALL.txt</cite>) it should now also be possible to compile in
+(partial) semaphore or queue support on Unix systems which lack the
+timeout functions <cite>sem_timedwait()</cite> or <cite>mq_timedreceive()</cite> and
+<cite>mq_timesend()</cite>.</p>
+</li>
+<li><p class="first"><cite>gettimeofday()</cite> is now used instead of <cite>clock_gettime()</cite> making
+compilation of the C extension (hopefully) possible on Mac OSX.  No
+modificaton of <cite>setup.py</cite> should be necessary.  Thanks to Michele
+Bertoldi for report and proposed patch.</p>
+</li>
+<li><p class="first"><cite>cpuCount()</cite> function added which returns the number of CPUs
+in the system.</p>
+</li>
+<li><p class="first">Bugfixes to <cite>PosixQueue</cite> class.</p>
+</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-32" name="changes-in-0-32">Changes in 0.32</a></h1>
+<ul class="simple">
+<li>Refactored and simplified <cite>_nonforking</cite> module -- info about
+<cite>sys.modules</cite> of parent process is no longer passed on to child
+process.  Also <cite>pkgutil</cite> is no longer used.</li>
+<li>Allocated space from an mmap used by <cite>LocalManager</cite> will now be
+recycled.</li>
+<li>Better tests for <cite>LocalManager</cite>.</li>
+<li>Fixed bug in <cite>managers.py</cite> concerning refcounting of shared objects.
+Bug affects the case where the callable used to create a shared
+object does not return a unique object each time it is called.
+Thanks to Alexey Akimov for the report.</li>
+<li>Added a <cite>freezeSupport()</cite> function. Calling this at the appropriate
+point in the main module is necessary when freezing a multiprocess
+program to produce a Windows executable.  (Has been tested with
+<cite>py2exe</cite>, <cite>PyInstaller</cite> and <cite>cx_Freeze</cite>.)</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-31" name="changes-in-0-31">Changes in 0.31</a></h1>
+<ul class="simple">
+<li>Fixed one line bug in <cite>localmanager.py</cite> which caused shared memory maps
+not to be resized properly.</li>
+<li>Added tests for shared values/structs/arrays to <cite>test/test_processing</cite>.</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-30" name="changes-in-0-30">Changes in 0.30</a></h1>
+<ul>
+<li><p class="first">Process objects now support the complete API of thread objects.</p>
+<p>In particular <cite>isAlive()</cite>, <cite>isDaemon()</cite>, <cite>setDaemon()</cite> have been
+added and <cite>join()</cite> now supports the <cite>timeout</cite> paramater.</p>
+<p>There are also new methods <cite>stop()</cite>, <cite>getPid()</cite> and <cite>getExitCode()</cite>.</p>
+</li>
+<li><p class="first">Implemented synchronization primitives based on the Windows mutexes
+and semaphores and posix named semaphores.</p>
+</li>
+<li><p class="first">Added support for sharing simple objects between processes by using
+a shared memory map and the <cite>struct</cite> or <cite>array</cite> modules.</p>
+</li>
+<li><p class="first">An <cite>activeChildren()</cite> function has been added to <cite>processing</cite> which
+returns a list of the child processes which are still alive.</p>
+</li>
+<li><p class="first">A <cite>Pipe()</cite> function has been added which returns a pair of
+connection objects representing the ends of a duplex connection over
+which picklable objects can be sent.</p>
+</li>
+<li><p class="first">socket objects etc are now picklable and can be transferred between
+processes.  (Requires compilation of the <cite>_processing</cite> extension.)</p>
+</li>
+<li><p class="first">Subclasses of <cite>managers.BaseManager</cite> no longer automatically spawn a
+child process when an instance is created: the <cite>start()</cite> method must be
+called explicitly.</p>
+</li>
+<li><p class="first">On Windows child processes are now spawned using <cite>subprocess</cite>.</p>
+</li>
+<li><p class="first">On Windows the Python 2.5 version of <cite>pkgutil</cite> is now used for
+loading modules by the <cite>_nonforking</cite> module.  On Python 2.4 this
+version of <cite>pkgutil</cite> (which uses the standard Python licence) is
+included in <cite>processing.compat</cite>.</p>
+</li>
+<li><p class="first">The arguments to the functions in <cite>processing.connection</cite> have
+changed slightly.</p>
+</li>
+<li><p class="first">Connection objects now have a <cite>poll()</cite> method which tests whether
+there is any data available for reading.</p>
+</li>
+<li><p class="first">The <cite>test/py2exedemo</cite> folder shows how to get <cite>py2exe</cite> to create a
+Windows executable from a program using the <cite>processing</cite> package.</p>
+</li>
+<li><p class="first">More tests.</p>
+</li>
+<li><p class="first">Bugfixes.</p>
+</li>
+<li><p class="first">Rearrangement of various stuff.</p>
+</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-21" name="changes-in-0-21">Changes in 0.21</a></h1>
+<ul class="simple">
+<li>By default a proxy is now only able to access those methods of its
+referent which have been explicitly exposed.</li>
+<li>The <cite>connection</cite> sub-package now supports digest authentication.</li>
+<li>Process objects are now given randomly generated 'inheritable'
+authentication keys.</li>
+<li>A manager process will now only accept connections from processes
+using the same authentication key.</li>
+<li>Previously <cite>get_module()</cite> from <cite>_nonforking.py</cite> was seriously messed
+up (though it generally worked).  It is a lot saner now.</li>
+<li>Python 2.4 or higher is now required.</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-20" name="changes-in-0-20">Changes in 0.20</a></h1>
+<ul class="simple">
+<li>The <cite>doc</cite> folder contains HTML documentation.</li>
+<li><cite>test</cite> is now a subpackage.  Running <cite>processing.test.main()</cite>
+will run test scripts using both processes and threads.</li>
+<li><cite>nonforking.py</cite> has been renamed <cite>_nonforking.py</cite>.
+<cite>manager.py</cite> has been renamed <cite>manager.py</cite>.
+<cite>connection.py</cite> has become a sub-package <cite>connection</cite></li>
+<li><cite>Listener</cite> and <cite>Client</cite> have been removed from
+<cite>processing</cite>, but still exist in <cite>processing.connection</cite>.</li>
+<li>The package is now <em>probably</em> compatible with versions of Python
+earlier than 2.4.</li>
+<li><cite>set</cite> is no longer a type supported by the default manager type.</li>
+<li>Many more changes.</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-12" name="changes-in-0-12">Changes in 0.12</a></h1>
+<ul class="simple">
+<li>Fixed bug where the arguments to <cite>processing.Manager()</cite> were passed on
+to <cite>processing.manager.DefaultManager()</cite> in the wrong order.</li>
+<li><cite>processing.dummy</cite> is now a subpackage of <cite>processing</cite>
+instead of a module.</li>
+<li>Rearranged package so that the <cite>test</cite> folder, <cite>README.txt</cite> and
+<cite>CHANGES.txt</cite> are copied when the package is installed.</li>
+</ul>
+</div>
+<div class="section">
+<h1><a id="changes-in-0-11" name="changes-in-0-11">Changes in 0.11</a></h1>
+<ul class="simple">
+<li>Fixed bug on windows when the full path of <cite>nonforking.py</cite> contains a
+space.</li>
+<li>On unix there is no longer a need to make the arguments to the
+constructor of <cite>Process</cite> be picklable or for and instance of a
+subclass of <cite>Process</cite> to be picklable when you call the start method.</li>
+<li>On unix proxies which a child process inherits from its parent can
+be used by the child without any problem, so there is no longer a
+need to pass them as arguments to <cite>Process</cite>.  (This will never be
+possible on windows.)</li>
+</ul>
+</div>
+</div>
+</body>
+</html>

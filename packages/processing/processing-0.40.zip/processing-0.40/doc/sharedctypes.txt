@@ -1,0 +1,106 @@
+.. include:: header.txt
+
+========================
+ Shared ctypes objects
+========================
+
+The `processing.sharedctypes` module provides functions for allocating
+ctypes objects from shared memory which can be inherited by child
+processes.  (See the standard library's documentation for details of
+the `ctypes` package.)
+
+Note that access to a ctypes objects is not protected by any lock.
+However accessing a ctypes object can be much faster (20+ times
+faster) than accessing a synchronized shared object allocated using
+`LocalManager`.
+
+The functions in the module are
+
+    `new_value(fmt_or_type, *args)`
+        Returns a ctypes object allocated from shared memory.
+
+        `fmt_or_type` determines the type of the returned object: it
+        is either a ctypes type or a one character string format of
+        the kind used by the `array` module.  The remaining arguments
+        are passed on to the constructor for the type.
+
+    `new_array(fmt_or_type, size_or_initializer)`
+        Returns a ctypes array allocated from shared memory.
+
+        `fmt_or_type` determines the type of the elements of the
+        returned array: it is either a ctypes type or a one character
+        string format of the kind used by the `array` module.  If
+        `size_or_initializer` is an integer then it determines the
+        length of the array, and the array will be initially zeroed.
+        Otherwise `size_or_initializer` is a sequence which is used to
+        initialize the array and whose length determines the length of
+        the array.
+
+    `copy(obj)`
+        Returns a ctypes object allocated from shared memory which is
+        a copy of the ctypes object `obj`.
+
+
+Equivalences
+============
+
+The table below compares the syntax for creating a shared ctypes
+object from shared memory with the normal ctypes syntax.  (In the
+table `MyStruct` is some subclass of `ctypes.Structure`.)
+
+============================ =========================== ====================
+sharedctypes using type      sharedctypes using format   ctypes
+============================ =========================== ====================
+new_value(c_double, 2.4)     new_value('d', 2.4)         c_double(2.4)
+new_value(MyStruct, 4, 6)                                MyStruct(4, 6)
+new_array(c_short, 7)        new_array('h', 7)           (c_short * 7)()
+new_array(c_int, (9, 2, 8))  new_array('i', (9, 2, 8))   (c_int * 3)(9, 2, 8)
+============================ =========================== ====================
+
+
+Example
+=======
+
+Below is an example where a number of ctypes objects are modified by a
+child process ::
+
+    from processing import Process
+    from processing.sharedctypes import new_value, new_array
+    from ctypes import Structure, c_double
+    
+    class Point(Structure):
+        _fields_ = [('x', c_double), ('y', c_double)]
+
+    def modify(n, x, s, A):
+        n.value **= 2
+        x.value **= 2
+        s.value = s.value.upper()
+        for p in A:
+            p.x **= 2
+            p.y **= 2
+    
+    if __name__ == '__main__':
+        n = new_value('i', 7)
+        x = new_value('d', 1.0/3.0)
+        s = new_array('c', 'hello world')
+        A = new_array(Point, [(1.875, -6.25), (-5.75, 2.0), (2.375, 9.5)])
+
+        p = Process(target=modify, args=(n, x, s, A))
+        p.start()
+        p.join()
+
+        print n
+        print x
+        print s.value
+        print [(p.x, p.y) for p in A]
+
+The results printed are ::
+
+    c_long(49)
+    c_double(0.1111111111111111)
+    HELLO WORLD
+    [(3.515625, 39.0625), (33.0625, 4.0), (5.640625, 90.25)]
+
+.. _Prev: pool-objects.html
+.. _Up: processing-ref.html
+.. _Next: connection-ref.html
