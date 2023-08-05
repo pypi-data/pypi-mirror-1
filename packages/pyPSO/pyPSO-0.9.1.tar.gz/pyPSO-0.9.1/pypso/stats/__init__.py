@@ -1,0 +1,1 @@
+'''To jest moduł odpowiedzialny za pojawianie się statystyk w programie'''
