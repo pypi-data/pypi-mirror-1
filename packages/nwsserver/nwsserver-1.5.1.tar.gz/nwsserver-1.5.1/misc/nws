@@ -1,0 +1,102 @@
+#!/bin/sh
+#
+# Copyright (c) 2005-2007, Scientific Computing Associates, Inc.
+#
+# NetWorkSpaces is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License as published
+# by the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307
+# USA
+#
+
+TWISTD=/usr/bin/twistd
+WORKDIR=/tmp
+
+TACFILE=/etc/nws.tac
+if [ ! -e $TACFILE ]
+then
+    TACFILE=$HOME/nws.tac
+fi
+
+if [ ! -e $TACFILE ]
+then
+    exit 0
+fi
+
+if [ "`id -u`" = "0" ]
+then
+    PIDFILE=/var/run/nws.pid
+    LOGFILE=/var/log/nws.log
+else
+    PIDFILE=$HOME/nws.pid
+    LOGFILE=$HOME/nws.log
+fi
+
+case $# in
+0)
+    echo "usage: $0 [start|stop]" 1>&2
+    exit 1
+    ;;
+esac
+
+case "$1" in
+start)
+    if [ -e $PIDFILE ]
+    then
+        echo "$PIDFILE file exists: is the server already running?" 1>&2
+        echo "(remove $PIDFILE to force execution)" 1>&2
+	exit 1
+    fi
+    /bin/rm -f $LOGFILE
+    echo -n "Starting the NWS server"
+    if $TWISTD -o -d $WORKDIR -l $LOGFILE --pidfile $PIDFILE -y $TACFILE
+    then
+        echo "."
+    else
+        echo " (failed)."
+        exit 1
+    fi
+    ;;
+stop)
+    if [ ! -e $PIDFILE ]
+    then
+        echo "$PIDFILE file doesn't exist: is the server really running?" 1>&2
+	exit 1
+    fi
+    echo -n "Stopping the NWS server"
+    kill `cat $PIDFILE` 2> /dev/null
+    # XXX I think we might need to do this due to priviledge shedding issues
+    /bin/rm -f $PIDFILE
+    echo "."
+    ;;
+force-reload|restart)
+    echo -n "Restarting the NWS server"
+    kill `cat $PIDFILE` 2> /dev/null
+    sleep 3
+    /bin/rm -f $PIDFILE
+    /bin/rm -f $LOGFILE
+    echo -n "Starting the NWS server"
+    if $TWISTD -o -d $WORKDIR -l $LOGFILE --pidfile $PIDFILE -y $TACFILE
+    then
+        echo "."
+    else
+        echo " (failed)."
+        exit 1
+    fi
+    ;;
+*)
+    echo "usage: $0 [start|stop]" 1>&2
+    exit 1
+    ;;
+esac
+
+exit 0
