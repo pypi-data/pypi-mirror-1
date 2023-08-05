@@ -1,0 +1,66 @@
+WSGIRewrite is an implementation of a ``mod_rewrite`` compatible
+URL rewriter, consisting of a WSGI middleware implementing an URL
+rewriter that uses the same syntax as the (in)famous ``mod_rewrite``
+module for Apache.  Most of ``mod_rewrite`` features are supported,
+including redirecting with a specific status code, proxying,
+conditional rules based on environment variables and chained rules.
+
+The middleware was written to be used with Paste Deploy as filter::
+
+    [pipeline:main]
+    pipeline = wsgirewrite myapp
+
+    [filter:wsgirewrite]
+    use = egg:WSGIRewrite
+    config = /path/to/htaccess
+
+    [app:myapp]
+    ...
+
+Where ``config`` specifies a file with the rewriting rules
+following ``mod_rewrite``'s syntax::
+
+    RewriteCond  %{HTTP_USER_AGENT}  ^Mozilla.*
+    RewriteRule  ^/$                 /homepage.max.html  [L]
+
+    RewriteCond  %{HTTP_USER_AGENT}  ^Lynx.*
+    RewriteRule  ^/$                 /homepage.min.html  [L]
+
+    RewriteRule  ^/$                 /homepage.std.html  [L]
+
+Optionally, you can also specify rules directly on the INI file
+using the ``rulesets`` variable::
+
+    [filter:wsgirewrite]
+    use = egg:WSGIRewrite
+    rulesets = feed blocked
+
+    [wsgirewrite:feed]
+    # redirect /atom.xml to real feed location
+    rule1 = ^/atom.xml$ /index.php?format=Atom1.0
+
+    [wsgirewrite:blocked]
+    # block host1.example.com and host2.example.com
+    # this could be done by matching ``host(1|2)``; I'm
+    # using these rules just to demonstrate the ``OR``
+    # flag functionality.
+    cond1 = %{REMOTE_HOST} ^host1\.example\.com$ [OR]
+    cond2 = %{REMOTE_HOST} ^host2\.example\.com$
+    # no redirection (-), Forbidden
+    rule1 = ^.*$ - F
+
+In case both ``config`` and ``rulesets`` are specified, the
+latter are evaluated first.
+
+Here's an example of instantiating the middleware directly::
+
+    >>> app = RewriteMiddleware(some_app, [
+    ...     ([], # conditions (none, in this case)
+    ...      [   # rules
+    ...          ("^/page.html$", "/new_page.html", []),
+    ...      ]
+    ...     )
+    ... ])
+
+This example will redirect requests for ``/page.html`` to the
+URL ``/new_page.html``. Simple as that.
