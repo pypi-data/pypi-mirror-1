@@ -1,0 +1,139 @@
+# Copyright (c) 2007, Guilherme Polo.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without 
+# modification, are permitted provided that the following conditions are met:
+#
+#   1. Redistributions of source code must retain the above copyright notice, 
+#      this list of conditions and the following disclaimer.
+#
+#   2. Redistributions in binary form must reproduce the above copyright 
+#      notice, this list of conditions and the following disclaimer in the 
+#      documentation and/or other materials provided with the distribution.
+#
+#   3. The name of the author may not be used to endorse or promote products 
+#      derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER 
+# OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+# LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+# NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import os
+import imp
+import gzip
+from xml.etree.ElementTree import ElementTree, XMLTreeBuilder
+from uml2orm.parser.dia import DiaParser
+from uml2orm.parser.xmi import XmiParser
+from uml2orm.parser.raw import RawParser
+
+# Available parsers. Namespace: Parser
+parsers = {'dia': DiaParser,
+           'uml': XmiParser,
+           'raw': RawParser}
+
+class NamespaceTracker(XMLTreeBuilder):
+    def __init__(self):
+        XMLTreeBuilder.__init__(self)
+
+        self._parser.StartNamespaceDeclHandler = self._start_ns
+        self.namespaces = { }
+
+    def local_name(self, name):
+        return self.analyze_name(name)[1]
+
+    def analyze_name(self, name):
+        if name[0] == '{':
+            ns, local = name[1:].split("}")
+        else:
+            return None, None, None
+
+        prefix = self.namespaces[ns]
+        if prefix is None:
+            prefix = u"!Unknown"
+
+        return prefix, local, ns
+
+    def _start_ns(self, prefix, ns):
+        self.namespaces[ns] = prefix
+        
+
+class GenericParser(object):
+    """Opens and parses:
+        DIA file (compressed and uncompressed);
+        XMI file (from Umbrello);
+        Raw python file."""
+
+    def __init__(self, input_file):
+        self.nstracker = NamespaceTracker()
+        self.root = None
+        self.namespace = None
+        
+        self.parse(input_file)
+        self.set_appropriate_parser()
+        
+    def __getattribute__(self, attr):
+        try:
+            return object.__getattribute__(self, attr)
+        except AttributeError:
+            return object.__getattribute__(self.parser, attr)
+
+    def parse(self, ifile):
+        """Opens/Loads input file and parse it."""
+        
+        try: # try to load as a raw file
+            modname = os.path.basename(ifile[:ifile.rfind('.')])
+            self.root = imp.load_module(modname, *imp.find_module(modname, 
+                                [os.path.split(os.path.abspath(ifile))[0]]))
+            
+            # test for necessary attributes
+            self.root.dbname
+            self.root.tables
+            
+            self.namespace = "raw"
+            return
+        except (AttributeError, ImportError, SyntaxError):
+            # let 'open' or the uml parsers throw errors
+            pass
+            
+        uml_file = gzip.open(ifile)
+        etree = ElementTree()
+
+        try:
+            self.root = etree.parse(uml_file, self.nstracker)
+
+        except IOError:
+            # This probably was caused because we opened the file in binary
+            # mode to read a compressed DIA file but the file is not in this
+            # format, so it failed. Open it as a normal file now and try to
+            # parse it again.
+            uml_file = open(ifile)
+            self.root = etree.parse(uml_file, self.nstracker)
+
+        finally:
+            uml_file.close()
+            
+        self.namespace = self.nstracker.namespaces.values()[0].lower()
+            
+    def set_appropriate_parser(self):
+        """Set a parser based on set namespace."""
+        self.parser = parsers[self.namespace]
+
+    def _get_parser(self):
+        """Get parser being used."""
+        return self.__parser
+
+    def _set_parser(self, parser):
+        """Instanciate an UML parser."""     
+        self.__parser = parser(self.root, self.nstracker)
+
+
+    # Properties
+    parser = property(_get_parser, _set_parser)
