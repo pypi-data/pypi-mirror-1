@@ -1,0 +1,393 @@
+.. include:: header.txt
+
+==============================
+ processing package reference 
+==============================
+
+The `processing` package mostly replicates the API of the `threading`
+module.
+
+
+Classes and exceptions
+----------------------
+
+    **class** `Process(group=None, target=None, name=None, args=(), kwargs={})`
+        An analogue of `threading.Thread`.
+
+        See `Process objects`_.
+
+    **exception** `ProcessExit`
+        Exception raised in a target process when the `Process.stop()`
+        method is used.  This is a subclass of `SystemExit`.
+
+    **exception** `BufferTooShort`
+        Exception raise by the `recvbytes_into()` method of a
+        `connection object <connection-ref.html#connection-objects>`_
+        when the supplied buffer object is too small for the message
+        read.
+
+        If `e` is an instance of `BufferTooShort` then `e.args[0]`
+        will give the message as a byte string.
+
+
+Pipes and Queues
+----------------
+
+When using multiple processes one generally uses message passing for
+communication between processes and avoids having to use any
+synchronization primitives like locks.  
+
+For passing messages one can use a pipe (for a connection between two
+processes) or a queue (which allows multiple producers and consumers).
+
+Note that one can also create a shared queue by using a manager object
+-- see `Managers`_.
+
+For an example of the usage of queues for interprocess communication
+see `test_workers.py <../test/test_workers.py>`_.
+
+    `Pipe()`
+        Returns a pair of connection objects representing the ends of
+        a duplex pipe.
+
+        These connection objects can be inherited by child processes
+        and have methods `send()` and `recv()` (among others) for
+        sending and receiving picklable objects.  (See `Connection
+        objects <connection-ref.html#connection-objects>`_.)  For
+        example::
+
+            >>> from processing import Pipe
+            >>> a, b = Pipe()
+            >>> a.send([1, 'hello', None])
+            >>> b.recv()
+            [1, 'hello', None]
+            >>> b.sendbytes('thank you')
+            >>> a.recvbytes()
+            'thank you'
+
+        Note that it is not safe to have more than one process (or
+        thread) reading or writing to the same end of a pipe at the
+        same time.
+
+        On Windows this requires the `_processing` extension.
+
+    `Queue(maxsize=0)`
+        Alias for either `PosixQueue` if available or else `PipeQueue`
+        -- see below.
+
+        It differs from Python standard `Queue.Queue` type by only
+        have finite capacity, so even when `maxsize` is specified as
+        `0` the `put()` method might block.  If you need to be sure
+        that `put()` will not block then you should use
+        `BufferedQueue()` instead.
+
+    `BufferedQueue()`
+        Alias for either `BufferedPosixQueue` if available or else
+        `BufferedPipeQueue`.
+
+        Differs from `Queue()` by guaranteeing that the `put()` method
+        will not block.  A buffered queue tends to be slower than a
+        normal queue if you are putting items on the queue one by one
+        (rather than using `putmany()`).
+
+        The first time a process puts an item on a buffered queue a
+        thread is started whose job is to transfer items from a buffer
+        onto the true interprocess queue.  In addition to the usual
+        queue methods `BufferedQueue` supports two extra:
+
+            `putmany(iterable)`
+                Adds all items in the iterable to the queue's buffer.
+                So `q.putmany(X)` is a faster equivalent of
+                `for x in X: q.put(x)`.
+
+            `close()`
+                Flushes data from the buffer to the interprocess
+                queue, then instructs the thread to stop and waits for
+                it to do so.  This will be called automatically when
+                the queue is garbage collected or when the process
+                exits.
+
+    `PipeQueue(maxsize=0)`
+        Returns a near clone of `Queue.Queue` except that the
+        `qsize()` method is not implemented.  It is implemented using
+        a pipe and some locks/semaphores.
+        
+        On Unix if a client terminates while it is reading or writing
+        from the queue, other clients reading from the queue may lose
+        track of where messages boundaries are or may retrieve
+        incomplete messages.  At least on Windows a keyboard interrupt
+        (SIGINT) or the use of a process's `stop()` method should not
+        cause such a problem.
+        
+        Placing an object on a `PipeQueue` can block because of lack
+        of buffer space even if a zero timeout is used.
+        
+        Requires support for native semaphore support from `_processing`.
+
+    `PosixQueue(maxsize=0, msgsize=0)`
+        Returns a near clone of `Queue.Queue` implemented using a (Unix
+        only) posix message queue.
+        
+        If `maxsize` is non-zero it determines the maximum number of
+        messages that can be in the queue and if `msgsize` is non-zero
+        it determines the maximum size in bytes of a message.  If
+        either is zero then the system default (which is finite) is
+        used.  (For instance on my Linux system the default maximum
+        number of messages in a queue is 10 and the maximum message
+        size is 8192 bytes.)  A `PosixQueue` object has attributes
+        `_maxmsg` and `_maxsize` which give these limits for that
+        queue.
+
+        Note that if `maxsize` or `msgsize` is larger than the system
+        maximum then an `OSError` exception will be thrown.  On Linux
+        the system maximums can viewed and modified through the
+        `/proc` filesystem --- see `man 7 mq_overview`.
+
+        Only available on Unix and only if support for posix queues
+        was built in to `_processing`.
+     
+
+Synchronization primitives
+--------------------------
+
+Generally synchronization primitives are not a necessary in a
+multiprocess program as they are in a mulithreaded program.
+
+Note that one can also create synchronization primitves by using a
+manager object -- see `Managers`_.
+
+The following all require support for native sempahores from the 
+`_processing` extension.  
+
+    `BoundedSemaphore(value=1)`
+        Returns a bounded semaphore object: a clone of
+        `threading.BoundedSemaphore`.
+
+    `Condition(lock=None)`
+        Returns a condition variable: a clone of `threading.Condition`.
+        
+        If `lock` is specified then it should be a `Lock` or `RLock`
+        object from `processing`.
+        
+    `Event()`
+        Returns an event object: a clone of `threading.Event`.
+
+    `Lock()` 
+        Returns a non-recursive lock object: a near clone of `threading.Lock`.
+
+        There are two differences from `threading.Lock`: trying to
+        acquire a lock already owned by the current thread raises an
+        exception instead of deadlocking; and trying to release a lock
+        held by a different thread/process will raise and exception.
+                        
+    `RLock()`
+        Returns a recursive lock object: a clone of `threading.RLock`.
+        
+    `Semaphore(value=1)`
+        Returns a bounded semaphore object: a clone of
+        `threading.Semaphore`.
+
+
+Managers
+--------
+
+Managers provide a way to create data which can be shared between
+different processes.
+
+    `LocalManager()` 
+        Returns a manager object which uses shared memory instead of a
+        server process.  It has instance methods
+        
+            `SharedValue`, `SharedStruct`, `SharedArray` 
+
+        for creating objects stored in shared memory map.  Also has
+        static methods
+        
+            `Lock`, `RLock`, `Semaphore`, `BoundedSemaphore`,
+            `Condition`, `Event`, `Queue`
+
+        which are just aliases for other functions in the `processing`
+        namespace.  See `LocalManager
+        <manager-objects.html#shared-memory-managers>`_.
+
+        Requires support for native semaphores from `_processing`.
+
+    `Manager()`
+        Returns a started `SyncManager` object which can be
+        used for sharing objects between processes.  The returned
+        manager object corresponds to a spawned child process and has
+        methods which will create shared objects and return
+        corresponding proxies.
+
+        The methods for creating shared objects are
+
+            `list()`, `dict()`, `Namespace()`, `SharedValue()`,
+            `SharedStruct()`, `SharedArray()`, `Lock()`, `RLock()`,
+            `Semaphore()`, `BoundedSemaphore()`, `Condition()`,
+            `Event()`, `Queue()`.
+            
+        For example::
+
+            >>> from processing import Manager
+            >>> manager = Manager()
+            >>> l = manager.list(range(10))
+            >>> l.reverse()
+            >>> print l
+            [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+            >>> print repr(l)
+            <Proxy[list] object at 0x00E1B3B0>
+
+        See `SyncManager <manager-objects.html#syncmanager>`_ and
+        `Proxy objects`_.
+
+
+Process Pools
+-------------
+
+One can create a pool of processes which will carry out tasks
+submitted to it.
+
+    `Pool(processes=None)`
+        Returns a process pool object which controls a pool of worker
+        processes to which jobs can be submitted.
+
+        It supports asynchronous results with timeouts and
+        callbacks and has a parallel map implementation.
+
+        If `processes` is `None` then the number returned by
+        `cpuCount()` is used.  See `Pool objects
+        <pool-objects.html>`_.
+
+        Example::
+
+            from processing import Pool
+
+            def f(x):
+                return x*x
+
+            if __name__ == '__main__':
+                pool = Pool(processes=2)
+                result1 = pool.apply_async(f, (10,))
+                result2 = pool.map_async(f, range(5))
+                print result1.get()               # => "100"
+                print result2.get(timeout=1)      # => "[0, 1, 4, 9, 16]"
+
+        Requires support for native semaphores from `_processing`.
+        
+
+Logging
+-------
+
+Some support for logging is available.  Note, however, that the
+`logging` package does not use process shared locks so it is possible
+(depending on the handler type) for messages from different processes
+to get mixed up.
+
+    `enableLogging(level, HandlerType=None, handlerArgs=(), format=None)`
+        Enables logging and sets the debug level to `level` -- see
+        documentation for the `logging` package in the standard
+        library.
+
+        If `HandlerType` is specified then a handler is created using
+        `HandlerType(*handlerArgs)` and added to the logger.  If
+        `format` is specified then this will be used for the handler
+        -- `format` defaults to `'[%(levelname)s/%(processName)s]
+        %(message)s'`.  (The logger used by `processing` allows use of
+        the non-standard `'%(processName)s'` format.)
+
+        If `HandlerType` is not specified and the logger has no
+        handlers then a default one is created which prints to
+        `sys.stderr`.
+
+        *Note*: on Windows a child process does not directly inherit
+        its parent's logger; instead it will automatically call
+        `enableLogging()` with the same arguments which were used when
+        its parent process last called `enableLogging()` (if it ever
+        did).
+
+    `getLogger()`
+        Returns the logger used by `processing`.  If `enableLogging()`
+        has not yet been called then `None` is returned.
+
+Below is an example session with logging turned on::
+
+    >>> import processing, logging
+    >>> processing.enableLogging(level=logging.INFO)
+    >>> processing.getLogger().warn('doomed')
+    [WARNING/MainProcess] doomed
+    >>> m = processing.Manager()
+    [INFO/SyncManager-1] process starting up
+    [INFO/SyncManager-1] manager bound to '\\\\.\\pipe\\pyc-1352-0-r97d0b'
+    >>> del m
+    [INFO/MainProcess] sending shutdown message to manager
+    [INFO/SyncManager-1] manager received shutdown message
+    [INFO/SyncManager-1] running all "atexit" finalizers
+    [INFO/SyncManager-1] process exiting with `os.exit(0)`
+
+
+Miscellaneous
+-------------
+
+    `activeChildren()`
+        Return list of all live children of the current process.
+        
+        Calling this has the side affect of "joining" any processes
+        which have already finished.
+
+    `cpuCount()`
+        Returns the number of CPUs in the system.  May raise
+        `NotImplementedError`.
+
+    `currentProcess()`
+        An analogue of `threading.currentThread`
+
+        Returns the object corresponding to the current process.
+
+    `freezeSupport()`
+        Adds support for when a program which uses the `processing`
+        package has been frozen to produce a Windows executable.  (Has
+        been tested with `py2exe`, `PyInstaller` and `cx_Freeze`.)
+
+        One needs to call this function straight after the `if __name__
+        == '__main__'` line of the main module.  For example ::
+
+            from processing import Process, freezeSupport
+
+            def f():
+                print "hello world!"
+
+            if __name__ == '__main__':
+                freezeSupport()
+                p = Process(target=f)
+                p.start()
+
+        If the `freezeSupport()` line is missed out then the frozen
+        executable produced from this module would (on Windows)
+        recursively create new processes.
+
+        If the module is being run normally by the python interpreter
+        then `freezeSupport()` has no effect.
+        
+
+.. note::
+   * The `processing.dummy` package replicates the API of `processing`
+     but is no more than a wrapper around the `threading` module.
+     
+   * `processing` contains no analogues of `activeCount`,
+     `enumerate`, `settrace`, `setprofile`, `Timer`, or
+     `local` from the `threading` module.
+
+
+Subsections
+-----------
+
+* `Process objects <process-objects.html>`_
+* `Manager objects <manager-objects.html>`_
+* `Proxy objects <proxy-objects.html>`_
+* `Pool objects <pool-objects.html>`_
+* `connection module <connection-ref.html>`_
+
+
+.. _Prev: intro.html
+.. _Up: index.html
+.. _Next: process-objects.html
