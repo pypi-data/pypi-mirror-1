@@ -1,0 +1,360 @@
+Clever Harold Program Authoring Guide
+--------------------------------------
+
+Outline
+=======
+
+- `Introduction`_
+- `Module Publisher`_
+- `Functions`_
+- `Classes`_
+- `Views`_
+- `Special Arguments`_
+- `REST Made Easy`_
+- `Further Reading`_
+
+
+Introduction
+============
+
+The tenets of writing program and controller code in Clever Harold:
+
+- Code should not need to import anything from the framework to function
+  correctly
+
+- Code should be usable outside of the web application environment,
+  for example, within a test suite or within another application
+
+- Only minimal, non-invasive adjustment to code should be required to
+  operate within the web application
+
+
+Module Publisher
+================
+
+Clever Harold includes a WSGI_ middleware type that makes functions
+and classes in your Python modules available through the web.  It does
+this by associating a sequence of directories (called ``dirs``) with a
+URL root, and when called, it scans each directory in ``dirs``
+attempting to match the URL to a Python module and callable within the
+module.
+
+The project configuration file created with ``paster init-harold``
+contains a section that configures a module publisher with your
+project's ``controllers`` directory.  You can rename or relocate this
+directory, and you can augment the publisher with additional directory
+names.  You can also include multiple module publishers in your
+project by creating a separate section in your configuration for each
+set of directories to publish.
+
+It's important to note that the module publisher, like the template
+publishers, are WSGI_ middleware and not WSGI_ applications.  This means
+that if the publisher cannot match a URL, it will defer handling of
+the request to the next application (or middleware) in the stack.
+This allows you to create a URL hierarchy by layering together
+multiple and disparate directory structures.
+
+The module publisher can be used in any WSGI_ stack and it can be
+referenced as a filter factory in a ``paster`` configuration script.
+Refer to the `Publisher API Documentation`_ for details regarding both
+uses.
+
+
+Functions
+=========
+
+The module publisher will execute functions in modules within its
+directories if those functions have a true ``expose`` attribute.
+This demonstrates a typical use::
+
+    #!/usr/bin/env python
+
+    def check_inventory(part_name):
+        if part_name == 'frobinator':
+            return 117
+        else:
+            return 0
+
+    check_inventory.expose = True
+
+When placed in a module ``store.py`` at the top of a published
+directory, these URLs would be valid::
+
+    /store/check_inventory/WizzoWidget
+    /store/check_inventory?part_name=WizzoWidget
+
+The module publisher maps the remaining portions of the URL and the
+query string values to the callable's arguments.  All argument types
+are supported, including positional, default positional, extra
+positional, and extra keyword arguments, in any valid combination.
+Consider a search function also placed in ``store.py``::
+
+
+    #!/usr/bin/env python
+
+    def search(store, *part_name):
+    	...
+
+    search.expose = True
+
+This would make these URLs available::
+
+     /store/search/MainStreet/WizzoWidget/AcmeCrank
+     /store/search/MainStreet/WizzoWidget?part_name=AcmeCrank
+     /store/search/MainStreet?part_name=WizzoWidget&part_name=AcmeCrank
+     /store/search?store=MainStreet&part_name=WizzoWidget&part_name=AcmeCrank
+
+
+Classes
+=======
+
+In addition to functions, the module publisher will also publish
+classes with an ``expose`` attribute.  The matching technique is
+the same: URLs are mapped to directories, modules within them, and
+then also to the module's classes and their instance methods.  Because
+most classes are written to be instantiated, the module publisher will
+first create an instance of a class before invoking any (optional)
+method indicated in the URL.
+
+The URL-to-parameter mapping for classes takes into account the
+required arguments for an ``__init__`` method, the instance method
+name, and any arguments needed to execute the method.  The basic form
+is this::
+
+    /path/module/class/init_arg/init_arg/method/method_arg/method_arg
+
+The publisher is a bit more liberal when mapping URLs to class
+instances in that extra values in the path and query string are
+ignored.  Also, the current implementation requires ``__init__``
+methods that do not accept extra positional arguments.  There is no
+such restriction on the other method signatures.
+
+The semantics of the ``expose`` attribute are different for classes.
+Instead of a simple truth value, the module publisher expects an
+``expose`` attribute to be a list of names, and will only publish
+methods with names that are included in the list.
+
+If a class is referenced by URL but no method is specified, the module
+publisher will check for a ``__call__`` method on the instance.  If
+the instance has this method, and if it's included in the ``expose``
+sequence, it will be executed with any remaining URL and query string
+parameters.
+
+Given this class in ``store.py``::
+
+    #!/usr/bin/env python
+
+    class Employee:
+        expose = ['__call__', 'greetings', ]
+
+	def __init__(self, name):
+            self.name = name
+
+        def __call__(self):
+            return 'Hello, my name is %s.' % self.name
+
+        def greetings(self):
+            return 'Hello to your friend, too.'
+
+        def status(self):
+            return 'I like eggs.'
+
+These URLs would be valid and would return ``'Hello, my name is Alice.'``::
+
+    /store/Employee/Alice
+    /store/Employee?name=Alice
+
+This URL would return ``'Hello to your friend, too.'``::
+
+    /store/Employee/Bob/greetings
+
+But the ``status`` method would not be available.  This URL would
+generate an exception::
+
+    /store/Employee/Bob/status
+
+
+
+Views
+=====
+
+The module publisher will optionally render the results of your
+functions and class methods with a template.  When templates are
+associated with published callables in this manner, they're referred to
+as `views`.
+
+Views are specified by attaching a ``view`` attribute to the callable.
+The value of the attribute can be any one of:
+
+- template source string
+- template file name
+- module name
+- module object
+
+Using source strings as views is not recommended for production
+applications, but the feature is very handy during development.
+
+Here are examples of all four techniques::
+
+    #!/usr/bin/env python
+    import bakery.menu.breakfast
+
+    def scrambled(egg_count):
+        return egg_count - 1
+    scrambled.expose = True
+    scrambled.view = bakery.menu.breakfast # module object
+
+    def poached(egg_count):
+        return "Wouldn't you rather have scrambled?"
+    poached.expose = True
+    poached.view = 'bakery.menu.lunch' # module name
+
+    def fried(egg_count):
+        return "Sorry, The chickens are on strike."
+    fried.expose = True
+    fried.view = '/apps/BakeryShop/bakery/dinner.kid'
+
+    def hardboiled(egg_count):
+        return dict(used=egg_count, included='hot sauce')
+    hardboiled.expose = True
+    hardboiled.view = """
+    <html xmlns:py="http://purl.org/kid/ns#">
+    Your dish has $${used} eggs.  We think you'll like the extra $${included}.
+    </html>
+    """
+
+The result of your callables does not need to be a dictionary.  If it
+isn't a dictionary, it's wrapped in a dictionary and given the key 
+``'results'`` before rendering the view.
+
+As with the template publishers, the module publisher will render a
+view by wrapping it in the specified layout.  See the `Template
+Authoring Guide`_ for use of layouts and defaults with publishers.
+
+
+To explicitly set the content type of a callable's view, set a
+``content_type`` attribute like so::
+
+    def lookup():
+        ...
+    lookup.view = 'petshop.views.b2b'
+    lookup.content_type = 'text/xml'
+
+The publisher will also encode your response in JSON_ format if the
+content type is ``'text/json'``.  Updating the previous example::
+
+    def lookup():
+        ...
+    lookup.content_type = 'text/json'
+
+
+
+Special Arguments
+=================
+
+A small set of special argument names are mapped by the module
+publisher automatically.  They are:
+
+- ``application`` - the parent application of the publisher instance
+- ``cookies`` - parsed cookies from the request
+- ``publisher`` - the publisher instance
+- ``environ`` - the WSGI_ environment for the current request
+- ``form`` - mapping of parsed form and query string values
+- ``request`` - an instance of ``paste.wsgiwrappers.WSGIRequest``
+- ``session`` - session mapping type instance
+
+If any of these names are present in the argument list of a published
+callable, the module publisher will supply the value internally in
+preference over a value present in the URL or query string.  
+
+This function will receive the WSGI_ environment every time it's called
+and return a message that contains the WSGI_ version::
+
+    #!/usr/bin/env python
+
+    def whoami(name, environ):
+        ver = '%s.%s' % environ['wsgi.version']
+        return "Hi, %s!  This server implements the WSGI %s spec." % (name, ver)
+
+    whoami.expose = True
+
+
+REST Made Easy
+==============
+
+One of the most exciting features of the module publisher is its
+ability to map HTTP request methods to module callables.  This enables
+web applications that offer both full REST_ and non-REST interfaces
+from the same code.
+
+When the module publisher locates a module but the request does not
+indicate a callable, it attempts to match the HTTP request method
+(lower case) to one of the callables in the module.  In practical
+terms, this means you can define functions or classes named ``get``,
+``post``, ``delete`` and so forth and the publisher will run them in
+response to those types of HTTP requests.
+
+Let's look at an example.  If we write a blog application that has a
+published module named ``article.py``, we could define functions like these::
+
+    #!/usr/bin/env python
+
+    def get(post_id):
+        ...
+    get.expose = True
+
+
+    def post(title, author, date, content):
+        ...
+    post.expose = True
+
+
+    def delete(post_id):
+        ...
+    delete.expose = True
+
+
+The module publisher would then map HTTP requests as follows::
+
+    GET /article/32        	   ->	 get(post_id=32)
+    POST /article?title=...	   ->	 post(title=..., )
+    DELETE /article/44		   -> 	 delete(post_id=44)
+
+And so on.  Because these functions are all marked with the ``expose``
+attribute, each is available via simple GET calls::
+
+    GET /article/32	     	 ->	get(post_id=32)
+    GET /article/post?title=...	 ->	post(title=..., )
+    GET /article/delete/44	 ->	delete(post_id=44)
+
+On one hand, this is violates the intent of REST_ because it allows
+non-idempotent implementations of GET.  But on the other hand it's an
+eminently approachable and practical solution for user agents that
+don't yet understand all HTTP methods.
+
+
+Further Reading
+---------------
+
+Clever Harold:
+
+- `Database Integration Guide`_
+- `Template Authoring Guide`_
+- `Tutorial`_
+
+
+External:
+
+- `RFC2616 Method Definitions`_
+- `The Highs and Lows of REST`_
+
+
+.. _REST: http://en.wikipedia.org/wiki/REST
+.. _WSGI: http://www.python.org/dev/peps/pep-0333/
+.. _Publisher API Documentation: http://trac.cleverharold.org/wiki/PublishersApiDocs
+.. _JSON:  http://www.json.org/
+.. _Template Authoring Guide: /documentation/templates
+.. _Database Integration Guide:  /documentation/databases
+.. _Tutorial:  /documentation/tutorial
+.. _RFC2616 Method Definitions: http://www.w3.org/Protocols/rfc2616/rfc2616-sec9.html
+.. _The Highs and Lows of REST:  http://lesscode.org/2006/03/19/high-low-rest/

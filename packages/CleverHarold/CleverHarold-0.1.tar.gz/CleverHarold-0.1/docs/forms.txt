@@ -1,0 +1,143 @@
+Clever Harold Form Authoring Guide
+----------------------------------
+
+Introduction
+============
+
+The initial release of Clever Harold provides server-side components
+for handling HTML form submission.  The framework includes optional
+function decorators to automate server-side form data validation and
+exception handling.
+
+Clever Harold currently does not generate HTML forms for clients, but
+we plan on including or building that capacity in the next release.
+
+These components are optional.  You're free to provide your own
+validation and exception handling mechansims.
+
+
+Validators
+==========
+
+The ``harold.armor`` package defines decorators for validation and
+transformation of values as they are passed to functions.  An example
+is worth a thousand words::
+
+    #!/usr/bin/env python
+    from harold import armor
+
+    def passwords_match(a, b):
+        if a != b:
+            raise TypeError('Passwords do not match')
+        else:
+            return a, b
+
+    @armor.fuse()
+    @armor.add('user_id', int)
+    @armor.add(('password, 'confirm', passwords_match)
+   
+    def set_new_password(user_id, password, confirm):
+        ...
+
+
+The ``@armor.fuse()`` decorator is required to enable the subsequent
+validators.
+
+The first validator, ``@armor.add('user_id', int)`` will convert any
+supplied value to an integer.  With this validator enabled, the
+``set_new_password`` function will never receive a string value for
+the ``user_id`` parameter, and any passed value that cannot be
+converted to an integer will raise an exception.
+
+The next validator, ``@armor.add(('password', 'confirm'),
+passwords_match)`` will ensure that the function always receives the
+same value for both ``password`` and ``confirm`` parameters.  Note
+that the validator accepts two values and returns two values.
+
+Validator functions can be any built-in Python type, or they can be
+any user-defined function.  In the case of user-defined functions, the
+function is expected to take the same number of parameters as
+specified in the decorator.  Validator functions are also expected to
+return that same number of values, although the function may return
+values of any type.
+
+
+Exceptions
+==========
+
+Clever Harold also supplies decorators for dealing with the most
+common types of form processing.  Two types of exception handlers are
+included so far.  The first decorator layers on top of a validation
+stack to provide automatic redirection to the refering page when an
+exception occurs during validation.  Building on the previous
+example::
+
+    #!/usr/bin/env python
+    from harold import armor, form
+
+    @form.responder.redirect()
+    @armor.fuse()
+    @armor.add('user_id', int)
+    ...
+   
+    def set_new_password(user_id, password, confirm):
+    	....
+
+When the callable raises a ValidationError, the request will be
+internally redirected to the requesting URL.  The request environment
+will be suppliemented with two additional keys prior to redirecting:
+``harold.form.values`` and ``harold.form.errors``.  
+
+The value of ``harold.form.values`` is a dictionary of all the form
+element names and values that were successfully validated.
+
+The value of ``harold.form.errors`` is a dictionary of names and
+messages for each form element that failed validation.
+
+Both of these can be used in your HTML forms to display partial forms
+to the user.  Consider this example::
+
+    <html xmlns:py="http://purl.org/kid/ns#">
+    <div py:def="main()">
+    <?python 
+        errs = environ.get('harold.form.errors', {})
+        vals = environ.get('harold.form.values', {})
+    ?>
+
+    <form action="/signup/submit_host" method="post">
+        <label for="email">Email address:</label> 
+        <div py:content="errs.get('email')" />
+        <input type="text" value="" name="email" /> 
+    ...
+
+
+A second type of exception responder is included for asyncronous HTTP
+form handling.  To enable a server-side callable to respond to
+asyncronous requests with JSON-encoded data, add a decorator like this::
+
+    #!/usr/bin/env python
+    from harold import armor, form
+
+    @form.responder.jsonexc()
+    @armor.fuse()
+    @armor.add('user_id', int)
+    ...
+   
+    def set_new_password(user_id, password, confirm):
+    	....
+
+Instead of HTTP redirection in response to validatior exceptions, the
+``@form.responder.jsonexc()`` decorator will return a JSON-encoded
+object with ``errors`` and ``values`` keys, with the same content as
+from the redirect responder.
+
+
+Further Reading
+---------------
+
+- `Armor API documentation`_
+- `Form Responder API documentation`_
+
+
+.. _Armor API documentation: http://trac.cleverharold.org/wiki/FormResponderApiDocs
+.. _Form Responder API documentation: http://trac.cleverharold.org/wiki/ArmorApiDocs
