@@ -1,0 +1,361 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+          "DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+  <title>pprocess</title>
+  <link rel="stylesheet" href="epydoc.css" type="text/css"></link>
+</head>
+<body bgcolor="white" text="black" link="blue" vlink="#204080"
+      alink="#204080">
+
+<!-- =========== START OF NAVBAR =========== -->
+<table class="navbar" border="0" width="100%" cellpadding="0" bgcolor="#a0c0ff" cellspacing="0">
+  <tr valign="center">
+    <th bgcolor="#70b0f0" class="navselect">&nbsp;&nbsp;&nbsp;Home&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar">&nbsp;&nbsp;&nbsp;<a class="navbar" href="trees.html">Trees</a>&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar">&nbsp;&nbsp;&nbsp;<a class="navbar" href="indices.html">Index</a>&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar">&nbsp;&nbsp;&nbsp;<a class="navbar" href="help.html">Help</a>&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar" width="100%"></th>
+  </tr>
+</table>
+<table width="100%" cellpadding="0" cellspacing="0">
+  <tr valign="top">
+    <td width="100%">
+      <font size="-1"><b class="breadcrumbs">
+        Module&nbsp;pprocess
+      </b></font></br>
+    </td>
+    <td><table cellpadding="0" cellspacing="0">
+      <tr><td align="right"><font size="-2">[show&nbsp;private&nbsp;|&nbsp;<a href="../public/pprocess-module.html">hide&nbsp;private</a>]</font></td></tr>
+      <tr><td align="right"><font size="-2">[<a href="frames.html"target="_top">frames</a>&nbsp;|&nbsp;<a href="pprocess-module.html" target="_top">no&nbsp;frames</a>]</font></td></tr>
+    </table></td>
+</tr></table>
+
+<!-- =========== START OF MODULE DESCRIPTION =========== -->
+<h2 class="module">Module pprocess</h2>
+
+<pre class="literalblock">
+A simple parallel processing API for Python, inspired somewhat by the thread
+module, slightly less by pypar, and slightly less still by pypvm.
+
+Copyright (C) 2005, 2006, 2007 Paul Boddie &lt;paul&#64;boddie.org.uk&gt;
+
+This software is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License as
+published by the Free Software Foundation; either version 2 of
+the License, or (at your option) any later version.
+
+This software is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public
+License along with this library; see the file LICENCE.txt
+If not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+
+--------
+
+The recommended styles of programming using pprocess involve the &quot;Thread-style
+Processing&quot; and &quot;Convenient Message Exchanges&quot; sections below, although
+developers may wish to read the &quot;Message Exchanges&quot; section for more details of
+the API concerned, and the &quot;Fork-style Processing&quot; section may be of interest to
+those with experience of large scale parallel processing systems.
+
+Thread-style Processing
+-----------------------
+
+To create new processes to run a function or any callable object, specify the
+&quot;callable&quot; and any arguments as follows:
+
+channel = start(fn, arg1, arg2, named1=value1, named2=value2)
+
+This returns a channel which can then be used to communicate with the created
+process. Meanwhile, in the created process, the given callable will be invoked
+with another channel as its first argument followed by the specified arguments:
+
+def fn(channel, arg1, arg2, named1, named2):
+    # Read from and write to the channel.
+    # Return value is ignored.
+    ...
+
+Fork-style Processing
+---------------------
+
+To create new processes in a similar way to that employed when using os.fork
+(ie. the fork system call on various operating systems), use the following
+method:
+
+channel = create()
+if channel.pid == 0:
+    # This code is run by the created process.
+    # Read from and write to the channel to communicate with the
+    # creating/calling process.
+    # An explicit exit of the process may be desirable to prevent the process
+    # from running code which is intended for the creating/calling process.
+    ...
+else:
+    # This code is run by the creating/calling process.
+    # Read from and write to the channel to communicate with the created
+    # process.
+    ...
+
+Message Exchanges
+-----------------
+
+When creating many processes, each providing results for the consumption of the
+main process, the collection of those results in an efficient fashion can be
+problematic: if some processes take longer than others, and if we decide to read
+from those processes when they are not ready instead of other processes which
+are ready, the whole activity will take much longer than necessary.
+
+One solution to the problem of knowing when to read from channels is to create
+an Exchange object, optionally initialising it with a list of channels through
+which data is expected to arrive:
+
+exchange = Exchange()           # populate the exchange later
+exchange = Exchange(channels)   # populate the exchange with channels
+
+We can add channels to the exchange using the add method:
+
+exchange.add(channel)
+
+To test whether an exchange is active - that is, whether it is actually
+monitoring any channels - we can use the active method which returns all
+channels being monitored by the exchange:
+
+channels = exchange.active()
+
+We may then check the exchange to see whether any data is ready to be received;
+for example:
+
+for channel in exchange.ready():
+    # Read from and write to the channel.
+    ...
+
+If we do not wish to wait indefinitely for a list of channels, we can set a
+timeout value as an argument to the ready method (as a floating point number
+specifying the timeout in seconds, where 0 means a non-blocking poll as stated
+in the select module's select function documentation).
+
+Convenient Message Exchanges
+----------------------------
+
+A convenient form of message exchanges can be adopted by defining a subclass of
+the Exchange class and defining a particular method:
+
+class MyExchange(Exchange):
+    def store_data(self, channel):
+        data = channel.receive()
+        # Do something with data here.
+
+The exact operations performed on the received data might be as simple as
+storing it on an instance attribute. To make use of the exchange, we would
+instantiate it as usual:
+
+exchange = MyExchange()         # populate the exchange later
+exchange = MyExchange(limit=10) # set a limit for later population
+
+The exchange can now be used in a simpler fashion than that shown above. We can
+add channels as before using the add method, or we can choose to only add
+channels if the specified limit of channels is not exceeded:
+
+exchange.add(channel)           # add a channel as normal
+exchange.add_wait(channel)      # add a channel, waiting if the limit would be
+                                # exceeded
+
+We can explicitly wait for &quot;free space&quot; for channels by calling the wait method:
+
+exchange.wait()
+
+Finally, when finishing the computation, we can choose to merely call the finish
+method and have the remaining data processed automatically:
+
+exchange.finish()
+
+Clearly, this approach is less flexible but more convenient than the raw message
+exchange API as described above. However, it permits much simpler and clearer
+code.
+
+Signals and Waiting
+-------------------
+
+When created/child processes terminate, one would typically want to be informed
+of such conditions using a signal handler. Unfortunately, Python seems to have
+issues with restartable reads from file descriptors when interrupted by signals:
+
+http://mail.python.org/pipermail/python-dev/2002-September/028572.html
+http://twistedmatrix.com/bugs/issue733
+
+Select and Poll
+---------------
+
+The exact combination of conditions indicating closed pipes remains relatively
+obscure. Here is a message/thread describing them (in the context of another
+topic):
+
+http://twistedmatrix.com/pipermail/twisted-python/2005-February/009666.html
+
+It would seem, from using sockets and from studying the asyncore module, that
+sockets are more predictable than pipes.
+
+Notes about poll implementations can be found here:
+
+http://www.greenend.org.uk/rjk/2001/06/poll.html
+</pre>
+<hr/>
+
+<!-- =========== START OF CLASSES =========== -->
+<table class="summary" border="1" cellpadding="3" cellspacing="0" width="100%" bgcolor="white">
+<tr bgcolor="#70b0f0" class="summary">
+  <th colspan="2">Classes</th></tr>
+<tr><td width="15%">
+  <b><a href="pprocess.Channel-class.html"><code>Channel</code></a></b></td>
+  <td>A communications channel.</td></tr>
+<tr><td width="15%">
+  <b><a href="pprocess.Exchange-class.html"><code>Exchange</code></a></b></td>
+  <td>A communications exchange that can be used to detect channels which are
+ready to communicate.</td></tr>
+</table><br />
+
+
+<!-- =========== START OF EXCEPTIONS =========== -->
+<table class="summary" border="1" cellpadding="3" cellspacing="0" width="100%" bgcolor="white">
+<tr bgcolor="#70b0f0" class="summary">
+  <th colspan="2">Exceptions</th></tr>
+<tr><td width="15%">
+  <b><a href="pprocess.AcknowledgementError-class.html"><code>AcknowledgementError</code></a></b></td>
+  <td>&nbsp;</td></tr>
+</table><br />
+
+
+<!-- =========== START OF FUNCTION SUMMARY =========== -->
+<table class="summary" border="1" cellpadding="3" cellspacing="0" width="100%" bgcolor="white">
+<tr bgcolor="#70b0f0" class="summary">
+  <th colspan="2">Function Summary</th></tr>
+<tr><td align="right" valign="top" width="15%"><font size="-1">&nbsp;</font></td>
+  <td><code><span class="summary-sig"><a href="pprocess-module.html#create" class="summary-sig-name"><code>create</code></a>()</span></code>
+<br />
+Create a new process, returning a communications channel to both the
+creating process and the created process.</td></tr>
+<tr><td align="right" valign="top" width="15%"><font size="-1">&nbsp;</font></td>
+  <td><code><span class="summary-sig"><a href="pprocess-module.html#start" class="summary-sig-name"><code>start</code></a>(<span class=summary-sig-arg>callable</span>,
+          <span class="summary-sig-vararg">*args</span>,
+          <span class="summary-sig-kwarg">**kwargs</span>)</span></code>
+<br />
+Create a new process which shall start running in the given 'callable'.</td></tr>
+<tr><td align="right" valign="top" width="15%"><font size="-1">&nbsp;</font></td>
+  <td><code><span class="summary-sig"><a href="pprocess-module.html#waitall" class="summary-sig-name"><code>waitall</code></a>()</span></code>
+<br />
+Wait for all created processes to terminate.</td></tr>
+</table><br />
+
+
+<!-- =========== START OF VARIABLE SUMMARY =========== -->
+<table class="summary" border="1" cellpadding="3" cellspacing="0" width="100%" bgcolor="white">
+<tr bgcolor="#70b0f0" class="summary">
+  <th colspan="2">Variable Summary</th></tr>
+<tr><td align="right" valign="top" width="15%"><font size="-1"><code>str</code></font></td>
+<td><b><a href="pprocess-module.html#__version__"><code>__version__</code></a></b> = <span title="'0.2.3'"><code><span class="variable-quote">'</span>0.2.3<span class="variable-quote">'</span>                                    </code>
+</span></td></tr>
+</table><br />
+
+
+<!-- =========== START OF FUNCTION DETAILS =========== -->
+<table class="details" border="1" cellpadding="3" cellspacing="0" width="100%" bgcolor="white">
+<tr bgcolor="#70b0f0" class="details">
+  <th colspan="2">Function Details</th></tr>
+</table>
+
+<a name="create"></a>
+<table width="100%" class="func-details" bgcolor="#e0e0e0"><tr><td>
+  <h3><span class="sig"><span class="sig-name">create</span>()</span>
+  </h3>
+<pre class="literalblock">
+Create a new process, returning a communications channel to both the
+creating process and the created process.
+</pre>
+  <dl><dt></dt><dd>
+  </dd></dl>
+</td></tr></table>
+
+<a name="start"></a>
+<table width="100%" class="func-details" bgcolor="#e0e0e0"><tr><td>
+  <h3><span class="sig"><span class="sig-name">start</span>(<span class=sig-arg>callable</span>,
+          <span class="sig-vararg">*args</span>,
+          <span class="sig-kwarg">**kwargs</span>)</span>
+  </h3>
+<pre class="literalblock">
+Create a new process which shall start running in the given 'callable'.
+Return a communications channel to the creating process, and supply such a
+channel to the created process as the 'channel' parameter in the given
+'callable'. Additional arguments to the 'callable' can be given as
+additional arguments to this function.
+</pre>
+  <dl><dt></dt><dd>
+  </dd></dl>
+</td></tr></table>
+
+<a name="waitall"></a>
+<table width="100%" class="func-details" bgcolor="#e0e0e0"><tr><td>
+  <h3><span class="sig"><span class="sig-name">waitall</span>()</span>
+  </h3>
+<pre class="literalblock">
+Wait for all created processes to terminate.
+</pre>
+  <dl><dt></dt><dd>
+  </dd></dl>
+</td></tr></table>
+<br />
+
+
+<!-- =========== START OF VARIABLE DETAILS =========== -->
+<table class="details" border="1" cellpadding="3" cellspacing="0" width="100%" bgcolor="white">
+<tr bgcolor="#70b0f0" class="details">
+  <th colspan="2">Variable Details</th></tr>
+</table>
+<table width="100%" class="var-details" bgcolor="#e0e0e0"><tr><td>
+<a name="__version__"></a>
+<h3>__version__</h3>
+<dl>
+  <dt></dt>
+  <dd>
+    <dl>
+      <dt><b>Type:</b></dt>
+      <dd>
+          <code>str</code>
+
+      </dd>
+<span title="'0.2.3'">      <dt><b>Value:</b></dt>
+      <dd><table><tr><td>
+<pre class="variable">
+<span class="variable-quote">'</span>0.2.3<span class="variable-quote">'</span>                                                                </pre>
+        </td></tr></table></dd>
+</span>    </dl>
+  </dd>
+</dl></td></tr></table>
+<br />
+
+
+<!-- =========== START OF NAVBAR =========== -->
+<table class="navbar" border="0" width="100%" cellpadding="0" bgcolor="#a0c0ff" cellspacing="0">
+  <tr valign="center">
+    <th bgcolor="#70b0f0" class="navselect">&nbsp;&nbsp;&nbsp;Home&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar">&nbsp;&nbsp;&nbsp;<a class="navbar" href="trees.html">Trees</a>&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar">&nbsp;&nbsp;&nbsp;<a class="navbar" href="indices.html">Index</a>&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar">&nbsp;&nbsp;&nbsp;<a class="navbar" href="help.html">Help</a>&nbsp;&nbsp;&nbsp;</th>
+    <th class="navbar" width="100%"></th>
+  </tr>
+</table>
+
+<table border="0" cellpadding="0" cellspacing="0" width="100%">
+  <tr>
+    <td align="left"><font size="-2">Generated by Epydoc 2.1 on Sun Jan 14 23:55:35 2007</font></td>
+    <td align="right"><a href="http://epydoc.sourceforge.net"
+                      ><font size="-2">http://epydoc.sf.net</font></a></td>
+  </tr>
+</table>
+</body>
+</html>
