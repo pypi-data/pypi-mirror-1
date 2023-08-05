@@ -1,0 +1,150 @@
+# Developing with YAXL
+
+## Introduction
+
+Here are the beginnings of a tutorial for YAXL.
+
+#### Reading XML
+
+Use the `parse` function to obtain a hierarchy of `Element` instances.
+
+	>>> x = parse("""
+	... 	<person id="1234">
+	... 		<name>Bob Smith</name>
+	... 		<age>200</age>
+	... 	</person>
+	... """)
+	>>> x
+	<person id="1234"><name>Bob Smith</name><age>200</age></person>
+	>>> x['id']
+	'1234'
+	>>> x[0].text
+	u'Bob Smith'
+	>>> x.children[0].text
+	u'Bob Smith'
+	>>> x[0]
+	<name>Bob Smith</name>
+	>>> x[1]
+	<age>200</age>
+	
+The method accepts the path to a local file, a file-like object, a URL or a string. This input can contain either a full document or a well-formed XML fragment.
+
+#### Creating new elements
+
+You can create new elements by using the `Element` constructor or the `append` method of an existing `Element` instance. Both accept a name for the element (which may contain a properly bound namespace prefix), a `dict` of attributes (all non-string values are converted to strings) and a `text` parameter that sets the text node contents of the element being created. Both return the newly created element so you can chain calls to them.
+
+	>>> person = Element('person', {'id': 1234})
+	>>> person.append('name', text='Bob Smith')
+	<name>Bob Smith</name>
+	>>> person
+	<person id="1234"><name>Bob Smith</name></person>
+	>>> person.append('age').text = 200
+	>>> person
+	<person id="1234"><name>Bob Smith</name><age>200</age></person>
+	>>> person.append('address').append('street', text='Coconut Grove')
+	<street>Coconut Grove</street>
+	>>> person[0]
+	<name>Bob Smith</name>
+	>>> person[1]
+	<age>200</age>
+	>>> person[2]
+	<address><street>Coconut Grove</street></address>
+	>>> person[2][0]
+	<street>Coconut Grove</street>
+	>>> person[2][0].text
+	'Coconut Grove'
+	
+Note that trying to create a new element whose qname uses an unbound namespace prefix will raise an `Exception`.
+
+#### Locating elements
+
+You can access the children of an element in three ways by:
+	
+	* accessing the `children` property of the element
+	* indexing the element itself
+	* calling the element or calling `select` on the element to evaluate an XPath expression
+	
+Note that there is no difference between using the `select` method and "calling" an element
+
+	>>> x = parse("""
+	... 	<table>
+	... 		<tr>
+	... 			<td>Something</td>
+	... 			<td>Something Else</td>
+	... 		</tr>
+	... 		<tr>
+	... 			<td>Another something</td>
+	... 			<td>Another something else</td>
+	... 		</tr>
+	... 	</table>
+	... """)
+	>>> x
+	<table><tr><td>Something</td><td>Something Else</td></tr><tr><td>Another something</td><td>Another something else</td></
+	tr></table>
+	>>> x[0]
+	<tr><td>Something</td><td>Something Else</td></tr>
+	>>> x[0].qname
+	u'tr'
+	>>> x[1]
+	<tr><td>Another something</td><td>Another something else</td></tr>
+	>>> x[0][0].text
+	u'Something'
+	>>> x[0][0]
+	<td>Something</td>
+	>>> x('tr/td')
+	(<td>Something</td>, <td>Something Else</td>, <td>Another something</td>, <td>Another something else</td>)
+	>>> x('tr')
+	(<tr><td>Something</td><td>Something Else</td></tr>, <tr><td>Another something</td><td>Another something else</td></tr>)	
+	>>> x('/')
+	<table><tr><td>Something</td><td>Something Else</td></tr><tr><td>Another something</td><td>Another something else</td></
+	tr></table>
+	>>> x('/tr')
+	(<tr><td>Something</td><td>Something Else</td></tr>, <tr><td>Another something</td><td>Another something else</td></tr>)
+	>>> x.children
+	[<tr><td>Something</td><td>Something Else</td></tr>, <tr><td>Another something</td><td>Another something else</td></tr>]
+	>>> x.children[0]
+	<tr><td>Something</td><td>Something Else</td></tr>
+	>>> x.children[1].children
+	[<td>Another something</td>, <td>Another something else</td>]
+
+#### Manipulating attributes
+
+You can access all of an element's attributes via the `attributes` property of the element.
+
+	>>> x = Element('t', {'id': 1234, 'name': 'John Doe'})
+	>>> x['id']
+	'1234'
+	>>> x['id'] = 5
+	>>> x
+	<t id="5" name="John Doe" />
+	>>> x['name'] = 17
+	>>> x
+	<t id="5" name="17" />
+	
+Note that trying to modify an attribute whose qname uses an unbound namespace prefix will raise an `Exception`.
+
+	>>> x = Element('t', {'id': 1234, 'name': 'John Doe'})
+	>>> x['test:x'] = 5
+	Traceback (most recent call last):
+	  ...
+	yaxl.UndeclaredNamespaceException: ...
+
+#### Mapping namespace prefixes
+
+To map a new namespace in an element, set an `xmlns:*` attribute to the URI to which the prefix should be bound. To bind the default namespace to a URI set the `xmlns` attribute. By default, the `xmlns` attribute is unset and the `xml` prefix is mapped to [http://www.w3.org/XML/1998/namespace](http://www.w3.org/XML/1998/namespace).
+
+	>>> x = Element('t', {'id': 1234, 'name': 'John Doe'})
+	>>> x['xmlns:test'] = 'http://example.org'
+	>>> x['test:x'] = 5
+	>>> x
+	<t xmlns:test="http://example.org" test:x="5" id="5" name="17" />
+	>>> x['xmlns:xml']
+	'http://www.w3.org/XML/1998/namespace'
+	>>> x['xmlns']
+	Traceback (most recent call last):
+	  ...
+	KeyError: 'xmlns'
+	>>> x['xmlns'] = 'http://test.org'
+	>>> x
+	<t xmlns:test="http://example.org" xmlns="http://test.org" test:x="5" id="5" name="17" />
+	
