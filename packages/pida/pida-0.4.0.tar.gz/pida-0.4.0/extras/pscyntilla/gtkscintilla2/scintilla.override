@@ -1,0 +1,1036 @@
+/* -*- Mode: C; c-basic-offset: 4 -*- 
+ * Copyright (c) 2002  Dennis J Houy <djhouy@paw.co.za>
+ * Copyright (c) 2001  Michele Campeotto <micampe@micampe.it>
+ * Copyright (c) 2006  Tiago Cogumbreiro <cogumbreiro@users.sf.net>
+ *
+ * License: LGPL
+ */
+%%
+headers
+#include <Python.h>
+#include <pygobject.h>
+#include <pygtk/pygtk.h>
+#include <gtkscintilla.h>
+#include "sci_exts.c"
+%%
+modulename scintilla
+%%
+import gobject.GObject as PyGObject_Type
+import gtk.Frame as PyGtkFrame_Type
+import gtk.gdk.Drawable as PyGdkDrawable_Type
+%%
+ignore-glob
+  *_get_type
+%%
+override gtk_scintilla_get_text kwargs
+static PyObject*
+_wrap_gtk_scintilla_get_text(PyGObject* self, PyObject* args, PyObject* kwargs)
+{
+    static char* kwlist[] = { "length", NULL };
+    int length = -1;
+    int c_res;
+    char *text;
+    PyObject* ret;
+    
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|i:GtkScintilla.get_text", 
+				     kwlist, &length)) {
+        return NULL;
+    }
+    
+    if (length < 0) {
+	length = gtk_scintilla_get_length(GTK_SCINTILLA(self->obj));
+    }
+    
+    text = (char*) g_malloc( MAX(sizeof(int), length+1) * sizeof(char) );
+    if (text == NULL) {
+	PyErr_NoMemory();
+	Py_INCREF(Py_None);
+	return Py_None;
+    }
+    
+    c_res = gtk_scintilla_get_text(GTK_SCINTILLA(self->obj), length+1, text);
+    
+    ret = Py_BuildValue("s#", text, c_res);
+    g_free(text);
+    
+    return ret;
+}
+%%
+override gtk_scintilla_get_sel_text kwargs
+static PyObject*
+_wrap_gtk_scintilla_get_sel_text(PyGObject* self, PyObject* args,
+				 PyObject* kwargs)
+{
+    static char* kwlist[] = { NULL };
+    char *text;
+    glong start, end;
+    int length;
+    int c_ret;
+    PyObject* ret;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, 
+				     ":GtkScintilla.get_sel_text", kwlist)) {
+        return NULL;
+    }
+    
+    start = gtk_scintilla_get_selection_start(GTK_SCINTILLA(self->obj));
+    end = gtk_scintilla_get_selection_end(GTK_SCINTILLA(self->obj));    
+    length = end-start;
+    
+    text = (char*) g_malloc(MAX(sizeof(int), length+1) * sizeof(char));
+    if (text == (char*) NULL) {
+	PyErr_NoMemory();
+	Py_INCREF(Py_None);
+	return Py_None;
+    }
+
+    c_ret = gtk_scintilla_get_sel_text(GTK_SCINTILLA(self->obj), text);
+
+    ret = Py_BuildValue("s#", text, length);
+    g_free(text);
+    
+    return ret;
+}
+%%
+override gtk_scintilla_get_line kwargs
+static PyObject*
+_wrap_gtk_scintilla_get_line(PyGObject* self, PyObject* args, PyObject* kwargs)
+{
+    static char* kwlist[] = { "line", NULL };
+    int line = 0;
+    int c_ret;
+    int length; 
+    char *text;
+    PyObject* ret; 
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i:GtkScintilla.get_line", 
+				     kwlist, &line)) {
+        return NULL;
+    }
+    
+    if (line < 0 || line >= gtk_scintilla_get_line_count(GTK_SCINTILLA(self->obj))) {
+        PyErr_SetString(PyExc_IndexError, "line index out of range");
+        return NULL;
+    }
+    
+    // count the number of lines
+    length = gtk_scintilla_line_length(GTK_SCINTILLA(self->obj), line);
+    
+    text = (char*) g_malloc(MAX(sizeof(int), length+1) * sizeof(char));
+    if (text == NULL) {
+        PyErr_NoMemory();
+        Py_INCREF(Py_None);
+        return Py_None;
+    }
+
+    c_ret = gtk_scintilla_get_line(GTK_SCINTILLA(self->obj), line, text);
+    text[c_ret] = (char) 0;
+
+    ret = Py_BuildValue("s#", text, c_ret);
+    g_free(text);
+
+    return ret;
+}
+%%
+override gtk_scintilla_get_cur_line kwargs
+static PyObject*
+_wrap_gtk_scintilla_get_cur_line(PyGObject* self, PyObject* args, 
+				 PyObject* kwargs)
+{
+    static char *kwlist[] = { "length", NULL };
+    int line = 0;
+    int length = -1; 
+    char *text;
+    int c_ret;
+    glong pos;
+    PyObject* ret;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, 
+				     "|i:GtkScintilla.get_cur_line", 
+				     kwlist, &length)) {
+        return NULL;
+    }
+    
+    if (length<0) {
+        pos = gtk_scintilla_get_current_pos(GTK_SCINTILLA(self->obj));
+        line = gtk_scintilla_line_from_position(GTK_SCINTILLA(self->obj), pos);
+        length = gtk_scintilla_line_length(GTK_SCINTILLA(self->obj), line);
+    }
+
+    text = (char*) g_malloc(MAX(sizeof(int), length+1) * sizeof(char));
+    if (text == NULL) {
+        PyErr_NoMemory();
+        Py_INCREF(Py_None);
+        return Py_None;
+    }
+    
+    c_ret = gtk_scintilla_get_cur_line(GTK_SCINTILLA(self->obj), 
+				       length+1, text);
+
+    ret = Py_BuildValue("(s#i)", text, strlen(text), c_ret);
+    free(text);
+
+    return ret;
+}
+%%
+override gtk_scintilla_get_text_range kwargs
+
+static PyObject*
+_get_text_range(PyGObject* self, int start, int end, int length)
+{
+    char *c_ret;
+    PyObject* ret;
+
+    if (start < 0 || end < 0 || end > length) {
+        PyErr_SetString(PyExc_ValueError, "Invalid text range");
+        return NULL;
+    }
+        
+    c_ret = gtk_scintilla_get_text_range(GTK_SCINTILLA(self->obj), 
+				         start, end, &length);
+
+    ret = Py_BuildValue("s#", c_ret, length);
+    g_free(c_ret);
+
+    return ret;
+}
+
+static PyObject*
+_wrap_gtk_scintilla_get_text_range(PyGObject* self, PyObject* args, 
+				   PyObject* kwargs)
+{
+    static char *kwlist[] = { "start", "end", NULL };
+    int start = -1; 
+    int end = -1; 
+    int length = 0;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, 
+				     "ii:GtkScintilla.get_text_range", 
+				     kwlist, &start, &end)) {
+        return NULL;
+    }
+    
+    length = gtk_scintilla_get_text_length(GTK_SCINTILLA(self->obj));
+    return _get_text_range(self, start, end, length);
+}
+%%
+override gtk_scintilla_get_selection kwargs
+static PyObject*
+_wrap_gtk_scintilla_get_selection(PyGObject* self, PyObject* args, 
+				  PyObject* kwargs)
+{
+    static char *kwlist[] = { NULL };
+    int start = -1; 
+    int end = -1; 
+    PyObject* ret;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, 
+				     ":GtkScintilla.get_selection", 
+				     kwlist)) {
+        return NULL;
+    }
+    
+    start = gtk_scintilla_get_selection_start(GTK_SCINTILLA(self->obj));
+    end = gtk_scintilla_get_selection_end(GTK_SCINTILLA(self->obj));
+
+    ret = Py_BuildValue("(ii)", start, end);
+
+    return ret;
+}
+%%
+override gtk_scintilla_set_selection kwargs
+static PyObject*
+_wrap_gtk_scintilla_set_selection(PyGObject* self, PyObject* args, 
+				  PyObject* kwargs)
+{
+    static char *kwlist[] = { "start", "end", NULL };
+    int start = -1; 
+    int end = -1; 
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, 
+				     "ii:GtkScintilla.set_selection", 
+				     kwlist, &start, &end)) {
+        return NULL;
+    }
+    
+    gtk_scintilla_set_selection_start(GTK_SCINTILLA(self->obj), start);
+    gtk_scintilla_set_selection_end(GTK_SCINTILLA(self->obj), end);
+    
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+%%
+override gtk_scintilla_get_target kwargs
+static PyObject*
+_wrap_gtk_scintilla_get_target(PyGObject* self, PyObject* args, 
+				  PyObject* kwargs)
+{
+    static char *kwlist[] = { NULL };
+    int start = -1; 
+    int end = -1; 
+    PyObject* ret;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, 
+				     ":GtkScintilla.get_target", 
+				     kwlist)) {
+        return NULL;
+    }
+    
+    start = gtk_scintilla_get_target_start(GTK_SCINTILLA(self->obj));
+    end = gtk_scintilla_get_target_end(GTK_SCINTILLA(self->obj));
+
+    ret = Py_BuildValue("(ii)", start, end);
+
+    return ret;
+}
+%%
+override gtk_scintilla_set_target kwargs
+static PyObject*
+_wrap_gtk_scintilla_set_target(PyGObject* self, PyObject* args, 
+				  PyObject* kwargs)
+{
+    static char *kwlist[] = { "start", "end", NULL };
+    int start = -1; 
+    int end = -1; 
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, 
+				     "ii:GtkScintilla.set_target", 
+				     kwlist, &start, &end)) {
+        return NULL;
+    }
+    
+    gtk_scintilla_set_target_start(GTK_SCINTILLA(self->obj), start);
+    gtk_scintilla_set_target_end(GTK_SCINTILLA(self->obj), end);
+    
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+%%
+override gtk_scintilla_scroll_to_line kwargs
+static PyObject*
+_wrap_gtk_scintilla_scroll_to_line(PyGObject* self, PyObject* args, 
+				   PyObject* kwargs)
+{
+    static char *kwlist[] = { "line", "hpos", NULL };
+    int hpos = 0;
+    int currlineno;
+    int lineno;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, 
+				     "i|i:GtkScintilla.scroll_to_line", 
+				     kwlist, &lineno, &hpos)) {
+        return NULL;
+    }
+
+    currlineno = gtk_scintilla_get_first_visible_line(GTK_SCINTILLA(self->obj));
+    gtk_scintilla_line_scroll(GTK_SCINTILLA(self->obj), hpos, lineno - currlineno);
+    
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+%%
+override gtk_scintilla_find_text kwargs
+static PyObject*
+_wrap_gtk_scintilla_find_text(PyGObject* self, PyObject* args, 
+			      PyObject* kwargs)
+{
+    static char *kwlist[] = { "flags", "text", "min", "max", NULL };
+    gint flags;
+    gchar *text;
+    glong chrg_min;
+    glong chrg_max;
+    glong text_min; 
+    glong text_max;
+    glong find_pos;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, 
+				     "isll:GtkScintilla.find_text", 
+				     kwlist, &flags, &text, &chrg_min, &chrg_max)) {
+        return NULL;
+    }
+
+    find_pos = gtk_scintilla_find_text (GTK_SCINTILLA(self->obj), flags, text,
+					chrg_min, chrg_max,
+					&text_min, &text_max);
+    if (find_pos < 0)
+	return Py_BuildValue("(ii)", -1, -1);
+    else
+	return Py_BuildValue("(ll)", text_min, text_max);
+}
+%%
+override gtk_scintilla_enable_folding kwargs
+/*static char *gtk_scintilla_enable_folding_doc = "Enable or disable folding for given scintilla.  \*/
+/*Args: scintilla, enable, style, internal.  Set enable to 0/1 to disable or enable. \*/
+/*Set internal=1 to additionally enable internal fold processing (which takes care \*/
+/*of fold changes w/o requiring a signal handler in Python).  Style is set to one of \*/
+/*0 for fold arrows, 1 for +/- fold indicators, 2 for flattened tree with round tabs, \*/
+/*and 3 for flattened tree with square tabs.  The defaults set here can be changed \*/
+/*using the low-level folding interface.  Caller must call colourise(0, -1) after \*/
+/*this call and any other customization made to the folding look.";*/
+static PyObject *
+_wrap_gtk_scintilla_enable_folding(PyGObject* self, PyObject* args, 
+				   PyObject* kwargs)
+{
+  static char *kwlist[] = { "enable", "style", "internal", NULL };
+  int enable;
+  int style;
+  int internal;
+  int width = 0;
+  int blue = (0xff << 16) | (0x00 << 8) | 0x00;
+  int white = (0xff << 16) | (0xff << 8) | 0xff;
+  int black = (0x00 << 16) | (0x00 << 8) | 0x00;
+  int ltblue = (0x80 << 16) | (0x30 << 8) | 0x30;
+    
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "iii:GtkScintilla.enable_folding", 
+				   kwlist, &enable, &style, &internal))
+    return NULL;
+
+  // Turn on internal folding implementation if requested
+  if (internal) {
+#ifdef INTERNAL_FOLDING
+    // Create signal map if needed
+    if (!gInternalFoldingMap) {
+      gInternalFoldingMap = PyDict_New();
+      if (!gInternalFoldingMap) {
+	PyErr_NoMemory();
+	return NULL;
+      }
+    }
+
+    // Only enable the first time for each scintilla
+    char ehex[128];
+    PyObject *pyone = PyInt_FromLong(1);
+    sprintf(ehex, "%x", int(self));
+    if (PyDict_GetItemString(gInternalFoldingMap, ehex) == NULL) {
+      // XXX Could also connect to gtkscintilla 'modified' but I ran
+      // XXX into glib marshall asserts and gave up
+      g_signal_connect (G_OBJECT(GTK_SCINTILLA(self->obj)->scintilla), "sci-notify",
+                        G_CALLBACK (internal_folding_cb), self->obj);
+      PyDict_SetItemString(gInternalFoldingMap, ehex, pyone);
+    }
+#else
+    Py_FatalError ("Error: scintilla_enable_folding called with internal=1 but internal folding is not compiled in");
+    return NULL;
+#endif
+  }
+
+  // Expand all before disabling
+  if (!enable)
+    __FoldAll(GTK_SCINTILLA(self->obj), 1);
+
+  // Compute required fold margin width
+  if (enable)
+    width = 15;
+    
+  // Set up folding margin and markers
+  gtk_scintilla_set_margin_type_n(GTK_SCINTILLA(self->obj), 2, SC_MARGIN_SYMBOL);
+  gtk_scintilla_set_margin_mask_n(GTK_SCINTILLA(self->obj), 2, SC_MASK_FOLDERS);
+  gtk_scintilla_set_margin_sensitive_n(GTK_SCINTILLA(self->obj), 2, enable);
+    
+  switch (style) {
+
+    // Arrows for fold expansion state indication
+    case 0:
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDEROPEN, SC_MARK_ARROWDOWN, blue, white);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDER, SC_MARK_ARROW, blue, white);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDERSUB, SC_MARK_EMPTY, black, black);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDERTAIL, SC_MARK_EMPTY, black, black);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDEREND, SC_MARK_EMPTY, white, black);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDEROPENMID, SC_MARK_EMPTY, white, black);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDERMIDTAIL, SC_MARK_EMPTY, white, black);
+      break;
+
+    // Plus/minus for fold expansion state indication
+    case 1:
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDEROPEN, SC_MARK_MINUS, blue, white);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDER, SC_MARK_PLUS, blue, white);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDERSUB, SC_MARK_EMPTY, white, black);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDERTAIL, SC_MARK_EMPTY, white, black);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDEREND, SC_MARK_EMPTY, white, black);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDEROPENMID, SC_MARK_EMPTY, white, black);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDERMIDTAIL, SC_MARK_EMPTY, white, black);
+      break;
+      
+    // Flattened tree control with curved headers
+    case 2:
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDEROPEN, SC_MARK_CIRCLEMINUS, blue, ltblue);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDER, SC_MARK_CIRCLEPLUS, blue, ltblue);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDERSUB, SC_MARK_VLINE, blue, ltblue);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDERTAIL, SC_MARK_LCORNERCURVE, blue, ltblue);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDEREND, SC_MARK_CIRCLEPLUSCONNECTED, blue, ltblue);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDEROPENMID, SC_MARK_CIRCLEMINUSCONNECTED, blue, ltblue);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDERMIDTAIL, SC_MARK_TCORNERCURVE, blue, ltblue);
+      break;
+      
+    // Flattened tree control with square headers
+    case 3:
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDEROPEN, SC_MARK_BOXMINUS, blue, ltblue);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDER, SC_MARK_BOXPLUS, blue, ltblue);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDERSUB, SC_MARK_VLINE, blue, ltblue);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDERTAIL, SC_MARK_LCORNER, blue, ltblue);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDEREND, SC_MARK_BOXPLUSCONNECTED, blue, ltblue);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDEROPENMID, SC_MARK_BOXMINUSCONNECTED, blue, ltblue);
+      _define_marker(GTK_SCINTILLA(self->obj), SC_MARKNUM_FOLDERMIDTAIL, SC_MARK_TCORNER, blue, ltblue);
+      break;
+      
+  }
+  // Enable/disable
+  gtk_scintilla_set_margin_width_n(GTK_SCINTILLA(self->obj), 2, width);
+  if (enable)
+    gtk_scintilla_set_property(GTK_SCINTILLA(self->obj), "fold", "1");
+  else
+    gtk_scintilla_set_property(GTK_SCINTILLA(self->obj), "fold", "0");
+
+  // Set some other reasonable options when enabling (should be prefs, really)
+  if (enable) {
+    
+    // For HTML
+    gtk_scintilla_set_property(GTK_SCINTILLA(self->obj), "fold.html", "1");
+    gtk_scintilla_set_property(GTK_SCINTILLA(self->obj), "fold.compact", "0");
+    
+    // For C/C++
+    gtk_scintilla_set_property(GTK_SCINTILLA(self->obj), "fold.comment", "1");
+    gtk_scintilla_set_property(GTK_SCINTILLA(self->obj), "styling.within.preprocessor", "1");
+
+    // For Python
+    gtk_scintilla_set_property(GTK_SCINTILLA(self->obj), "fold.comment.python", "1");
+    gtk_scintilla_set_property(GTK_SCINTILLA(self->obj), "fold.quotes.python", "1");
+  }
+  
+  // Done
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+%%
+override gtk_scintilla_fold_all kwargs
+/*static char *gtk_scintilla_fold_all_doc = "Fold up or expand all fold points in given \*/
+/*scintilla.  Args=expand.  Set expand=1 to expand all or 0 to fold all.";*/
+static PyObject *_wrap_gtk_scintilla_fold_all(PyGObject* self, PyObject* args, 
+				   	      PyObject* kwargs) {
+  static char *kwlist[] = { "expand", NULL };
+  int expand;
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i:GtkScintilla.fold_all", kwlist, &expand))
+    return NULL;
+
+  __FoldAll(GTK_SCINTILLA(self->obj), expand);
+      
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+%%
+override gtk_scintilla_expand_more kwargs
+/*static char *gtk_scintilla_expand_more_doc = "Expand fold point at given line number one \*/
+/*level deeper.  Args=lineno.";*/
+static PyObject *_wrap_gtk_scintilla_expand_more(PyGObject* self, PyObject* args, 
+						 PyObject* kwargs) {
+  static char *kwlist[] = { "lineno", NULL };
+  int lineno;
+  int this_level, prev_exp_level, exp_level, first_unexpanded;
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i:GtkScintilla.expand_more", kwlist, &lineno))
+    return NULL;
+    
+  __GetFoldExpansion(GTK_SCINTILLA(self->obj), lineno, &this_level, &prev_exp_level, 
+                     &exp_level, &first_unexpanded);
+                     
+  if ((this_level == -1) || (first_unexpanded == -1)) {
+    Py_INCREF(Py_None);
+    return Py_None;
+  }
+                     
+  gtk_scintilla_set_fold_expanded(GTK_SCINTILLA(self->obj), lineno, 1);
+  __FoldForceRecursive(GTK_SCINTILLA(self->obj), lineno, this_level, first_unexpanded, 1);
+    
+  // Done
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+%%
+override gtk_scintilla_collapse_more kwargs
+/*static char *gtk_scintilla_collapse_more_doc = "Collapse fold point at given line number one \*/
+/*level.  Args=lineno.";*/
+static PyObject *_wrap_gtk_scintilla_collapse_more(PyGObject* self, PyObject* args, 
+				   		   PyObject* kwargs) {
+  static char *kwlist[] = { "lineno", NULL };
+  int lineno;
+  int this_level, prev_exp_level, exp_level, first_unexpanded;
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i:GtkScintilla.collapse_more", kwlist, &lineno))
+    return NULL;
+    
+  __GetFoldExpansion(GTK_SCINTILLA(self->obj), lineno, &this_level, &prev_exp_level, 
+                     &exp_level, &first_unexpanded);
+  
+  if ((this_level == -1) || (prev_exp_level == -1)) {
+    Py_INCREF(Py_None);
+    return Py_None;
+  }
+                     
+  if (exp_level == this_level)
+    gtk_scintilla_set_fold_expanded(GTK_SCINTILLA(self->obj), lineno, 0);
+  else
+    gtk_scintilla_set_fold_expanded(GTK_SCINTILLA(self->obj), lineno, 1);
+  __FoldForceRecursive(GTK_SCINTILLA(self->obj), lineno, this_level, prev_exp_level, 
+                       (exp_level != this_level));
+    
+  // Done
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+%%
+override gtk_scintilla_expand_recursive kwargs
+/*static char *gtk_scintilla_expand_recursive_doc = "Expand all fold points below the \*/
+/*hierarchy at given line.  Args=lineno.";*/
+static PyObject *_wrap_gtk_scintilla_expand_recursive(PyGObject* self, PyObject* args, 
+				   		      PyObject* kwargs) {
+  static char *kwlist[] = { "lineno", NULL };
+  int lineno;
+  int level;
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i:GtkScintilla.expand_recursive", kwlist, &lineno))
+    return NULL;
+    
+  level = gtk_scintilla_get_fold_level(GTK_SCINTILLA(self->obj), lineno);
+  if (!(level & SC_FOLDLEVELHEADERFLAG)) {
+    Py_INCREF(Py_None);
+    return Py_None;
+  }
+
+  gtk_scintilla_set_fold_expanded(GTK_SCINTILLA(self->obj), lineno, 1);
+  __FoldForceRecursive(GTK_SCINTILLA(self->obj), lineno, level, kExpandAll, 1);
+    
+  // Done
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+%%
+override gtk_scintilla_collapse_recursive kwargs
+/*static char *gtk_scintilla_collapse_recursive_doc = "Collapse all fold points below the \*/
+/*hierarchy at given line.  Args=lineno.";*/
+static PyObject *_wrap_gtk_scintilla_collapse_recursive(PyGObject* self, PyObject* args, 
+				   			PyObject* kwargs) {
+  static char *kwlist[] = { "lineno", NULL };
+  int lineno;
+  int level;
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i:GtkScintilla.collapse_recursive", kwlist, &lineno))
+    return NULL;
+    
+  level = gtk_scintilla_get_fold_level(GTK_SCINTILLA(self->obj), lineno);
+  if (!(level & SC_FOLDLEVELHEADERFLAG)) {
+    Py_INCREF(Py_None);
+    return Py_None;
+  }
+
+  gtk_scintilla_set_fold_expanded(GTK_SCINTILLA(self->obj), lineno, 0);
+  __FoldForceRecursive(GTK_SCINTILLA(self->obj), lineno, level, kCollapseAll, 1);
+  
+  // Done
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+%%
+override gtk_scintilla_get_fold_expansion kwargs
+/*static char *gtk_scintilla_get_fold_expansion_doc = "Get the level to which the the given fold \*/
+/*point is expanded.  Args=lineno.  Returns quad tuple containing the fold \*/
+/*level of the line itself in this_level, the second to last fully expanded level, \*/
+/*the last fully expanded level, and the first unexpanded level.";*/
+static PyObject *_wrap_gtk_scintilla_get_fold_expansion(PyGObject* self, PyObject* args, 
+				   			PyObject* kwargs) {
+  static char *kwlist[] = { "lineno", NULL };
+  int lineno;
+  int this_level, prev_exp_level, exp_level, first_unexpanded;
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i:GtkScintilla.get_fold_expansion", kwlist, &lineno))
+    return NULL;
+    
+  __GetFoldExpansion(GTK_SCINTILLA(self->obj), lineno, &this_level, &prev_exp_level, 
+                     &exp_level, &first_unexpanded);
+                     
+  // Done
+  return Py_BuildValue("iiii", this_level, prev_exp_level, exp_level, first_unexpanded);  
+}
+%%
+override gtk_scintilla_macro_action kwargs
+static PyObject *_wrap_gtk_scintilla_macro_action(PyGObject *self, PyObject *args,
+                                                  PyObject *kwargs) {
+  PyObject *tuple;
+  int message;
+  uptr_t wParam;
+  sptr_t lParam;
+  int retval;
+  PyObject *pymessage;
+
+  // Extract fixed params
+  if (!PyArg_ParseTuple(args, "O!:scintilla_macro_action", &PyTuple_Type, &tuple))
+    return NULL;
+
+  // Get fixed parameter (message id)
+  pymessage = PyTuple_GetItem(tuple, 0);
+  message = PyInt_AsLong(pymessage);
+
+  // Unpack varying params
+  switch (message) {
+
+  // Package message parameters for those that have them
+  case SCI_REPLACESEL: {
+    PyObject *text = PyTuple_GetItem(tuple, 2);
+    lParam = (sptr_t) PyString_AsString(text);
+    wParam = 0;
+    break;
+  }
+  case SCI_ADDTEXT: {
+    PyObject *text = PyTuple_GetItem(tuple, 2);
+    lParam = (sptr_t) PyString_AsString(text);
+    wParam = 0;
+    break;
+  }
+  case SCI_INSERTTEXT: {
+    PyObject *text = PyTuple_GetItem(tuple, 2);
+    PyObject *pos = PyTuple_GetItem(tuple, 1);
+    lParam = (sptr_t) PyString_AsString(text);
+    wParam = (uptr_t) PyInt_AsLong(pos);
+    break;
+  }
+  case SCI_GOTOLINE: {
+    PyObject *pos = PyTuple_GetItem(tuple, 1);
+    lParam = 0;
+    wParam = (uptr_t) PyInt_AsLong(pos);
+    break;
+  }
+  case SCI_GOTOPOS: {
+    PyObject *pos = PyTuple_GetItem(tuple, 1);
+    lParam = 0;
+    wParam = (uptr_t) PyInt_AsLong(pos);
+    break;
+  }
+  case SCI_SEARCHNEXT: {
+    PyObject *text = PyTuple_GetItem(tuple, 2);
+    PyObject *mode = PyTuple_GetItem(tuple, 1);
+    lParam = (sptr_t) PyString_AsString(text);
+    wParam = (uptr_t) PyInt_AsLong(mode);
+    break;
+  }
+  case SCI_SEARCHPREV: {
+    PyObject *text = PyTuple_GetItem(tuple, 2);
+    PyObject *mode = PyTuple_GetItem(tuple, 1);
+    lParam = (sptr_t) PyString_AsString(text);
+    wParam = (uptr_t) PyInt_AsLong(mode);
+    break;
+  }
+  
+  // Message with no parameter
+  default: {
+    lParam = 0;
+    wParam = 0;
+    break;
+  }
+  }
+
+  // Determine whether the command will fail
+  // XXX Checks could be added here in the future... may not be needed
+#ifdef FUTURE
+  switch (message) {
+  case SCI_GOTOLINE:
+  case SCI_GOTOPOS:
+  case SCI_LINEDOWN:
+  case SCI_LINEDOWNEXTEND:
+  case SCI_LINEUP:
+  case SCI_LINEUPEXTEND:
+  case SCI_CHARLEFT:
+  case SCI_CHARLEFTEXTEND:
+  case SCI_CHARRIGHT:
+  case SCI_CHARRIGHTEXTEND:
+  case SCI_WORDLEFT:
+  case SCI_WORDLEFTEXTEND:
+  case SCI_WORDRIGHT:
+  case SCI_WORDRIGHTEXTEND:
+  case SCI_PAGEUP:
+  case SCI_PAGEUPEXTEND:
+  case SCI_PAGEDOWN:
+  case SCI_PAGEDOWNEXTEND:
+  case SCI_DELETEBACK:
+  case SCI_BACKTAB:
+  case SCI_DELWORDLEFT:
+  case SCI_DELWORDRIGHT:
+  }
+#endif
+
+  // Run the command
+  retval = gtk_scintilla_send_message(GTK_SCINTILLA(self->obj), message, wParam, lParam);
+
+  // Determine whether the command failed
+  switch (message) {
+  case SCI_SEARCHNEXT:
+  case SCI_SEARCHPREV:
+    if (retval != -1)
+      retval = 0;
+    break;
+  default:
+    retval = 0;
+    break;
+  }
+  
+  // Return 0 to indicate success, non-0 failure (macro should be aborted)
+  return PyInt_FromLong(retval);
+}
+%%
+override gtk_scintilla_doc_new kwargs
+static int
+_wrap_gtk_scintilla_doc_new(PyGObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = { NULL };
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, ":GtkScintillaDoc.__init__", kwlist))
+        return -1;
+    self->obj = (GObject *)gtk_scintilla_doc_new (NULL);
+
+    if (!self->obj) {
+        PyErr_SetString(PyExc_RuntimeError, "could not create GtkScintillaDoc object");
+        return -1;
+    }
+    pygobject_register_wrapper((PyObject *)self);
+    return 0;
+}
+%%
+override gtk_scintilla_doc_insert_string kwargs
+static PyObject *_wrap_gtk_scintilla_doc_insert_string(PyGObject* self,
+						       PyObject* args, 
+						       PyObject* kwargs) {
+  static char *kwlist[] = { "position", "str", NULL };
+  int position;
+  PyObject *str;
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs,
+				   "iS:GtkScintillaDoc.insert_string", kwlist,
+				   &position, &str))
+    return NULL;
+
+  if ( position < 0 ) {
+    PyErr_BadArgument();
+    return NULL;
+  }
+
+  gtk_scintilla_doc_insert_string(GTK_SCINTILLA_DOC(self->obj), position, 
+				  PyString_AsString(str), PyString_Size(str));
+
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+%%
+override gtk_scintilla_doc_get_char_range kwargs
+static PyObject *
+_wrap_gtk_scintilla_doc_get_char_range(PyGObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = { "position", "length", NULL };
+    PyObject *buffer;
+    int position, length;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "ii:GtkScintillaDoc.get_char_range", kwlist, &position, &length))
+        return NULL;
+
+    if ( position < 0 || length <= 0
+	 || position + length > gtk_scintilla_doc_length(GTK_SCINTILLA_DOC(self->obj)) ) {
+	PyErr_Format(PyExc_ValueError, "char range must be between 0 and document length");
+	return NULL;
+    }
+
+    buffer = PyString_FromStringAndSize(NULL, length);
+    if ( buffer == NULL )
+	return NULL;
+    gtk_scintilla_doc_get_char_range(GTK_SCINTILLA_DOC(self->obj),
+				     PyString_AsString(buffer), position,
+				     length);
+
+    return buffer;
+}
+%%
+override gtk_scintilla_doc_start_styling kwargs
+static PyObject *
+_wrap_gtk_scintilla_doc_start_styling(PyGObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = { "position", "flags", NULL };
+    int position;
+    char flags;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "ib:GtkScintillaDoc.start_styling", kwlist, &position, &flags))
+        return NULL;
+    gtk_scintilla_doc_start_styling(GTK_SCINTILLA_DOC(self->obj), position, flags);
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+%%
+override gtk_scintilla_doc_set_style_for kwargs
+static PyObject *
+_wrap_gtk_scintilla_doc_set_style_for(PyGObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = { "length", "style", NULL };
+    int length, ret;
+    char style;
+    PyObject *py_ret;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "ib:GtkScintillaDoc.set_style_for", kwlist, &length, &style))
+        return NULL;
+    ret = gtk_scintilla_doc_set_style_for(GTK_SCINTILLA_DOC(self->obj), length, style);
+    py_ret = ret ? Py_True : Py_False;
+    Py_INCREF(py_ret);
+    return py_ret;
+}
+%%
+override gtk_scintilla_doc_style_at kwargs
+static PyObject *
+_wrap_gtk_scintilla_doc_style_at(PyGObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = { "position", NULL };
+    int position;
+    gchar ret;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i:GtkScintillaDoc.style_at", kwlist, &position))
+        return NULL;
+    ret = gtk_scintilla_doc_style_at(GTK_SCINTILLA_DOC(self->obj), position);
+    return PyInt_FromLong(ret);
+}
+%%
+override gtk_scintilla_replace_target kwargs
+static PyObject *
+_wrap_gtk_scintilla_replace_target(PyGObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = { "text", NULL };
+    int length, ret;
+    char *text;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "s#:GtkScintilla.replace_target", kwlist, &text, &length))
+        return NULL;
+    ret = gtk_scintilla_replace_target(GTK_SCINTILLA(self->obj), length, text);
+    return PyInt_FromLong(ret);
+}
+
+%%
+override gtk_scintilla_append_text kwargs
+static PyObject *
+_wrap_gtk_scintilla_append_text(PyGObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = { "text", NULL };
+    int length;
+    char *text;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "s#:GtkScintilla.append_text", kwlist, &text, &length))
+        return NULL;
+
+    gtk_scintilla_append_text(GTK_SCINTILLA(self->obj), length, text);
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+%%
+override gtk_scintilla_add_text kwargs
+static PyObject *
+_wrap_gtk_scintilla_add_text(PyGObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = { "text", NULL };
+    int length;
+    char *text;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "s#:GtkScintilla.add_text", kwlist, &text, &length))
+        return NULL;
+
+    gtk_scintilla_add_text(GTK_SCINTILLA(self->obj), length, text);
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+%%
+override gtk_scintilla_get_char_at kwargs
+
+static PyObject*
+_wrap_gtk_scintilla_sq_getitem(PyGObject *self, int pos)
+{
+    int char_at;
+    
+    PyObject* ret;
+
+    if (pos < 0 || pos >= gtk_scintilla_get_length(GTK_SCINTILLA(self->obj))) {
+        PyErr_SetString(PyExc_IndexError, "character index out of range");
+        return NULL;
+    }
+    
+    char_at = gtk_scintilla_get_char_at(GTK_SCINTILLA(self->obj), pos);
+    ret = PyString_FromFormat("%c", char_at);
+    return ret;
+}
+
+static PyObject*
+_wrap_gtk_scintilla_get_char_at(PyGObject* self, PyObject* args, PyObject* kwargs)
+{
+    static char* kwlist[] = { "position", NULL };
+    glong pos = -1;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i:GtkScintilla.get_char_at",
+                        kwlist, &pos)) {
+        return NULL;
+    }
+    return _wrap_gtk_scintilla_sq_getitem(self, pos);
+}
+
+%%
+override gtk_scintilla_get_modify
+static PyObject*
+_wrap_gtk_scintilla_get_modify(PyGObject* self)
+{
+    int ret;
+
+    ret = gtk_scintilla_get_modify(GTK_SCINTILLA(self->obj));
+    return PyBool_FromLong(ret);
+}
+
+%%
+override gtk_scintilla_get_read_only noargs
+static PyObject*
+_wrap_gtk_scintilla_get_read_only(PyGObject* self)
+{
+    int ret;
+
+    ret = gtk_scintilla_get_read_only(GTK_SCINTILLA(self->obj));
+    return PyBool_FromLong(ret);
+}
+
+%%
+override-slot GtkScintilla.tp_as_sequence
+
+static int
+_wrap_gtk_scintilla_sq_length(PyGObject *self)
+{
+    return gtk_scintilla_get_length(GTK_SCINTILLA(self->obj));
+}
+
+static PyObject*
+_wrap_gtk_scintilla_sq_slice(PyGObject *self, int ilow, int ihigh)
+{
+    // get the total size
+    int len = gtk_scintilla_get_length(GTK_SCINTILLA(self->obj));
+
+    if (ilow < 0)
+        ilow += len;
+    if (ihigh < 0)
+        ihigh += len;
+    if (ilow >= len)
+        ilow = len-1;
+    if (ihigh > len)
+        ihigh = len;
+
+    return _get_text_range(self, ilow, ihigh, len);
+}
+
+static PySequenceMethods _wrap_gtk_scintilla_tp_as_sequence = {
+    (inquiry)_wrap_gtk_scintilla_sq_length,      // __len__
+    (binaryfunc)0,                               // __add__
+    (intargfunc)0,                               // __mul__
+    (intargfunc)_wrap_gtk_scintilla_sq_getitem,  // __getitem__
+    (intintargfunc)_wrap_gtk_scintilla_sq_slice, // __getslice__
+    (intobjargproc)0,                            // __setitem__
+    (intintobjargproc)0                          // __setslice__
+};
+
+%%

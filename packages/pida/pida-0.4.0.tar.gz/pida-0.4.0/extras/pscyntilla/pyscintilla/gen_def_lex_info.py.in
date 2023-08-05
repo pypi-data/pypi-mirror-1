@@ -1,0 +1,684 @@
+""" _gen_def_lex_info.py -- Generates Python file containing default
+settings for builtin scintilla lexers from a SciTE properties file.
+
+Copyright (c) 1999-2003, Archaeopteryx Software, Inc.  All rights reserved.
+
+Contact: info@wingware.com
+
+"""
+
+import sys
+import string
+import types
+import os
+
+kConstantsModule = 'sci_utils'
+
+class Name:
+  def __init__(self, name):
+    self.name = name
+
+  def __repr__(self):
+    return self.name
+
+  def __hash__(self):
+    return hash(self.name)
+
+  def __cmp__(self, other):
+    if isinstance(other, Name):
+      return cmp(self.name, other.name)
+    else:
+      return -1
+  
+# These two dictionaries need to be maintained manually when new lexers are
+# added.  Most other information is extracted from the SciTE properties files.
+# See also sci_utils, where document types and mime type info needs to be added.
+kIdForName = {
+  'cpp': Name(kConstantsModule + ".kCppDocument"),
+  'java': Name(kConstantsModule + ".kJavaDocument"),
+  'python': Name(kConstantsModule + ".kPythonDocument"),
+  'py': Name(kConstantsModule + ".kPythonDocument"),
+  'make': Name(kConstantsModule + ".kMakefileDocument"),
+  'makefile': Name(kConstantsModule + ".kMakefileDocument"),
+  'batch': Name(kConstantsModule + ".kDosBatchDocument"),
+  'vb': Name(kConstantsModule + ".kVBDocument"),
+  'vbscript': Name(kConstantsModule + ".kVBDocument"),
+  'html': Name(kConstantsModule + ".kHTMLDocument"),
+  'hypertext': Name(kConstantsModule + ".kHTMLDocument"),
+  'props': Name(kConstantsModule + ".kPropsDocument" ),
+  'errorlist': Name(kConstantsModule + ".kErrListDocument" ),
+  'msidl': Name(kConstantsModule + ".kMSIDLDocument"),
+  'sql': Name(kConstantsModule + ".kSQLDocument"),
+  'xml': Name(kConstantsModule + ".kXMLDocument"),
+  'latex': Name(kConstantsModule + ".kLatexDocument"),
+  'lua': Name(kConstantsModule + ".kLuaDocument"),
+  'idl': Name(kConstantsModule + ".kXPIDLDocument"),
+  'xpidl': Name(kConstantsModule + ".kXPIDLDocument"),
+  'javascript': Name(kConstantsModule + ".kJavascriptDocument"),
+  'rc': Name(kConstantsModule + ".kRCDocument"),
+  'plsql': Name(kConstantsModule + ".kPLSQLDocument"),
+  'php': Name(kConstantsModule + ".kPHPDocument"),
+  'perl': Name(kConstantsModule + ".kPerlDocument"),
+  'diff': Name(kConstantsModule + ".kDiffDocument"),
+  'conf': Name(kConstantsModule + ".kConfDocument"),
+  'pascal': Name(kConstantsModule + ".kPascalDocument"),
+  'ave': Name(kConstantsModule + ".kAveDocument"),
+  'ada': Name(kConstantsModule + ".kAdaDocument"),
+  'eiffel': Name(kConstantsModule + ".kEiffelDocument"),
+  'eiffelkw': Name(kConstantsModule + ".kEiffelDocument"),
+  'lisp': Name(kConstantsModule + ".kLispDocument"),
+  'scheme': Name(kConstantsModule + ".kLispDocument"),
+  'ruby': Name(kConstantsModule + ".kRubyDocument"),
+  'bash': Name(kConstantsModule + ".kBashDocument"),
+  'bullant': Name(kConstantsModule + ".kBullantDocument"),
+  'itcl': Name(kConstantsModule + ".kTCLDocument"),
+  'pascalclasses': Name(kConstantsModule + ".kPascalDocument"),
+  'css2': Name(kConstantsModule + ".kCSSDocument"),
+  'ada.operators': Name(kConstantsModule + ".kAdaDocument"),
+  'cs': Name(kConstantsModule + ".kCppDocument"),
+  'vbnet': Name(kConstantsModule + ".kVBDocument"),
+  'vbotherstatements': Name(kConstantsModule + ".kVBDocument"),
+  'fortran': Name(kConstantsModule + ".kFortranDocument"),
+  'f77': Name(kConstantsModule + ".kFortranDocument"),
+  'f95': Name(kConstantsModule + ".kFortranDocument"),
+  'TkCommands': Name(kConstantsModule + ".kTCLDocument"),
+  'ada.main': Name(kConstantsModule + ".kAdaDocument"),
+  'matlab': Name(kConstantsModule + ".kMatlabDocument"),
+  'docbook': Name(kConstantsModule + ".kDocbookDocument"),
+  'tcl': Name(kConstantsModule + ".kTCLDocument"),
+  'css': Name(kConstantsModule + ".kCSSDocument"),
+  'asm': Name(kConstantsModule + ".kASMDocument"),
+  'baan': Name(kConstantsModule + ".kBaanDocument"),
+  'nncron': Name(kConstantsModule + ".kNNCrontabDocument"),
+  'nncrontab': Name(kConstantsModule + ".kNNCrontabDocument"),
+  'tk': Name(kConstantsModule + ".kTCLDocument"),
+  'scriptol': Name(kConstantsModule + ".kScriptolDocument"),
+  'sol': Name(kConstantsModule + ".kScriptolDocument"),
+  'pov': Name(kConstantsModule + ".kPOVDocument"),
+  'escript': Name(kConstantsModule + ".kEScriptDocument"),
+  'lout': Name(kConstantsModule + ".kLOUTDocument"),
+  'mmixal': Name(kConstantsModule + ".kMMIXALDocument"),
+  'nsis': Name(kConstantsModule + ".kNSISDocument"),
+  'ps': Name(kConstantsModule + ".kPSDocument"),
+  'yaml': Name(kConstantsModule + ".kYAMLDocument"),
+  'vxml': Name(kConstantsModule + ".kVXMLDocument"),
+}
+
+kSclexForName = {
+  'cpp': Name(kConstantsModule + '.SCLEX_CPP'),
+  'java': Name(kConstantsModule + '.SCLEX_CPP'),
+  'python': Name(kConstantsModule + '.SCLEX_PYTHON'),
+  'py': Name(kConstantsModule + '.SCLEX_PYTHON'),
+  'make': Name(kConstantsModule + '.SCLEX_MAKEFILE'), 
+  'makefile': Name(kConstantsModule + '.SCLEX_MAKEFILE'), 
+  'batch': Name(kConstantsModule + '.SCLEX_BATCH'),
+  'vb': Name(kConstantsModule + '.SCLEX_VB'),
+  'vbscript': Name(kConstantsModule + '.SCLEX_VB'),
+  'html': Name(kConstantsModule + ".SCLEX_HTML"),
+  'hypertext': Name(kConstantsModule + ".SCLEX_HTML"),
+  'props': Name(kConstantsModule + '.SCLEX_PROPERTIES'),
+  'errorlist': Name(kConstantsModule + '.SCLEX_ERRORLIST'),
+  'msidl': Name(kConstantsModule + '.SCLEX_CPP'),
+  'sql': Name(kConstantsModule + '.SCLEX_SQL'),
+  'xml': Name(kConstantsModule + '.SCLEX_XML'),
+  'latex': Name(kConstantsModule + '.SCLEX_LATEX'),
+  'lua': Name(kConstantsModule + '.SCLEX_LUA'),
+  'idl': Name(kConstantsModule + '.SCLEX_CPP'),
+  'xpidl': Name(kConstantsModule + '.SCLEX_CPP'),
+  'javascript': Name(kConstantsModule + '.SCLEX_CPP'),
+  'rc': Name(kConstantsModule + '.SCLEX_CPP'),
+  'plsql': Name(kConstantsModule + '.SCLEX_SQL'),
+  'php': Name(kConstantsModule + '.SCLEX_HTML'),
+  'perl': Name(kConstantsModule + '.SCLEX_PERL'),
+  'diff': Name(kConstantsModule + '.SCLEX_DIFF'),
+  'conf': Name(kConstantsModule + '.SCLEX_CONF'),
+  'pascal': Name(kConstantsModule + '.SCLEX_PASCAL'),
+  'ave': Name(kConstantsModule + '.SCLEX_AVE'), 
+  'ada': Name(kConstantsModule + '.SCLEX_ADA'),
+  'eiffel': Name(kConstantsModule + '.SCLEX_EIFFEL'),
+  'eiffelkw': Name(kConstantsModule + '.SCLEX_EIFFEL'),
+  'lisp': Name(kConstantsModule + '.SCLEX_LISP'),
+  'scheme': Name(kConstantsModule + '.SCLEX_LISP'),
+  'ruby': Name(kConstantsModule + '.SCLEX_RUBY'),
+  'bash': Name(kConstantsModule + '.SCLEX_PERL'),
+  'bullant': Name(kConstantsModule + ".SCLEX_BULLANT"),
+  'itcl': Name(kConstantsModule + ".SCLEX_TCL"),
+  'pascalclasses': Name(kConstantsModule + ".SCLEX_PASCAL"),
+  'css2': Name(kConstantsModule + ".SCLEX_CSS"),
+  'ada.operators': Name(kConstantsModule + ".SCLEX_ADA"),
+  'cs': Name(kConstantsModule + ".SCLEX_CPP"),
+  'vbnet': Name(kConstantsModule + ".SCLEX_VB"),
+  'vbotherstatements': Name(kConstantsModule + ".SCLEX_VB"),
+  'fortran': Name(kConstantsModule + ".SCLEX_FORTRAN"),
+  'f77': Name(kConstantsModule + ".SCLEX_FORTRAN"),
+  'f95': Name(kConstantsModule + ".SCLEX_FORTRAN"),
+  'TkCommands': Name(kConstantsModule + ".SCLEX_TCL"),
+  'ada.main': Name(kConstantsModule + ".SCLEX_ADA"),
+  'matlab': Name(kConstantsModule + ".SCLEX_MATLAB"),
+  'docbook': Name(kConstantsModule + ".SCLEX_XML"),
+  'tcl': Name(kConstantsModule + ".SCLEX_TCL"),
+  'css': Name(kConstantsModule + ".SCLEX_CSS"),
+  'asm': Name(kConstantsModule + ".SCLEX_ASM"),
+  'baan': Name(kConstantsModule + ".SCLEX_BAAN"),
+  'nncron': Name(kConstantsModule + ".SCLEX_NNCRONTAB"),
+  'nncrontab': Name(kConstantsModule + ".SCLEX_NNCRONTAB"),
+  'tk': Name(kConstantsModule + ".SCLEX_TCL"),
+  'scriptol': Name(kConstantsModule + ".SCLEX_SCRIPTOL"),
+  'sol': Name(kConstantsModule + ".SCLEX_SCRIPTOL"),
+  'pov': Name(kConstantsModule + ".SCLEX_POV"),
+  'escript': Name(kConstantsModule + ".SCLEX_ESCRIPT"),
+  'lout': Name(kConstantsModule + ".SCLEX_LOUT"),
+  'mmixal': Name(kConstantsModule + ".SCLEX_MMIXAL"),
+  'nsis': Name(kConstantsModule + ".SCLEX_NSIS"),
+  'ps': Name(kConstantsModule + ".SCLEX_PS"),
+  'yaml': Name(kConstantsModule + ".SCLEX_YAML"),
+  'vxml': Name(kConstantsModule + ".SCLEX_HTML"),
+}
+
+for key in kSclexForName.keys():
+  if not kIdForName.has_key(key):
+    raise KeyError, "Consistency check failed key %s in kSclexForName but not kIdForName" % key
+for key in kIdForName.keys():
+  if not kSclexForName.has_key(key):
+    raise KeyError, "Consistency check failed key %s in kIdForName but not kSclexForName" % key
+  
+def ReadProperties(filename):
+  """ Reads contents of properties file into a list of lines, eliminating blank
+  lines & comments and joining continuation lines. """
+
+  f = open(filename)
+  line_list = []
+  last_line = ' '
+  for line in f.readlines():
+
+    # Trim newline
+    if len(line) != 0 and line[-1] == '\n':
+        line = line[:-1]
+
+    # Handle import in form "import module" (this filters out cases where
+    # import happens to be at start of a properties defn line)
+    if len(line) > len('import ') and line[0:len('import ')] == 'import ' and \
+       string.find(string.strip(line[len('import'):]), ' ') == -1:
+      importfile = string.strip(line[len('import'):])
+      importdir, ignore = os.path.split(filename)
+      importfp = os.path.join(importdir, importfile + '.properties')
+      if os.path.isfile(importfp):
+        imported_lines = ReadProperties(importfp)
+        for line in imported_lines:
+          line_list.append(line)
+
+    # Add regular non-comment line
+    if len(line) != 0 and line[0] != '#':
+      if last_line[-1] == '\\':
+        line_list[-1] = last_line[:-1] + line
+      else:
+        line_list.append(line)
+      last_line = line_list[-1]
+      
+  # Done
+  f.close()
+  return line_list
+
+def LinesToDict(line_list):
+  """ Convert line list into a dict of key / value, one entry per line """
+
+  dict = {}
+  for line in line_list:
+    if len(string.strip(line)) > 0 and string.find(line, '=') > 0:
+      eqpos = string.find(line, '=')
+      key = string.strip(line[:eqpos])
+      value = string.strip(line[eqpos+1:])
+      if len(key) != 0 and len(value) != 0:
+        dict[key] = value
+
+  return dict
+
+def ResolveKeyMatches(str, dict):
+  """ Resolve the $() delimiter in given string by looking up values
+  in the given dict.  Returns a list of all matches, since the $() may
+  refer to a list of things """
+
+  wildsplit = string.split(str, '$(')
+  if len(wildsplit) == 1:
+    return (str,)
+  assert(len(wildsplit) == 2)
+
+  closepos = string.find(wildsplit[1], ')')
+  if closepos == -1:
+    return (str,)
+
+  start = wildsplit[0]
+  wildcard = wildsplit[1][:closepos]
+  end = wildsplit[1][closepos+1:]
+
+  if dict.has_key(wildcard):
+    valuelist = dict[wildcard]
+    values = string.split(valuelist, ';')
+    retval = []
+    for value in values:
+      match = start + value + end
+      retval.append(match)
+    return retval
+
+  else:
+    return ("",)
+
+def ResolveKeyReferences(dict):
+  """ Convert all $() delimited references in keys in the given dict into
+  plain ascii values; returns a dict with all-expanded keys """
+
+  new_dict = {}
+  for key in dict.keys():
+    matches = ResolveKeyMatches(key, dict)
+    for match in matches:
+      new_dict[match] = dict[key]
+  return new_dict
+
+def FilterLines(line_list, prefix, file_dict):
+  """ Returns dictionary composed from lines beginning with given prefix.  Keys
+  will be everything between the end of the prefix and the 1st = sign. """
+  
+  dict = {}
+  for line in line_list:
+    if string.find(line, prefix) == 0:
+      split_list = string.split(line, '=')
+      key = split_list[0]
+      value = string.strip(string.join(split_list[1:], '='))
+      key = string.strip(key[len(prefix):])
+
+      if len(key) != 0 and len(value) != 0:
+        dict[ResolveReferences(key, file_dict)] = ResolveReferences(value, file_dict)
+  return dict
+  
+def ResolveReferences(str, dict):
+  """ Convert all $() delimited references in the string into the real
+  value.  Any references not found will be treated as blank values. """
+
+  wildsplit = string.split(str, '$(')
+  if len(wildsplit) == 1:
+    return str
+
+  retval = wildsplit[0]
+  for item in wildsplit[1:]:
+    closepos = string.find(item, ')')
+    assert(closepos) > 0
+
+    wildcard = item[:closepos]
+    end = item[closepos+1:]
+
+    if dict.has_key(wildcard):
+      retval = retval + dict[wildcard] + end
+    else:
+      retval = retval + end
+
+  return ResolveReferences(retval, dict)
+
+def FindKeywordClasses(line_list, dict):
+  return FilterLines(line_list, 'keywordclass.', dict)    
+
+def FindFilePatterns(line_list, dict, omit_keys=[]):
+  """Get map from *.xxx[;*.yyy]... file extension spec to name of document type"""
+  patterns = FilterLines(line_list, 'file.patterns.', dict)
+  retval = {}
+  for key, value in patterns.items():
+    if not key in omit_keys:
+      if retval.has_key(value):
+        print "ERROR: Duplicate patterns for doctype %s and %s" % (key, retval[value])
+      retval[value] = key
+  return retval
+
+def FindExtraKeywordLists(line_list, dict, pat_map):
+  """Get map from document type to extra keyword lists"""
+  retval = {}
+  for i in range(2, 9):
+    keywords = FilterLines(line_list, 'keywords%i.' % i, dict)
+    for pattern, value in keywords.items():
+      doctype = pat_map.get(pattern)
+      if doctype is None:
+        print "ERROR: Bad level-%i keyword file type: %s" % (i, key)
+        print "ERROR: No matching doctype found"
+      elif not kIdForName.has_key(doctype):
+        print "Warning: Omitting extra keywords for doctype %s (not found)" % doctype
+      else:
+        print "Doctype %s: keywords%i len=%i" % (doctype, i, len(value))
+        doctype_keywords = retval.get(kIdForName[doctype], {})
+        retval[kIdForName[doctype]] = doctype_keywords
+        doctype_keywords[i-1] = value
+  return retval
+    
+def GetStyleDict(str_value):
+  """ Return dictionary of info from style property definition. """
+
+  dict = {}
+  part_list = map(string.strip, string.split(str_value, ','))
+  for part in part_list:
+    if string.find(part, ':') == -1:
+      name = part
+      value = 1
+    else:
+      name, value = map(string.strip, string.split(part, ':'))
+
+    if name == 'size':
+      value = string.atoi(value)
+    dict[name] = value
+
+  return dict
+
+def MergeDicts(d1, d2, overwrite):
+  """ Merges values fron d2 into d1.  Previous values will be overwritten
+  iff overwrite is true. """
+
+  for key, value in d2.items():
+    if overwrite or not d1.has_key(key):
+      d1[key] = value
+      
+def FindStyles(line_list, dict):
+  """ Find style definitions in given line list."""
+
+  ret_dict = {}
+  line_dict = FilterLines(line_list, 'style.', dict)
+  for key, value in line_dict.items():
+    lexer, state = string.split(key, '.')
+    if state != '*':
+      state = string.atoi(state)
+
+    lex_dict = ret_dict.get(lexer)
+    if lex_dict == None:
+      ret_dict[lexer] = lex_dict = {}
+
+    style_dict = GetStyleDict(value)
+    state_dict = lex_dict.get(state)
+    if state_dict == None:
+      lex_dict[state] = style_dict
+    else:
+      lex_dict[state].update(style_dict)
+    
+  # Set default values where not overridden
+  def_dict = ret_dict.get('*')
+  if def_dict != None:
+    del ret_dict['*']
+    for lex_id, lex_map in ret_dict.items():
+      for def_state, def_value in def_dict.items():
+        lex_state = lex_map.get(def_state)
+        if lex_state == None:
+          lex_state = {}
+          lex_map[def_state] = lex_state
+        MergeDicts(lex_state, def_value, 0)
+        
+  return ret_dict
+
+def FindDocumentTypes(name_dict):
+  """ Transform language names to lexer ids. """
+
+  id_dict = {}
+  for name, value in name_dict.items():
+    id = kIdForName.get(name)
+    if id != None:
+      id_dict[id] = value
+    else:
+      print 'Unknown language type:', name
+
+  return id_dict
+
+def EscapeQuote(s, q):
+  """ Returns given string with all q characters and '\' escaped. """
+
+  parts = string.split(s, '\\')
+  if len(parts) != 1:
+    s = string.join(parts, '\\\\')
+  parts = string.split(s, q)
+  if len(parts) != 1:
+    s = string.join(parts, '\\' + q)
+  return s
+
+def PrettyPrintString(s, max_line_len, first_col, out):
+  """ Prints a string with escape chars if necessary. """
+
+  avail = max_line_len - first_col
+  if avail < 15:
+    avail = 15
+  if len(s) < avail:
+    out.write('"%s"' % EscapeQuote(s, '"'))
+  else:
+    i = 0
+    out.write('(\n')
+    first_col = first_col + 2
+    out.write(first_col * ' ')
+    while i < len(s):
+      count = avail
+      if count < len(s) - i:
+        while count > 0 and s[i + count] != ' ':
+          count = count - 1
+        if count == 0:
+          count = avail
+
+      out.write('"%s"' % EscapeQuote(s[i:i + count], '"'))
+      i = i + count
+      if i < len(s):
+        out.write('\n')
+        out.write(first_col * ' ')
+    out.write('\n' + (first_col - 2) * ' ' + ')')
+
+def PrettyPrintDictValue(val_dict, start_col, out, omit_keys=[], omit_addons={}):
+
+  if len(val_dict) == 0:
+    out.write('{}')
+  else:
+    out.write('{\n')
+    start_col = start_col + 2
+    out.write(start_col * ' ')
+    indent = start_col * ' '
+    first = 1
+    items = val_dict.items()
+    items.sort()
+    for id, value in items:
+      if id not in omit_keys:
+        if not first:
+          out.write(indent)
+        first = 0
+        if type(id) == types.StringType:
+          out.write('"%s": ' % id)
+        else:
+          out.write('%s: ' % str(id))
+        if type(value) == types.StringType:
+          PrettyPrintString(value, 75, len(indent) + 2, out)
+        elif type(value) == types.DictType:
+          PrettyPrintDictValue(value, len(indent) + 2, out, omit_keys +
+                               omit_addons.get(id, []), omit_addons)
+        elif type(value) == types.IntType:
+          out.write(str(value))
+        else:
+          out.write(repr(value))
+        out.write(',\n')
+  
+    out.write('\n' + (start_col - 2) * ' ' + '}')
+  
+def PrettyPrintDictInit(name, val_dict, indent, out, omit_keys=[], omit_addons={}):
+  """ Write python code to bind name to a new dictionary with the given val_dict.
+  The values of val_dict must be strings. """
+
+  prefix = indent + name + ' = '
+  out.write(prefix)
+  PrettyPrintDictValue(val_dict, len(indent) + 2, out, omit_keys, omit_addons)
+  out.write('\n')
+   
+def WriteLexerForDocTypeDict(out):
+  """Write dict from file patterns to lexer name"""
+
+  cvt = {}
+  for name, doctype in kIdForName.items():
+    lexer = kSclexForName[name]
+    cvt[doctype] = lexer
+
+  PrettyPrintDictInit('kLexerForDocType', cvt, '', out)
+
+def WriteFilePatternDict(dict, out):
+  """Write dict from file patterns to lexer name"""
+
+  cvt = {}
+  for patterns, doctype in dict.items():
+    exts = patterns.split(';')
+    for ext in exts:
+      if kSclexForName.has_key(doctype) and kIdForName.has_key(doctype):
+        cvt[ext] = (kSclexForName[doctype], kIdForName[doctype])
+      else:
+        print "Warning: Skipping doctype %s (not found)" % doctype
+
+  PrettyPrintDictInit('kFilePatterns', cvt, '', out)
+
+def WriteKeywordDict(dict, out):
+  """ Write python code to create default keyword dictionary. """
+
+  PrettyPrintDictInit('kDefaultKeywords', dict, '', out, omit_keys)
+
+def WriteExtraKeywordsDict(dict, out):
+  """Write dict from doctype to dict from keyword list number to keywords
+  for extra keywords that get set up in addition to the primary list
+  for lexers"""
+
+  PrettyPrintDictInit('kExtraKeywords', dict, '', out)
+                      
+def WriteStyleDicts(dict, out, omit_keys=[], omit_addons={}):
+  """ Write python code to create default keyword dictionary. """
+
+  dict_of_dicts = {}
+  items = dict.items()
+  items.sort()
+  for lex_name, value in items:
+    name = 'kDefault%sStyles' % lex_name
+    PrettyPrintDictInit(name, value, '', out, omit_keys, omit_addons)
+    if kSclexForName.has_key(lex_name):
+      dict_of_dicts[kSclexForName[lex_name]] = Name(name)
+    else:
+      print 'Unknown lexer name:', lex_name
+
+  PrettyPrintDictInit('kDefStylesForLexer', dict_of_dicts, '', out, omit_keys)
+
+def WriteLexerStateNames(out):
+  
+  kLexerForPrefix = { 'B': Name(kConstantsModule + '.SCLEX_VB'),
+                      'F': Name(kConstantsModule + '.SCLEX_F77'),
+                      'C': Name(kConstantsModule + '.SCLEX_CPP'),
+                      'P': Name(kConstantsModule + '.SCLEX_PYTHON'),
+                      }
+  
+  
+  name_dict = {}
+  
+  f = open('sci_names.py')
+  for line in f:
+    if line.startswith('SCE_') and '=' in line:
+      name, val = [s.strip() for s in line.split('=')[:2]]
+      parts = name[4:].split('_')
+      if parts[0].startswith('H'):
+        if parts[0] == 'H':
+          parts = parts[1:]
+        elif parts[0] == 'HB':
+          parts = ['VISUALBASIC'] + parts[1:]
+        elif parts[0] == 'HBA':
+          parts = ['ASP', 'VISUALBASIC'] + parts[1:]
+        elif parts[0] == 'HP':
+          parts = ['PYTHON'] + parts[1:]
+        elif parts[0] == 'HPA':
+          parts = ['ASP', 'PYTHON'] + parts[1:]
+        elif parts[0] == 'HJ':
+          parts = ['JAVASCRIPT'] + parts[1:]
+        elif parts[0] == 'HJA':
+          parts = ['ASP', 'JAVASCRIPT'] + parts[1:]
+        else:
+          print parts
+          parts = [parts[0][1:]] + parts[1:]
+        parts = ['HTML', '_'.join(parts)]
+        
+      if len(parts) != 2:
+        parts = [parts[0], '_'.join(parts[1:])]
+
+      lexer_name, state_name = parts
+      lexer = kLexerForPrefix.get(lexer_name)
+      if lexer is not None:
+        if lexer not in name_dict:
+          name_dict[lexer] = {}
+        name_dict[lexer][state_name.lower()] = int(val)
+  f.close()
+
+  print name_dict.keys()
+  PrettyPrintDictInit('kStateNamesForLexer', name_dict, '', out)
+
+def WriteLexerForName(out):
+
+  prefix = kConstantsModule + '.SCLEX_'
+  name_dict = {}
+  reverse = {}
+  for l in kSclexForName.values():
+    if l.name.startswith(prefix):
+      name = l.name[len(prefix):]
+      name_dict[name] = l
+      reverse[l] = name
+  PrettyPrintDictInit('kLexerForName', name_dict, '', out)
+  PrettyPrintDictInit('kNameForLexer', reverse, '', out)
+
+if __name__ == '__main__':
+  if len(sys.argv) < 3:
+    print 'Usage: %s <options> <scite-properties-file> <output-python-file>' % sys.argv[0]
+    print 'Valid Options:'
+    print '  --no-fonts      -- Do not output font or size specifiers (to use defaults)'
+    print '  --no-html-bg    -- Do not output background specifiers for HTML scripting languages'
+    sys.exit()
+  in_filename = sys.argv[-2]
+  out_filename = sys.argv[-1]
+  omit_keys = []
+  if '--no-fonts' in sys.argv:
+    omit_keys.append('font')
+    omit_keys.append('size')
+  omit_addons = {}
+  if '--no-html-bg' in sys.argv:
+    for i in range(38, 128):
+      omit_addons[i] = ['back']
+      
+  # Read all the default properties from SciTE
+  line_list = ReadProperties(in_filename)
+      
+  # Hack to make up for items missing from properties files
+  line_list.append("keywordclass.perl=$(keywords.*.pl)")
+  line_list.append("keywordclass.bash=$(keywords.*.sh)")
+  line_list.append("keywordclass.conf=$(keywords.*.conf)")
+  line_list.append("keywordclass.sql=$(keywords.*.sql)")
+  line_list.append("keywordclass.plsql=$(keywords.*.spec)")
+  line_list.append("file.patterns.css=*.css")
+  line_list.append("file.patterns.java=*.java")
+  line_list.append("file.patterns.javascript=*.js")
+  line_list.append("file.patterns.errorlist=*.err")
+  line_list.append("file.patterns.diff=*.diff;*.dif;*.diffs;*.cdif;*.cdiff;*.patch")
+  line_list.append("file.patterns.ruby=*.rb")
+  line_list.append("file.patterns.tcl=*.tcl;*.itcl;*.tk")
+  
+  # Convert into dicts
+  line_dict = LinesToDict(line_list)
+  resolved_dict = ResolveKeyReferences(line_dict)
+  dict = FindKeywordClasses(line_list, resolved_dict)
+  kw_dict = FindDocumentTypes(dict)
+  st_dict = FindStyles(line_list, resolved_dict)
+  print "Found lexers: ",
+  for x in st_dict.keys():
+    print x, 
+  print ''
+  patterns = FindFilePatterns(line_list, resolved_dict, omit_keys=['braces'])
+  extra_keywords = FindExtraKeywordLists(line_list, resolved_dict, patterns)
+
+  # Write file header
+  out_file = open(out_filename, 'w')
+  out_file.write("# Default setting for scintilla's builtin lexers\n")
+  out_file.write("# Generated from %s\n" % in_filename)
+  out_file.write("\n")
+  out_file.write("import %s\n" % kConstantsModule)
+  out_file.write("\n")
+
+  # Write the dicts
+  WriteLexerForDocTypeDict(out_file)
+  WriteLexerForName(out_file)
+  WriteLexerStateNames(out_file)
+  WriteFilePatternDict(patterns, out_file)
+  WriteKeywordDict(kw_dict, out_file)
+  WriteExtraKeywordsDict(extra_keywords, out_file)
+  WriteStyleDicts(st_dict, out_file, omit_keys, omit_addons)
+
