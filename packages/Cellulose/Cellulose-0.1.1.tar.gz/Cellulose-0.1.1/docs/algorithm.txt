@@ -1,0 +1,96 @@
+Algorithm Description
+=====================
+
+A big goal I had when designing cellulose is to keep it simple enough that
+anyone who wants to use it could fully understand how it works.
+
+This document should give a good overview.
+
+There are three basic steps involved::
+    1. Dependency discovery
+    2. Change notification
+    3. Change verification
+
+
+Dependency discovery
+--------------------
+
+For dependency discovery, a global 'stack' is used, named
+`dependant_cell_stack`.
+
+When a cell wants to begin gathering dependencies, it pushes itself onto the
+dependant_cell_stack.
+
+When a cell is accessed it checks the top of the dependant_cell_stack and:
+    1. The accessed cell adds itself as a *dependency* of cell on the stack.
+    2. The cell on the stack is added as a *dependant* of the accessed cell.
+
+The cell then pops itself off of the stack when it is done gathering
+dependencies.
+
+
+Change notification
+-------------------
+
+Change notifications come in two different types, "Changed" and "Possibly
+Changed".
+
+When a cell is changed, (and knows for sure that it has changed), it alerts all
+of its *dependants* that it has changed.  (No arguments are passed.)
+
+When a cell is alerted that one of its dependencies has *changed*, it marks
+itself as *dirty*.  (ie, the cached value needs to be recalculated.)  It then
+must in turn alert *its dependants.*  However, just because the dependency has
+changed, does not mean that *this cell* has changed.  (This cannot be determined
+until the cell is recalculated, but it should not be recalculated until its
+value is needed.  ie, it must be done lazily.)  So, the cell alerts all its
+dependants that it has *possibly changed.*
+
+When a cell is alerted that one of its dependencies has *possibly changed*, it
+adds that dependencies to its *list of possibly changed dependencies*, and then
+in turn alerts its dependencies that it has possibly changed.  (This only
+happens when the cell is not already marked as dirty.)
+
+
+Note that when a cell changes, all cells that eventually depend on it are
+alerted of a change *immediately*.  No cell may be accessed during this process.
+This guarantees that when you access a cell the value you get is fully up to
+date in relation to the values it was generated from.
+
+
+Basic operation of a ComputedCell
+---------------------------------
+
+When a (computed) cell is accessed, it must decide to either return the cached
+value, or recalculate the value.
+
+  * If it is not already marked 'dirty', it first asks the cells in its *list of
+    possibly changed dependencies* to verify if they have changed or not.  (This
+    normally involves calculating their values.)
+
+  * If after this it is still not marked 'dirty' the *cached* value is returned.
+
+Generating the value involves these steps:
+
+  * Clear the list of dependencies, storing the previous list locally.
+
+  * Push itself onto the dependant_cell_stack
+
+  * run the function for generating the value.
+
+  * Pop itself from the dependant_cell_stack
+
+  * All of the cells that were previously dependencies, but did not report in
+    the last run, are disassociated with.
+
+  * If the new value is different to the old value the cell notifies its
+    dependants that it has changed, as described above.
+
+  * The cell is marked not 'dirty'; the value is cached and returned.
+
+(Funny, the method that this all happens in is actually shorter than this
+description!  It might even be easier to understand, too.)
+
+Note that ComputedCell is only one possible usage of a cell that depends on
+others.  There is nothing in the core that requires a cell to be associated with
+a value.
