@@ -1,0 +1,52 @@
+#!/usr/bin/env python
+
+# This preamble is adapted from Twisted. If we're being run from a source
+# tree, add that tree's libdir to our path, so tahoe can be run from source
+# without a lot of tedious PYTHONPATH changes.
+import sys, os.path
+where = os.path.realpath(sys.argv[0]).split(os.sep)
+
+# look for Tahoe.home . Two cases:
+#  ...(not BASE)/tahoe
+#  .../(BASE)/bin/tahoe
+if len(where) >= 2 and where[-2] == "bin":
+    base = os.sep.join(where[:-2])
+
+    if os.path.exists(os.path.join(base, "Tahoe.home")):
+        # we've found our home. Put the tahoe source at the front of sys.path
+        srcdir = os.path.join(base, "src")
+        sys.path.insert(0, srcdir)
+        # and put any support eggs at the end of sys.path
+        if sys.platform == "win32":
+            supportdir = os.path.join(base, "support", "Lib", "site-packages")
+        else:
+            supportdir = os.path.join(base, "support",
+                                      "lib",
+                                      "python%d.%d" % sys.version_info[:2],
+                                      "site-packages")
+        support_eggs = []
+        if os.path.exists(supportdir):
+            for fn in os.listdir(supportdir):
+                if fn.endswith(".egg"):
+                    support_eggs.append(os.path.join(supportdir, fn))
+
+        # We also need to include .egg's in the base dir, because if there is an
+        # .egg there then "make build-deps" will take that as satisfying its
+        # requirements.
+        for fn in os.listdir(base):
+            if fn.endswith(".egg"):
+                support_eggs.append(os.path.abspath(os.path.join(base, fn)))
+
+        sys.path.extend(support_eggs)
+
+        # also update PYTHONPATH so that child processes (like twistd) will
+        # use this too
+        pp = os.environ.get("PYTHONPATH")
+        if pp:
+            pp = os.pathsep.join([srcdir] + pp.split(os.pathsep) + support_eggs)
+        else:
+            pp = os.pathsep.join([srcdir] + support_eggs)
+        os.environ["PYTHONPATH"] = pp
+
+from allmydata.scripts import runner
+runner.run()
