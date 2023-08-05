@@ -1,0 +1,155 @@
+"""SelectorList is a list of CSS Selector objects.
+
+TODO
+    - ??? CSS2 gives a special meaning to the comma (,) in selectors.
+        However, since it is not known if the comma may acquire other
+        meanings in future versions of CSS, the whole statement should be
+        ignored if there is an error anywhere in the selector, even though
+        the rest of the selector may look reasonable in CSS2.
+
+        Illegal example(s):
+
+        For example, since the "&" is not a valid token in a CSS2 selector,
+        a CSS2 user agent must ignore the whole second line, and not set
+        the color of H3 to red:
+"""
+__all__ = ['SelectorList']
+__docformat__ = 'restructuredtext'
+__author__ = '$LastChangedBy: cthedot $'
+__date__ = '$LastChangedDate: 2007-10-16 21:41:43 +0200 (Di, 16 Okt 2007) $'
+__version__ = '$LastChangedRevision: 486 $'
+
+import xml.dom
+import cssutils
+from selector import Selector
+
+class SelectorList(cssutils.util.Base, list):
+    """
+    (cssutils) a list of Selectors of a CSSStyleRule
+
+    Properties
+    ==========
+    length: of type unsigned long, readonly
+        The number of Selector elements in the list.
+    selectorText: of type DOMString
+        The textual representation of the selector for the rule set. The
+        implementation may have stripped out insignificant whitespace while
+        parsing the selector.
+    seq:
+        A list of interwoven Selector objects and u','
+    """
+    def __init__(self, selectorText=None, readonly=False):
+        """
+        initializes SelectorList with optional selectorText
+        """
+        super(SelectorList, self).__init__()
+
+        self.seq = []
+        if selectorText:
+            self.selectorText = selectorText
+        self._readonly = readonly
+
+    def appendSelector(self, newSelector):
+        """
+        append a new Selector made from newSelector
+        returns new Selector
+
+        DOMException on setting
+
+        - SYNTAX_ERR: (self)
+          Raised if the specified CSS string value has a syntax error
+          and is unparsable.
+        - NO_MODIFICATION_ALLOWED_ERR: (self)
+          Raised if this rule is readonly.
+        """
+        self._checkReadonly()
+        
+        if not isinstance(newSelector, Selector):
+            newSelector = Selector(newSelector)
+
+        if newSelector.valid:
+            newseq = []
+            for s in self.seq:
+                if s.selectorText != newSelector.selectorText:
+                    newseq.append(s)
+            newseq.append(newSelector)
+            self.seq = newseq
+            return True
+        else:
+            return False
+
+    def _getLength(self):
+        return len(self.seq)
+
+    length = property(_getLength,
+        doc="The number of Selector elements in the list.")
+
+    def _getSelectorText(self):
+        """ returns serialized format """
+        return cssutils.ser.do_css_SelectorList(self)
+
+
+    def _setSelectorText(self, selectorText):
+        """
+        selectortext
+            comma-separated list of selectors
+
+        DOMException on setting
+
+        - SYNTAX_ERR: (self)
+          Raised if the specified CSS string value has a syntax error
+          and is unparsable.
+        - NO_MODIFICATION_ALLOWED_ERR: (self)
+          Raised if this rule is readonly.
+        """
+        self._checkReadonly()
+        valid = True
+        tokenizer = self._tokenize2(selectorText)
+        newseq = []
+
+        expected = True
+        while True:
+            # find all upto and including next ",", EOF or nothing
+            selectortokens = self._tokensupto2(tokenizer, listseponly=True)
+            if selectortokens:
+                if self._tokenvalue(selectortokens[-1]) == ',':
+                    expected = selectortokens.pop()
+                else:
+                    expected = None
+
+                selector = Selector(selectortokens)
+                if selector.valid:
+                    newseq.append(selector)
+                else:
+                    valid = False
+                    self._log.error(u'SelectorList: Invalid Selector: %s' %
+                                    self._valuestr(selectortokens))
+            else:
+                break
+
+        # post condition
+        if u',' == expected:
+            valid = False
+            self._log.error(u'SelectorList: Cannot end with ",": %r' %
+                            self._valuestr(selectorText))
+        elif expected:
+            valid = False
+            self._log.error(u'SelectorList: Unknown Syntax: %r' %
+                            self._valuestr(selectorText))
+
+        if valid:
+            self.seq = newseq
+            #for selector in newseq:
+            #    self.appendSelector(selector)
+
+    selectorText = property(_getSelectorText, _setSelectorText,
+        doc="""(cssutils) The textual representation of the selector for
+            a rule set.""")
+    
+    def __repr__(self):
+        return "cssutils.css.%s(selectorText=%r)" % (
+                self.__class__.__name__, self.selectorText)
+
+    def __str__(self):
+        return "<cssutils.css.%s object selectorText=%r at 0x%x>" % (
+                self.__class__.__name__, self.selectorText, id(self))
