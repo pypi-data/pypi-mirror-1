@@ -1,0 +1,198 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Architecture « Documentation « PlugBoard</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <style media="screen" type="text/css">@import url('../s/site.css');</style>
+  <link media="print" href="../s/print.css" rel="stylesheet"
+ type="text/css">
+</head>
+<body id="docs-page">
+<div id="main">
+<div class="hidden"><a href="#content">Skip to content</a></div>
+<div id="header">
+<h1><span>PlugBoard, the flexible framework to create plugin-based
+applications.</span></h1>
+<div id="top-nav">
+<ul>
+  <li><a id="a_home" href="/">Home</a></li>
+  <li><a id="a_about" href="../about/">About</a></li>
+  <li><a id="a_install" href="../install/">Install</a></li>
+  <li><a id="a_docs" href="../docs/">Documentation</a></li>
+  <li><a id="a_dev" href="../development/">Development</a></li>
+</ul>
+<form action="http://www.google.com/custom" method="get"> <input
+ name="sitesearch" value="plugboard.berlios.de" type="hidden"><!-- style="vertical-align: middle" -->
+Search site with Google <input onfocus="this.select();" size="20"
+ maxlength="255" name="q" value="" type="text"> </form>
+</div>
+</div>
+<div id="content">
+<h2>Architecture</h2>
+<br>
+<h3>1. Components</h3>
+<p>The main component of the framework is the <b>application interface</b>
+(<code>IApplication</code>) used for
+reference by all other components:
+it should be initialized before using any other component.
+</p>
+<p>
+The application implementation should do nothing else that add some useful functions
+and hooks (such as adapters) to let the development be as the easier and faster as possible.
+</p>
+<p>
+After the application initialization, registered plugins (<code>IPlugin</code>)
+must be found trough a plugin resource manager (<code>IPluginResource</code>).
+The plugin resource then adds internally all found plugins and
+register itself (<i>the instance</i>) as an adapter for <code>IApplication</code>,
+so that the application could implement its own plugin resource
+following the interface scheme.
+</p>
+<p>At this point, the application is configured and ready to be loaded
+using the context resource (<code>IContextResource</code>),
+which groups some plugins and loads them passing for the following three states:
+</p>
+<ul>
+  <li><b>initialization</b>: loads all internal plugin variables without
+any interaction with other plugins</li>
+  <li><b>preloading</b>: perform initialization actions with other
+plugins and their initialized options (e.g. connecting to plugin events)</li>
+  <li><b>loading:</b> this is the last step, where all plugins could perform
+any action to interact with other plugins</li>
+</ul>
+<i>This loading feature has the purpose to remove all dependencies among plugins</i>
+<p>Just after the initialization of each plugin, the plugin instance
+is registered as an adapter of <code>IApplication</code>
+so plugins could reach other plugins adapting the application to the requested plugin
+interface.
+</p>
+<div class="note">
+<h3>Note</h3>
+<p>It's important to specify a different interface for each plugins.
+Note that registering an adaption replaces the previous one, so there can
+be only one interface implementation in each context.</p>
+</div>
+<p>The last optional but recommended component is the <b>engine</b> (<code>IEngine</code>).
+It's something like a protocol that specifies how plugin communicate each other trough events
+and contain some useful utilities for a specified environment. Mandatory engine components
+are the event dispather (<code>IEventDispatcher</code>, registered as
+an adaptiong for <code>IPlugin</code>) and its events (<code>IEvent</code>,
+adaption for <code>IEventDispatcher</code>).
+</p>
+<p>Then each plugin could have its own event dispatcher based on the
+current engine to let other plugins connect to it.
+</p>
+<p>Event connecting is also simplified by the <b>event connector</b>.
+Its behavior consists in getting all objects contained in self starting
+with "<code>on_</code>" and connecting them as callbacks for the
+rest of the object name as the event name to the specified plugin.
+Usually, it doesn't need to be implemented for each different engine
+since it uses the engine abstraction.
+</p>
+<h3>2. Builtin plugin resources</h3>
+<h3>2.1 Setuptools</h3>
+<p>
+The setuptools plugin resource is used to gain the list of application
+plugins registered using setuptools entry points.
+</p>
+<p>A simple usage:</p>
+<pre>
+<font color="blue">from</font> plugboard <font color="blue">import</font> plugin
+pr = plugin.SetuptoolsPluginResource(application, '<font color="grey">application.plugins</font>')
+pr.refresh()
+</pre>
+<h3>3. Builtin context resources</h3>
+<h3>3.1 XML</h3>
+<p>
+This resource gains context informations from a <i>xml.dom.minidom.Element</i>
+element, looking in its children.
+</p>
+<p>A simple usage:
+</p>
+<pre>
+<font color="blue">from</font> xml.dom <font color="blue">import</font> minidom
+xmlstr = """<font color="grey">&lt;root&gt;
+&lt;context name='ctx1'&gt;
+&lt;plugin path='app.plugins.APlugin' /&gt;
+&lt;plugin path='app.plugins.BPlugin' /&gt;
+&lt;/context&gt;</font>
+"""
+xml_element = minidom.parseString(xmlstr).documentElement)
+
+<font color="blue">from</font> plugboard <font color="blue">import</font> context
+cr = context.XMLContextResource(application, xml_element)
+cr.refresh()
+</pre>
+<h3>4. Builtin engines</h3>
+<h3>4.1 PlugBoard</h3>
+<p>
+The PlugBoard engine doesn't define any utility for applications,
+since it's the most general purpose engine. However, it has a really
+simple method for event dispatching: it stores observer callbacks
+and call them when an <i>emit</i> is requested.
+</p>
+<h3>4.2 GTK</h3>
+<p>
+This engine can be used in GTK 2.8 or above, since it exploits the
+creation of GTK signals into a
+generic <code>GObject</code>.
+</p>
+<div class="note">
+<h3>Note</h3>
+<p>This can be done using the special class variable <code>__gsignals__</code>, only available in <a href="http://www.pygtk.org">PyGTK</a> 2.8 or higher.</p>
+<p>Read <a href="http://www.async.com.br/faq/pygtk/index.py?req=index">PyGTK FAQs</a>
+for more informations.</p>
+</div>
+<p>
+So, everytime a signal is requested to be created, a new gobject is instantiated.
+To grant the integrity of the first argument passed to the callback to be the plugin instance
+and not the gobject when firing the event, <code>connect_object()</code>
+is used instead of <code>connect()</code>.
+</p>
+<h3>5. Engine utilities</h3>
+<h3>5.1 EventConnector</h3>
+<p>
+This class automatically connects its callable attributes beggining
+with <i>"on_"</i> to the specified plugin. The event name to
+be used is described in the object name itself, just after the "<code>on_</code>"
+string: for instance "<code>on_new</code>" would connect to the event "<code>new</code>".
+</p>
+<p>
+These callable objects (usually methods) could hold an attribute called <code>extra</code>
+which contains extra arguments to be passed to the <code>connect()</code> method of <code>IEvent</code>.
+</p>
+<p>A simple usage:
+</p>
+<pre>
+<font color="blue">from</font> plugboard <font color="blue">import</font> plugin, engine
+<font color="blue">from</font> zope.interface <font color="blue">import</font> implements
+<font color="blue">import</font> interfaces
+<font color="blue">class</font> APlugin(plugin.Plugin):
+&nbsp;&nbsp;implements(interface.IAPlugin)
+&nbsp;&nbsp;<font color="blue">def</font> __init__(self, application):
+&nbsp;&nbsp;&nbsp;&nbsp;self.dispatcher = engine.IEventDispatcher(self)
+&nbsp;&nbsp;&nbsp;&nbsp;self.dispatcher.add_event('<font color="grey">new</font>', (<font color="red">str</font>, '<font color="grey">Some data type</font>'))
+&nbsp;&nbsp;<font color="blue">def</font> load(self, context):
+&nbsp;&nbsp;&nbsp;&nbsp;self.dispatcher['<font color="grey">new</font>'].emit('<font color="grey">Some data</font>')
+
+<font color="blue">class</font> BToAEventConnector(engine.EventConnector):
+&nbsp;&nbsp;<font color="blue">def</font> on_new(self, plugin, data, extra):
+&nbsp;&nbsp;&nbsp;&nbsp;<font color="orange">...</font>
+<font color="blue">class</font> BPlugin(plugin.Plugin):
+&nbsp;&nbsp;implements(interfaces.IBPlugin)
+&nbsp;&nbsp;<font color="blue">def</font> preload(self, application):
+&nbsp;&nbsp;&nbsp;&nbsp;ec = BToAEventConnector(interfaces.IAPlugin(application))
+&nbsp;&nbsp;&nbsp;&nbsp;ec.on_new.extra = ('<font color="grey">first extra argument</font>',)
+</pre>
+</div>
+
+<!-- end content -->
+<div id="footer">
+<p><a href="#main">Top^</a> | All contents by <a
+ href="http://www.deelan.com">deelan</a>, <a
+ href="http://creativecommons.org/licenses/by-sa/2.5/">some rights
+reserved</a> | Page last modified Feb 13, 2006 </p>
+</div>
+</div>
+</body>
+</html>

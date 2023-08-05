@@ -1,0 +1,238 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Editor &laquo; Documentation &laquo; PlugBoard</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <style media="screen" type="text/css">@import url('../s/site.css');</style>
+  <link media="print" href="../s/print.css" rel="stylesheet"
+ type="text/css" />
+</head>
+<body id="docs-page">
+<div id="main">
+<div class="hidden"><a href="#content">Skip to content</a></div>
+<div id="header">
+<h1><span>PlugBoard,
+the flexible framework to create plugin-based
+applications.</span></h1>
+<div id="top-nav">
+<ul>
+  <li><a id="a_home" href="/">Home</a></li>
+  <li><a id="a_about" href="../about/">About</a></li>
+  <li><a id="a_install" href="../install/">Install</a></li>
+  <li><a id="a_docs" href="../docs/">Documentation</a></li>
+  <li><a id="a_dev" href="../development/">Development</a></li>
+</ul>
+<form action="http://www.google.com/custom" method="get"> <input
+ name="sitesearch" value="plugboard.berlios.de" type="hidden" /><!-- style="vertical-align: middle" -->
+Search site with Google <input onfocus="this.select();" size="20"
+ maxlength="255" name="q" value="" type="text" /> </form>
+</div>
+</div>
+<div id="content">
+
+<h2>How to create a flexible editor</h2>
+<h3>1. Introduction</h3>
+<p>This tutorial explains how to
+get working most of all PlugBoard components toghether.</p>
+<p>This document would like to be a first shot example made step by step for all parts of, so its target
+are mainly new comers to PlugBoard.</p>
+<p>However, before using this framework then understand this tutorial, you <b>must</b>
+know the <a href="http://www.zope.org/Products/ZopeInterface/">zope.interface</a>
+and <a href="http://peak.telecommunity.com/DevCenter/setuptools">setuptools</a> libraries.</p>
+<div class="note">
+<h3>Note</h3>
+<p>This tutorial uses some components which need to be able to access Python library path
+(for instance <code>site-packages</code>).</p>
+<p>We will use an XML config and <a href="http://www.pygtk.org">PyGTK 2.8</a>
+</div>
+
+<h3>2. Creating the project</h3>
+<p>Now let's create the skeleton directory structure:</p>
+<pre>plugboardctl.py create PlugEditor</pre>
+<p>Notice how this script created for you the <code>setup.py</code> file specifying inside the
+current version of PlugBoard as dependency and a starting entrypoint
+string for our application plugins.</p>
+
+<h3>3. The main file</h3>
+<p>PlugBoard, as described in the <a href="architecture.html">architecture document</a>, offers
+an <code>IApplication</code> interface which is the principal component of an application.</p>
+<p>Its implementation is found at <code>plugboard.application.Application</code>, so write this simply code:</p>
+<pre>
+<img src="../i/bullet.png" /> <font color="black">plugeditor/main.py</font>
+
+<font color="blue">from</font> plugboard <font color="blue">import</font> application
+
+<font color="blue">def</font> main():
+  app = application.Application()
+</pre>
+<p>Now we created our <code>IApplication</code> implementation instance. After that, we said in <code>setup.py</code> there's a string which defines a Python path for plugin entrypoints, for instance <b><code>plugeditor.plugins</code></b>. So, since we are using a setuptools-based plugin management to find installed plugins, install the <code>IPluginResource</code> as follows:
+<pre>
+<img src="../i/bullet.png" /> <font color="black">plugeditor/main.py</font>
+
+<font color="blue">from</font> plugboard <font color="blue">import</font> application, plugin
+
+<font color="blue">def</font> main():
+  app = application.Application()
+  pr = plugin.SetuptoolsPluginResource(app, '<font color="grey">plugeditor.plugins</font>')
+  pr.refresh()
+</pre>
+<p><code>SetuptoolsPluginResource</code> is a builtin implementation of <code>IPluginResource</code>, which accepts as the first argument the plugin entrypoint path. The method call <code>pr.refresh()</code> is used the retrieve the list of plugins from the given entrypoint path.</p>
+<div class="note">
+<h3>Note</h3>
+<p>The <code>refresh(entrypoint_path=None)</code> method accepts a keyword argument for specifying the entrypoint path for plugins. If no path has been given, it uses the one specified at the initialization.</p>
+<p>It also clears the plugins list before retrieving them again from the given entrypoint path.</p>
+</div>
+Once you have been done this, we can start writing plugins. In this kind of application, i chose to make the core (for instance the main window and other related things) as a plugin itself, so it could be changed as well using other implementations.
+
+<h3>4. The main window plugin</h3>
+<h3>4.1 The interface</h3>
+<p>Ok, now let's create the main window interface of the editor</code>:
+<pre>
+<img src="../i/bullet.png" /> <font color="black">plugeditor/plugins/interfaces.py</font>
+
+<font color="blue">from</font> plugboard.plugin <font color="blue">import</font> IPlugin
+<font color="blue">import</font> gtk
+
+<font color="blue">class</font> IMainWindowPlugin(IPlugin):
+  <font color="blue">def</font> get_window():
+    """
+    <font color="grey">Returns the main window widget</font>
+    """
+  get_window.return_type = gtk.Window
+</pre>
+<p>Creating an interface for the main window plugin let the application to be very flexible for switching from an implementation to another.</p>
+<p>In the code above, we declare a class deriving from <code>IPlugin</code> which contains common methods and informations regarding plugins. The <code>get_window.return_type = gtk.Window</code> directive is just an information for developers who want to create an <code>IMainWindowPlugin</code> implementation.</p>
+<div class="note">
+<h3>Note</h3>
+<p>If you don't know which declaring component of zope.interface the assignment to <code>get_window.return_type</code> is, please read the zope.interface documentation. This is called <b>tag</b>, used to add extra informations over an attribute or method.</p>
+</div>
+
+<h3>4.2 The implementation</h3>
+<p>Now, we need to implement the previous created <code>IMainWindowPlugin</code> interface:</p>
+<pre>
+<img src="../i/bullet.png" /> <font color="black">plugeditor/plugins/core.py</font>
+
+<font color="blue">from</font> plugboard <font color="blue">import</font> plugin
+<font color="blue">from</font> zope.interface <font color="blue">import</font> implements
+<font color="blue">import</font> interfaces, gtk
+
+<font color="blue">class</font> MainWindowPlugin(plugin.Plugin):
+  implements(interfaces.IMainWindowPlugin)
+
+  <font color="blue">def</font> __init__(self, application):
+    self.widget = gtk.Window()
+    self.widget.set_title("<font color="grey">PlugEditor</font>")
+
+  <font color="blue">def</font> load(self, context):
+    self.widget.show_all()
+
+  <font color="blue">def</font> get_widget(self):
+    <font color="blue">return</font> self.widget
+
+  def set_child(
+</pre>
+<p>The initialization just set the instance variable <code>widget</code> value, while on loading the window will be shown.</p>
+<div class="note">
+<h3>Note</h3>
+<p>If you don't know how a plugin is loaded into the application, please read the <a href="architecture.html">PlugBoard architecture documentation</a></p>
+</div>
+<p>Once we done this, we should add this new plugin to the entrypoint, so that <code>SetuptoolsPluginResource</code> can find it:</p>
+<pre>
+<img src="../i/bullet.png" /> <font color="black">setup.py</font>
+
+<b>[...]</b>
+entry_points="""<font color="grey">
+[plugeditor.plugins]
+MainWindowPlugin = plugeditor.plugins.core:MainWindowPlugin    
+</font>""",
+<b>[...]</b>
+</pre>
+<p>The first name <code>MainWindowPlugin</code> is not important for the purposes of <code>SetuptoolsPluginResource</code>, however it could be a good idea to keep the name always clear because of other <code>IPluginResource</code> implementations for setuptools which could need it.</p>
+
+<h3>5. The context resource</h3>
+<p>The <code>IContextResource</code> is used to load specific plugins into a specific context. Each context contain a list of plugins which must be listed in <code>IPluginResource</code>. So, according to this concept, let's use the <code>XMLContextPlugin</code> implementation as follows:</p>
+<pre>
+<img src="../i/bullet.png" /> <font color="black">plugeditor/main.py</font>
+
+<font color="blue">from</font> plugboard <font color="blue">import</font> application, plugin, context
+<font color="blue">import</font> user, os
+<font color="blue">from</font> xml.dom <font color="blue">import</font> minidom
+<font color="blue">import</font> gtk
+
+config_file = os.path.join(user.home, '<font color="grey">.plugeditor</font>')
+
+<font color="blue">def</font> get_config():
+  <font color="blue">if</font> <font color="blue">not</font> os.path.exists(config_file):
+    file(config_file, '<font color="grey">w</font>').write('<font color="grey">&lt;plugeditor /&gt;</font>')
+  <font color="blue">try</font>:
+    <font color="blue">return</font> minidom.parse(config_file).documentElement
+  <font color="blue">except</font>:
+    <font color="blue">pass</font>
+
+<font color="blue">def</font> main():
+  app = application.Application()
+  pr = plugin.SetuptoolsPluginResource(app, '<font color="grey">plugeditor.plugins</font>')
+  pr.refresh()
+  config = get_config()
+  <font color="blue">if</font> <font color="blue">not</font> config:
+    <font color="blue">print</font> >> sys.stderr, "<font color="grey">No valid configuration file as been found</font>"
+  cr = context.XMLContextResource(app, config)
+  cr.refresh()
+  cr['<font color="grey">default</font>'].load()
+  gtk.main()
+</pre>
+<p>In the first lines of the code, we simply get the document element (<i>plugeditor</i>) of the XML config file, while in the <code>main()</code> function we pass to the <code>XMLContextResource</code> the got xml element.</p>
+<p>The XML document should have the following structure:</p>
+<pre>
+<img src="../i/bullet.png" /> <font color="black">~/.plugboard</font>
+
+&lt;plugeditor&gt;
+  &lt;context name='<font color="grey">default</font>'&gt;
+    &lt;plugin path='<font color="grey">plugeditor.plugins.core.MainWindowPlugin</font>' /&gt;
+  &lt;/context&gt;
+&lt;/plugeditor&gt;
+</pre>
+<p>Notice how we loaded the <i>default</i> context in the code. Logically, everything should be as much dynamic as possible with an appropriate UI to let the user define both contexts and plugins.</p>
+<div class="note">
+<h3>Note</h3>
+<p><code>XMLContextResource</code> initialization let you specify what names must be used for both elements and attributes; here's the implementation:</p>
+<pre>
+<font color="blue">def</font> __init__(self, application, dom_element=<font color="blue">None</font>,
+                   context_element='<font color="grey">context</font>', context_name='<font color="grey">name</font>',
+		   plugin_element='<font color="grey">plugin</font>', plugin_path='<font color="grey">path</font>')
+</pre>
+</div>
+<p>In the XML config, we defined the previous created plugin to be inserted in the context <i>default</i> then calling the <code>load</code> method will initialize, preload and load the requested plugin.</p>
+<p>This kind of structure, allows plugins to have different settings for each context, then each plugin can be present in many contexts.</p>
+
+<h3>6. Run the example</h3>
+<p>If you followed the above instructions and everything has gone well, you can run the example then a window should appear on the screen:</p>
+<pre>
+<img src="../i/bullet.png" /> <font color="black">(Privileged console)</font>
+
+python setup.py develop
+
+<img src="../i/bullet.png" /> <font color="black">(Python interpreter)</font>
+
+&gt;&gt;&gt; from plugeditor import main
+&gt;&gt;&gt; main.main()
+</pre>
+
+<p>Notice how we need to install PlugEditor in the Python path (trough the <code>develop</code> command) because of the setuptools-based plugin. This behavior can change if you'll implement a different <code>IPluginResource</code> for your application without using setuptools.</p>
+<p>After we need to import modules and start manually the application; naturally this is done because we didn't provide any script for this task.</p>
+<p>If you want to see loaded plugins/contexts just add <code>print list(pr.get_plugins()), list(cr.get_contexts())</code> in <code>main()</code>.</p
+
+
+
+<div id="footer">
+<p><a href="#main">Top^</a>
+| All contents by <a href="http://www.deelan.com">deelan</a>,
+<a href="http://creativecommons.org/licenses/by-sa/2.5/">some
+rights
+reserved</a> | Page last modified
+Feb 26, 2006</p>
+
+</div>
+</div>
+</body>
+</html>
