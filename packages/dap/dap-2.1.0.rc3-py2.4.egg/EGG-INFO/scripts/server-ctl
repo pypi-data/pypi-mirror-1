@@ -1,0 +1,92 @@
+#!/bin/sh
+
+#
+# Configuration
+# 
+PORT=8888
+DAPSERVER="/usr/bin/dap-server.py"
+DATADIR="/home/data"
+PIDFILE="/var/run/dap-server.pid"
+
+SERVER="${DAPSERVER} -d ${PIDFILE} -p ${PORT} ${DATADIR}"
+ERROR=0
+ARGV="$@"
+if [ "x$ARGV" = "x" ] ; then 
+    ARGS="help"
+fi
+
+for ARG in $@ $ARGS
+do
+    # check for pidfile
+    if [ -f $PIDFILE ] ; then
+	PID=`cat $PIDFILE`
+	if [ "x$PID" != "x" ] && kill -0 $PID 2>/dev/null ; then
+	    STATUS="dap-server (pid $PID) running"
+	    RUNNING=1
+	else
+	    STATUS="dap-server (pid $PID?) not running"
+	    RUNNING=0
+	fi
+    else
+	STATUS="dap-server (no pid file) not running"
+	RUNNING=0
+    fi
+
+    case $ARG in
+    start)
+	if [ $RUNNING -eq 1 ] ; then
+	    echo "$0 $ARG: dap-server (pid $PID) already running"
+	    continue
+	fi
+	if $SERVER ; then
+	    echo "$0 $ARG: dap-server started"
+	else
+	    echo "$0 $ARG: dap-server could not be started"
+	    ERROR=1
+	fi
+	;;
+    condstart)
+	if [ $RUNNING -eq 1 ] ; then
+	    continue
+	fi
+	if $SERVER ; then
+	    echo "$0 $ARG: dap-server started"
+	else
+	    echo "$0 $ARG: dap-server could not be started"
+	    ERROR=1
+	fi
+	;;
+    stop)
+	if [ $RUNNING -eq 0 ] ; then
+	    echo "$0 $ARG: $STATUS"
+	    continue
+	fi
+	if kill $PID ; then
+	    echo "$0 $ARG: dap-server stopped"
+	else
+	    echo "$0 $ARG: dap-server could not be stopped"
+	    ERROR=2
+	fi
+	;;
+    status)
+	echo $STATUS
+	;;
+    *)
+	echo "usage: $0 (start|condstart|stop|status)"
+	cat <<EOF
+
+    start      - start dap-server
+    condstart  - start dap-server if it's not running
+    stop       - stop dap-server
+    status     - display dap-server status
+
+EOF
+	ERROR=3
+    ;;
+
+    esac
+
+done
+
+exit $ERROR
+
