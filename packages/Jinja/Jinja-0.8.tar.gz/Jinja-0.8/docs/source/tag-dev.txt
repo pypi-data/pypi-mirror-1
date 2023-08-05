@@ -1,0 +1,216 @@
+=========
+Tag Howto
+=========
+
+Tags are much more complex than filters_, because with tags you can do
+everything.
+
+While filters only extend the behavior of tags like ``print`` and ``filter``,
+the whole Jinja core uses tags to handle loops, conditions...
+
+When Jinja compiles a template, it splits the raw template text into
+''nodes''. Each node is an instance of ``jinja.nodes.Node`` and has a
+``render(context)`` method. A compiled template is, simply, a list of ``Node``
+objects. When you call ``render()`` on a compiled template object, the template
+calls ``render()`` on each ``Node`` in its node list, with the given context.
+The results are all concatenated together to form the output of the template.
+
+When Jinja encounters a ``BlockToken`` in the template it looks at the defined
+library and let it parse the token content (e.g. ``for item in sequence``).
+
+When no library is defined it uses the standard library ``stdlib``.
+
+Diving In
+=========
+
+Each Tag object has to look at least like this::
+
+    from jinja.lib import stdlib
+    from jinja.nodes import *
+    
+    class MyTag(Node):
+        rules = {}
+
+        def __init__(self, parser, matched_tag, handler_args, stack):
+            pass
+
+        def render(self, context):
+            return ''
+
+    stdlib.register_tag(MyTag)
+
+``rules`` is a dict of parser instructions::
+
+    rules = {
+        'default': [KeywordNode('mytag')],
+        'witharg': [KeywordNode('mytag'), ChoiceNode()]
+    }
+
+This rule definition would match all ``{% mytag %}`` and ``{% mytag arg %}``
+tags.
+
+The ``__init__`` method gets called on tag creation. When you're using a cached
+loader it will save the tag in the state of leaving the ``__init__`` method.
+
+The arguments are these:
+
+* **parser** - a template parser instance which can be used to parse parts
+  of the template.
+
+* **matched_tag** - a string containing the name of the matched rule.
+  (e.g. ``witharg`` or ``default`` in the example above)
+
+* **handler_args** - the list of argument nodes.
+
+* **stack** - list of piped filters
+
+Example
+=======
+
+To understand this here is the defintion of the ``print`` tag::
+
+    class VariableTag(Node):
+        rules = {
+            'default': [KeywordNode('print'), ChoiceNode()]
+        }
+
+        def __init__(self, parser, matched_tag, handler_args, stack):
+            self._variable = handler_args[1]
+            self._filters = [(f, args[1:][0]) for f, _, args in stack]
+            
+        def findnodes(self):
+            yield self._variable
+            
+        def render(self, context):
+            if not self._filters:
+                return self._variable.render(context)
+            var = self._variable.resolve(context)
+            for f, args in self._filters:
+                var = f(var, *[arg.resolve(context) for arg in args])
+            return var
+            
+    stdlib.register_tag(VariableTag)
+
+The ``rules`` dict defines a rule matching all ``{% print variable %}``.
+
+A ``ChoiceNode`` matches per default all variables and string/integer
+constants.
+
+The ``__init__`` methods saves the variable node and the list of filters
+in the Tag.
+
+The ``findnodes`` method has to return a iterable of all nodes defined
+in the ``Tag``.
+
+In the render method the ``VariableTag`` returns a parsed content of the
+variable by applying all filters.
+
+Nodes
+=====
+
+Jinja shipps a number of nodes the parser can match. All this nodes are
+defined in the ``jinja.nodes`` module.
+
+KeywordNode
+~~~~~~~~~~~
+
+A keyword node matches against a constant keyword value. You can compare
+Keywords with strings which simplyfies the postprocessing::
+
+    if my_keyword_node == "foo":
+        ...
+    else:
+        ...
+
+It isn't possible to resolve or render keyworde nodes.
+
+VariableNode
+~~~~~~~~~~~~
+
+A variable node matches all possible variables by saving the name.
+Variable nodes provide a ``define`` method for updating their value::
+
+    varnode.define(context, 'new value')
+
+You can get the value of a ``VariableNode`` using resolve::
+
+    value = varnode.resolve(context)
+
+variable nodes do also provide a render method which acts like the resolve
+method but returns a string.
+
+ValueNode
+~~~~~~~~~
+
+Value nodes behaves like variable nodes but match strings, integers, boolean
+values and "none".
+
+It provides the same functionallity like the ``VariableNode``, but resolve
+can also get called without the context which allows you to fetch the constant
+value inside the ``__init__`` method of a tag.
+
+ChoiceNode
+~~~~~~~~~~
+
+A choice node matches more than one one nodetype::
+
+    ChoiceNode(Node1(), Node2())
+
+When not given any arguments it will match eigther one ``VariableNode`` or
+``ValueNode``.
+
+CollectionNode
+~~~~~~~~~~~~~~
+
+A collection node matches an unlimited number of Nodes::
+
+    CollectionNode(Node1(), Node2())
+
+When not given any arguments it will match all variable and/or value nodes.
+
+
+One-Way Parsing
+===============
+
+One way parsing is very basic::
+
+    {% mynode %}  
+        ...
+    {% endmynode %}
+
+You can fetch the ``body`` between those two tags inside the ``__init__``
+method of you ``MyTag`` class::
+
+    self._body = parser.subparse('endmynode')
+
+This will store all the nodes from ``mynode`` to ``endmynode`` which you can
+render using ``self._body.render(context)``.
+
+Two-Way Parsing
+===============
+
+Two way parsing is a bit more complicated::
+
+    {% mynode %}
+        ...
+    {% switchmynode %}
+        ...
+    {% endmynode %}
+
+But it would also match::
+
+    {% mynode %}
+        ...
+    {% endmynode %}
+
+Parsing this would result in two bodies::
+
+    self._body_one, self._body_two = parser.forkparse('switchmynode', 'endmynode')
+
+When the parser doesn't find the ``switchmynode`` tag it will returns an
+empty ``NodeList`` for ``self._body_two``.
+
+For more informations have a look at the Tags_ module in the jinja source.
+
+.. _filters: filter-dev.txt
+.. _Tags: http://wsgiarea.pocoo.org/trac/browser/jinja/trunk/jinja/tags.py
