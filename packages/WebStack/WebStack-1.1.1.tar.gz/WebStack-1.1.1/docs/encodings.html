@@ -1,0 +1,84 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><head>
+  
+  <title>Character Encodings</title><meta name="generator" content="amaya 8.1a, see http://www.w3.org/Amaya/" />
+  <link href="styles.css" rel="stylesheet" type="text/css" /></head>
+<body>
+<h1>Character Encodings</h1>
+<p>When writing applications with WebStack, you should try and use
+Python's Unicode objects as much as possible. However, there are a
+number of places where plain Python strings can be involved:</p>
+<ul>
+  <li><a href="parameters-headers.html">Inspecting query strings</a></li>
+  <li><a href="responses.html">Sending output in a response</a></li>
+  <li><a href="parameters.html">Receiving uploaded content</a></li>
+  <li><a href="state.html">Accessing cookie information</a></li>
+  <li><a href="sessions.html">Accessing session information</a> (see the <a href="sessions-usage.html#Limitations">"Session Limitations and Guidelines"</a>)</li>
+</ul>
+<p>When Web pages (and other types of content) are sent to and from
+users of your application, the text will be in some kind of character
+encoding. For example, in English-speaking environments, the US-ASCII
+encoding is common and contains the basic letters, numbers and symbols
+used in English, whereas in Western Europe&nbsp;encodings like
+ISO-8859-1 and ISO-8859-15 are typically used, since they&nbsp;contain
+additional letters and symbols in order to support other languages.
+Often, UTF-8 is used to encode text because it covers most languages
+simultaneously and is therefore flexible enough for many applications.</p>
+<p>When URLs are received in applications, in order for some of the
+request parameters to be interpreted, the situation is a bit more
+awkward. The original text is encoded in US-ASCII but will contain
+special numeric codes that indicate&nbsp;character values in the
+original text encoding -&nbsp;see the <a href="parameters.html">description
+of query strings</a> for more information.</p>
+<h2>Recommendations</h2>
+<dl>
+  <dt>The following recommendations should help you avoid issues with
+incorrect characters in the Web pages (and other content) that you
+produce:</dt>
+</dl>
+<h3>Use Unicode Objects for Textual Content</h3>
+<p>Handling text in specific encodings using normal Python strings can
+be difficult, and handling text in multiple encodings in the same
+application can be highly error-prone. Fortunately, Python has support
+for Unicode objects which let you think of letters, numbers, symbols
+and all other characters in an abstract way.</p>
+<ul>
+  <li>Convert textual content to Unicode as soon as possible (see below
+for choosing encodings).</li>
+  <li>If you must include hard-coded messages in your application code,
+make sure to specify the encoding using the <a href="http://www.python.org/peps/pep-0263.html">standard declaration</a>
+at the top of your source file.</li>
+  <li>Remember that the standard library&nbsp;<code>codecs</code>
+module contains useful functions to access streams as if Unicode
+objects were being transmitted; for example:</li>
+</ul>
+<pre>import codecs<br /><br />class MyResource:<br /><br />    encoding = "utf-8"<br /><br />    def respond(self, trans):<br />        stream = trans.get_request_stream()                         # only reads strings<br />        unicode_stream = codecs.getreader(self.encoding)(stream)    # reads Unicode objects<br /><br />        [Some activity...]<br /><br />        out = trans.get_response_stream()                           # writes strings and Unicode objects<br /></pre>
+<h3>Use Strings for Binary Content</h3>
+<p>If you are reading and writing binary content, Unicode objects are
+inappropriate. Make sure to open files in binary mode, where necessary.</p>
+<h3>Use Explicit Encodings and Be Consistent</h3>
+<p>Although WebStack has some support for detecting character encodings
+used
+in requests, it is often best for your application to exercise control
+over
+which encoding is used when <a href="parameters.html">inspecting
+request
+parameters</a> and when <a href="responses.html">producing responses</a>.
+The
+best way to do this is to decide which encoding is most suitable for
+the data
+presented and received in your application and then to use it
+throughout.
+Here is an outline of code which does this:</p>
+<pre>from WebStack.Generic import ContentType<br /><br />class MyResource:<br /><br />    encoding = "utf-8"                                                     # We decide on "utf-8" as our chosen<br />                                                                           # encoding.<br />    def respond(self, trans):<br />        [Do various things.]<br /><br />        fields = trans.get_fields_from_body(encoding=self.encoding)        # Explicitly use the encoding.<br /><br />        [Do other things with the Unicode values from the fields.]<br /><br />        trans.set_content_type(ContentType("text/html", self.encoding))    # The output Web page uses the encoding.<br /><br />        [Produce the response, making sure that self.encoding is used to convert Unicode to raw strings.]</pre>
+<h3>Tell Encodings to Other Components</h3>
+<p>When using other components to generate content (see <a href="integrating.html">"Integrating with Other Systems"</a>), it may
+be the case that such components will just write the generated content
+straight to a normal stream (rather than one wrapped by a&nbsp;<code>codecs</code>
+module function). In such cases, it is likely that for textual content
+such as XML or related formats (XHTML, SVG, HTML) you will need to
+instruct the component to use your chosen encoding; for example:</p>
+<pre>        # In the respond method, xml_document is an xml.dom.minidom.Document object...<br />        xml_document.toxml(self.encoding)</pre>
+<p>This will then generate the appropriate characters in the output <span style="font-style: italic;">and</span> specify the correct encoding
+for the XML document.</p>
+</body></html>
