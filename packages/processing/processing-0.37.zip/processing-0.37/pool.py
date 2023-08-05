@@ -1,0 +1,393 @@
+#
+# Module providing the `Pool` class for managing a process pool
+#
+# processing/pool.py
+#
+# Copyright (c) 2007, R Oudkerk --- see COPYING.txt
+#
+
+__all__ = ['Pool']
+
+#
+# Imports
+#
+
+import processing
+import threading
+import Queue
+import itertools
+import collections
+
+#
+# Miscellaneous
+#
+
+newjobid = itertools.count().next
+
+def mapstar(args):
+    return map(*args)
+
+def applystar(args):
+    return apply(*args)
+
+#
+# Code run by worker processes
+#
+
+def worker(inqueue, outqueue):
+    for job, i, func, args, kwds in iter(inqueue.get, None):
+        try:
+            result = (True, func(*args, **kwds))
+        except Exception, e:
+            result = (False, e)
+        outqueue.put((job, i, result))
+
+#
+# Class representing a process pool
+#
+        
+class Pool(object):
+    '''
+    Class which supports an async version of the `apply()` builtin
+    '''
+    def __init__(self, processes=None):
+        self._inqueue = processing.PipeQueue()
+        self._outqueue = processing.PipeQueue()
+        self._taskqueue = Queue.Queue()
+        self._cache = {}
+        
+        if processes is None:
+            try:
+                processes = processing.cpuCount()
+            except NotImplementedError:
+                processes = 1
+            
+        self._pool = [
+            processing.Process(target=worker,
+                               args=[self._inqueue, self._outqueue])
+            for i in range(processes)
+            ]
+        
+        for i, w in enumerate(self._pool):
+            w.setName('PoolWorker-' + ':'.join(map(str, w._identity)))
+            w.start()
+            
+        # Note: these threads will be joined by the finalizer and are
+        # only made daemonic because otherwise the exit handler
+        # registered by `threading` might try to join them
+        # before the finalizer is run
+        
+        thandler = threading.Thread(target=Pool._handle_tasks,
+                                    args=[self._taskqueue, self._inqueue])
+        thandler.setDaemon(True)
+        thandler.start()
+
+        rhandler = threading.Thread(target=Pool._handle_results,
+                                    args=[self._outqueue, self._cache])
+        rhandler.setDaemon(True)
+        rhandler.start()
+
+        self.shutdown = processing.Finalize(
+            self, Pool._finalize_pool,
+            args=(self._taskqueue, self._inqueue, self._outqueue,
+                  thandler, rhandler, self._pool),
+            atexit=True
+            )
+        
+    def apply(self, func, args=(), kwds={}):
+        '''
+        Equivalent of `apply()` builtin
+        '''
+        return self.apply_async(func, args, kwds).get()
+
+    def map(self, func, seq, chunksize=None):
+        '''
+        Equivalent of `map()` builtin
+        '''
+        return self.map_async(func, seq, chunksize).get()
+
+    def imap(self, func, seq):
+        '''
+        Equivalent of `itertool.imap()` -- can be MUCH slower than `Pool.map()`
+        '''
+        result = IMapIterator(self._cache)
+        job = result._job
+        self._taskqueue.put((((job, i, func, (x,), {})
+                              for i, x in enumerate(seq)), result._setlength))
+        return result
+
+    def imap_unordered(self, func, seq):
+        '''
+        Like `imap()` method but ordering of results is arbitrary
+        '''
+        result = IMapUnorderedIterator(self._cache)
+        job = result._job
+        self._taskqueue.put((((job, i, func, (x,), {})
+                              for i, x in enumerate(seq)), result._setlength))
+        return result
+
+    def apply_async(self, func, args=(), kwds={}, callback=None):
+        '''
+        Asynchronous equivalent of `apply()` builtin
+        '''
+        result = ApplyResult(self._cache, callback)
+        job = result._job
+        self._taskqueue.put(([(job, None, func, args, kwds)], None))
+        return result
+    
+    def map_async(self, func, seq, chunksize=None, callback=None):
+        '''
+        Asynchronous equivalent of `map()` builtin
+        '''
+        if not hasattr(seq, '__len__'):
+            seq = list(seq)
+        
+        if chunksize is None:
+            chunksize, extra = divmod(len(seq), len(self._pool) * 4)
+            if extra:
+                chunksize += 1
+                
+        task_batches = Pool._gettasks(func, seq, chunksize)
+        result = MapResult(self._cache, chunksize, len(seq), callback)
+        job = result._job
+        self._taskqueue.put((((job, i, mapstar, (x,), {})
+                              for i, x in enumerate(task_batches)), None))
+        return result
+    
+    # staticmethod
+    def _handle_tasks(taskqueue, inqueue):
+        put = inqueue._put
+        for taskseq, setlength in iter(taskqueue.get, None):
+            i = -1
+            for i, task in enumerate(taskseq):
+                put(task)
+            if setlength:
+                setlength(i+1)
+    _handle_tasks = staticmethod(_handle_tasks)
+
+    # staticmethod
+    def _handle_results(outqueue, cache):
+        for job, i, obj in iter(outqueue._get, None):
+            try:
+                cache[job]._set(i, obj)
+            except KeyError:
+                pass
+    _handle_results = staticmethod(_handle_results)
+        
+    # staticmethod
+    def _finalize_pool(taskqueue, inqueue, outqueue,
+                       task_handler, result_handler, pool):
+        # stop task handler thread
+        taskqueue.not_empty.acquire()
+        try:
+            taskqueue.queue.clear()
+            taskqueue.queue.append(None)
+            taskqueue.not_empty.notify()
+        finally:
+            taskqueue.not_empty.release()
+
+        # stop result handler thread
+        outqueue.put(None)
+
+        # stop work processes
+        for p in pool:
+            inqueue.put(None)
+
+        # join all the threads and processes
+        task_handler.join()
+        result_handler.join()
+        for p in pool:
+            p.join()
+    _finalize_pool = staticmethod(_finalize_pool)
+
+    # staticmethod
+    def _gettasks(func, it, size):
+        it = iter(it)
+        while 1:
+            x = tuple(itertools.islice(it, size))
+            if not x:
+                return
+            yield (func, x)
+    _gettasks = staticmethod(_gettasks)
+            
+#
+# Class whose instances are returned by `Pool.apply_async()`
+#
+
+class ApplyResult(object):
+
+    def __init__(self, cache, callback):
+        self._cond = threading.Condition(threading.Lock())
+        self._job = newjobid()
+        self._cache = cache
+        self._ready = False
+        self._callback = callback
+        cache[self._job] = self
+        
+    def ready(self):
+        return self._ready
+    
+    def successful(self):
+        assert self._ready
+        return self._success
+    
+    def wait(self, timeout=None):
+        self._cond.acquire()
+        try:
+            if not self._ready:
+                self._cond.wait(timeout)
+        finally:
+            self._cond.release()
+
+    def get(self, timeout=None):
+        self.wait(timeout)
+        if not self._ready:
+            raise processing.TimeoutError
+        if self._success:
+            return self._value
+        else:
+            raise self._value
+
+    def _set(self, i, obj):
+        self._success, self._value = obj
+        if self._callback and self._success:
+            self._callback(self._value)
+        self._cond.acquire()
+        try:
+            self._ready = True
+            self._cond.notify()
+        finally:
+            self._cond.release()
+        del self._cache[self._job]
+
+#
+# Class whose instances are returned by `Pool.map_async()`
+#
+
+class MapResult(ApplyResult):
+    
+    def __init__(self, cache, chunksize, length, callback):
+        ApplyResult.__init__(self, cache, None)
+        self._success = True
+        self._value = [None]*length
+        self._chunksize = chunksize
+        self._callback = callback
+        if chunksize <= 0:
+            self._number_left = 0
+            self._ready = True
+        else:
+            self._number_left = length//chunksize + bool(length % chunksize)
+        
+    def _set(self, i, (success, result)):
+        if success:
+            self._value[i*self._chunksize:(i+1)*self._chunksize] = result
+            self._number_left -= 1
+            if self._number_left == 0:
+                if self._callback:
+                    self._callback(self._value)
+                del self._cache[self._job]
+                self._cond.acquire()
+                try:
+                    self._ready = True
+                    self._cond.notify()
+                finally:
+                    self._cond.release()
+
+        else:
+            self._success = False
+            self._value = result
+            del self._cache[self._job]
+            self._cond.acquire()
+            try:
+                self._ready = True
+                self._cond.notify()
+            finally:
+                self._cond.release()
+
+#
+# Class whose instances are returned by `Pool.imap()`
+#
+
+class IMapIterator(object):
+
+    def __init__(self, cache):
+        self._cond = threading.Condition(threading.Lock())
+        self._job = newjobid()
+        self._cache = cache
+        self._items = collections.deque()
+        self._index = 0
+        self._length = None
+        self._unsorted = {}
+        cache[self._job] = self
+        
+    def __iter__(self):
+        return self
+    
+    def next(self, timeout=None):
+        self._cond.acquire()
+        try:
+            try:
+                item = self._items.popleft()
+            except IndexError:
+                if self._index == self._length:
+                    raise StopIteration
+                self._cond.wait(timeout)
+                try:
+                    item = self._items.popleft()
+                except IndexError:
+                    if self._index == self._length:
+                        raise StopIteration
+                    raise processing.TimeoutError
+        finally:
+            self._cond.release()
+
+        success, value = item
+        if success:
+            return value
+        raise value
+    
+    def _set(self, i, obj):
+        self._cond.acquire()
+        try:
+            if self._index == i:
+                self._items.append(obj)
+                self._index += 1
+                while self._index in self._unsorted:
+                    obj = self._unsorted.pop(self._index)
+                    self._items.append(obj)
+                    self._index += 1
+                self._cond.notify()
+            else:
+                self._unsorted[i] = obj
+                
+            if self._index == self._length:
+                del self._cache[self._job]
+        finally:
+            self._cond.release()
+            
+    def _setlength(self, length):
+        self._cond.acquire()
+        try:
+            self._length = length
+            if self._index == self._length:
+                self._cond.notify()
+                del self._cache[self._job]
+        finally:
+            self._cond.release()
+
+#
+# Class whose instances are returned by `Pool.imap_unordered()`
+#
+
+class IMapUnorderedIterator(IMapIterator):
+
+    def _set(self, i, obj):
+        self._cond.acquire()
+        try:
+            self._items.append(obj)
+            self._index += 1
+            self._cond.notify()
+            if self._index == self._length:
+                del self._cache[self._job]
+        finally:
+            self._cond.release()

@@ -1,0 +1,84 @@
+===================
+ Python processing
+===================
+
+:Author:        R Oudkerk
+:Contact:       roudkerk at users.berlios.de
+:Url:           http://developer.berlios.de/projects/pyprocessing
+:Licence:       BSD Licence
+
+
+``processing`` is a package for the Python language which supports the
+spawning of processes using the API of the standard library's
+``threading`` module.  It runs on both Unix and Windows.
+
+Objects can be transferred between processes using pipes or queues,
+and objects can be shared between processes using a server process or
+(for simple data) shared memory.  Equivalents of the synchronization
+primitives in ``threading`` are also provided.
+
+
+Links
+=====
+
+* `Documentation <./doc/index.html>`_
+* `Installation instructions <./INSTALL.txt>`_
+* `Changelog <./CHANGES.txt>`_
+* `Acknowledgments <./THANKS.txt>`_
+* `BSD Licence <./COPYING.txt>`_
+
+
+The package can be downloaded from
+
+*    http://developer.berlios.de/project/filelist.php?group_id=9001 or
+*    http://cheeseshop.python.org/pypi/processing
+
+
+Examples
+========
+
+The ``processing.Process`` class follows the API of ``threading.Thread``.
+For example ::
+
+    from processing import Process, Queue
+
+    def f(q):
+        q.put('hello world')
+
+    if __name__ == '__main__':
+        q = Queue()
+        p = Process(target=f, args=[q])
+        p.start()
+        print q.get()
+        p.join()
+
+Synchronization primitives like locks, semaphores and conditions are
+available, for example ::
+
+    >>> from processing import Condition
+    >>> c = Condition()
+    >>> print c
+    <Condition(<RLock(None, 0)>), 0>
+    >>> c.acquire()
+    True
+    >>> print c
+    <Condition(<RLock(MainProcess, 1)>), 0>
+
+One can also use a manager to create shared objects either in shared
+memory or in a server process, for example ::
+
+    >>> from processing import Manager
+    >>> manager = Manager()
+    >>> l = manager.list(range(10))
+    >>> l.reverse()
+    >>> print l
+    [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+    >>> print repr(l)
+    <Proxy[list] object at 0x00E1B3B0>
+
+
+.. raw:: html
+
+    <a href="http://developer.berlios.de" title="BerliOS Developer"> 
+    <img src="http://developer.berlios.de/bslogo.php?group_id=9001" 
+    width="124px" height="32px" border="0" alt="BerliOS Developer Logo"></a>
