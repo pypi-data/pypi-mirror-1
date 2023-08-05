@@ -1,0 +1,79 @@
+import optparse
+
+if __name__ == "__main__":
+    parser = optparse.OptionParser(add_help_option=False)
+    parser.add_option('-v', '--verbose', action='store_true',
+        help='increase verbosity')
+    parser.add_option('-q', '--quiet', action='store_true',
+        help='decrease verbosity')
+    parser.add_option('-c', '--checksum',action='store_true',
+        help='always checksum')
+    parser.add_option('-a', '--archive', action='store_true',
+        help='archive mode, equivalent to -rlptgoD')
+    parser.add_option('-r', '--recursive', action='store_true',
+        help='recurse into directories')
+    parser.add_option('-R', '--relative', action='store_true',
+        help='use relative path names')
+    parser.add_option('--no-relative', action='store_true',
+        help='turn off --relative')
+    parser.add_option('--no-implied-dirs', action='store_true',
+        help="don't send implied dirs with -R")
+    parser.add_option('-b', '--backup', action='store_true',
+        help='make backups (see --suffix & --backup-dir)')
+    parser.add_option('--backup-dir', metavar="DIR", 
+        help='make backups into this directory')
+    parser.add_option('--suffix', metavar="SUFFIX",
+        help='backup suffix (default ~ w/o --backup-dir)')
+    parser.add_option('-u', '--update', action='store_true',
+        help="update only (don't overwrite newer files)")
+    parser.add_option('--inplace', action='store_true',
+        help='update the destination files inplace')
+    parser.add_option('-K', '--keep-dirlinks', action='store_true',
+        help='treat symlinked dir on receiver as dir')
+    parser.add_option('-l', '--links', action='store_true',
+        help="copy symlinks as symlinks")
+    parser.add_option('-L', '--copy-links', action='store_true',
+        help="copy the referent of all symlinks")
+    parser.add_option('--copy-unsafe-links', action='store_true',
+        help='copy the referent of "unsafe" symlinks')
+    parser.add_option('--safe-links', action='store_true',
+        help='ignore "unsafe" symlinks')
+    parser.add_option('-H', '--hard-links', action='store_true',
+        help='preserve hard links')
+    parser.add_option('-p', '--perms', action='store_true',
+        help='preserve permissions')
+    parser.add_option('-o', '--owner', action='store_true',
+        help='preserve owner (root only)')
+    parser.add_option('-g', '--group', action='store_true',
+        help='preserve group')
+    parser.add_option('-D', '--devices', action='store_true',
+        help='preserve devices (root only)')
+    parser.add_option('-t', '--times', action='store_true',
+        help='preserve times')
+    parser.add_option('-S', '--sparse', action='store_true',
+        help='handle sparse files efficiently')
+    parser.add_option('-n', '--dry-run', action='store_true',
+        help='show what would have been transferred')
+    parser.add_option('-W', '--whole-file', action='store_true',
+        help='copy whole files, no incremental checks')
+    parser.add_option('--no-whole-file', action='store_true',
+        help='turn off --whole-file')
+    parser.add_option('-x', '--one-file-system',  action='store_true',
+        help="don't cross filesystem boundaries")
+    parser.add_option('-B', '--block-size', metavar='SIZE',
+        help='force a fixed checksum block-size')
+    parser.add_option('-e', '--rsh', metavar='COMMAND',
+        help='specify the remote shell')
+    parser.add_option('--rsync-path', metavar='PATH',
+        help='specify path to rsync on the remote machine')
+    parser.add_option('--existing', action='store_true',
+        help='only update files that already exist')
+    parser.add_option('--ignore-existing', action='store_true',
+        help='ignore files that already exist on receiver')
+    parser.add_option('--delete', action='store_true',
+        help="delete files that don't exist on sender")
+    
+    if '_wxOptParseCallback' in globals():
+        parser._wxOptParseCallback = _wxOptParseCallback
+    
+    (options, args) = parser.parse_args()
