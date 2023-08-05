@@ -1,0 +1,233 @@
+.. include:: header.txt
+
+==============================
+ processing package reference 
+==============================
+
+The `processing` package mostly replicates the API of the `threading`
+module.
+
+The following functions and classes will always be available in the
+`processing` namespace:
+
+    **class** `Process(group=None, target=None, name=None, args=(), kwargs={})`
+        An analogue of `threading.Thread`.
+
+        See `Process objects`_.
+
+    `currentProcess()`
+        An analogue of `threading.currentThread`
+
+        Returns the object corresponding to the current process.
+
+    `activeChildren()`
+        Return list of all live children of the current process.
+        
+        Calling this has the side affect of "joining" any processes
+        which have already finished.
+        
+    `cpuCount()`
+        Returns the number of CPUs in the system.  May raise
+        `NotImplementedError`.
+
+    `Pipe()`
+        Returns a pair of connection objects representing the ends of
+        a duplex pipe.
+
+        These connection objects can be inherited by child processes
+        and have methods `send()` and `recv()` (among others) for
+        sending and recveiving picklable objects.  (See `Connection
+        objects <connection-ref.html#connection-objects>`_.)  For
+        example::
+
+            >>> from processing import Pipe
+            >>> a, b = Pipe()
+            >>> a.send([1, 'hello', None])
+            >>> b.recv()
+            [1, 'hello', None]
+
+        Note that connection objects are not thread/process safe.
+        
+    `Manager()`
+        Returns a started `SyncManager` object which can be
+        used for sharing objects between processes.  The returned
+        manager object corresponds to a spawned child process and has
+        methods which will create shared objects and return
+        corresponding proxies.
+
+        The methods for creating shared objects are
+
+            `list()`, `dict()`, `Namespace()`, `SharedValue()`,
+            `SharedStruct()`, `SharedArray()`, `Lock()`, `RLock()`,
+            `Semaphore()`, `BoundedSemaphore()`, `Condition()`,
+            `Event()`, `Queue()`.
+            
+        For example::
+
+            >>> from processing import Manager
+            >>> manager = Manager()
+            >>> l = manager.list(range(10))
+            >>> l.reverse()
+            >>> print l
+            [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+            >>> print repr(l)
+            <Proxy[list] object at 0x00E1B3B0>
+
+        See `SyncManager <manager-objects.html#syncmanager>`_ and
+        `Proxy objects`_.
+
+    `freezeSupport()`
+        Adds support for when a program which uses the `processing`
+        package has been frozen to produce a Windows executable.  (Has
+        been tested with `py2exe`, `PyInstaller` and `cx_Freeze`.)
+
+        One needs to call this function straight after the `if __name__
+        == '__main__'` line of the main module.  For example ::
+
+            from processing import Process, freezeSupport
+
+            def f():
+                print "hello world!"
+
+            if __name__ == '__main__':
+                freezeSupport()
+                p = Process(target=f)
+                p.start()
+
+        If the `freezeSupport()` line is missed out then the frozen
+        executable produced from this module would (on Windows)
+        recursively create new processes.
+
+        If the module is being run normally by the python interpreter
+        then `freezeSupport()` has no effect.
+
+    **exception** `ProcessExit`
+        Exception raised in another process when the `Process.stop()`
+        method is used.  This is a subclass of `SystemExit`.
+
+If the `_processing` extension is available then one also has:
+
+    **exception** `BufferTooShort`
+        Exception raise by the `recvbytes_into()` method of a
+        connection object when the supplied buffer object is too small
+        for the message read.
+
+        If `e` is an instance of `BufferTooShort` then `e.args[0]`
+        will give the message as a byte string.
+
+
+If the `_processing` extension was compiled with support for the
+platforms native semaphores (see `INSTALL.txt <../INSTALL.txt>`_) then
+the following functions are available:
+
+    `LocalManager()` 
+        Returns a manager object with instance methods
+        
+            `SharedValue`, `SharedStruct`, `SharedArray` 
+
+        for creating objects stored in shared memory map.  Also has
+        static methods
+        
+            `Lock`, `RLock`, `Semaphore`, `BoundedSemaphore`,
+            `Condition`, `Event`, `Queue`
+
+        which are just aliases for other functions in the `processing`
+        namespace.  See `LocalManager
+        <manager-objects.html#shared-memory-managers>`_.
+
+    `BoundedSemaphore(value=1)`
+        Returns a bounded semaphore object: a clone of
+        `threading.BoundedSemaphore`.
+
+    `Condition(lock=None)`
+        Returns a condition variable: a clone of `threading.Condition`.
+        
+        If `lock` is specified then it should be a `Lock` or `RLock`
+        object from `processing`.
+        
+    `Event()`
+        Returns an event object: a clone of `threading.Event`.
+
+    `Lock()` 
+        Returns a lock object: a clone of `threading.Lock` except
+        that acquiring a lock already owned by the calling thread
+        raises an exception instead of causing a deadlock).
+                        
+    `RLock()`
+        Returns a recursive lock object: a clone of `threading.RLock`.
+        
+    `Semaphore(value=1)`
+        Returns a bounded semaphore object: a clone of
+        `threading.Semaphore`.
+        
+    `PipeQueue(maxsize=0)`
+        Returns a near clone of `Queue.Queue` except that the
+        `qsize()` method is not implemented.  It is implemented using
+        a pipe and some locks/semaphores.
+        
+        On Unix if a client terminates while it is reading or writing
+        from the queue, other clients reading from the queue may lose
+        track of where messages boundaries are or may retrieve
+        incomplete messages.  At least on Windows a keyboard interrupt
+        (SIGINT) or the use of a process's `stop()` method should not
+        cause such a problem.
+        
+        Placing an object on a `PipeQueue` can block because of lack
+        of buffer space even if a zero timeout is used.
+        
+On Unix if `_processing` was compiled with support for Posix queues
+(see `INSTALL.txt <../INSTALL.txt>`_) then one also has:
+
+    `PosixQueue(maxsize=0, msgsize=0)`
+        Returns a near clone of `Queue.Queue` implemented using a (Unix
+        only) posix message queue.
+        
+        If `maxsize` is non-zero it determines the maximum number of
+        messages that can be in the queue and if `msgsize` is non-zero
+        it determines the maximum size in bytes of a message.  If
+        either is zero then the system default (which is finite) is
+        used.  (For instance on my Linux system the default maximum
+        number of messages in a queue is 10 and the maximum message
+        size is 8192 bytes.)  A `PosixQueue` object has attributes
+        `_maxmsg` and `_maxsize` which give these limits for that
+        queue.
+
+        Note that if `maxsize` or `msgsize` is larger than the system
+        maximum then an `OSError` exception will be thrown.  On Linux
+        the system maximums can viewed and modified through the
+        `/proc` filesystem --- see `man 7 mq_overview`.
+
+In addition `Queue()` will be an alias for either `PosixQueue()` or
+`PipeQueue()` if they are available:
+     
+    `Queue(maxsize=0)`
+        Alias for either `PosixQueue` if available or else `PipeQueue`.
+
+It should be noted that a queue created by `Queue.Queue()` will have
+infinite capacity and that putting an object on it will never block
+(or raise a `Full` exception).  This is not true of a queue created
+with `PipeQueue()` or `PosixQueue()` so a little extra care may be
+needed to avoid the possibility of deadlocks.
+
+                
+.. note::
+   * The `processing.dummy` package replicates the API of `processing`
+     but is no more than a wrapper around the `threading` module.
+     
+   * `processing` contains no analogues of `activeCount`,
+     `enumerate`, `settrace`, `setprofile`, `Timer`, or
+     `local` from the `threading` module.
+
+
+Subsections
+-----------
+
+* `Process objects <process-objects.html>`_
+* `Manager objects <manager-objects.html>`_
+* `Proxy objects <proxy-objects.html>`_
+* `connection module <connection-ref.html>`_
+
+
+.. _Prev: intro.html
+.. _Up: index.html
+.. _Next: process-objects.html

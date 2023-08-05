@@ -1,0 +1,146 @@
+.. include:: header.txt
+
+========================
+ Programming guidelines
+========================
+
+There are certain guidelines and idioms which should be adhered to
+when using the `processing` package.  
+
+
+All platforms
+-------------
+
+*Avoid shared state*
+    As far as possible one should try to avoid shifting large amounts
+    of data between processes.
+    
+    It is probably best to stick to using queues or pipes for
+    communication between processes rather than using the lower level
+    synchronization primitives from the `threading` module.
+    
+*Picklability*:
+    Ensure that the arguments to the methods of proxies are
+    picklable.
+
+*Thread safety of proxies*:
+    Do not use a proxy object from more than one thread unless you
+    protect it with a lock.
+
+    Alternatively another copy of the proxy can be created using the
+    `copy.copy()` function.
+
+    (There is never a problem with different processes using the
+    'same' proxy.)
+        
+*Catching* `ProcessExit`
+    If a `ProcessExit` exception is raised in a child process
+    then that process should end (almost) immediately; otherwise the
+    `stop()` method will not work as expected.  Note that
+    `ProcessExit` is a subclass of `SystemExit`.
+
+*Not letting the manager die early*
+    When the main process terminates any manager process it has
+    created will also terminate.  Make sure that no child process
+    still needs the manager when this happens --- the easiest way is
+    just to join all child processes you create.
+
+*Joining zombie processes*
+    On Unix when a process finishes but has not been joined it becomes
+    a zombie.  There should never be very many because each time a new
+    process starts (or `activeChildren()` is called) all completed
+    processes which have not yet been joined will be joined.  Also
+    calling a finished process's `isAlive()` will join the process
+    will already have been joined.  Even so it is probably good
+    practice to explicitly join all the processes that you start.
+
+*Better to inherit than pickle/unpickle*
+    On Windows many of types from the `processing` package need to be
+    picklable so that child processes can use them.  However, on Unix
+    the following types are not picklable:
+
+        `Lock`, `RLock`, `Semaphore`, `BoundedSemaphore`,
+        `Condition`, `Event`, `Queue`, `SharedValue`, 
+        `SharedStruct`, `SharedArray`.
+
+    For the sake of compatibility it is better not to rely on these
+    types being picklable.
+
+
+Windows
+-------
+
+Platforms such as Windows which lack `os.fork()` have a few extra
+restrictions:
+
+*More picklability*:
+    Ensure that all arguments to `Process.__init__()` are picklable.
+
+    Also, if you subclass `Process` then make sure that instances
+    will be picklable when the `start()` method is called.
+
+*Global variables*:
+    Bear in mind that if code run in a child process tries to access a
+    global variable, then the value it sees (if any) may not be the
+    same as the value in the parent process at the time that
+    `start()` was called.
+
+    However, global variables which are just module level constants
+    cause no problems.
+
+*Safe importing*:
+    Make sure that the module containing the target of a `Process`
+    instance (or the definition of a subclass of `Process` you are
+    using) can be safely imported by a new Python interpreter without
+    causing unintended side effects (such a starting a new process).
+
+    For example, under Windows running the following module would
+    recursively create new processes until you run out of memory or
+    get a crash::
+
+        from processing import Process
+
+        def foo():
+            print 'hello'
+
+        p = Process(target=foo)
+        p.start()
+
+    Instead one should protect creation of the new process by using
+    `if __name__ == '__main__':` as follows::
+
+        from processing import Process
+
+        def foo():
+            print 'hello'
+
+        if __name__ == '__main__':
+            p = Process(target=foo)
+            p.start()
+
+    This allows the newly spawned Python interpreter to safely import
+    the module and then run the module's `foo()` function.
+
+*Freezing*:
+    One can produce Windows executables from a python program by using
+    `py2exe`, `PyInstaller`, `cx_Freeze` etc.  However, if the program
+    uses `processing` then one needs to call `freezeSupport()`
+    immediately after the `if __name__ == '__main__':` line of the
+    main module.  Otherwise one will probably get the same problems
+    mentioned above concerning *Safe importing*.  For example ::
+
+        from processing import Process, freezeSupport
+
+        def foo():
+            print 'hello'
+
+        if __name__ == '__main__':
+            freezeSupport()
+            p = Process(target=foo)
+            p.start()
+
+
+.. _Prev: connection-ref.html
+.. _Up: index.html
+.. _Next: tests.html
+
