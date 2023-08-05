@@ -1,0 +1,152 @@
+===========
+Using Jinja
+===========
+
+Using Jinja in the application side is very basic. All you have to do
+is to import the ``Template`` and ``Context`` class. Additionally you
+need a loader which handles the template imports::
+
+    from jinja import Template, Context, FileSystemLoader
+
+    t = Template('templatename', FileSystemLoader('path/to/the/templates'))
+    c = Context({
+        'users': [
+            {'name': 'someone', 'id': 1, 'visible': True},
+            {'name': 'notme', 'id': 2, 'visible': True},
+            {'name': 'peter', 'id': 3, 'visible': False}
+        ]
+    })
+    print t.render(c)
+
+The template ``templatename.html`` in ``path/to/the/templates`` might look
+like this::
+
+    <ul id="userlist">
+    {% for user in users %}
+      {% if user.visible %}
+        {% define shown true %}
+        <li><a href="/users/{{ user.id }}/">{{ user.name|escapexml }}</a></li>
+      {% endif %}
+    {% endfor %}
+    {% if not shown %}
+      <li><strong>no users found</strong></li>
+    {% endif %}
+    </ul>
+
+Loaders
+=======
+
+There are three loaders shipped with Jinja:
+
+FileSystemLoader
+----------------
+
+Create it with::
+
+    loader = FileSystemLoader('searchpath/')
+
+This loader will look for templates named ``NAME.html`` and doesn't cache anything.
+
+
+CachedFileSystemLoader
+----------------------
+
+Create this loader using::
+
+    loader = CachedFileSystemLoader('searchpath/'[, 'cachedir/'])
+
+Works like the ``FileSystemLoader`` but caches the reparsed nodelist in the cachdir.
+If cachedir is not given it will cache it in the searchpath but with a "." prefix.
+
+.. admonition:: Note
+
+    Please notice that cached templates are much faster then reparsing them each
+    request because Jinja will save the preparsed nodelist in a dump.
+
+
+EggLoader
+---------
+
+Since jinja 0.8 you can load templates out of eggs::
+
+    loader = EggLoader('NameOfMyEgg', 'internal/path/to/templates')
+
+
+ChoiceLoader
+------------
+
+Takes a number of loader instances.
+
+The ``load`` and ``load_and_compile`` method try to to call the
+functions of all given loaders::
+
+    from jinja import ChoiceLoader, FileSystemLoader, EggLoader
+
+    loader = ChoiceLoader(
+        FileSystemLoader('/path/to/my/templates'),
+        EggLoader('MyEgg', 'internal/path/to/templates')
+    )
+
+
+StringLoader
+------------
+
+The ``StringLoader`` is a very basic loader without support for template inheritance,
+but allows the loading of templates stored in a string::
+
+    template = '''{{ "Hello World" }}'''
+    print Template(template, StringLoader())
+
+
+If you want to create your own loader check out the `loader development`_
+document.
+
+
+Unicode Support
+===============
+
+Jinja comes with built-in Unicode support. As a matter of fact, the return
+value of ``Template.render()`` will be a Python unicode object.
+
+Unfortunately, most text is still stored in some form of encoding, so normal
+strings must be converted to Unicode.
+
+The template
+------------
+
+Each template loader can be given a ``charset`` argument which defaults to
+``"utf-8"``::
+
+    loader = FileSystemLoader('path', charset='latin-1')
+
+This tells the loader that all templates it processes are encoded in the 
+``latin-1`` encoding.
+
+The string loader of course doesn't use the ``charset`` if you "load" Unicode
+strings.
+
+The context
+-----------
+
+Every string that is stored in your context (whether directly or tucked away in
+a list or dict) and used in the template will eventually have to be converted to
+Unicode too. Therefore, the context, too, takes a ``charset`` argument (which
+again defaults to ``"utf-8"``)::
+
+    context = Context({'thing': 'Käse'}, charset='latin-1')
+    template.render(context)
+
+Unicode strings in the context are not concerned as they needn't be converted.
+
+You can only specify one encoding per context, so if you have strings that use
+another charset you have two options:
+
+- convert them to unicode before putting them into the context
+- put them into the context as normal strings and use the ``decode`` filter::
+
+    {{ russianstring | decode "koi8-r" }}
+
+When it encounters an encoding issue, Jinja will raise the
+``TemplateCharsetError`` exception.
+
+.. _loader development: loader-dev.txt

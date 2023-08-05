@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <title>Developing Loaders | Jinja Documentation</title>
+    <style text="text/css">
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 1em;
+            padding: 0;
+        }
+
+        #navigation {
+            float: right;
+            margin: -1em -1em 1em 1em;
+            padding: 1em 2em 0 2em;
+            border: 1px solid #bbb;
+            border-width: 0 0 1px 1px;
+            background-color: #f8f8f8;
+        }
+
+        #page {
+            width: 45em;
+        }
+
+        a {
+            color: #d00;
+        }
+
+        a:hover {
+            color: #d40;
+        }
+
+        h1 {
+            font-size: 2em;
+            color: #d00;
+            margin: 0.5em 0 0.5em 0;
+            padding: 0;
+        }
+
+        h2 {
+            font-size: 1.7em;
+            color: #bd2121;
+            margin: 1em 0 0.5em 0;
+        }
+
+        h3 {
+            font-size: 1.3em;
+            color: #8a2424;
+            margin: 0.5em 0 0 0;
+        }
+
+        p {
+            margin: 0.5em 1em 0.5em 1em;
+        }
+
+        pre {
+            margin: 1em 0 1em 2em;
+            padding: 0.5em;
+            border-top: 1px solid #ddd;
+            border-bottom: 1px solid #ddd;
+            background-color: #f2f2f2;
+            overflow: auto;
+        }
+        
+        li {
+            line-height: 1.4em;
+        }
+        
+        hr {
+            margin: 1em;
+            padding: 0;
+            height: 1px!important;
+            background-color: #ccc;
+            border: none!important;
+        }
+        
+        div.admonition {
+            margin: 1em 0 1em 1.5em;
+            padding: 0.5em 0.5em 0.5em 2em;
+            background-color: #f6e3e3;
+            border: 1px solid #d50000;
+            border-left: none;
+            border-right: none;
+        }
+        
+        div.admonition p.admonition-title {
+            font-size: 1.1em;
+            color: #d40;
+            font-weight: bold;
+            margin: 0 0 0.5em -1em;
+        }
+        
+        table {
+            border-collapse: collapse;
+            margin: 1em 2em 1em 1.5em;
+        }
+        
+        table td, table th {
+            text-align: left;
+            border: 1px solid #eee;
+            padding: 0.3em;
+        }
+        
+        table th {
+            background-color: #d00000;
+            color: white;
+            border: 1px solid #d00000;
+            border-bottom: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+    <div id="navigation">
+        <h3>Documentation</h3>
+        <ul>
+            
+            <li><a href="index.html">back to index</a></li>
+            
+            <li><a href="http://wsgiarea.pocoo.org/repos/jinja/trunk/docs/source/loader-dev.txt">view source online</a></li>
+        </ul>
+        
+            <h3>Table of Contents</h3>
+            <ul>
+            
+                <li><a href="#baseloader">BaseLoader</a></li>
+            
+                <li><a href="#load-and-compile-vs-load-and-compile-uncached">load_and_compile vs load_and_compile_uncached</a></li>
+            
+            </ul>
+        
+    </div>
+    <h1>Developing Loaders</h1>
+    <div id="page">
+        <p>If you want to use jinja in a bigger application and you want to change
+the way jinja looks up templates the best way is to write a loader.</p>
+<p>This allows you for example to load different template sets depending on
+the setting of the user etc.</p>
+<div class="section">
+<h2><a id="baseloader" name="baseloader">BaseLoader</a></h2>
+<p>In <tt class="docutils literal"><span class="pre">jinja.loader</span></tt> is a class called <tt class="docutils literal"><span class="pre">BaseLoader</span></tt> you can use to implement
+your own loader. A common loader looks like this:</p>
+<pre class="literal-block">
+class Loader(object):
+
+    def load(self, name, parent=None):
+        &quot;&quot;&quot;This method isn't allowed to cache the data&quot;&quot;&quot;
+        raise NotImplementedError()
+
+    def load_and_compile(self, name, lib=None, parent=None):
+        &quot;&quot;&quot;Get's called when the template requires an nodelist
+        to render on.&quot;&quot;&quot;
+        template = self.load(name, parent)
+        lexer = Lexer(template)
+        parser = Parser(lexer.tokenize(), self, lib)
+        return parser.parse()
+
+    def load_and_compile_uncached(self, name, lib=None, parent=None):
+        &quot;&quot;&quot;Get's called for the extends tag to get a fresh
+        nodelist to manipulate.&quot;&quot;&quot;
+        return self.load_and_compile(name, lib, parent)
+</pre>
+<p><tt class="docutils literal"><span class="pre">load</span></tt> has to return a unicode object with the template source in.
+<tt class="docutils literal"><span class="pre">load_and_compile</span></tt> and <tt class="docutils literal"><span class="pre">load_and_compile_uncached</span></tt> has to return
+parsed nodelists. <tt class="docutils literal"><span class="pre">name</span></tt> is the name of the template the user
+wants the loader to import. <tt class="docutils literal"><span class="pre">parent</span></tt> is the name of the template
+the loader gets triggered.</p>
+<p>Normally this is <tt class="docutils literal"><span class="pre">None</span></tt>. But when you load a template using
+<tt class="docutils literal"><span class="pre">{%</span> <span class="pre">extends</span> <span class="pre">%}</span></tt> or <tt class="docutils literal"><span class="pre">{%</span> <span class="pre">include</span> <span class="pre">%}</span></tt> <tt class="docutils literal"><span class="pre">parent</span></tt> is the name of the
+template containing the tag.</p>
+<p><tt class="docutils literal"><span class="pre">load_and_compile</span></tt>/<tt class="docutils literal"><span class="pre">load_and_compile_uncached</span></tt> take another
+argument called <tt class="docutils literal"><span class="pre">lib</span></tt> which is the reference of the template lib
+the parser should use. If <tt class="docutils literal"><span class="pre">lib</span></tt> is <tt class="docutils literal"><span class="pre">None</span></tt> the parser will use
+the default lib <tt class="docutils literal"><span class="pre">jinja.lib.stdlib</span></tt>.</p>
+</div>
+<div class="section">
+<h2><a id="load-and-compile-vs-load-and-compile-uncached" name="load-and-compile-vs-load-and-compile-uncached">load_and_compile vs load_and_compile_uncached</a></h2>
+<p>Since jinja 0.8 there are two different loader functions. A cached one
+and an uncached one. The uncached one gets called when the template
+requires a fresh copy of a nodelist which it can use to modify and
+pickle afterwards. In case of the stdlib these are the <tt class="docutils literal"><span class="pre">extends</span></tt> and
+<tt class="docutils literal"><span class="pre">include</span></tt> tags.</p>
+<p>The normal <tt class="docutils literal"><span class="pre">cached</span></tt> version doesn't have to cache. For example the
+<tt class="docutils literal"><span class="pre">FileSystemLoader</span></tt> doesn't provide caching. Because of this
+the <tt class="docutils literal"><span class="pre">load_and_compile_uncached</span></tt> method automatically calls the
+<tt class="docutils literal"><span class="pre">load_and_compile</span></tt> method with the given arguments when you inherit
+from the <tt class="docutils literal"><span class="pre">BaseLoader</span></tt> and don't overwrite <tt class="docutils literal"><span class="pre">BaseLoader</span></tt>.</p>
+</div>
+
+    </div>
+</body>
+</html>

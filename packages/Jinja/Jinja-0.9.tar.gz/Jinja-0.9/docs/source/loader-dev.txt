@@ -1,0 +1,66 @@
+==================
+Developing Loaders
+==================
+
+If you want to use jinja in a bigger application and you want to change
+the way jinja looks up templates the best way is to write a loader.
+
+This allows you for example to load different template sets depending on
+the setting of the user etc.
+
+
+BaseLoader
+==========
+
+In ``jinja.loader`` is a class called ``BaseLoader`` you can use to implement
+your own loader. A common loader looks like this::
+
+    class Loader(object):
+
+        def load(self, name, parent=None):
+            """This method isn't allowed to cache the data"""
+            raise NotImplementedError()
+
+        def load_and_compile(self, name, lib=None, parent=None):
+            """Get's called when the template requires an nodelist
+            to render on."""
+            template = self.load(name, parent)
+            lexer = Lexer(template)
+            parser = Parser(lexer.tokenize(), self, lib)
+            return parser.parse()
+
+        def load_and_compile_uncached(self, name, lib=None, parent=None):
+            """Get's called for the extends tag to get a fresh
+            nodelist to manipulate."""
+            return self.load_and_compile(name, lib, parent)
+
+``load`` has to return a unicode object with the template source in.
+``load_and_compile`` and ``load_and_compile_uncached`` has to return
+parsed nodelists. ``name`` is the name of the template the user
+wants the loader to import. ``parent`` is the name of the template
+the loader gets triggered.
+
+Normally this is ``None``. But when you load a template using
+``{% extends %}`` or ``{% include %}`` ``parent`` is the name of the
+template containing the tag.
+
+``load_and_compile``/``load_and_compile_uncached`` take another
+argument called ``lib`` which is the reference of the template lib
+the parser should use. If ``lib`` is ``None`` the parser will use
+the default lib ``jinja.lib.stdlib``.
+
+
+load_and_compile vs load_and_compile_uncached
+=============================================
+
+Since jinja 0.8 there are two different loader functions. A cached one
+and an uncached one. The uncached one gets called when the template
+requires a fresh copy of a nodelist which it can use to modify and
+pickle afterwards. In case of the stdlib these are the ``extends`` and
+``include`` tags.
+
+The normal ``cached`` version doesn't have to cache. For example the
+``FileSystemLoader`` doesn't provide caching. Because of this
+the ``load_and_compile_uncached`` method automatically calls the
+``load_and_compile`` method with the given arguments when you inherit
+from the ``BaseLoader`` and don't overwrite ``BaseLoader``.
