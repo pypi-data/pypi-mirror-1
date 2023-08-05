@@ -1,0 +1,4713 @@
+Metadata-Version: 1.0
+Name: z3c.form
+Version: 1.0.0
+Summary: An advanced form and widget framework for Zope 3
+Home-page: http://svn.zope.org/z3c.form
+Author: Stephan Richter, Roger Ineichen and the Zope Community
+Author-email: zope3-dev@zope.org
+License: ZPL 2.1
+Description: This package provides an implementation for HTML forms and widgets. The goal
+        is to provide a simple API but with the ability to easily customize any data or
+        steps.
+        
+        Detailed Documentation
+        **********************
+        
+        =================
+        Forms and Widgets
+        =================
+        
+        This package provides an implementation for HTML forms and widgets. The goal
+        is to provide a simple API but with the ability to easily customize any data or
+        steps. This document, provides the content of this package's documentation
+        files. The documents are ordered in the way they should be read:
+        
+        - ``form.txt`` [must read]
+        
+        Describes the setup and usage of forms in the most common usages. Some
+        details are provided to the structure of form components.
+        
+        - ``subform.txt`` [must read]
+        
+        Introduces the complexities surrounding sub-forms and details two classes of
+        sub-forms, including code examples.
+        
+        - ``field.txt`` [must read]
+        
+        Provides a comprehensive explanation of the field manager API and how it is
+        to be used.
+        
+        - ``button.txt`` [must read]
+        
+        Provides a comprehensive explanation of the button manager API. It also
+        outlines how to create buttons within schemas and how buttons are converted
+        to actions.
+        
+        - ``zcml.txt`` [must read]
+        
+        Explains the ZCML directives defines by this package, which are designed to
+        make it easier to register new templates without writing Python code.
+        
+        - ``validator.txt`` [advanced users]
+        
+        Validators are used to validate converted form data. This document provides
+        a comprehensive overview of the API and how to use it effectively.
+        
+        - ``widget.txt`` [advanced users]
+        
+        Explains in detail the design goals surrounding widgets and widget managers
+        and how they were realized with the implemented API.
+        
+        - ``action.txt`` [advanced users]
+        
+        Explains in detail the design goals surrounding action managers and
+        actions. The execution of actions using action handlers is also covered. The
+        document demonstrates how actions can be created without the use of buttons.
+        
+        - ``value.txt`` [informative]
+        
+        The concept of attribute value adapters is introduced and fully
+        explained. Some motivation for this new and powerful pattern is given as
+        well.
+        
+        - ``datamanager.txt`` [informative]
+        
+        Data managers are resposnsible for accessing and writing the data. While
+        attribute access is the most common case, data managers can also manage
+        other data structures, such as dictionaries.
+        
+        - ``converter.txt`` [informative]
+        
+        Data converters convert data between internal and widget values and vice
+        versa.
+        
+        - ``term.txt`` [informative]
+        
+        Terms are wrappers around sources and vocabularies to provide a common
+        interface for choices in this package.
+        
+        - ``util.txt`` [informative]
+        
+        The ``util`` module provides several helper functions and classes. The
+        components not tested otherwise are explained in this file.
+        
+        
+        Browser Documentation
+        ---------------------
+        
+        There are several documentation files in the ``browser/`` sub-package. They
+        mainly document the basic widgets provided by the package.
+        
+        - ``README.txt`` [advanced users]
+        
+        This file contains a checklist, ensuring that all fields have a widget.
+        
+        - ``<fieldname>.txt``
+        
+        Each field name documentation file comprehensively explains the widget and
+        how it is ensured to work properly.
+        
+        =====
+        Forms
+        =====
+        
+        The purpose of this package, of course, is the development forms in a simple
+        as possible way and still providing all the hooks to do customization at any
+        level as required by our real-world use cases. Thus, once the system is setup
+        with all its default registrations, it should be trivial to develop a new
+        form.
+        
+        The strategy of this document is to provide the most common, and thus
+        simplest, case first and then demonstrate the available customization
+        options. In order to not overwhelm you with our set of well-chosen defaults,
+        all the default component registrations have been made prior to doing those
+        examples:
+        
+        >>> from z3c.form import testing
+        >>> testing.setupFormDefaults()
+        
+        Before we can start writing forms, we must have the content to work with:
+        
+        >>> import zope.interface
+        >>> import zope.schema
+        >>> class IPerson(zope.interface.Interface):
+        ...
+        ...     name = zope.schema.TextLine(
+        ...         title=u'Name',
+        ...         required=True)
+        ...
+        ...     gender = zope.schema.Choice(
+        ...         title=u'Gender',
+        ...         values=('male', 'female'),
+        ...         required=False)
+        ...
+        ...     age = zope.schema.Int(
+        ...         title=u'Age',
+        ...         description=u"The person's age.",
+        ...         min=0,
+        ...         default=20,
+        ...         required=False)
+        
+        >>> from zope.schema.fieldproperty import FieldProperty
+        >>> class Person(object):
+        ...     zope.interface.implements(IPerson)
+        ...     name = FieldProperty(IPerson['name'])
+        ...     gender = FieldProperty(IPerson['gender'])
+        ...     age = FieldProperty(IPerson['age'])
+        ...
+        ...     def __init__(self, name, gender=None, age=None):
+        ...         self.name = name
+        ...         if gender:
+        ...             self.gender = gender
+        ...         if age:
+        ...             self.age = age
+        ...
+        ...     def __repr__(self):
+        ...         return '<%s %r>' %(self.__class__.__name__, self.name)
+        
+        Okay, that should suffice for now.
+        
+        What's next? Well, first things first. Let's create an add form for the
+        person. Since practice showed that the ``IAdding`` interface is overkill for
+        most projects, the default add form of ``z3c.form`` requires you to define the
+        creation and adding mechanism.
+        
+        __Note__:
+        
+        If it is not done, ``NotImplementedError``'s are raised:
+        
+        >>> from z3c.form.testing import TestRequest
+        >>> from z3c.form import form, field
+        
+        >>> abstract = form.AddForm(None, TestRequest())
+        
+        >>> abstract.create({})
+        Traceback (most recent call last):
+        ...
+        NotImplementedError
+        
+        >>> abstract.add(1)
+        Traceback (most recent call last):
+        ...
+        NotImplementedError
+        
+        >>> abstract.nextURL()
+        Traceback (most recent call last):
+        ...
+        NotImplementedError
+        
+        
+        Thus let's now create a wroking add form:
+        
+        >>> class PersonAddForm(form.AddForm):
+        ...
+        ...     fields = field.Fields(IPerson)
+        ...
+        ...     def create(self, data):
+        ...         return Person(**data)
+        ...
+        ...     def add(self, object):
+        ...         self.context[object.name] = object
+        ...
+        ...     def nextURL(self):
+        ...         return 'index.html'
+        
+        This is as simple as it gets. We explicitely define the pieces that are
+        custom to every situation and let the default setup of the framework do the
+        rest. Yes, this looks extremely similar to ``zope.formlib`` and it is
+        intentional so, because we really like the simplicity of ``zope.formlib``'s
+        way of dealing with the common use cases.
+        
+        During the test setup we also brought up a root folder already, so let's try
+        to add a new person object there. For this add form, of course, the context is
+        now the root folder:
+        
+        >>> request = TestRequest()
+        >>> add = PersonAddForm(root, request)
+        
+        Since forms are not necessarily pages -- in fact often they are not -- they
+        must not have a ``__call__`` method that does all the processing and rendering
+        at once. Instead, this form embraces the update/render pattern. Thus, we first
+        call the ``update()`` method.
+        
+        >>> add.update()
+        
+        Actually a lot of things happen during this stage. Let me step through it one
+        by one pointing out the effects.
+        
+        
+        Find a widget manager and update it
+        -----------------------------------
+        
+        The default widget manager knows to look for the ``fields`` attribute in the
+        form, since it implements ``IFieldsForm``:
+        
+        >>> from z3c.form import interfaces
+        >>> interfaces.IFieldsForm.providedBy(add)
+        True
+        
+        The widget manager is then stored in the ``widgets`` attribute as promised by
+        the ``IForm`` interface:
+        
+        >>> add.widgets
+        <z3c.form.field.FieldWidgets object at ...>
+        
+        The widget manager will have three widgets, one for each field:
+        
+        >>> add.widgets.keys()
+        ['name', 'gender', 'age']
+        
+        When the widget manager updates itself, several sub-tasks are processed. The
+        manager goes through each field, trying to create a fully representative
+        widget for the field.
+        
+        Field Availability
+        ~~~~~~~~~~~~~~~~~~
+        
+        Just because a field is requested in the field manager, does not mean that a
+        widget has to be created for the field. There are cases when a field
+        declaration might be ignored. The following reasons come to mind:
+        
+        * No widget is created, if the data is not accessible in the content.
+        * A custom widget manager has been registered to particularly ignore a field.
+        
+        In this simple case, all fields will be converted to widgets.
+        
+        Widget Creation
+        ~~~~~~~~~~~~~~~
+        
+        So first it instantiates the widget with the field. During the process,
+        several pieces of information are transferred from the field to the widget:
+        
+        >>> age = add.widgets['age']
+        
+        # field.title -> age.label
+        >>> age.label
+        u'Age'
+        
+        # field.required -> age.required
+        >>> age.required
+        False
+        
+        All these values can be overridden at later stages of the updating
+        process.
+        
+        Widget Value
+        ~~~~~~~~~~~~
+        
+        The next step is to determine the the value that should be displayed by the
+        widget. There are three places where the value could come from:
+        
+        * The field's default value.
+        * The request, in case a form has not been submitted or an error occurred.
+        * The context of the form, which represents the displayed content.
+        
+        Since we are currently building an add form, the only the first two places are
+        effective. And since we do not have anything in the request, the value should
+        be the field's default value or be empty.
+        
+        >>> age.value
+        u'20'
+        
+        Since the widget only deals with output-ready values, the system also converts
+        the value using a data converter.
+        
+        Widget Mode
+        ~~~~~~~~~~~
+        
+        Now the widget manager looks at the field to determine the widget mode -- in
+        other words whether the widget is a display or edit widget. In this case all
+        fields are input fields:
+        
+        >>> age.mode
+        'input'
+        
+        Deciding which mode to use, however, might not be a trivial operation. It
+        might depend on several factors:
+        
+        * The permission to the content's data value
+        * The manual ``mode`` flag in the field
+        * The ``read_only`` flag in the schema field
+        
+        
+        Widget Attribute Values
+        ~~~~~~~~~~~~~~~~~~~~~~~
+        
+        As mentioned before, several widget attributes are optionally overridden when
+        the widget updates itself:
+        
+        * label
+        * hint
+        * required
+        * mode
+        
+        Since we have no customization components registered, all of those fields will
+        remain as set before.
+        
+        
+        Find an action manager, update and execute it
+        ---------------------------------------------
+        
+        After all widgets have been setup correctly, the actions are setup. By
+        default, the form machinery uses the button declaration on the form to create
+        its actions. For the add form, an add button is defined by default, so that we
+        did not need to create our own. Thus, there should be one action:
+        
+        >>> len(add.actions)
+        1
+        
+        The add button is an action and a widget at the same time:
+        
+        >>> addAction = add.actions['add']
+        >>> addAction.title
+        u'Add'
+        >>> addAction.value
+        u'Add'
+        
+        After everything is setup, all pressed buttons are executed. Once a submitted
+        action is detected, a special action handler adapter is used to determine the
+        actions to take. Since the add button has not been pressed yet, no action
+        occurred.
+        
+        
+        Rendering the form
+        ------------------
+        
+        Once the update is complete we can render the form. Since we have not
+        specified a template yet, we have to do this now. We have prepared a small and
+        very simple template as part of this test:
+        
+        >>> import os
+        >>> from zope.app.pagetemplate import viewpagetemplatefile
+        >>> from z3c.form import tests
+        >>> def addTemplate(form):
+        ...     form.template = viewpagetemplatefile.BoundPageTemplate(
+        ...         viewpagetemplatefile.ViewPageTemplateFile(
+        ...             'simple_edit.pt', os.path.dirname(tests.__file__)), form)
+        >>> addTemplate(add)
+        
+        Let's now render the page:
+        
+        >>> print add.render()
+        <html>
+        <body>
+        <form action=".">
+        <div class="row">
+        <label for="form.widgets.name">Name</label>
+        <input type="text" id="form.widgets.name" name="form.widgets.name"
+        class="textWidget" value="" />
+        </div>
+        <div class="row">
+        <label for="form.widgets.gender">Gender</label>
+        <select id="form.widgets.gender" name="form.widgets.gender:list"
+        class="selectWidget" size="1">
+        <option id="form.widgets.gender.novalue"
+        value="--NOVALUE--">no value</option>
+        <option id="form.widgets.gender.0" value="male">male</option>
+        <option id="form.widgets.gender.1" value="female">female</option>
+        </select>
+        <input name="form.widgets.gender-empty-marker" type="hidden"
+        value="1" />
+        </div>
+        <div class="row">
+        <label for="form.widgets.age">Age</label>
+        <input type="text" id="form.widgets.age" name="form.widgets.age"
+        class="textWidget" value="20" />
+        </div>
+        <div class="action">
+        <input type="submit" id="form.buttons.add" name="form.buttons.add"
+        class="submitWidget" value="Add" />
+        </div>
+        </form>
+        </body>
+        </html>
+        
+        
+        Submitting an add form successfully
+        -----------------------------------
+        
+        Let's now fill the request with all the right values so that upon submitting
+        the form with the "Add" button, the person should be added to the root folder:
+        
+        >>> request = TestRequest(form={
+        ...     'form.widgets.name': u'Stephan Richter',
+        ...     'form.widgets.gender': ['male'],
+        ...     'form.widgets.age': u'20',
+        ...     'form.buttons.add': u'Add'}
+        ...     )
+        
+        >>> add = PersonAddForm(root, request)
+        >>> add.update()
+        
+        >>> sorted(root)
+        [u'Stephan Richter']
+        >>> stephan = root[u'Stephan Richter']
+        >>> stephan.name
+        u'Stephan Richter'
+        >>> stephan.gender
+        'male'
+        >>> stephan.age
+        20
+        
+        
+        Submitting an add form with invalid data
+        ----------------------------------------
+        
+        Next we try to submit the add form with the required name missing. Thus, the
+        add form should not complete with the addition, but return with the add form
+        pointing out the error.
+        
+        >>> request = TestRequest(form={
+        ...     'form.widgets.gender': ['male'],
+        ...     'form.widgets.age': u'23',
+        ...     'form.buttons.add': u'Add'}
+        ...     )
+        
+        >>> add = PersonAddForm(root, request)
+        >>> add.update()
+        
+        The widget manager and the widget causing the error should have an error
+        message:
+        
+        >>> [error for error in add.widgets.errors]
+        [<ErrorViewSnippet for RequiredMissing>]
+        
+        >>> add.widgets['name'].error
+        <ErrorViewSnippet for RequiredMissing>
+        
+        Let's now render the form:
+        
+        >>> from z3c.form import testing
+        >>> add.template = viewpagetemplatefile.BoundPageTemplate(
+        ...     viewpagetemplatefile.ViewPageTemplateFile(
+        ...         testing.getPath('../tests/simple_edit.pt'), ''), add)
+        >>> print add.render()
+        <html>
+        <body>
+        <i>There were some errors.</i>
+        <ul>
+        <li>
+        Name: <div class="error">Required input is missing.</div>
+        </li>
+        </ul>
+        <form action=".">
+        <div class="row">
+        <b><div class="error">Required input is missing.</div>
+        </b><label for="form.widgets.name">Name</label>
+        <input type="text" id="form.widgets.name" name="form.widgets.name"
+        class="textWidget" value="" />
+        </div>
+        <div class="row">
+        <label for="form.widgets.gender">Gender</label>
+        <select id="form.widgets.gender" name="form.widgets.gender:list"
+        class="selectWidget" size="1">
+        <option id="form.widgets.gender.novalue"
+        value="--NOVALUE--">no value</option>
+        <option id="form.widgets.gender.0" value="male"
+        selected="selected">male</option>
+        <option id="form.widgets.gender.1" value="female">female</option>
+        </select>
+        <input name="form.widgets.gender-empty-marker" type="hidden"
+        value="1" />
+        </div>
+        <div class="row">
+        <label for="form.widgets.age">Age</label>
+        <input type="text" id="form.widgets.age" name="form.widgets.age"
+        class="textWidget" value="23" />
+        </div>
+        <div class="action">
+        <input type="submit" id="form.buttons.add" name="form.buttons.add"
+        class="submitWidget" value="Add" />
+        </div>
+        </form>
+        </body>
+        </html>
+        
+        Note that the values of the field are now extracted from the request.
+        
+        Let's now also provide a negative age, which is not possible either:
+        
+        >>> request = TestRequest(form={
+        ...     'form.widgets.gender': ['male'],
+        ...     'form.widgets.age': u'-5',
+        ...     'form.buttons.add': u'Add'}
+        ...     )
+        
+        >>> add = PersonAddForm(root, request)
+        >>> add.update()
+        
+        >>> [(view.widget.label, view) for view in add.widgets.errors]
+        [(u'Name', <ErrorViewSnippet for RequiredMissing>),
+        (u'Age', <ErrorViewSnippet for TooSmall>)]
+        
+        But the errror message for a negative age is too generic:
+        
+        >>> print add.widgets['age'].error.render()
+        <div class="error">Value is too small</div>
+        
+        It would be better to say that negative values are disallowed. So let's
+        register a new error view snippet for the ``TooSmall`` error:
+        
+        >>> from z3c.form import error
+        
+        >>> class TooSmallView(error.ErrorViewSnippet):
+        ...     zope.component.adapts(
+        ...         zope.schema.interfaces.TooSmall, None, None, None, None, None)
+        ...
+        ...     def update(self):
+        ...         super(TooSmallView, self).update()
+        ...         if self.field.min == 0:
+        ...             self.message = u'The value cannot be a negative number.'
+        
+        >>> zope.component.provideAdapter(TooSmallView)
+        
+        >>> add = PersonAddForm(root, request)
+        >>> add.update()
+        >>> print add.widgets['age'].error.render()
+        <div class="error">The value cannot be a negative number.</div>
+        
+        
+        Additional Form Attributes and API
+        ----------------------------------
+        
+        Since we are talking about HTML forms here, add and edit forms support all
+        relevant FORM element attributes as attributes on the class.
+        
+        >>> add.method
+        'post'
+        >>> add.enctype
+        'multipart/form-data'
+        >>> add.acceptCharset
+        >>> add.accept
+        
+        The ``action`` attribute is computed. By default it is the current URL:
+        
+        >>> add.action
+        'http://127.0.0.1'
+        
+        The name is also computed. By default it takes the prefix and removes any
+        trailing ".".
+        
+        >>> add.name
+        'form'
+        
+        The template can then use those attributes, if it likes to. Since we are
+        talking about templates, in this example we set the template manual, but if no
+        template is specified, the system tries to find an adapter. Initially, there
+        is no adapter, so rendering the form fails:
+        
+        >>> add.template = None
+        >>> add.render()
+        Traceback (most recent call last):
+        ...
+        ComponentLookupError: ((...), <InterfaceClass ...IPageTemplate>, u'')
+        
+        The form module provides a simple component to create template factories:
+        
+        >>> factory = form.FormTemplateFactory(
+        ...     testing.getPath('../tests/simple_edit.pt'), form=PersonAddForm)
+        >>> zope.component.provideAdapter(factory)
+        
+        Now the factory will be used to provide a template:
+        
+        >>> print add.render()
+        <html>
+        ...
+        </html>
+        
+        Since a form can also be used as a page itself, it is callable:
+        
+        >>> print add()
+        <html>
+        ...
+        </html>
+        
+        
+        Changing Widget Attribute Values
+        --------------------------------
+        
+        It frequently happens that a customer comes along and wants to slightly or
+        totally change some of the text shown in forms or make optional fields
+        required. Until now this always meant to implement a custom schema for this
+        client. With the z3c.form framework all attributes -- for which it is sensible
+        to replace a value without touching the code -- are customizable via an
+        attribute value adapter.
+        
+        So let's change the label of the name widget from "Name" to "Full Name":
+        
+        >>> from z3c.form import widget
+        >>> NameLabel = widget.StaticWidgetAttribute(
+        ...     u'Full Name', field=IPerson['name'])
+        >>> zope.component.provideAdapter(NameLabel, name='label')
+        
+        When the form renders, the label should be changed:
+        
+        >>> add = PersonAddForm(root, TestRequest())
+        >>> addTemplate(add)
+        >>> add.update()
+        >>> print add.render()
+        <html>
+        ...
+        <div class="row">
+        <label for="form.widgets.name">Full Name</label>
+        <input type="text" id="form.widgets.name" name="form.widgets.name"
+        class="textWidget" value="" />
+        </div>
+        ...
+        
+        
+        Adding a "Cancel" button
+        ------------------------
+        
+        Let's say a client requests that all add forms should have a "Cancel"
+        button. When the button is pressed, the user is forwarded to the next URL of
+        the add form. As always, the goal is to not touch the core implementation of
+        the code, but make those changes externally.
+        
+        Adding a button/action is a little bit more involved than changing a value,
+        because you have to isnert the additional action and customize the action
+        handler. Based on your needs of flexibility, multiple approaches could be
+        chosen. Here we demonstrate the simplest one.
+        
+        The first step is to create a custom action manager that always inserts a
+        cancel action:
+        
+        >>> from z3c.form import button
+        >>> class AddActions(button.ButtonActions):
+        ...     zope.component.adapts(
+        ...         interfaces.IAddForm,
+        ...         zope.interface.Interface,
+        ...         zope.interface.Interface)
+        ...
+        ...     def update(self):
+        ...         self.form.buttons = button.Buttons(
+        ...             self.form.buttons,
+        ...             button.Button('cancel', u'Cancel'))
+        ...         super(AddActions, self).update()
+        
+        After registering the new action manager,
+        
+        >>> zope.component.provideAdapter(AddActions)
+        
+        the add form should display a cancel button:
+        
+        >>> add.update()
+        >>> print add.render()
+        <html>
+        ...
+        <div class="action">
+        <input type="submit" id="form.buttons.add" name="form.buttons.add"
+        class="submitWidget" value="Add" />
+        </div>
+        <div class="action">
+        <input type="submit" id="form.buttons.cancel" name="form.buttons.cancel"
+        class="submitWidget" value="Cancel" />
+        </div>
+        ...
+        
+        But showing the button does not mean it does anything. So we also need a
+        custom action handler to handle the cancel action:
+        
+        >>> class AddActionHandler(button.ButtonActionHandler):
+        ...     zope.component.adapts(
+        ...         interfaces.IAddForm,
+        ...         zope.interface.Interface,
+        ...         zope.interface.Interface,
+        ...         button.ButtonAction)
+        ...
+        ...     def __call__(self):
+        ...         if self.action.name == 'form.buttons.cancel':
+        ...            self.form._finishedAdd = True
+        ...            return
+        ...         super(AddActionHandler, self).__call__()
+        
+        After registering the action handler,
+        
+        >>> zope.component.provideAdapter(AddActionHandler)
+        
+        we can press the cancel button and we will be forwarded:
+        
+        >>> request = TestRequest(form={'form.buttons.cancel': u'Cancel'})
+        
+        >>> add = PersonAddForm(root, request)
+        >>> addTemplate(add)
+        >>> add.update()
+        >>> add.render()
+        ''
+        
+        >>> request.response.getStatus()
+        302
+        >>> request.response.getHeader('Location')
+        'index.html'
+        
+        Eventually, we might have action managers and handlers that are much more
+        powerful and some of the manual labor in this example would become
+        unnecessary.
+        
+        
+        Creating an Edit Form
+        ---------------------
+        
+        Now that we have exhaustively covered the customization possibilities of add
+        forms, let's create an edit form. Edit forms are even simpler than add forms,
+        since all actions are completely automatic:
+        
+        >>> class PersonEditForm(form.EditForm):
+        ...
+        ...     fields = field.Fields(IPerson)
+        
+        We can use the created person from the successful addition above.
+        
+        >>> edit = PersonEditForm(root[u'Stephan Richter'], TestRequest())
+        
+        After adding a template, we can look at the form:
+        
+        >>> addTemplate(edit)
+        >>> edit.update()
+        >>> print edit.render()
+        <html>
+        <body>
+        <form action=".">
+        <div class="row">
+        <label for="form.widgets.name">Full Name</label>
+        <input type="text" id="form.widgets.name" name="form.widgets.name"
+        class="textWidget" value="Stephan Richter" />
+        </div>
+        <div class="row">
+        <label for="form.widgets.gender">Gender</label>
+        <select id="form.widgets.gender" name="form.widgets.gender:list"
+        class="selectWidget" size="1">
+        <option id="form.widgets.gender.novalue"
+        value="--NOVALUE--">no value</option>
+        <option id="form.widgets.gender.0" value="male"
+        selected="selected">male</option>
+        <option id="form.widgets.gender.1" value="female">female</option>
+        </select>
+        <input name="form.widgets.gender-empty-marker" type="hidden"
+        value="1" />
+        </div>
+        <div class="row">
+        <label for="form.widgets.age">Age</label>
+        <input type="text" id="form.widgets.age" name="form.widgets.age"
+        class="textWidget" value="20" />
+        </div>
+        <div class="action">
+        <input type="submit" id="form.buttons.apply" name="form.buttons.apply"
+        class="submitWidget" value="Apply" />
+        </div>
+        </form>
+        </body>
+        </html>
+        
+        As you can see, the data is being pulled in from the context for the edit
+        form. Next we will look at the behavior when submitting the form.
+        
+        
+        Failure Upon Submission of Edit Form
+        ------------------------------------
+        
+        Let's now submit the form having some invalid data.
+        
+        >>> request = TestRequest(form={
+        ...     'form.widgets.name': u'Claudia Richter',
+        ...     'form.widgets.gender': ['female'],
+        ...     'form.widgets.age': u'-1',
+        ...     'form.buttons.apply': u'Apply'}
+        ...     )
+        
+        >>> edit = PersonEditForm(root[u'Stephan Richter'], request)
+        >>> addTemplate(edit)
+        >>> edit.update()
+        >>> print edit.render()
+        <html>
+        <body>
+        <i>There were some errors.</i>
+        <ul>
+        <li>
+        Age: <div class="error">The value cannot be a negative number.</div>
+        </li>
+        </ul>
+        <form action=".">
+        <div class="row">
+        <label for="form.widgets.name">Full Name</label>
+        <input type="text" id="form.widgets.name" name="form.widgets.name"
+        class="textWidget" value="Claudia Richter" />
+        </div>
+        <div class="row">
+        <label for="form.widgets.gender">Gender</label>
+        <select id="form.widgets.gender" name="form.widgets.gender:list"
+        class="selectWidget" size="1">
+        <option id="form.widgets.gender.novalue"
+        value="--NOVALUE--">no value</option>
+        <option id="form.widgets.gender.0" value="male">male</option>
+        <option id="form.widgets.gender.1" value="female"
+        selected="selected">female</option>
+        </select>
+        <input name="form.widgets.gender-empty-marker" type="hidden"
+        value="1" />
+        </div>
+        <div class="row">
+        <b><div class="error">The value cannot be a negative number.</div>
+        </b><label for="form.widgets.age">Age</label>
+        <input type="text" id="form.widgets.age" name="form.widgets.age"
+        class="textWidget" value="-1" />
+        </div>
+        <div class="action">
+        <input type="submit" id="form.buttons.apply" name="form.buttons.apply"
+        class="submitWidget" value="Apply" />
+        </div>
+        </form>
+        </body>
+        </html>
+        
+        
+        Successfully Editing Content
+        ----------------------------
+        
+        Let's now resubmit the form with valid data, so the data should be updated.
+        
+        >>> request = TestRequest(form={
+        ...     'form.widgets.name': u'Claudia Richter',
+        ...     'form.widgets.gender': ['female'],
+        ...     'form.widgets.age': u'27',
+        ...     'form.buttons.apply': u'Apply'}
+        ...     )
+        
+        >>> edit = PersonEditForm(root[u'Stephan Richter'], request)
+        >>> addTemplate(edit)
+        >>> edit.update()
+        >>> print edit.render()
+        <html>
+        ...
+        <i>Data successfully updated.</i>
+        ...
+        
+        >>> stephan = root[u'Stephan Richter']
+        >>> stephan.name
+        u'Claudia Richter'
+        >>> stephan.gender
+        'female'
+        >>> stephan.age
+        27
+        
+        
+        Successful Action with No Changes
+        ---------------------------------
+        
+        When submitting the form without any changes, the form will tell you so.
+        
+        >>> request = TestRequest(form={
+        ...     'form.widgets.name': u'Claudia Richter',
+        ...     'form.widgets.gender': ['female'],
+        ...     'form.widgets.age': u'27',
+        ...     'form.buttons.apply': u'Apply'}
+        ...     )
+        
+        >>> edit = PersonEditForm(root[u'Stephan Richter'], request)
+        >>> addTemplate(edit)
+        >>> edit.update()
+        >>> print edit.render()
+        <html>
+        ...
+        <i>No changes were applied.</i>
+        ...
+        
+        
+        Changing Status Messages
+        ------------------------
+        
+        Depending on the project, it is often desirable to change the status messages
+        to fit the application. In ``zope.formlib`` this was hard to do, since the
+        messages were burried within fairly complex methods that one did not want to
+        touch. In this package all those messages are exposed as form attributes.
+        
+        There are three messages for the edit form:
+        
+        * ``formErrorsMessage`` -- Indicates that there was an error occurred while
+        applying the changes. This message is also available for the add form.
+        
+        * ``successMessage`` -- The form data was successfully applied.
+        
+        * ``noChangesMessage`` -- No changes were found in the form data.
+        
+        Let's now change the ``noChangesMessage``:
+        
+        >>> edit.noChangesMessage = u'No changes were detected in the form data.'
+        >>> edit.update()
+        >>> print edit.render()
+        <html>
+        ...
+        <i>No changes were detected in the form data.</i>
+        ...
+        
+        When even more flexibility is required within a project, one could also
+        implement these messages as properties looking up an attribute value. However,
+        we have found this to be a rare case.
+        
+        
+        Creating Edit Forms for Dictionaries
+        ------------------------------------
+        
+        Sometimes it is not desirable to edit a class instance that implements the
+        fields, but other types of object. A good example is the need to modify a
+        simple dictionaries, where the field names are the keys. To do that, a special
+        data manager for dictionaries is available:
+        
+        >>> from z3c.form import datamanager
+        >>> zope.component.provideAdapter(datamanager.DictionaryField)
+        
+        The only step the developer has to complete is to re-implement the form's
+        ``getContent()`` method to return the dictionary:
+        
+        >>> personDict = {'name': u'Roger Ineichen'}
+        >>> class PersonDictEditForm(PersonEditForm):
+        ...     def getContent(self):
+        ...         return personDict
+        
+        We can now use the form as usual:
+        
+        >>> edit = PersonDictEditForm(None, TestRequest())
+        >>> addTemplate(edit)
+        >>> edit.update()
+        >>> print edit.render()
+        <html>
+        <body>
+        <form action=".">
+        <div class="row">
+        <label for="form.widgets.name">Full Name</label>
+        <input type="text" id="form.widgets.name"
+        name="form.widgets.name" class="textWidget"
+        value="Roger Ineichen" />
+        </div>
+        <div class="row">
+        <label for="form.widgets.gender">Gender</label>
+        <select id="form.widgets.gender" name="form.widgets.gender:list"
+        class="selectWidget" size="1">
+        <option id="form.widgets.gender.novalue"
+        value="--NOVALUE--">no value</option>
+        <option id="form.widgets.gender.0" value="male">male</option>
+        <option id="form.widgets.gender.1" value="female">female</option>
+        </select>
+        <input name="form.widgets.gender-empty-marker" type="hidden"
+        value="1" />
+        </div>
+        <div class="row">
+        <label for="form.widgets.age">Age</label>
+        <input type="text" id="form.widgets.age"
+        name="form.widgets.age" class="textWidget" value="20" />
+        </div>
+        <div class="action">
+        <input type="submit" id="form.buttons.apply"
+        name="form.buttons.apply" class="submitWidget"
+        value="Apply" />
+        </div>
+        </form>
+        </body>
+        </html>
+        
+        Note that the name displayed in the form is identical to the one in the
+        dictionary. Let's now submit a form to ensure that the data is also written to
+        the dictionary:
+        
+        >>> request = TestRequest(form={
+        ...     'form.widgets.name': u'Jesse Ineichen',
+        ...     'form.widgets.gender': ['male'],
+        ...     'form.widgets.age': u'5',
+        ...     'form.buttons.apply': u'Apply'}
+        ...     )
+        >>> edit = PersonDictEditForm(None, request)
+        >>> edit.update()
+        
+        >>> from zope.testing.doctestunit import pprint
+        >>> pprint(personDict)
+        {'age': 5,
+        'gender': 'male',
+        'name': u'Jesse Ineichen'}
+        
+        
+        Creating a Display Form
+        -----------------------
+        
+        Creating a display form is simple; just instantiate, update and render it:
+        
+        >>> class PersonDisplayForm(form.DisplayForm):
+        ...     fields = field.Fields(IPerson)
+        ...     template = viewpagetemplatefile.ViewPageTemplateFile(
+        ...         'simple_display.pt', os.path.dirname(tests.__file__))
+        
+        >>> display = PersonDisplayForm(stephan, TestRequest())
+        >>> display.update()
+        >>> print display.render()
+        <html>
+        <body>
+        <div class="row">
+        Claudia Richter
+        </div>
+        <div class="row">
+        female
+        </div>
+        <div class="row">
+        27
+        </div>
+        </body>
+        </html>
+        
+        
+        Extending Forms
+        ---------------
+        
+        One very common use case is to extend forms. For example, you would like to
+        use the edit form and its defined "Apply" button, but add another button
+        yourself. Unfortunately, just inheriting the form is not enough, because the
+        new button and handler declarations will override the inherited ones. Let me
+        demonstrate the problem:
+        
+        >>> class BaseForm(form.Form):
+        ...     fields = field.Fields(IPerson).select('name')
+        ...
+        ...     @button.buttonAndHandler(u'Apply')
+        ...     def handleApply(self, form):
+        ...         print 'success'
+        
+        >>> BaseForm.fields.keys()
+        ['name']
+        >>> BaseForm.buttons.keys()
+        ['apply']
+        >>> BaseForm.handlers
+        <Handlers [<Handler for <Button 'apply' u'Apply'>>]>
+        
+        Let's now derive a form from the base form:
+        
+        >>> class DerivedForm(BaseForm):
+        ...     fields = field.Fields(IPerson).select('gender')
+        ...
+        ...     @button.buttonAndHandler(u'Cancel')
+        ...     def handleCancel(self, form):
+        ...         print 'cancel'
+        
+        >>> DerivedForm.fields.keys()
+        ['gender']
+        >>> DerivedForm.buttons.keys()
+        ['cancel']
+        >>> DerivedForm.handlers
+        <Handlers [<Handler for <Button 'cancel' u'Cancel'>>]>
+        
+        The obvious method to "inherit" the base form's information os to copy it
+        over:
+        
+        >>> class DerivedForm(BaseForm):
+        ...     fields = BaseForm.fields.copy()
+        ...     buttons = BaseForm.buttons.copy()
+        ...     handlers = BaseForm.handlers.copy()
+        ...
+        ...     fields += field.Fields(IPerson).select('gender')
+        ...
+        ...     @button.buttonAndHandler(u'Cancel')
+        ...     def handleCancel(self, form):
+        ...         print 'cancel'
+        
+        >>> DerivedForm.fields.keys()
+        ['name', 'gender']
+        >>> DerivedForm.buttons.keys()
+        ['apply', 'cancel']
+        >>> DerivedForm.handlers
+        <Handlers
+        [<Handler for <Button 'apply' u'Apply'>>,
+        <Handler for <Button 'cancel' u'Cancel'>>]>
+        
+        But this is pretty clumsy. Instead, the ``form`` module provides a helper
+        method that will do the extending for you:
+        
+        >>> class DerivedForm(BaseForm):
+        ...     form.extends(BaseForm)
+        ...
+        ...     fields += field.Fields(IPerson).select('gender')
+        ...
+        ...     @button.buttonAndHandler(u'Cancel')
+        ...     def handleCancel(self, form):
+        ...         print 'cancel'
+        
+        >>> DerivedForm.fields.keys()
+        ['name', 'gender']
+        >>> DerivedForm.buttons.keys()
+        ['apply', 'cancel']
+        >>> DerivedForm.handlers
+        <Handlers
+        [<Handler for <Button 'apply' u'Apply'>>,
+        <Handler for <Button 'cancel' u'Cancel'>>]>
+        
+        If you, for example do not want to extend the buttons and handlers, you can
+        turn that off:
+        
+        >>> class DerivedForm(BaseForm):
+        ...     form.extends(BaseForm, ignoreButtons=True, ignoreHandlers=True)
+        ...
+        ...     fields += field.Fields(IPerson).select('gender')
+        ...
+        ...     @button.buttonAndHandler(u'Cancel')
+        ...     def handleCancel(self, form):
+        ...         print 'cancel'
+        
+        >>> DerivedForm.fields.keys()
+        ['name', 'gender']
+        >>> DerivedForm.buttons.keys()
+        ['cancel']
+        >>> DerivedForm.handlers
+        <Handlers [<Handler for <Button 'cancel' u'Cancel'>>]>
+        
+        
+        Custom widget factories
+        -----------------------
+        
+        Another important part of a form is, that we can use custom widgets. We can do
+        this in a form by defining a widget factory for a field. We can get the field
+        by get them from the fields collection e.g. fields['foo']. Which means, we can
+        define new widget factories by defining fields['foo'].widgetFactory = MyWidget.
+        Let's show a sample and define a custom widget:
+        
+        >>> from z3c.form.browser import text
+        >>> class MyWidget(text.TextWidget):
+        ...     """My new widget."""
+        ...     css = u'MyCSS'
+        
+        No we can define a field widget factory:
+        
+        >>> def MyFieldWidget(field, request):
+        ...     """IFieldWidget factory for MyWidget."""
+        ...     return widget.FieldWidget(field, MyWidget(request))
+        
+        We register the MyWidget in a form like:
+        
+        >>> class MyEditForm(form.EditForm):
+        ...
+        ...     fields = field.Fields(IPerson)
+        ...     fields['name'].widgetFactory = MyFieldWidget
+        
+        We can see, that the custom widget get used in the rendered form:
+        
+        >>> myEdit = MyEditForm(root[u'Stephan Richter'], TestRequest())
+        >>> addTemplate(myEdit)
+        >>> myEdit.update()
+        >>> print myEdit.render()
+        ...
+        <html...
+        <input type="text" id="form.widgets.name"
+        name="form.widgets.name" class="MyCSS"
+        value="Claudia Richter" />
+        ...
+        
+        =========
+        Sub-Forms
+        =========
+        
+        Traditionally, the Zope community talks about sub-forms in a generic manner
+        without defining their purpose, restrictions and assumptions. When we
+        initially talked about sub-forms for this package, we quickly noticed that
+        there are several classes of sub-forms with different goals.
+        
+        Of course, we need to setup our defaults for this demonstration as well:
+        
+        >>> from z3c.form import testing
+        >>> testing.setupFormDefaults()
+        
+        
+        Class I: The form within the form
+        ---------------------------------
+        
+        This class of sub-forms provides a complete form within a form, including its
+        own actions. When an action of the sub-form is submitted, the parent form
+        usually does not interact with that action at all. The same is true for the
+        reverse; when an action of the parent form is submitted, the sub-form does not
+        react.
+        
+        A classic example for this type of sub-form is uploading an image. The subform
+        allows uploading a file and once the file is uploaded the image is shown as
+        well as a "Delete"/"Clear" button. The sub-form will store the image in the
+        session and when the main form is submitted it looks in the session for the
+        image.
+        
+        This scenario was well supported in ``zope.formlib`` and also does not require
+        special support in ``z3c.form``. Let me show you, how this can be done.
+        
+        In this example, we would like to describe a car and its owner:
+        
+        >>> import zope.interface
+        >>> import zope.schema
+        
+        >>> class IOwner(zope.interface.Interface):
+        ...     name = zope.schema.TextLine(title=u'Name')
+        ...     license = zope.schema.TextLine(title=u'License')
+        
+        >>> class ICar(zope.interface.Interface):
+        ...     model = zope.schema.TextLine(title=u'Model')
+        ...     make = zope.schema.TextLine(title=u'Make')
+        ...     owner = zope.schema.Object(title=u'Owner', schema=IOwner)
+        
+        Let's now implement the two interfaces and create instances, so that we can
+        create edit forms for it:
+        
+        >>> class Owner(object):
+        ...     zope.interface.implements(IOwner)
+        ...     def __init__(self, name, license):
+        ...         self.name = name
+        ...         self.license = license
+        
+        >>> class Car(object):
+        ...     zope.interface.implements(ICar)
+        ...     def __init__(self, model, make, owner):
+        ...         self.model = model
+        ...         self.make = make
+        ...         self.owner = owner
+        
+        >>> me = Owner(u'Stephan Richter', u'MA-1231FW97')
+        >>> mycar = Car(u'Nissan', u'Sentra', me)
+        
+        We define the owner sub-form as we would any other form. The only difference
+        is the template, which should not render a form-tag:
+        
+        >>> import os
+        >>> from zope.app.pagetemplate import viewpagetemplatefile
+        >>> from z3c.form import form, field, tests
+        
+        >>> templatePath = os.path.dirname(tests.__file__)
+        
+        >>> class OwnerForm(form.EditForm):
+        ...     template = viewpagetemplatefile.ViewPageTemplateFile(
+        ...         'simple_owneredit.pt', templatePath)
+        ...     fields = field.Fields(IOwner)
+        ...     prefix = 'owner'
+        
+        Next we define the car form, which has the owner form as a sub-form. The car
+        form also needs a special template, since it needs to render the sub-form at
+        some point. For the simplicity of this example, I have duplicated a lot of
+        template code here, but you can use your favorite template techniques, such as
+        METAL macros, viewlets, or pagelets to make better reuse of some code.
+        
+        >>> class CarForm(form.EditForm):
+        ...     fields = field.Fields(ICar).select('model', 'make')
+        ...     template = viewpagetemplatefile.ViewPageTemplateFile(
+        ...         'simple_caredit.pt', templatePath)
+        ...     prefix = 'car'
+        ...     def update(self):
+        ...         self.owner = OwnerForm(self.context.owner, self.request)
+        ...         self.owner.update()
+        ...         super(CarForm, self).update()
+        
+        Let's now instantiate the form and render it:
+        
+        >>> from z3c.form.testing import TestRequest
+        >>> request = TestRequest()
+        
+        >>> carForm = CarForm(mycar, request)
+        >>> carForm.update()
+        >>> print carForm.render()
+        <html>
+        <body>
+        <form action=".">
+        <div class="row">
+        <label for="car.widgets.model">Model</label>
+        <input type="text" id="car.widgets.model"
+        name="car.widgets.model" class="textWidget" value="Nissan" />
+        </div>
+        <div class="row">
+        <label for="car.widgets.make">Make</label>
+        <input type="text" id="car.widgets.make"
+        name="car.widgets.make" class="textWidget" value="Sentra" />
+        </div>
+        <fieldset>
+        <legend>Owner</legend>
+        <div class="row">
+        <label for="owner.widgets.name">Name</label>
+        <input type="text" id="owner.widgets.name"
+        name="owner.widgets.name" class="textWidget"
+        value="Stephan Richter" />
+        </div>
+        <div class="row">
+        <label for="owner.widgets.license">License</label>
+        <input type="text" id="owner.widgets.license"
+        name="owner.widgets.license" class="textWidget"
+        value="MA-1231FW97" />
+        </div>
+        <div class="action">
+        <input type="submit" id="owner.buttons.apply"
+        name="owner.buttons.apply" class="submitWidget"
+        value="Apply" />
+        </div>
+        </fieldset>
+        <div class="action">
+        <input type="submit" id="car.buttons.apply"
+        name="car.buttons.apply" class="submitWidget"
+        value="Apply" />
+        </div>
+        </form>
+        </body>
+        </html>
+        
+        I can now submit the owner form, which should not submit any car changes I
+        might have made in the form:
+        
+        >>> request = TestRequest(form={
+        ...     'car.widgets.model': u'BMW',
+        ...     'car.widgets.make': u'325',
+        ...     'owner.widgets.name': u'Stephan Richter',
+        ...     'owner.widgets.license': u'MA-97097A87',
+        ...     'owner.buttons.apply': u'Apply'
+        ...     })
+        
+        >>> carForm = CarForm(mycar, request)
+        >>> carForm.update()
+        
+        >>> mycar.model
+        u'Nissan'
+        >>> mycar.make
+        u'Sentra'
+        
+        >>> me.name
+        u'Stephan Richter'
+        >>> me.license
+        u'MA-97097A87'
+        
+        Also, the form should say that the data of the owner has changed:
+        
+        >>> print carForm.render()
+        <html>
+        <body>
+        <form action=".">
+        <div class="row">
+        <label for="car.widgets.model">Model</label>
+        <input type="text" id="car.widgets.model"
+        name="car.widgets.model" class="textWidget"
+        value="BMW" />
+        </div>
+        <div class="row">
+        <label for="car.widgets.make">Make</label>
+        <input type="text" id="car.widgets.make"
+        name="car.widgets.make" class="textWidget"
+        value="325" />
+        </div>
+        <fieldset>
+        <legend>Owner</legend>
+        <i>Data successfully updated.</i>
+        <div class="row">
+        <label for="owner.widgets.name">Name</label>
+        <input type="text" id="owner.widgets.name"
+        name="owner.widgets.name" class="textWidget"
+        value="Stephan Richter" />
+        </div>
+        <div class="row">
+        <label for="owner.widgets.license">License</label>
+        <input type="text" id="owner.widgets.license"
+        name="owner.widgets.license" class="textWidget"
+        value="MA-97097A87" />
+        </div>
+        <div class="action">
+        <input type="submit" id="owner.buttons.apply"
+        name="owner.buttons.apply" class="submitWidget"
+        value="Apply" />
+        </div>
+        </fieldset>
+        <div class="action">
+        <input type="submit" id="car.buttons.apply"
+        name="car.buttons.apply" class="submitWidget"
+        value="Apply" />
+        </div>
+        </form>
+        </body>
+        </html>
+        
+        The same is true the other way around as well. Submitting the overall form
+        does not submit the owner form:
+        
+        >>> request = TestRequest(form={
+        ...     'car.widgets.model': u'BMW',
+        ...     'car.widgets.make': u'325',
+        ...     'car.buttons.apply': u'Apply',
+        ...     'owner.widgets.name': u'Claudia Richter',
+        ...     'owner.widgets.license': u'MA-123403S2',
+        ...     })
+        
+        >>> carForm = CarForm(mycar, request)
+        >>> carForm.update()
+        
+        >>> mycar.model
+        u'BMW'
+        >>> mycar.make
+        u'325'
+        
+        >>> me.name
+        u'Stephan Richter'
+        >>> me.license
+        u'MA-97097A87'
+        
+        
+        Class II: The logical unit
+        --------------------------
+        
+        In this class of sub-forms, a sub-form is often just a collection of widgets
+        without any actions. Instead, the sub-form must be able to react to the
+        actions of the parent form. A good example of those types of sub-forms is
+        actually the example I chose above.
+        
+        So let's redevelop our example above in a way that the owner sub-form is just
+        a logical unit that shares the action with its parent form. Initially, the
+        example does not look very different, except that we use ``EditSubForm`` as a
+        base class:
+        
+        >>> from z3c.form import subform
+        
+        >>> class OwnerForm(subform.EditSubForm):
+        ...     template = viewpagetemplatefile.ViewPageTemplateFile(
+        ...         'simple_subedit.pt', templatePath)
+        ...     fields = field.Fields(IOwner)
+        ...     prefix = 'owner'
+        
+        The main form also is pretty much the same, except that a subform takes three
+        constructor arguments, the last one being the parent form:
+        
+        >>> class CarForm(form.EditForm):
+        ...     fields = field.Fields(ICar).select('model', 'make')
+        ...     template = viewpagetemplatefile.ViewPageTemplateFile(
+        ...         'simple_caredit.pt', templatePath)
+        ...     prefix = 'car'
+        ...
+        ...     def update(self):
+        ...         super(CarForm, self).update()
+        ...         self.owner = OwnerForm(self.context.owner, self.request, self)
+        ...         self.owner.update()
+        
+        Rendering the form works as before:
+        
+        >>> request = TestRequest()
+        >>> carForm = CarForm(mycar, request)
+        >>> carForm.update()
+        >>> print carForm.render()
+        <html>
+        <body>
+        <form action=".">
+        <div class="row">
+        <label for="car.widgets.model">Model</label>
+        <input type="text" id="car.widgets.model" name="car.widgets.model"
+        class="textWidget" value="BMW" />
+        </div>
+        <div class="row">
+        <label for="car.widgets.make">Make</label>
+        <input type="text" id="car.widgets.make" name="car.widgets.make"
+        class="textWidget" value="325" />
+        </div>
+        <fieldset>
+        <legend>Owner</legend>
+        <div class="row">
+        <label for="owner.widgets.name">Name</label>
+        <input type="text" id="owner.widgets.name" name="owner.widgets.name"
+        class="textWidget" value="Stephan Richter" />
+        </div>
+        <div class="row">
+        <label for="owner.widgets.license">License</label>
+        <input type="text" id="owner.widgets.license"
+        name="owner.widgets.license" class="textWidget"
+        value="MA-97097A87" />
+        </div>
+        </fieldset>
+        <div class="action">
+        <input type="submit" id="car.buttons.apply"
+        name="car.buttons.apply" class="submitWidget"
+        value="Apply" />
+        </div>
+        </form>
+        </body>
+        </html>
+        
+        The itnersting part of this setup is that the "Apply" button calls the action
+        handlers for both, the main and the sub-form:
+        
+        >>> request = TestRequest(form={
+        ...     'car.widgets.model': u'Ford',
+        ...     'car.widgets.make': u'F150',
+        ...     'car.buttons.apply': u'Apply',
+        ...     'owner.widgets.name': u'Claudia Richter',
+        ...     'owner.widgets.license': u'MA-991723FDG',
+        ...     })
+        
+        >>> carForm = CarForm(mycar, request)
+        >>> carForm.update()
+        
+        >>> mycar.model
+        u'Ford'
+        >>> mycar.make
+        u'F150'
+        >>> me.name
+        u'Claudia Richter'
+        >>> me.license
+        u'MA-991723FDG'
+        
+        Let's now have a look at cases where an error happens. If an error occurs in
+        the parent form, the sub-form is still submitted:
+        
+        >>> request = TestRequest(form={
+        ...     'car.widgets.model': u'Volvo\n',
+        ...     'car.widgets.make': u'450',
+        ...     'car.buttons.apply': u'Apply',
+        ...     'owner.widgets.name': u'Stephan Richter',
+        ...     'owner.widgets.license': u'MA-991723FDG',
+        ...     })
+        
+        >>> carForm = CarForm(mycar, request)
+        >>> carForm.update()
+        
+        >>> mycar.model
+        u'Ford'
+        >>> mycar.make
+        u'F150'
+        >>> me.name
+        u'Stephan Richter'
+        >>> me.license
+        u'MA-991723FDG'
+        
+        Let's look at the rendered form:
+        
+        >>> print carForm.render()
+        <html>
+        <body>
+        <i>There were some errors.</i>
+        <ul>
+        <li>
+        Model: <div class="error">Constraint not satisfied</div>
+        </li>
+        </ul>
+        <form action=".">
+        <div class="row">
+        <b><div class="error">Constraint not satisfied</div>
+        </b><label for="car.widgets.model">Model</label>
+        <input type="text" id="car.widgets.model"
+        name="car.widgets.model" class="textWidget" value="Volvo " />
+        </div>
+        <div class="row">
+        <label for="car.widgets.make">Make</label>
+        <input type="text" id="car.widgets.make"
+        name="car.widgets.make" class="textWidget" value="450" />
+        </div>
+        <fieldset>
+        <legend>Owner</legend>
+        <i>Data successfully updated.</i>
+        <div class="row">
+        <label for="owner.widgets.name">Name</label>
+        <input type="text" id="owner.widgets.name"
+        name="owner.widgets.name" class="textWidget"
+        value="Stephan Richter" />
+        </div>
+        <div class="row">
+        <label for="owner.widgets.license">License</label>
+        <input type="text" id="owner.widgets.license"
+        name="owner.widgets.license" class="textWidget"
+        value="MA-991723FDG" />
+        </div>
+        </fieldset>
+        <div class="action">
+        <input type="submit" id="car.buttons.apply"
+        name="car.buttons.apply" class="submitWidget"
+        value="Apply" />
+        </div>
+        </form>
+        </body>
+        </html>
+        
+        Now, we know, we know. This might not be the behavior that *you* want. But
+        remember how we started this document. We started with the recognition that
+        there are many classes and policies surrounding subforms. So while this
+        package provides some sensible default behavior, it is not intended to be
+        comprehensive.
+        
+        Let's now create an error in the sub-form, ensuring that an error message
+        occurs:
+        
+        >>> request = TestRequest(form={
+        ...     'car.widgets.model': u'Volvo',
+        ...     'car.widgets.make': u'450',
+        ...     'car.buttons.apply': u'Apply',
+        ...     'owner.widgets.name': u'Claudia\n Richter',
+        ...     'owner.widgets.license': u'MA-991723F12',
+        ...     })
+        
+        >>> carForm = CarForm(mycar, request)
+        >>> carForm.update()
+        
+        >>> mycar.model
+        u'Volvo'
+        >>> mycar.make
+        u'450'
+        >>> me.name
+        u'Stephan Richter'
+        >>> me.license
+        u'MA-991723FDG'
+        
+        >>> print carForm.render()
+        <html>
+        ...
+        <fieldset>
+        <legend>Owner</legend>
+        <ul>
+        <li>
+        Name: <div class="error">Constraint not satisfied</div>
+        </li>
+        </ul>
+        ...
+        </fieldset>
+        ...
+        </html>
+        
+        If the data did not change, it is also locally reported:
+        
+        >>> request = TestRequest(form={
+        ...     'car.widgets.model': u'Ford',
+        ...     'car.widgets.make': u'F150',
+        ...     'car.buttons.apply': u'Apply',
+        ...     'owner.widgets.name': u'Stephan Richter',
+        ...     'owner.widgets.license': u'MA-991723FDG',
+        ...     })
+        
+        >>> carForm = CarForm(mycar, request)
+        >>> carForm.update()
+        >>> print carForm.render()
+        <html>
+        ...
+        <fieldset>
+        <legend>Owner</legend>
+        <i>No changes were applied.</i>
+        ...
+        </fieldset>
+        ...
+        </html>
+        
+        Final Note: With ``zope.formlib`` and ``zope.app.form`` people usually wrote
+        complex object widgets to handle objects within forms. We never considered
+        this a good way of programming, since one looses control over the layout too
+        easily.
+        
+        ==============
+        Field Managers
+        ==============
+        
+        One of the features in ``zope.formlib`` that works really well is the syntax
+        used to define the contents of the form. The formlib uses form fields, to
+        describe how the form should be put together. Since we liked this way of
+        working, this package offers this feature as well in a very similar way.
+        
+        A field manager organizes all fields to be displayed within a form. Each field
+        is associated with additional meta-data. The simplest way to create a field
+        manager is to specify the schema from which to extract all fields.
+        
+        Thus, the first step is to create a schema:
+        
+        >>> import zope.interface
+        >>> import zope.schema
+        
+        >>> class IPerson(zope.interface.Interface):
+        ...      id = zope.schema.Int(
+        ...          title=u'Id',
+        ...          readonly=True)
+        ...
+        ...      name = zope.schema.TextLine(
+        ...          title=u'Name')
+        ...
+        ...      country = zope.schema.Choice(
+        ...          title=u'Country',
+        ...          values=(u'Germany', u'Switzerland', u'USA'),
+        ...          required=False)
+        
+        We can now create the field manager:
+        
+        >>> from z3c.form import field
+        >>> manager = field.Fields(IPerson)
+        
+        Like all managers in this package, the enumerable mapping API is provided:
+        
+        >>> manager['id']
+        <Field 'id'>
+        >>> manager['unknown']
+        Traceback (most recent call last):
+        ...
+        KeyError: 'unknown'
+        
+        >>> manager.get('id')
+        <Field 'id'>
+        >>> manager.get('unknown', 'default')
+        'default'
+        
+        >>> 'id' in manager
+        True
+        >>> 'unknown' in manager
+        False
+        
+        >>> manager.keys()
+        ['id', 'name', 'country']
+        
+        >>> [key for key in manager]
+        ['id', 'name', 'country']
+        
+        >>> manager.values()
+        [<Field 'id'>, <Field 'name'>, <Field 'country'>]
+        
+        >>> manager.items()
+        [('id', <Field 'id'>),
+        ('name', <Field 'name'>),
+        ('country', <Field 'country'>)]
+        
+        >>> len(manager)
+        3
+        
+        You can also select the fields that you would like to have:
+        
+        >>> manager = manager.select('name', 'country')
+        >>> manager.keys()
+        ['name', 'country']
+        
+        Changing the order is simply a matter of changing the selction order:
+        
+        >>> manager = manager.select('country', 'name')
+        >>> manager.keys()
+        ['country', 'name']
+        
+        Sometimes it is easier to simply omit a set of fields instead of selecting all
+        the ones you want:
+        
+        >>> manager = field.Fields(IPerson)
+        >>> manager = manager.omit('id')
+        >>> manager.keys()
+        ['name', 'country']
+        
+        You can also add two field managers together:
+        
+        >>> manager2 = field.Fields(IPerson).select('id')
+        >>> (manager + manager2).keys()
+        ['name', 'country', 'id']
+        
+        But adding anything else to a field manager is not well defined:
+        
+        >>> manager + 1
+        Traceback (most recent call last):
+        ...
+        TypeError: unsupported operand type(s) for +: 'Fields' and 'int'
+        
+        You can also not make any additions that would cause a name conflict:
+        
+        >>> manager + manager
+        Traceback (most recent call last):
+        ...
+        ValueError: ('Duplicate name', 'name')
+        
+        When creating a new form derived from another, you often want to keep existing
+        fields and add new ones. In order no to change the super-form class, you need
+        to copy the field manager:
+        
+        >>> manager.keys()
+        ['name', 'country']
+        >>> manager.copy().keys()
+        ['name', 'country']
+        
+        
+        More on the Constructor
+        -----------------------
+        
+        But the constructor does not only accept schemas to be passed in. One can also
+        just pass in schema fields:
+        
+        >>> field.Fields(IPerson['name']).keys()
+        ['name']
+        
+        However, the schema field has to have a name:
+        
+        >>> email = zope.schema.TextLine(title=u'E-Mail')
+        >>> field.Fields(email)
+        Traceback (most recent call last):
+        ...
+        ValueError: Field has no name
+        
+        Adding a name helps:
+        
+        >>> email.__name__ = 'email'
+        >>> field.Fields(email).keys()
+        ['email']
+        
+        Or you can just pass in other field managers, which is the feature the add
+        mechanism uses:
+        
+        >>> field.Fields(manager).keys()
+        ['name', 'country']
+        
+        Last, but not least, the constructor also accepts form fields, which is used
+        by ``select()`` and ``omit()``:
+        
+        >>> field.Fields(manager['name'], manager2['id']).keys()
+        ['name', 'id']
+        
+        If the constructor does not recognize any of the types above, it raises a
+        ``TypeError`` exception:
+        
+        >>> field.Fields(object())
+        Traceback (most recent call last):
+        ...
+        TypeError: ('Unrecognized argument type', <object object at ...>)
+        
+        Additionally, you can specify several keyword arguments in the field manager
+        constructor that are used to setup the fields:
+        
+        * ``omitReadOnly``
+        
+        When set to ``True`` all read-only fields are omitted.
+        
+        >>> field.Fields(IPerson, omitReadOnly=True).keys()
+        ['name', 'country']
+        
+        * ``keepReadOnly``
+        
+        Sometimes you want to keep a particular read-only field around, even though
+        in general you want to omit them. In this case you can specify the fields to
+        keep:
+        
+        >>> field.Fields(
+        ...     IPerson, omitReadOnly=True, keepReadOnly=('id',)).keys()
+        ['id', 'name', 'country']
+        
+        * ``prefix``
+        
+        Sets the prefix of the fields. This argument is passed on to each field.
+        
+        >>> manager = field.Fields(IPerson, prefix='myform.')
+        >>> manager['myform.name']
+        <Field 'myform.name'>
+        
+        
+        * ``interface``
+        
+        Usually the interface is inferred from the field itself. The interface is
+        used to determine whether an adapter must be looked up for a given
+        context.
+        
+        But sometimes fields are generated in isolation to an interface or the
+        interface of the field is not the one you want. In this case you can specify
+        the interface:
+        
+        >>> class IMyPerson(IPerson):
+        ...     pass
+        
+        >>> manager = field.Fields(email, interface=IMyPerson)
+        >>> manager['email'].interface
+        <InterfaceClass __builtin__.IMyPerson>
+        
+        * ``mode``
+        
+        The mode in which the widget will be rendered. By default there are two
+        available, "input" and "display". When mode is not specified, "input" is
+        chosen.
+        
+        >>> from z3c.form import interfaces
+        >>> manager = field.Fields(IPerson, mode=interfaces.DISPLAY_MODE)
+        >>> manager['country'].mode
+        'display'
+        
+        
+        Fields Widget Manager
+        ---------------------
+        
+        When a form (or any other widget-using view) is updated, one of the tasks is
+        to create the widgets. Traditionally, generating the widgets involved looking
+        at the form fields (or similar) of a form and generating the widgets using the
+        information of those specifications. This solution is good for the common
+        (about 85%) use cases, since it makes writing new forms very simple and allows
+        a lot of control at a class-definition level.
+        
+        It has, however, its limitations. It does not, for example, allow for
+        customization without rewriting a form. This can range from omitting fields on
+        a particular form to generically adding a new widget to the form, such as an
+        "object name" button on add forms. This package solves this issue by providing
+        a widget manager, which is responsible providing the widgets for a particular
+        view.
+        
+        The default widget manager for forms is able to look at a form's field
+        definitions and create widgets for them. Thus, let's create a schema first:
+        
+        >>> import zope.interface
+        >>> import zope.schema
+        
+        >>> class LastNameTooShort(zope.schema.interfaces.ValidationError):
+        ...     """The last name is too short."""
+        
+        >>> class IPerson(zope.interface.Interface):
+        ...     lastName = zope.schema.TextLine(
+        ...         title=u'Last Name',
+        ...         description=u"The person's last name.",
+        ...         default=u'',
+        ...         required=True)
+        ...
+        ...     firstName = zope.schema.TextLine(
+        ...         title=u'First Name',
+        ...         description=u"The person's first name.",
+        ...         default=u'-- unknown --',
+        ...         required=False)
+        ...
+        ...     @zope.interface.invariant
+        ...     def twiceAsLong(person):
+        ...         if len(person.lastName) >= 2 * len(person.firstName):
+        ...             raise LastNameTooShort()
+        
+        Next we need a form that specifies the fields to be added:
+        
+        >>> from z3c.form import field
+        
+        >>> class AddPerson(object):
+        ...     prefix = 'form.'
+        ...     fields = field.Fields(IPerson)
+        >>> addPerson = AddPerson()
+        
+        For more details on how to define fields within a form, see ``field.txt``. We
+        can now create the fields widget manager. It's discriminators are the form for
+        which the widgets are created, the request, and the context that is being
+        manipulated. Since we are developing an add-form the context is ``None``.
+        
+        >>> from z3c.form.testing import TestRequest
+        >>> request = TestRequest()
+        >>> context = object()
+        
+        >>> manager = field.FieldWidgets(addPerson, request, context)
+        >>> manager.ignoreContext = True
+        
+        The main resposibility of the manager is to provide the ``IEnumerableMapping``
+        interface and an ``update()`` method. Initially the mapping, going from widget
+        id to widget value, is empty:
+        
+        >>> from zope.interface.common.mapping import IEnumerableMapping
+        >>> IEnumerableMapping.providedBy(manager)
+        True
+        
+        >>> manager.keys()
+        []
+        
+        Only by "updating" the manager, the widgets will become available. But before
+        we can use the update method we have to register the ``IFieldWidget`` adapter
+        for the ``ITextLine`` field:
+        
+        >>> from z3c.form import interfaces, widget
+        
+        >>> @zope.component.adapter(zope.schema.TextLine, TestRequest)
+        ... @zope.interface.implementer(interfaces.IFieldWidget)
+        ... def TextFieldWidget(field, request):
+        ...     return widget.FieldWidget(field, widget.Widget(request))
+        
+        >>> zope.component.provideAdapter(TextFieldWidget)
+        
+        >>> from z3c.form import converter
+        >>> zope.component.provideAdapter(converter.FieldDataConverter)
+        >>> zope.component.provideAdapter(converter.FieldWidgetDataConverter)
+        
+        >>> manager.update()
+        
+        Other than usual mappings in Python, the widget manager's widgets are always
+        in a particular order:
+        
+        >>> manager.keys()
+        ['lastName', 'firstName']
+        
+        Let's make sure that all enumerable mapping functions work correctly:
+        
+        >>> manager['lastName']
+        <Widget 'form.widgets.lastName'>
+        
+        >>> manager['unknown']
+        Traceback (most recent call last):
+        ...
+        KeyError: 'unknown'
+        
+        >>> manager.get('lastName')
+        <Widget 'form.widgets.lastName'>
+        
+        >>> manager.get('unknown', 'default')
+        'default'
+        
+        >>> 'lastName' in manager
+        True
+        >>> 'unknown' in manager
+        False
+        
+        >>> [key for key in manager]
+        ['lastName', 'firstName']
+        
+        >>> manager.values()
+        [<Widget 'form.widgets.lastName'>,
+        <Widget 'form.widgets.firstName'>]
+        
+        >>> manager.items()
+        [('lastName', <Widget 'form.widgets.lastName'>),
+        ('firstName', <Widget 'form.widgets.firstName'>)]
+        
+        >>> len(manager)
+        2
+        
+        When a widget is added to the widget manager, it is located:
+        
+        >>> lname = manager['lastName']
+        
+        >>> lname.__name__
+        'lastName'
+        >>> lname.__parent__
+        <z3c.form.field.FieldWidgets object at ...>
+        
+        All widgets created by this widget manager are context aware:
+        
+        >>> interfaces.IContextAware.providedBy(lname)
+        True
+        >>> lname.context is context
+        True
+        
+        All widgets will also assume the mode of the manager:
+        
+        >>> manager['lastName'].mode
+        'input'
+        
+        >>> manager.mode = interfaces.DISPLAY_MODE
+        >>> manager.update()
+        
+        >>> manager['lastName'].mode
+        'display'
+        
+        Besides managing widgets, the widget manager also controls the process of
+        extracting and validating extracted data. Let's start with the validation
+        first, which only validates the data as a whole, assuming each individual
+        value being already validated.
+        
+        Before we can use the method, we have to register a "manager validator":
+        
+        >>> from z3c.form import validator
+        >>> zope.component.provideAdapter(validator.InvariantsValidator)
+        
+        >>> manager.validate(
+        ...     {'firstName': u'Stephan', 'lastName': u'Richter'})
+        ()
+        
+        The result of this method is a tuple of errors that occured during the
+        validation. An empty tuple means the validation succeeded. Let's now make the
+        validation fail:
+        
+        >>> errors = manager.validate(
+        ...     {'firstName': u'Stephan', 'lastName': u'Richter-Richter'})
+        
+        >>> [error.doc() for error in errors]
+        ['The last name is too short.']
+        
+        A special case occurs when the schema fields are not associated with an
+        interface:
+        
+        >>> name = zope.schema.TextLine(__name__='name')
+        
+        >>> class PersonForm(object):
+        ...     prefix = 'form.'
+        ...     fields = field.Fields(name)
+        >>> personForm = PersonForm()
+        
+        >>> manager = field.FieldWidgets(personForm, request, context)
+        
+        In this case, the widget manager's ``validate()`` method should simply ignore
+        the field and not try to look up any invariants:
+        
+        >>> manager.validate({'name': u'Stephan'})
+        ()
+        
+        Let's now have a look at the widget manager's ``extract()``, which returns a
+        data dictionary and the collection of errors. Before we can validate, we have
+        to register a validator for the widget:
+        
+        >>> zope.component.provideAdapter(validator.SimpleFieldValidator)
+        
+        When all goes well, the data dictionary is complete and the error collection
+        empty:
+        
+        >>> request = TestRequest(form={
+        ...     'form.widgets.firstName': u'Stephan',
+        ...     'form.widgets.lastName': u'Richter'})
+        >>> manager = field.FieldWidgets(addPerson, request, context)
+        >>> manager.ignoreContext = True
+        >>> manager.update()
+        >>> manager.extract()
+        ({'lastName': u'Richter', 'firstName': u'Stephan'}, ())
+        
+        Since all errors are immediately converted to error view snippets, we have to
+        provide the adapter from a validation error to an error view snippet first:
+        
+        >>> from z3c.form import error
+        >>> zope.component.provideAdapter(error.ErrorViewSnippet)
+        
+        Let's now cause a widget-level error by not submitting the required last
+        name:
+        
+        >>> request = TestRequest(form={
+        ...     'form.widgets.firstName': u'Stephan'})
+        >>> manager = field.FieldWidgets(addPerson, request, context)
+        >>> manager.ignoreContext = True
+        >>> manager.update()
+        >>> manager.extract()
+        ({'firstName': u'Stephan'}, (<ErrorViewSnippet for RequiredMissing>,))
+        
+        Finally, let's ensure that invariant failures are also caught:
+        
+        >>> request = TestRequest(form={
+        ...     'form.widgets.firstName': u'Stephan',
+        ...     'form.widgets.lastName': u'Richter-Richter'})
+        >>> manager = field.FieldWidgets(addPerson, request, context)
+        >>> manager.ignoreContext = True
+        >>> manager.update()
+        >>> data, errors = manager.extract()
+        >>> errors[0].doc()
+        'The last name is too short.'
+        
+        And that's all.
+        
+        
+        Fields -- Custom Widget Factories
+        ---------------------------------
+        
+        It is possible to declare custom widgets for fields within the field's
+        declaration.
+        
+        Let's have a look at the default form first. Initially, the standard
+        registered widgets are used:
+        
+        >>> manager = field.FieldWidgets(addPerson, request, context)
+        >>> manager.update()
+        
+        >>> manager['firstName']
+        <Widget 'form.widgets.firstName'>
+        
+        Now we would like to have our own custom input widget:
+        
+        >>> class CustomInputWidget(widget.Widget):
+        ...     pass
+        
+        >>> def CustomInputWidgetFactory(field, request):
+        ...     return widget.FieldWidget(field, CustomInputWidget(request))
+        
+        It can be simply assigned as follows:
+        
+        >>> addPerson.fields['firstName'].widgetFactory = CustomInputWidgetFactory
+        
+        Now this widget should be used instead of the registered default one:
+        
+        >>> manager = field.FieldWidgets(addPerson, request, context)
+        >>> manager.update()
+        >>> manager['firstName']
+        <CustomInputWidget 'form.widgets.firstName'>
+        
+        In the background the widget factory assignment really just registered the
+        default factory for in the ``WidgetFactories`` object, which manages the
+        custom widgets for all modes. Now all modes show this input widget:
+        
+        >>> manager = field.FieldWidgets(addPerson, request, context)
+        >>> manager.mode = interfaces.DISPLAY_MODE
+        >>> manager.update()
+        >>> manager['firstName']
+        <CustomInputWidget 'form.widgets.firstName'>
+        
+        However, we can also register a specific widget for the display mode:
+        
+        >>> class CustomDisplayWidget(widget.Widget):
+        ...     pass
+        
+        >>> def CustomDisplayWidgetFactory(field, request):
+        ...     return widget.FieldWidget(field, CustomDisplayWidget(request))
+        
+        >>> addPerson.fields['firstName']\
+        ...     .widgetFactory[interfaces.DISPLAY_MODE] = CustomDisplayWidgetFactory
+        
+        Now the display mode should produce the custom display widget, ...
+        
+        >>> manager = field.FieldWidgets(addPerson, request, context)
+        >>> manager.mode = interfaces.DISPLAY_MODE
+        >>> manager.update()
+        >>> manager['firstName']
+        <CustomDisplayWidget 'form.widgets.firstName'>
+        
+        ... while the input mode still shows the default custom input widget:
+        
+        >>> manager = field.FieldWidgets(addPerson, request, context)
+        >>> manager.mode = interfaces.INPUT_MODE
+        >>> manager.update()
+        >>> manager['firstName']
+        <CustomInputWidget 'form.widgets.firstName'>
+        
+        The widgets factories component,
+        
+        >>> factories = addPerson.fields['firstName'].widgetFactory
+        >>> factories
+        {'display': <function CustomDisplayWidgetFactory at ...>}
+        
+        is pretty much a standard dictionary that also manages a default value:
+        
+        >>> factories.default
+        <function CustomInputWidgetFactory at ...>
+        
+        When getting a value for a key, if the key is not found, the default is
+        returned:
+        
+        >>> factories.keys()
+        ['display']
+        
+        >>> factories[interfaces.DISPLAY_MODE]
+        <function CustomDisplayWidgetFactory at ...>
+        >>> factories[interfaces.INPUT_MODE]
+        <function CustomInputWidgetFactory at ...>
+        
+        >>> factories.get(interfaces.DISPLAY_MODE)
+        <function CustomDisplayWidgetFactory at ...>
+        >>> factories.get(interfaces.INPUT_MODE)
+        <function CustomInputWidgetFactory at ...>
+        
+        If no default is specified,
+        
+        >>> factories.default = None
+        
+        then the dictionary behaves as usual:
+        
+        >>> factories[interfaces.DISPLAY_MODE]
+        <function CustomDisplayWidgetFactory at ...>
+        >>> factories[interfaces.INPUT_MODE]
+        Traceback (most recent call last):
+        ...
+        KeyError: 'input'
+        
+        >>> factories.get(interfaces.DISPLAY_MODE)
+        <function CustomDisplayWidgetFactory at ...>
+        >>> factories.get(interfaces.INPUT_MODE)
+        
+        
+        =======
+        Buttons
+        =======
+        
+        Buttons are a method to declare actions for a form. Like fields describe
+        widgets within a form, buttons describe actions. The symmetry goes even
+        further; like fields, buttons are schema fields within schema. When the form
+        is instantiated and updated, the buttons are converted to actions.
+        
+        >>> from z3c.form import button
+        
+        
+        Schema Defined Buttons
+        ----------------------
+        
+        Let's now create a schema that describes the buttons of a form. Having button
+        schemas allows one to more easily reuse button declarations and to group them
+        logically. ``Button`` objects are just a simple extension to ``Field``
+        objects, so they behave identical within a schema:
+        
+        >>> import zope.interface
+        >>> class IButtons(zope.interface.Interface):
+        ...     apply = button.Button(title=u'Apply')
+        ...     cancel = button.Button(title=u'Cancel')
+        
+        In reality, only the title and name is relevant. Let's now create a form that
+        provides those buttons.
+        
+        >>> from z3c.form import interfaces
+        >>> class Form(object):
+        ...     zope.interface.implements(
+        ...         interfaces.IButtonForm, interfaces.IHandlerForm)
+        ...     buttons = button.Buttons(IButtons)
+        ...     prefix = 'form'
+        ...
+        ...     @button.handler(IButtons['apply'])
+        ...     def apply(self, action):
+        ...         print 'successfully applied'
+        ...
+        ...     @button.handler(IButtons['cancel'])
+        ...     def cancel(self, action):
+        ...         self.request.response.redirect('index.html')
+        
+        Let' now create an action manager for the button manager in the form. To do
+        that we first need a request and a form instance:
+        
+        >>> from z3c.form.testing import TestRequest
+        >>> request = TestRequest()
+        >>> form = Form()
+        
+        Action managers are instantiated using the form, request, and
+        context/content. A special button-action-manager implementation is avaialble
+        in the ``button`` package:
+        
+        >>> actions = button.ButtonActions(form, request, None)
+        >>> actions.update()
+        
+        Once the action manager is updated, the buttons should be available as
+        actions:
+        
+        >>> actions.keys()
+        ['apply', 'cancel']
+        >>> actions['apply']
+        <ButtonAction 'form.buttons.apply' u'Apply'>
+        
+        Button actions are locations:
+        
+        >>> apply = actions['apply']
+        >>> apply.__name__
+        'apply'
+        >>> apply.__parent__
+        <ButtonActions None>
+        
+        A button action is also a submit widget. The attributes translate as follows:
+        
+        >>> interfaces.ISubmitWidget.providedBy(apply)
+        True
+        
+        >>> apply.value == apply.title
+        True
+        >>> apply.id == apply.name
+        True
+        
+        Next we want to display our button actions. To be able to do this, we have to
+        register a template for the submit widget:
+        
+        >>> from z3c.form import testing, widget
+        >>> templatePath = testing.getPath('submit_input.pt')
+        >>> factory = widget.WidgetTemplateFactory(templatePath, 'text/html')
+        
+        >>> from zope.pagetemplate.interfaces import IPageTemplate
+        >>> zope.component.provideAdapter(factory,
+        ...     (zope.interface.Interface, TestRequest, None, None,
+        ...      interfaces.ISubmitWidget),
+        ...     IPageTemplate, name='input')
+        
+        A widget template has many discriminators: context, request, view, field, and
+        widget. We can now render each action:
+        
+        >>> print actions['apply'].render()
+        <input type="submit" id="form.buttons.apply"
+        name="form.buttons.apply" class="submitWidget"
+        value="Apply" />
+        
+        So displaying is nice, but how do button handlers get executed? The action
+        manager provides attributes and method to check whether actions were
+        executed. Initially there are no executed actions:
+        
+        >>> list(actions.executedActions)
+        []
+        
+        So in this case executing the actions does not do anything:
+        
+        >>> actions.execute()
+        
+        But if the request contains the information that the button was pressed, the
+        execution works:
+        
+        >>> request = TestRequest(form={'form.buttons.apply': 'Apply'})
+        
+        >>> actions = button.ButtonActions(form, request, None)
+        >>> actions.update()
+        >>> actions.execute()
+        
+        Aehm, something should have happened. But in order for the system to look at
+        the handlers declared in the form, a special action handler has to be
+        registered with the system:
+        
+        >>> zope.component.provideAdapter(button.ButtonActionHandler)
+        
+        And voila, the execution works:
+        
+        >>> actions.execute()
+        successfully applied
+        
+        Finally, if there is no handler for a button, then the button click is
+        silently ignored:
+        
+        >>> form.handlers = button.Handlers()
+        >>> actions.execute()
+        
+        While this might seem awkward at first, this is an intended feature. Sometimes
+        there are several sub-forms that listen to a particular button and one form or
+        another might simply not care about the button at all and not provide a
+        handler.
+        
+        
+        In-Form Button Declarations
+        ---------------------------
+        
+        Some readers might find it cumbersome to declare a full schema just to create
+        some buttons. A faster method is to write simple arguments to the button
+        manager:
+        
+        >>> class Form(object):
+        ...     zope.interface.implements(
+        ...         interfaces.IButtonForm, interfaces.IHandlerForm)
+        ...     buttons = button.Buttons(
+        ...         button.Button('apply', title=u'Apply'))
+        ...     prefix = 'form.'
+        ...
+        ...     @button.handler(buttons['apply'])
+        ...     def apply(self, action):
+        ...         print 'successfully applied'
+        
+        The first argument of the ``Button`` class constructor is the name of the
+        button. Optionally, this can also be one of the follwoing keyword arguments:
+        
+        >>> button.Button(name='apply').__name__
+        'apply'
+        >>> button.Button(__name__='apply').__name__
+        'apply'
+        
+        If no name is specified, the name will be assigned to the button. When it can
+        it uses the title, otherwise a hexadecimal string is created:
+        
+        >>> button.Button(title=u'Apply').__name__
+        'apply'
+        >>> button.Button(title=u'Apply and more').__name__
+        '4170706c7920616e64206d6f7265'
+        
+        
+        This declaration behaves identical to the one before:
+        
+        >>> form = Form()
+        >>> request = TestRequest()
+        
+        >>> actions = button.ButtonActions(form, request, None)
+        >>> actions.update()
+        >>> actions.execute()
+        
+        When sending in the right information, the actions are executed:
+        
+        >>> request = TestRequest(form={'form.buttons.apply': 'Apply'})
+        >>> actions = button.ButtonActions(form, request, None)
+        >>> actions.update()
+        >>> actions.execute()
+        successfully applied
+        
+        An even simpler method -- resembling closest the API provided by formlib -- is
+        to create the button and handler at the same time:
+        
+        >>> class Form(object):
+        ...     zope.interface.implements(
+        ...         interfaces.IButtonForm, interfaces.IHandlerForm)
+        ...     prefix = 'form.'
+        ...
+        ...     @button.buttonAndHandler(u'Apply')
+        ...     def apply(self, action):
+        ...         print 'successfully applied'
+        
+        In this case the ``buttonAndHandler`` decorator creates a button and a handler
+        for it. By default the name is computed from the title of the button, which is
+        required. All (keyword) arguments are forwarded to the button
+        constructor. Let's now render the form:
+        
+        >>> request = TestRequest(form={'form.buttons.apply': 'Apply'})
+        >>> actions = button.ButtonActions(form, request, None)
+        >>> actions.update()
+        >>> actions.execute()
+        successfully applied
+        
+        If the title is a more complex string, then the name of the button becomes a
+        hex-encoded string:
+        
+        >>> class Form(object):
+        ...
+        ...     @button.buttonAndHandler(u'Apply and Next')
+        ...     def apply(self, action):
+        ...         print 'successfully applied'
+        
+        >>> Form.buttons.keys()
+        ['4170706c7920616e64204e657874']
+        
+        Of course, you can use the ``__name__`` argument to specify a nem
+        yourself. The decorator, however, also allows the keyword ``name``:
+        
+        >>> class Form(object):
+        ...
+        ...     @button.buttonAndHandler(u'Apply and Next', name='applyNext')
+        ...     def apply(self, action):
+        ...         print 'successfully applied'
+        
+        >>> Form.buttons.keys()
+        ['applyNext']
+        
+        This helper function also supports a keyword argument ``provides``, which
+        allows the developer to specify a sequence of interfaces that the generated
+        button should directly provide. Those provided interfaces can be used for a
+        multitude of things, including handler discrimination and UI layout:
+        
+        >>> class IMyButton(zope.interface.Interface):
+        ...    pass
+        
+        >>> class Form(object):
+        ...
+        ...     @button.buttonAndHandler(u'Apply', provides=(IMyButton,))
+        ...     def apply(self, action):
+        ...         print 'successfully applied'
+        
+        >>> IMyButton.providedBy(Form.buttons['apply'])
+        True
+        
+        
+        Button Conditions
+        -----------------
+        
+        Sometimes it is desirable to only show a button when a certain condition is
+        fulfilled. The ``Button`` field supports conditions via a simple argument. The
+        ``condition`` argument must be a callable takening the form as argument and
+        returns a truth-value. If the condition is not fulfilled, the button will not
+        be converted to an action:
+        
+        >>> class Form(object):
+        ...     prefix='form'
+        ...     showApply = True
+        ...
+        ...     @button.buttonAndHandler(
+        ...         u'Apply', condition=lambda form: form.showApply)
+        ...     def apply(self, action):
+        ...         print 'successfully applied'
+        
+        In this case a form variable specifies the availability. Initially the button
+        is available as action:
+        
+        >>> myform = Form()
+        >>> actions = button.ButtonActions(myform, TestRequest(), None)
+        >>> actions.update()
+        >>> actions.keys()
+        ['apply']
+        
+        If we set the show-apply attribute to false, the action will not be available.
+        
+        >>> myform.showApply = False
+        >>> actions = button.ButtonActions(myform, TestRequest(), None)
+        >>> actions.update()
+        >>> actions.keys()
+        []
+        
+        This feature is very helpful in multi-forms and wizards.
+        
+        
+        The Button Manager
+        ------------------
+        
+        The button manager contains several additional API methods that make the
+        management of buttons easy.
+        
+        First, you are able to add button managers:
+        
+        >>> bm1 = button.Buttons(IButtons)
+        >>> bm2 = button.Buttons(button.Button('help', title=u'Help'))
+        
+        >>> bm1 + bm2
+        <z3c.form.button.Buttons object at ...>
+        >>> list(bm1 + bm2)
+        ['apply', 'cancel', 'help']
+        
+        The result of the addition is another button manager. Also note that the order
+        of the buttons is preserved throughout the addition. Adding anything else is
+        not well-defined:
+        
+        >>> bm1 + 1
+        Traceback (most recent call last):
+        ...
+        TypeError: unsupported operand type(s) for +: 'Buttons' and 'int'
+        
+        Second, you can select the buttons in a particular order:
+        
+        >>> bm = bm1 + bm2
+        >>> list(bm)
+        ['apply', 'cancel', 'help']
+        
+        >>> list(bm.select('help', 'apply', 'cancel'))
+        ['help', 'apply', 'cancel']
+        
+        The ``select()`` method can also be used to eliminate another button:
+        
+        >>> list(bm.select('help', 'apply'))
+        ['help', 'apply']
+        
+        Of course, in the example above we elimintated one and reoganized the buttons.
+        
+        Third, you can omit one or more buttons:
+        
+        >>> list(bm.omit('cancel'))
+        ['apply', 'help']
+        
+        Finally, while the constructor is very flexible, you cannot just pass in
+        anything:
+        
+        >>> button.Buttons(1, 2)
+        Traceback (most recent call last):
+        ...
+        TypeError: ('Unrecognized argument type', 1)
+        
+        When creating a new form derived from another, you often want to keep existing
+        buttons and add new ones. In order no to change the super-form class, you need
+        to copy the button manager:
+        
+        >>> bm.keys()
+        ['apply', 'cancel', 'help']
+        >>> bm.copy().keys()
+        ['apply', 'cancel', 'help']
+        
+        
+        The Handlers Object
+        -------------------
+        
+        All handlers of a form are collected in the ``handlers`` attribute, which is a
+        ``Handlers`` instance:
+        
+        >>> isinstance(form.handlers, button.Handlers)
+        True
+        >>> form.handlers
+        <Handlers [<Handler for <Button 'apply' u'Apply'>>]>
+        
+        Internally the object uses an adapter registry to manage the handlers for
+        buttons. If a handler is registered for a button, it simply behaves as an
+        instance-adapter.
+        
+        The object itself is pretty simple. You can get a handler as follows:
+        
+        >>> apply = form.buttons['apply']
+        >>> form.handlers.getHandler(apply)
+        <Handler for <Button 'apply' u'Apply'>>
+        
+        But you can also register handlers for groups of buttons, either by interface
+        or class:
+        
+        >>> class SpecialButton(button.Button):
+        ...     pass
+        
+        >>> def handleSpecialButton(form, action):
+        ...     return 'Special button action'
+        
+        >>> form.handlers.addHandler(
+        ...     SpecialButton, button.Handler(SpecialButton, handleSpecialButton))
+        
+        >>> form.handlers
+        <Handlers
+        [<Handler for <Button 'apply' u'Apply'>>,
+        <Handler for <class 'SpecialButton'>>]>
+        
+        Now all special buttons should use that handler:
+        
+        >>> button1 = SpecialButton(title=u'Button 1')
+        >>> button2 = SpecialButton(title=u'Button 2')
+        
+        >>> form.handlers.getHandler(button1)(form, None)
+        'Special button action'
+        >>> form.handlers.getHandler(button2)(form, None)
+        'Special button action'
+        
+        However, registering a more specific handler for button 1 will override the
+        general handler:
+        
+        >>> def handleButton1(form, action):
+        ...     return 'Button 1 action'
+        
+        >>> form.handlers.addHandler(
+        ...     button1, button.Handler(button1, handleButton1))
+        
+        >>> form.handlers.getHandler(button1)(form, None)
+        'Button 1 action'
+        >>> form.handlers.getHandler(button2)(form, None)
+        'Special button action'
+        
+        You can also add handlers objects:
+        
+        >>> handlers2 = button.Handlers()
+        
+        >>> button3 = SpecialButton(title=u'Button 3')
+        >>> handlers2.addHandler(
+        ...     button3, button.Handler(button3, None))
+        
+        >>> form.handlers + handlers2
+        <Handlers
+        [<Handler for <Button 'apply' u'Apply'>>,
+        <Handler for <class 'SpecialButton'>>,
+        <Handler for <SpecialButton '427574746f6e2031' u'Button 1'>>,
+        <Handler for <SpecialButton '427574746f6e2033' u'Button 3'>>]>
+        
+        However, adding other components is not supported:
+        
+        >>> form.handlers + 1
+        Traceback (most recent call last):
+        ...
+        NotImplementedError
+        
+        The handlers also provide a method to copy the handlers to a new instance:
+        
+        >>> copy = form.handlers.copy()
+        >>> isinstance(copy, button.Handlers)
+        True
+        >>> copy is form.handlers
+        False
+        
+        This is commonly needed when one wants to extend the handlers of a super-form.
+        
+        ==========
+        Directives
+        ==========
+        
+        Widget template directive
+        -------------------------
+        
+        Show how we can use the widget template directive. Register the meta
+        configuration for the directive.
+        
+        >>> import sys
+        >>> from zope.configuration import xmlconfig
+        >>> import z3c.form
+        >>> context = xmlconfig.file('meta.zcml', z3c.form)
+        
+        We need a custom widget template
+        
+        >>> import os, tempfile
+        >>> temp_dir = tempfile.mkdtemp()
+        >>> file = os.path.join(temp_dir, 'widget.pt')
+        >>> open(file, 'w').write('''
+        ... <input type="text" id="" name="" value="" size=""
+        ...        tal:attributes="id view/id;
+        ...                        name view/name;
+        ...                        size view/size;
+        ...                        value view/value;" />
+        ... ''')
+        
+        and a interface
+        
+        >>> import zope.interface
+        >>> from z3c.form import interfaces
+        >>> class IMyWidget(interfaces.IWidget):
+        ...     """My widget interface."""
+        
+        and a widget class:
+        
+        >>> from z3c.form.testing import TestRequest
+        >>> from z3c.form.browser import text
+        >>> class MyWidget(text.TextWidget):
+        ...     zope.interface.implements(IMyWidget)
+        >>> request = TestRequest()
+        >>> myWidget = MyWidget(request)
+        
+        Make them available under the fake package ``custom``:
+        
+        >>> sys.modules['custom'] = type(
+        ...     'Module', (),
+        ...     {'IMyWidget': IMyWidget})()
+        
+        and register them as a widget template within the ``z3c:widgetTemplate``
+        directive:
+        
+        >>> context = xmlconfig.string("""
+        ... <configure
+        ...     xmlns:z3c="http://namespaces.zope.org/z3c">
+        ...   <z3c:widgetTemplate
+        ...       template="%s"
+        ...       widget="custom.IMyWidget"
+        ...       />
+        ... </configure>
+        ... """ % file, context=context)
+        
+        Let's get the template
+        
+        >>> import zope.component
+        >>> from z3c.template.interfaces import IPageTemplate
+        >>> template = zope.component.queryMultiAdapter((None, request, None, None,
+        ...     myWidget), interface=IPageTemplate, name='input')
+        
+        and check them:
+        
+        >>> template
+        <zope.app.pagetemplate.viewpagetemplatefile.ViewPageTemplateFile ...>
+        
+        Let's use the template within the widget.
+        
+        >>> print template(myWidget)
+        <input type="text" id="" name="" value="" />
+        
+        We normly render the widget which returns the registered template.
+        
+        >>> print myWidget.render()
+        <input type="text" id="" name="" value="" />
+        
+        If the template does not exist, then the widget directive should fail
+        immediately:
+        
+        >>> unknownFile = os.path.join(temp_dir, 'unknown.pt')
+        >>> context = xmlconfig.string("""
+        ... <configure
+        ...     xmlns:z3c="http://namespaces.zope.org/z3c">
+        ...   <z3c:widgetTemplate
+        ...       template="%s"
+        ...       widget="custom.IMyWidget"
+        ...       />
+        ... </configure>
+        ... """ % unknownFile, context=context)
+        Traceback (most recent call last):
+        ...
+        ZopeXMLConfigurationError: File "<string>", line 4.2-7.8
+        ConfigurationError: ('No such file', '...unknown.pt')
+        
+        
+        Cleanup
+        -------
+        
+        Now we need to clean up the custom module.
+        
+        >>> del sys.modules['custom']
+        
+        ==========
+        Validators
+        ==========
+        
+        Validators are components that validate submitted data. This is certainly not
+        a new concept, but in the previous form frameworks validation was hidden in
+        many places:
+        
+        * Field/Widget Validation
+        
+        The schema field consists of a ``validate()`` method. Validation is
+        automatically invoked when converting a unicode string to a field value
+        using ``fromUnicode()``. This makes it very hard to customize the field
+        validation. No hooks were provided to exert dditional restriction at the
+        presentation level.
+        
+        * Schema/Form Validation
+        
+        This type of validation was not supported at all initially. ``zope.formlib``
+        fixed this problem by validating against schema invariants. While this was a
+        first good step, it still made it hard to customize validators, since it
+        required touching the base implementations of the forms.
+        
+        * Action Validation
+        
+        ``zope.formlib`` supports the notion of action validatos. Actions have a
+        success and failure handler. If the validation succeeds, the success handler
+        is called, otherwise the failure handler is chosen. We believe that this
+        design was ill-conceived, especially the default, which required the data to
+        completely validate in order for the action to successful. There are many
+        actions that do not even care about the data in the form, such as "Help",
+        "Cancel" and "Reset" buttons. Thus validation should be part of the data
+        retrieval process and not the action.
+        
+        For me, the primary goals of the validator framework are as follows:
+        
+        * Assert additional restrictions on the data at the presentation
+        level.
+        
+        There are several use cases for this. Sometimes clients desire additional
+        restrictions on data for their particular version of the software. It is not
+        always desireable to adjust the model for this client, since the framework
+        knows how to handle the less restrictive case anyways. In another case,
+        additional restrictions might be applied to a particular form due to limited
+        restrictions.
+        
+        * Make validation pluggable.
+        
+        Like most other components of this package, it should be possible to control
+        the validation adapters at a fine grained level.
+        
+        * Widgets: context, request, view, field[1], widget
+        
+        * Widget Managers: context, request, view, schema[2], manager
+        
+        [1].. This is optional, since widgets must not necessarily have fields.
+        [2].. This is optional, since widget managers must not necessarily have
+        manage field widgets and thus know about schemas.
+        
+        * Provide good defaults that behave sensibly.
+        
+        God defaults are, like in anywhere in this pacakge, very important. We have
+        chosen to implement the ``zope.formlib`` behavior as the default, since it
+        worked very well -- with exception of action validation, of course.
+        
+        For this package, we have decided to support validators at the widget and
+        widget manager level. By default the framework only supports field widgets,
+        since the validation of field-absent widgets is generally not
+        well-defined. Thus, we first need to create a schema.
+        
+        >>> import zope.interface
+        >>> import zope.schema
+        >>> class IPerson(zope.interface.Interface):
+        ...     login = zope.schema.TextLine(
+        ...         title=u'Login',
+        ...         min_length=1,
+        ...         max_length=10)
+        ...
+        ...     email = zope.schema.TextLine(
+        ...         title=u'E-mail')
+        ...
+        ...     @zope.interface.invariant
+        ...     def isLoginPartOfEmail(person):
+        ...         if not person.email.startswith(person.login):
+        ...             raise zope.interface.Invalid("The login not part of email.")
+        
+        
+        Widget Validators
+        -----------------
+        
+        Widget validators only validate the data of one particular widget. The
+        validated value is always assumed to be an internal value and not a widget
+        value.
+        
+        By default, the system uses the simple field validator, which simply uses the
+        ``validate()`` method of the field. For instantiation, all validators have the
+        following signature for its discriminators: context, request, view, field, and
+        widget
+        
+        >>> from z3c.form import validator
+        >>> simple = validator.SimpleFieldValidator(
+        ...     None, None, None, IPerson['login'], None)
+        
+        A validator has a single method ``validate()``. When the validation is
+        successful, ``None`` is returned:
+        
+        >>> simple.validate(u'srichter')
+        
+        A validation error is raised, when the validation fails:
+        
+        >>> simple.validate(u'StephanCaveman3')
+        Traceback (most recent call last):
+        ...
+        TooLong: (u'StephanCaveman3', 10)
+        
+        Let's now create a validator that also requires at least 1 numerical character
+        in the login name:
+        
+        >>> import re
+        
+        >>> class LoginValidator(validator.SimpleFieldValidator):
+        ...
+        ...     def validate(self, value):
+        ...         super(LoginValidator, self).validate(value)
+        ...         if re.search('[0-9]', value) is None:
+        ...             raise zope.interface.Invalid('No numerical character found.')
+        
+        Let's now try our new validator:
+        
+        >>> login = LoginValidator(None, None, None, IPerson['login'], None)
+        
+        >>> login.validate(u'srichter1')
+        
+        >>> login.validate(u'srichter')
+        Traceback (most recent call last):
+        ...
+        Invalid: No numerical character found.
+        
+        We can now register the validator with the component architecture, ...
+        
+        >>> import zope.component
+        >>> zope.component.provideAdapter(LoginValidator)
+        
+        and look up the adapter using the usual way:
+        
+        >>> from z3c.form import interfaces
+        
+        >>> zope.component.queryMultiAdapter(
+        ...     (None, None, None, IPerson['login'], None),
+        ...     interfaces.IValidator)
+        <LoginValidator for IPerson['login']>
+        
+        Unfortunately, the adapter is now registered for all fields, so that the
+        E-mail field also has this restriction (which is okay in this case, but not
+        generally):
+        
+        >>> zope.component.queryMultiAdapter(
+        ...     (None, None, None, IPerson['email'], None),
+        ...     interfaces.IValidator)
+        <LoginValidator for IPerson['email']>
+        
+        The validator module provides a helper function to set the discriminators for
+        a validator, which can include instances:
+        
+        >>> validator.WidgetValidatorDiscriminators(
+        ...     LoginValidator, field=IPerson['login'])
+        
+        Let's now clean up the component architecture and register the login validator
+        again:
+        
+        >>> from zope.testing import cleanup
+        >>> cleanup.cleanUp()
+        
+        >>> zope.component.provideAdapter(LoginValidator)
+        
+        >>> zope.component.queryMultiAdapter(
+        ...     (None, None, None, IPerson['login'], None),
+        ...     interfaces.IValidator)
+        <LoginValidator for IPerson['login']>
+        
+        >>> zope.component.queryMultiAdapter(
+        ...     (None, None, None, IPerson['email'], None),
+        ...     interfaces.IValidator)
+        
+        
+        Widget Manager Validators
+        -------------------------
+        
+        The widget manager validator, while similar in spirit, works somewhat
+        different. The discriminators of the widget manager validator are: context,
+        request, view, schema, and manager.
+        
+        A simple default implementation is provided that checks the invariants of the
+        schemas:
+        
+        >>> invariants = validator.InvariantsValidator(
+        ...     None, None, None, IPerson, None)
+        
+        Widget manager validators have the option to validate a data dictionary,
+        
+        >>> invariants.validate(
+        ...     {'login': u'srichter', 'email': u'srichter@foo.com'})
+        ()
+        
+        or an object implementing the schema:
+        
+        >>> class Person(object):
+        ...     login = u'srichter'
+        ...     email = u'srichter@foo.com'
+        >>> stephan = Person()
+        
+        >>> invariants.validateObject(stephan)
+        ()
+        
+        Since multiple errors can occur during the validation process, all errors are
+        collected in a tuple, which is returned. If the tuple is empty, the validation
+        was successful. Let's now generate a failure:
+        
+        >>> errors = invariants.validate(
+        ...     {'login': u'srichter', 'email': u'strichter@foo.com'})
+        
+        >>> errors
+        (<zope.interface.exceptions.Invalid instance at ...>,)
+        
+        >>> str(errors[0])
+        'The login not part of email.'
+        
+        Let's now have a look at writing a custom validator. In this case, we want to
+        ensure that the E-mail address is at most twice as long as the login:
+        
+        >>> class CustomValidator(validator.InvariantsValidator):
+        ...     def validateObject(self, obj):
+        ...         errors = super(CustomValidator, self).validateObject(obj)
+        ...         if len(obj.email) > 2 * len(obj.login):
+        ...             errors += (zope.interface.Invalid('Email too long.'),)
+        ...         return errors
+        
+        Since the ``validate()`` method of ``InvatiantsValidator`` simply uses
+        ``validateObject()`` it is enough to only override ``validateObject()``. Now
+        we can use the validator:
+        
+        >>> custom = CustomValidator(
+        ...     None, None, None, IPerson, None)
+        
+        >>> custom.validate(
+        ...     {'login': u'srichter', 'email': u'srichter@foo.com'})
+        ()
+        >>> custom.validate(
+        ...     {'login': u'srichter', 'email': u'srichter@foobar.com'})
+        (<zope.interface.exceptions.Invalid instance at ...>,)
+        
+        To register the custom validator only for this schema, we hace to use the
+        discriminator generator again.
+        
+        >>> from z3c.form import util
+        >>> validator.WidgetsValidatorDiscriminators(
+        ...     CustomValidator, schema=util.getSpecification(IPerson, force=True))
+        
+        Note: Of course we could have used the ``zope.component.adapts()`` function
+        from within the class, but I think it is too tediuos, since you have to
+        specify all discriminators and not only the specific ones you are
+        interested in.
+        
+        After registering the validator,
+        
+        >>> zope.component.provideAdapter(CustomValidator)
+        
+        it becomes the validator for this schema:
+        
+        >>> zope.component.queryMultiAdapter(
+        ...     (None, None, None, IPerson, None), interfaces.IManagerValidator)
+        <CustomValidator for IPerson>
+        
+        >>> class ICar(zope.interface.Interface):
+        ...     pass
+        >>> zope.component.queryMultiAdapter(
+        ...     (None, None, None, ICar, None), interfaces.IManagerValidator)
+        
+        
+        The Data Wrapper
+        ----------------
+        
+        The ``Data`` class provides a wrapper to present a dictionary as a class
+        instance. This is used to check for invariants, which always expect an
+        object. While the common use cases of the data wrapper are well tested in the
+        code above, there are some corner cases that need to be addressed.
+        
+        So let's start by creating a data object:
+        
+        >>> data = validator.Data(IPerson, {'login': 'srichter', 'other': 1})
+        
+        When we try to access a name that is not in the schema, we get an attribute
+        error:
+        
+        >>> data.address
+        Traceback (most recent call last):
+        ...
+        AttributeError: address
+        
+        >>> data.other
+        Traceback (most recent call last):
+        ...
+        AttributeError: other
+        
+        If the field found is a method, then a runtime error is raised:
+        
+        >>> class IExtendedPerson(IPerson):
+        ...     def compute():
+        ...         """Compute something."""
+        
+        >>> data = validator.Data(IExtendedPerson, {'compute': 1})
+        >>> data.compute
+        Traceback (most recent call last):
+        ...
+        RuntimeError: ('Data value is not a schema field', 'compute')
+        
+        =======
+        Widgets
+        =======
+        
+        Widgets are small UI components that accept and process the textual user
+        input. The only responsibility of a widget is to represent a value to the
+        user, allow it to be modified and then return a new value. Good examples of
+        widgets include the Qt widgets and HTML widgets. The widget is not responsible
+        for converting its value to the desired internal value or validate the
+        incoming data. These resposnibilities are passed data converters and
+        validators, respecitively.
+        
+        There are several problems that can be identified in the original Zope 3 widget
+        implementation located at ``zope.app.form``.
+        
+        (1) Field Dependence -- Widgets are always views of fields. While this might
+        be a correct choice for a high-level API, it is fundamentally wrong. It
+        disallows us to use widgets without defining fields. This also couples
+        certain pieces of information too tightly to the field, especially, value
+        retrieval from and storage to the context, validation and raw data
+        conversion.
+        
+        (2) Form Dependence -- While widgets do not have to be located within a form,
+        they are usually tightly coupled to it. It is very difficult to use
+        widgets outside the context of a form.
+        
+        (3) Traversability -- Widgets cannot be traversed, which means that they
+        cannot interact easily using Javascript. This is not a fundamental
+        problem, but simply a lack of the current design to recognize that small
+        UI components must also be traversable and thus have a URI.
+        
+        (4) Customizability -- A consequence of issue (1) is that widgets are not
+        customizable enough. Implementing real-world projects has shown that
+        widgets often want a very fine-grained ability to customize values. A
+        prime example is the label. Because the label of a widget is retrieved
+        from the field title, it is impossible to provide an alternative label for
+        a widget. While the label could be changed from the form, this would
+        require rewriting the entire form to change a label. Instead, we often
+        endde up writing cusom schemas.
+        
+        (5) Flexbility -- Oftentimes it is desired to have one widget, but multiple
+        styles of representation. For example, in one scenario the widget uses a
+        plain HTML widget and in another a fancy JavaScript widget is used. The
+        current implementation makes it very hard to provide alternative styles
+        for a widget.
+        
+        
+        Creating and Using Simple Widgets
+        ---------------------------------
+        
+        When using the widget API by itself, the simplest way to use it is to just
+        instantiate it using the request:
+        
+        >>> from z3c.form.testing import TestRequest
+        >>> from z3c.form import widget
+        >>> request = TestRequest()
+        >>> age = widget.Widget(request)
+        
+        In this case we instantiated a generic widget. A full set of simple
+        browser-based widgets can be found in the ``browser/`` package. Since no
+        helper components are around to fill the attributes of the widget, we have to
+        do it by hand:
+        
+        >>> age.name = 'age'
+        >>> age.label = u'Age'
+        >>> age.value = '39'
+        
+        The most important attributes are the "name" and the "value". The name is used
+        to identify the widget within the form. The value is either the value to be
+        manipulated or the default value. The value must be provided in the form the
+        widget needs it. It is the responsibility of a data converter to convert
+        between the widget value and the desired internal value.
+        
+        Before we can render the widget, we have to register a template for the
+        widget. The first step is to define the template:
+        
+        >>> import tempfile
+        >>> textWidgetTemplate = tempfile.mktemp('text.pt')
+        >>> open(textWidgetTemplate, 'w').write('''\
+        ... <input type="text" name="" value=""
+        ...        tal:attributes="name view/name; value view/value;" />\
+        ... ''')
+        
+        Next, we have to create a template factory for the widget:
+        
+        >>> from z3c.form.widget import WidgetTemplateFactory
+        >>> factory = WidgetTemplateFactory(
+        ...     textWidgetTemplate, widget=widget.Widget)
+        
+        The first argument, which is also required, is the path to the template
+        file. An optional ``content_type`` keyword argument allows the developer to
+        specify the output content type, usually "text/html". Then there are five
+        keyword arguments that specify the discriminators of the template:
+        
+        * ``context`` -- This is the context in which the widget is displayed. In a
+        simple widget like the one we have now, the context is ``None``.
+        
+        * ``request`` -- This discriminator allows you to specify the type of request
+        for which the widget will be available. In our case this would be a browser
+        request. Note that browser requests can be further broken into layer, so you
+        could also specify a layer interface here.
+        
+        * ``view`` -- This is the view from which the widget is used. The simple
+        widget at hand, does not have a view associated with it though.
+        
+        * ``field`` -- This is the field for which the widget provides a
+        representation. Again, this simple widget does not use a field, so it is
+        ``None``.
+        
+        * ``widget`` -- This is the widget itself. With this discriminator you can
+        specify for which type of widget you are providing a template.
+        
+        We can now register the template factory. The name of the factory is the mode
+        of the widget. By default, there are two widget modes: "input" and
+        "display". However, since the mode is just a string, one can develop other
+        kinds of modes as needed for a project. The default mode is "input":
+        
+        >>> from z3c.form import interfaces
+        >>> age.mode is interfaces.INPUT_MODE
+        True
+        
+        >>> import zope.component
+        >>> zope.component.provideAdapter(factory, name=interfaces.INPUT_MODE)
+        
+        Once everything is set up, the widget is updated and then rendered:
+        
+        >>> age.update()
+        >>> print age.render()
+        <input type="text" name="age" value="39" />
+        
+        If a value is found in the request, it takes precedence, since the user
+        entered the value:
+        
+        >>> age.request = TestRequest(form={'age': '25'})
+        >>> age.update()
+        >>> print age.render()
+        <input type="text" name="age" value="25" />
+        
+        However, there is an option to turn off all request data:
+        
+        >>> age.value = '39'
+        >>> age.ignoreRequest = True
+        >>> age.update()
+        >>> print age.render()
+        <input type="text" name="age" value="39" />
+        
+        
+        Creating and Using Field Widgets
+        --------------------------------
+        
+        An extended form of the widget allows fields to control several of the
+        widget's properties. Let's create a field first:
+        
+        >>> ageField = zope.schema.Int(
+        ...     __name__ = u'age',
+        ...     title = u'Age',
+        ...     min = 0,
+        ...     max = 130)
+        
+        We can now use our simple widget and create a field widget from it:
+        
+        >>> ageWidget = widget.FieldWidget(ageField, age)
+        
+        Such a widget provides ``IFieldWidget``:
+        
+        >>> interfaces.IFieldWidget.providedBy(ageWidget)
+        True
+        
+        Of course, this is more commonly done using an adapter. Commonly those
+        adapters look like this:
+        
+        >>> @zope.component.adapter(zope.schema.Int, TestRequest)
+        ... @zope.interface.implementer(interfaces.IFieldWidget)
+        ... def IntWidget(field, request):
+        ...     return widget.FieldWidget(field, widget.Widget(request))
+        
+        >>> zope.component.provideAdapter(IntWidget)
+        >>> ageWidget = zope.component.getMultiAdapter((ageField, request),
+        ...     interfaces.IFieldWidget)
+        
+        Now we just have to update and render the widget:
+        
+        >>> ageWidget.update()
+        >>> print ageWidget.render()
+        <input type="text" name="age" />
+        
+        There is no initial value for the widget, since there is no value in the
+        request and the field does not provide a default. Let's now give our field a
+        default value and see what happens:
+        
+        >>> ageField.default = 30
+        >>> ageWidget.update()
+        Traceback (most recent call last):
+        ...
+        TypeError: ('Could not adapt', <Widget u'age'>,
+        <InterfaceClass z3c.form.interfaces.IDataConverter>)
+        
+        In order for the widget to be able to take the field's default value and use
+        it to provide an initial value the widget, we need to provide a data converter
+        that defines how to convert from the field value to the widget value.
+        
+        >>> from z3c.form import converter
+        >>> zope.component.provideAdapter(converter.FieldWidgetDataConverter)
+        >>> zope.component.provideAdapter(converter.FieldDataConverter)
+        
+        >>> ageWidget.update()
+        >>> print ageWidget.render()
+        <input type="text" name="age" value="30" />
+        
+        Again, the request value is honored above everything else:
+        
+        >>> ageWidget.request = TestRequest(form={'age': '25'})
+        >>> ageWidget.update()
+        >>> print ageWidget.render()
+        <input type="text" name="age" value="25" />
+        
+        
+        Creating and Using Context Widgets
+        ----------------------------------
+        
+        When widgets represent an attribute value of an object, then this object must
+        be set as the context of the widget:
+        
+        >>> class Person(object):
+        ...     age = 45
+        
+        >>> ageWidget.context = Person()
+        >>> zope.interface.alsoProvides(ageWidget, interfaces.IContextAware)
+        
+        The result is that the context value takes over precendence over the default
+        value:
+        
+        >>> ageWidget.request = TestRequest()
+        >>> ageWidget.update()
+        Traceback (most recent call last):
+        ...
+        ComponentLookupError: ((...), <InterfaceClass ...IDataManager>, u'')
+        
+        This call fails because the widget does not know how to extract the value from
+        the context. Registering a data manager for the widget does the trick:
+        
+        >>> from z3c.form import datamanager
+        >>> zope.component.provideAdapter(datamanager.AttributeField)
+        
+        >>> ageWidget.update()
+        >>> print ageWidget.render()
+        <input type="text" name="age" value="45" />
+        
+        The context can be explicitely ignored, making the widget display the default
+        value again:
+        
+        >>> ageWidget.ignoreContext = True
+        >>> ageWidget.update()
+        >>> print ageWidget.render()
+        <input type="text" name="age" value="30" />
+        
+        Again, the request value is honored above everything else:
+        
+        >>> ageWidget.request = TestRequest(form={'age': '25'})
+        >>> ageWidget.ignoreContext = False
+        >>> ageWidget.update()
+        >>> print ageWidget.render()
+        <input type="text" name="age" value="25" />
+        
+        
+        Dynamically Changing Attribute Values
+        -------------------------------------
+        
+        Once widgets are used within a framework, it is very tedious to write Python
+        code to adjust certain attributes, even though hooks exist. The easiest way to
+        change those attribute values is actually to provide an adapter that provides
+        the custom value.
+        
+        We can create a custom label for the age widget:
+        
+        >>> AgeLabel = widget.StaticWidgetAttribute(
+        ...     u'Current Age',
+        ...     context=None, request=None, view=None, field=ageField, widget=None)
+        
+        Clearly, this code deos not require us to touch the orginal form and widget
+        code, given that we have enough control over the selection. In the example
+        above, all the selection discriminators are listed for demonstration
+        purposes. Of course, the label in this case can be created as follows:
+        
+        >>> AgeLabel = widget.StaticWidgetAttribute(u'Current Age', field=ageField)
+        
+        Much better, isn't it? Initially the label is the title of the field:
+        
+        >>> ageWidget.label
+        u'Age'
+        
+        Let's now simply register the label as a named adapter; the name is the name
+        of the attribute to change:
+        
+        >>> zope.component.provideAdapter(AgeLabel, name='label')
+        
+        Asking the widget for the label now will return the newly registered label:
+        
+        >>> ageWidget.update()
+        >>> ageWidget.label
+        u'Current Age'
+        
+        Of course, simply setting the label or changing the label extraction via a
+        sub-class are other options you might want to consider. Furthermore, you
+        could also create a computed attribute value or implement your own component.
+        
+        Overriding any other attribtue, such as ``required``, is done in the same
+        way. If any widget provides new attributes, they are also overridable this
+        way. For example, the selection widget defines a label for the option that no
+        value was selected. We often want to override this, because the German
+        translation sucks or the wording is often too generic.
+        
+        Overriding the default value is somewhat special due to the complexity of
+        obtaining the value. So let's register one now:
+        
+        >>> AgeDefault = widget.StaticWidgetAttribute(50, field=ageField)
+        >>> zope.component.provideAdapter(AgeDefault, name="default")
+        
+        Let's now instantiate, update and render the widget to see the default value:
+        
+        >>> ageWidget = zope.component.getMultiAdapter((ageField, request),
+        ...     interfaces.IFieldWidget)
+        >>> ageWidget.update()
+        >>> print ageWidget.render()
+        <input type="text" name="age" value="50" />
+        
+        
+        Sequence Widget
+        ---------------
+        
+        A common use case in user interfaces is to ask the user to select one or more
+        items from a set of options/choices. The ``widget`` module provides a basic
+        widget implementation to support this use case.
+        
+        The options available for selections are known as terms. Initially, there are
+        no terms:
+        
+        >>> request = TestRequest()
+        >>> seqWidget = widget.SequenceWidget(request)
+        >>> seqWidget.name = 'seq'
+        
+        >>> seqWidget.terms is None
+        True
+        
+        There are two ways terms can be added, either manually or via an
+        adapter. Those term objects must provide ``ITerms``. There is no simple
+        default implementation, so we have to provide one ourselves:
+        
+        >>> from zope.schema import vocabulary
+        >>> class Terms(vocabulary.SimpleVocabulary):
+        ...     zope.interface.implements(interfaces.ITerms)
+        ...     def getValue(self, token):
+        ...         return self.getTermByToken(token).value
+        
+        >>> terms = Terms(
+        ...   [Terms.createTerm(1, 'v1', u'Value 1'),
+        ...    Terms.createTerm(2, 'v2', u'Value 2'),
+        ...    Terms.createTerm(3, 'v3', u'Value 3')])
+        >>> seqWidget.terms = terms
+        
+        Once the ``terms`` attribute is set, updating the widgets does not change the
+        terms:
+        
+        >>> seqWidget.update()
+        >>> [term.value for term in seqWidget.terms]
+        [1, 2, 3]
+        
+        The value of a sequence widget is a tuple/list of term tokens. When extracting
+        values from the request, the values must be valid tokens, otherwise the
+        default value is returned:
+        
+        >>> seqWidget.request = TestRequest(form={'seq': ['v1']})
+        >>> seqWidget.extract()
+        ['v1']
+        
+        >>> seqWidget.request = TestRequest(form={'seq': ['v4']})
+        >>> seqWidget.extract()
+        <NOVALUE>
+        
+        >>> seqWidget.request = TestRequest(form={'seq-empty-marker': '1'})
+        >>> seqWidget.extract()
+        []
+        
+        Since the value of the widget is a tuple of tokens, when displaying the
+        values, they have to be converted to the title of the term:
+        
+        >>> seqWidget.value = ('v1', 'v2')
+        >>> seqWidget.displayValue
+        [u'Value 1', u'Value 2']
+        
+        To demonstrate how the terms is automatically chosen by a widget, we should
+        instantiate a field widget. Let's do this with a choice field:
+        
+        >>> seqField = zope.schema.Choice(
+        ...     title=u'Sequence Field',
+        ...     vocabulary=terms)
+        
+        Let's now create the field widget:
+        
+        >>> seqWidget = widget.FieldWidget(seqField, widget.SequenceWidget(request))
+        >>> seqWidget.terms
+        
+        The terms should be available as soon as the widget is updated:
+        
+        >>> seqWidget.update()
+        Traceback (most recent call last):
+        ...
+        ComponentLookupError: ((...), <InterfaceClass ...ITerms>, u'')
+        
+        This failed, because we did not register an adapter for the terms yet. After
+        the adapter is registered, everything should work as expected:
+        
+        >>> from z3c.form import term
+        >>> zope.component.provideAdapter(term.ChoiceTerms)
+        
+        >>> seqWidget.update()
+        >>> seqWidget.terms
+        <z3c.form.term.ChoiceTerms object at ...>
+        
+        So that's it. Everything else is the same from then on.
+        
+        ===============
+        Action Managers
+        ===============
+        
+        Action managers are components that manage all actions that can be taken
+        within a view, usually a form. They are also responsible for executing actions
+        when asked to do so.
+        
+        Creating an action manager
+        --------------------------
+        
+        An action manager is a form-related adapter that has the following
+        discriminator: form, request, and content. While there is a base
+        implementation for an action manager, the ``action`` module does not provide a
+        full implementation.
+        
+        So we first have to build a simple implementation based on the ``Actions``
+        manager base class which allows us to add actions. Note that the following
+        implementation is for deomnstration purposes. If you want to see a real action
+        manager implementation, then have a look at ``ButtonActions``. Let's now
+        implement our simple action manager:
+        
+        >>> from z3c.form import action
+        >>> class SimpleActions(action.Actions):
+        ...     """Simple sample."""
+        ...
+        ...     def append(self, name, action):
+        ...         """See z3c.form.interfaces.IActions."""
+        ...         if not name in self:
+        ...             self._data_keys.append(name)
+        ...         self._data_values.append(action)
+        ...         self._data[name] = action
+        
+        Before we can initialise the action manager, we have to create instances for
+        our three discriminators, just enough to get it working:
+        
+        >>> import zope.interface
+        >>> from z3c.form import interfaces
+        >>> class Form(object):
+        ...     zope.interface.implements(interfaces.IForm)
+        >>> form = Form()
+        
+        >>> class Content(object):
+        ...     zope.interface.implements(zope.interface.Interface)
+        >>> content = Content()
+        
+        >>> from z3c.form.testing import TestRequest
+        >>> request = TestRequest()
+        
+        We are now ready to create the action manager, which is a simple
+        triple-adapter:
+        
+        >>> manager = SimpleActions(form, request, content)
+        >>> manager
+        <SimpleActions None>
+        
+        As we can see in the manager representation above, the name of the manager is
+        ``None``, since we have not specified one:
+        
+        >>> manager.__name__ = 'example'
+        >>> manager
+        <SimpleActions 'example'>
+        
+        
+        Managing and Accessing Actions
+        ------------------------------
+        
+        Initially there are no actions in the manager:
+        
+        >>> manager.keys()
+        []
+        
+        Our simple implementation of has an additional ``append()`` method, which we
+        will use to add actions:
+        
+        >>> apply = action.Action(request, u'Apply')
+        >>> manager.append(apply.name, apply)
+        
+        The action is added immediately:
+        
+        >>> manager.keys()
+        ['apply']
+        
+        However, you should not rely on it being added, and always update the manager
+        once all actions were defined:
+        
+        >>> manager.update()
+        
+        Note: If the title of the action is a more complex unicode string and no name
+        is specified for the action, then a hexadecimal name is created from the
+        title:
+        
+        >>> action.Action(request, u'Apply Now!').name
+        '4170706c79204e6f7721'
+        
+        Since the action manager is an enumerable mapping, ...
+        
+        >>> from zope.interface.common.mapping import IEnumerableMapping
+        >>> IEnumerableMapping.providedBy(manager)
+        True
+        
+        there are several API methods available:
+        
+        >>> manager['apply']
+        <Action 'apply' u'Apply'>
+        >>> manager['foo']
+        Traceback (most recent call last):
+        ...
+        KeyError: 'foo'
+        
+        >>> manager.get('apply')
+        <Action 'apply' u'Apply'>
+        >>> manager.get('foo', 'default')
+        'default'
+        
+        >>> 'apply' in manager
+        True
+        >>> 'foo' in manager
+        False
+        
+        >>> manager.values()
+        [<Action 'apply' u'Apply'>]
+        
+        >>> manager.items()
+        [('apply', <Action 'apply' u'Apply'>)]
+        
+        >>> len(manager)
+        1
+        
+        
+        Executing actions
+        -----------------
+        
+        When an action is executed, an execution adapter is looked up. If there is no
+        adapter, nothing happens. So let's create a request that submits the apply
+        button:
+        
+        >>> request = TestRequest(form={'apply': 'Apply'})
+        >>> manager = SimpleActions(form, request, content)
+        
+        We also want to have two buttons in this case, so that we can ensure that only
+        one is executed:
+        
+        >>> apply = action.Action(request, u'Apply')
+        >>> manager.append(apply.name, apply)
+        
+        >>> cancel = action.Action(request, u'Cancel')
+        >>> manager.append(cancel.name, cancel)
+        >>> manager.update()
+        
+        Now that the manager is updated, we can ask it for the "executed" actions:
+        
+        >>> manager.executedActions
+        [<Action 'apply' u'Apply'>]
+        
+        Executing the actions does nothing, because there are no handlers yet:
+        
+        >>> manager.execute()
+        
+        
+        Let's now register an action handler that listens to the "Apply" action. An
+        action handler has four discriminators: form, request, content, and
+        action. All those objects are available to the handler under those names. When
+        using the base action handler from the ``action`` module, ``__call__()`` is
+        the only method that needs to be implemented:
+        
+        >>> from z3c.form import util
+        
+        >>> class SimpleActionHandler(action.ActionHandlerBase):
+        ...     zope.component.adapts(
+        ...         None, TestRequest, None, util.getSpecification(apply))
+        ...     def __call__(self):
+        ...         print 'successfully applied'
+        
+        >>> zope.component.provideAdapter(SimpleActionHandler)
+        
+        As you can see, we registered the action specifically for the apply
+        action. Now, executing the actions calls this handler:
+        
+        >>> manager.execute()
+        successfully applied
+        
+        Of course it only works for the "Apply" action and not ""Cancel":
+        
+        >>> request = TestRequest(form={'cancel': 'Cancel'})
+        >>> manager.request = apply.request = cancel.request = request
+        >>> manager.execute()
+        
+        ========================
+        Attribute Value Adapters
+        ========================
+        
+        In advanced, highly customized projects it is often the case that a property
+        wants to be overridden for a particular customer in a particular case. A prime
+        example is the label of a widget. Until this implementation of a form
+        framework was written, widgets only could get their label from the field they
+        were representing. Thus, wanting to change the label of a widget meant
+        implementing a custom schema and re-registering the form in question for the
+        custom schema. It is needless to say that this was very annoying.
+        
+        For this form framework, we are providing multiple levels of customization.
+        The user has the choice to change the value of an attribute through attribute
+        assignment or adapter lookup. The chronological order of an attribute value
+        assignment is as follows:
+        
+        1. During initialization or right thereafter, the attribute value can be set
+        by direct attribute assignment, i.e. ``obj.attr = value``
+        
+        2. While updating the object, an adapter is looked up for the attribute. If an
+        adapter is found, the attribute value will be overridden. Of course, if the
+        object does not have an ``update()`` method, one can choose another
+        location to do the adapter lookup.
+        
+        3. After updating, the developer again has the choice to override the attribute
+        allowing granularity above and beyond the adapter.
+        
+        The purpose of this module is to implement the availability of an attribute
+        value using an adapter.
+        
+        >>> from z3c.form import value
+        
+        The module provides helper functions and classes, to create those adapters
+        with as little code as possible.
+        
+        
+        Static Value Adapter
+        --------------------
+        
+        To demonstrate the static value adapter, let's go back to our widget label
+        example. Let's create a couple of simple widgets and forms first:
+        
+        >>> class TextWidget(object):
+        ...    label = u'Text'
+        >>> tw = TextWidget()
+        
+        >>> class CheckboxWidget(object):
+        ...    label = u'Checkbox'
+        >>> cbw = CheckboxWidget()
+        
+        >>> class Form1(object):
+        ...    pass
+        >>> form1 = Form1()
+        
+        >>> class Form2(object):
+        ...    pass
+        >>> form2 = Form2()
+        
+        We can now create a generic widget property adapter:
+        
+        >>> WidgetAttribute = value.StaticValueCreator(
+        ...     discriminators = ('widget', 'view')
+        ...     )
+        
+        Creating the widget attribute object, using the helper function above, allows
+        us to define the discriminators (or the granulatrity) that can be used to
+        control a widget attribute by an adapter. In our case this is the widget
+        itself and the form/view in which the widget is displayed. In other words, it
+        will be possible to register a widget attribute value specifically for a
+        particular widget, a particular form, or a combination thereof.
+        
+        Let's now create a label attribute adapter for the text widget, since our
+        customer does not like the default label:
+        
+        >>> TextLabel = WidgetAttribute(u'My Text', widget=TextWidget)
+        
+        The first argument of any static attribute value is the value itself, in our
+        case the string "My Text". The following keyword arguments are the
+        discriminators specified in the property factory. Since we only specify the
+        widget, the label will be available to all widgets. But first we have to
+        register the adapter:
+        
+        >>> import zope.component
+        >>> zope.component.provideAdapter(TextLabel, name='label')
+        
+        The name of the adapter is the attribute name of the widget. Let's now see how
+        we can get the label:
+        
+        >>> from z3c.form import interfaces
+        >>> staticValue = zope.component.getMultiAdapter(
+        ...     (tw, form1), interfaces.IValue, name='label')
+        >>> staticValue
+        <StaticValue u'My Text'>
+        
+        The resulting value object has one public method ``get()``, which returns the
+        actual value:
+        
+        >>> staticValue.get()
+        u'My Text'
+        
+        As we said before, the value should be available to all forms, ...
+        
+        >>> zope.component.getMultiAdapter(
+        ...     (tw, form2), interfaces.IValue, name='label')
+        <StaticValue u'My Text'>
+        
+        ... but only to the ``TextWidget``:
+        
+        >>> zope.component.getMultiAdapter(
+        ...     (cbw, form2), interfaces.IValue, name='label')
+        Traceback (most recent call last):
+        ...
+        ComponentLookupError: ((<CheckboxWidget...>, <Form2...>),
+        <InterfaceClass ...IValue>, 'label')
+        
+        By the way, the attribute adapter factory notices, if you specify a
+        discriminator that was not specified:
+        
+        >>> WidgetAttribute(u'My Text', form=Form2)
+        Traceback (most recent call last):
+        ...
+        ValueError: One or more keyword arguments did not match the discriminators.
+        
+        >>> WidgetAttribute.discriminators
+        ('widget', 'view')
+        
+        
+        Computed Value Adapter
+        ----------------------
+        
+        A second implementation of the value adapter in the evaluated value, where one
+        can specify a function that computes the value to be returned. The only
+        argument to the function is the value adapter instance itself, which then
+        contains all the discriminators as specified when creating the generic widget
+        attribute factory. Let's take the same use case as before, but generating the
+        value as follows:
+        
+        >>> def getLabelValue(adapter):
+        ...     return adapter.widget.label + ' (1)'
+        
+        Now we create the value adapter for it:
+        
+        >>> WidgetAttribute = value.ComputedValueCreator(
+        ...     discriminators = ('widget', 'view')
+        ...     )
+        
+        >>> TextLabel = WidgetAttribute(getLabelValue, widget=TextWidget)
+        
+        After registering the adapter, ...
+        
+        >>> zope.component.provideAdapter(TextLabel, name='label')
+        
+        we now get the answers:
+        
+        >>> from z3c.form import interfaces
+        >>> zope.component.getMultiAdapter(
+        ...     (tw, form1), interfaces.IValue, name='label')
+        <ComputedValue u'Text (1)'>
+        
+        
+        __Note__: The two implementations of the attribute value adapters are not
+        meant to be canonical features that must always be used. The API is
+        kept simple to allow you to quickly implement your own value
+        adapter.
+        
+        
+        Automatic Interface Assignment
+        ------------------------------
+        
+        Oftentimes it is desirable to register an attribute value adapter for an
+        instance. A good example is a field, so let's create a small schema:
+        
+        >>> import zope.interface
+        >>> import zope.schema
+        >>> class IPerson(zope.interface.Interface):
+        ...     firstName = zope.schema.TextLine(title=u'First Name')
+        ...     lastName = zope.schema.TextLine(title=u'Last Name')
+        
+        The customer now requires that the title -- which is the basis of the widget
+        label for field widgets -- of the last name should be "Surname". Until now the
+        option was to write a new schema changing the title. With this attribute value
+        module, as introduced thus far, we would need to provide a special interface
+        for the last name field, since registering a label adapter for all text fields
+        would also change the first name.
+        
+        Before demonstrating the solution to this problem, let's first create a field
+        attribute value:
+        
+        >>> FieldAttribute = value.StaticValueCreator(
+        ...     discriminators = ('field',)
+        ...     )
+        
+        We can now create the last name title, changing only the title of the
+        ``lastName`` field. Instead of passing in an interface of class as the field
+        discriminator, we pass in the field instance:
+        
+        >>> LastNameTitle = FieldAttribute(u'Surname', field=IPerson['lastName'])
+        
+        The attribute value factory will automatically detect instances, create an
+        interface on the fly, directly provide it on the field and makes it the
+        discriminator interface for the adapter registratioon.
+        
+        So after registering the adapter, ...
+        
+        >>> zope.component.provideAdapter(LastNameTitle, name='title')
+        
+        the adapter is only available to the last name field and not the first name:
+        
+        >>> zope.component.queryMultiAdapter(
+        ...     (IPerson['lastName'],), interfaces.IValue, name='title')
+        <StaticValue u'Surname'>
+        
+        >>> zope.component.queryMultiAdapter(
+        ...     (IPerson['firstName'],), interfaces.IValue, name='title')
+        
+        =============
+        Data Managers
+        =============
+        
+        For the longest time the way widgets retrieved and stored their values on the
+        actual content/model was done by binding the field to a context and then
+        setting and getting the attribute from it. This has several distinct design
+        shortcomings:
+        
+        1. The field has too much responsibility by knowing about its implementations.
+        
+        2. There is no way of redefining the method used to store and access data
+        other than rewriting fields.
+        
+        3. Finding the right content/model to modify is an implicit policy: Find an
+        adapter for the field's schema and then set the value there.
+        
+        While implementing dome real-world projects, we noticed that this approach is
+        too limiting and we often could not use the form framework when we wanted or
+        had to jump through many hoops to make it work for us. For example, if we want
+        to display a form to collect data that does not correspond to a set of content
+        components, we was forced to not only write a schema for the form but also
+        implement that schema as a class. but all we wanted was a dictionary. For
+        edit-form like tasks we often also had an initial dictionary, which we just
+        wanted modified.
+        
+        Data managers abstract the getting and setting of the data. A data manager is
+        responsible for setting one piece of data in a particular context.
+        
+        >>> from z3c.form import datamanager
+        
+        
+        Attribute Field Manager
+        -----------------------
+        
+        The most common case, of course, is the management of class attributes through
+        fields. In this case, the data manager needs to know about the context and the
+        field it is managing the data for.
+        
+        >>> import zope.interface
+        >>> import zope.schema
+        >>> class IPerson(zope.interface.Interface):
+        ...     name = zope.schema.TextLine(
+        ...         title=u'Name',
+        ...         default=u'<no name>')
+        
+        >>> class Person(object):
+        ...     zope.interface.implements(IPerson)
+        ...     name = u''
+        ...     def __init__(self, name):
+        ...         self.name = name
+        
+        >>> stephan = Person(u'Stephan Richter')
+        
+        We can now instantiate the data manager for Stephan's name:
+        
+        >>> nameDm = datamanager.AttributeField(stephan, IPerson['name'])
+        
+        The data manager consists of a few simple methods to accomplish its
+        purpose. Getting the value is done using the ``get()`` method:
+        
+        >>> nameDm.get()
+        u'Stephan Richter'
+        
+        The value can be set using ``set()``:
+        
+        >>> nameDm.set(u'Stephan "Caveman" Richter')
+        
+        >>> nameDm.get()
+        u'Stephan "Caveman" Richter'
+        >>> stephan.name
+        u'Stephan "Caveman" Richter'
+        
+        A final feature that is supported by the data manager is the check whether a
+        value can be accessed and written. To demonstrate the feature, we first have
+        to provide security declarations for our person:
+        
+        >>> from zope.security.management import endInteraction
+        >>> from zope.security.management import newInteraction
+        >>> from zope.security.management import setSecurityPolicy
+        >>> import z3c.form.testing
+        >>> endInteraction()
+        >>> newPolicy = z3c.form.testing.SimpleSecurityPolicy()
+        >>> newPolicy.allowedPermissions = ('View', 'Edit')
+        >>> oldpolicy = setSecurityPolicy(newPolicy)
+        >>> newInteraction()
+        
+        >>> from zope.security.checker import Checker
+        >>> from zope.security.checker import defineChecker
+        >>> personChecker = Checker({'name':'View', 'name':'Edit'})
+        >>> defineChecker(Person, personChecker)
+        
+        We now need to wrap stephan into a proxy:
+        
+        >>> protectedStephan = zope.security.checker.ProxyFactory(stephan)
+        
+        Since we are not logged in as anyone, we cannot acces or write the value:
+        
+        >>> nameDm = datamanager.AttributeField(protectedStephan, IPerson['name'])
+        
+        >>> nameDm.canAccess()
+        False
+        >>> nameDm.canWrite()
+        False
+        
+        Clearly, this also means that ``get()`` and ``set()`` are also shut off:
+        
+        >>> nameDm.get()
+        Traceback (most recent call last):
+        ...
+        Unauthorized: (<Person object at ...>, 'name', 'Edit')
+        
+        >>> nameDm.set(u'Stephan')
+        Traceback (most recent call last):
+        ...
+        ForbiddenAttribute: ('name', <Person object at ...>)
+        
+        Now we have to setup the security system and "log in" as a user:
+        
+        >>> newPolicy.allowedPermissions = ('View', 'Edit')
+        >>> newPolicy.loggedIn = True
+        
+        The created principal, with which we are logged in now, can only access the
+        attribute:
+        
+        >>> nameDm.canAccess()
+        True
+        >>> nameDm.canWrite()
+        False
+        
+        Thus only the ``get()`` method is allowed:
+        
+        >>> nameDm.get()
+        u'Stephan "Caveman" Richter'
+        
+        >>> nameDm.set(u'Stephan')
+        Traceback (most recent call last):
+        ...
+        ForbiddenAttribute: ('name', <Person object at ...>)
+        
+        If field's schema is not directly provided by the context, the datamanager
+        will attempt to find an adapter. Let's give the person an address for example:
+        
+        >>> class IAddress(zope.interface.Interface):
+        ...     city = zope.schema.TextLine(title=u'City')
+        
+        >>> class Address(object):
+        ...     zope.component.adapts(IPerson)
+        ...     zope.interface.implements(IAddress)
+        ...     def __init__(self, person):
+        ...         self.person = person
+        ...     @apply
+        ...     def city():
+        ...         def get(self):
+        ...             return getattr(self.person, '_city', None)
+        ...         def set(self, value):
+        ...             self.person._city = value
+        ...         return property(get, set)
+        
+        >>> zope.component.provideAdapter(Address)
+        
+        Now we can create a data manager for the city attribute:
+        
+        >>> cityDm = datamanager.AttributeField(stephan, IAddress['city'])
+        
+        Initially there is no value, but of course we can create one:
+        
+        >>> cityDm.get()
+        
+        >>> cityDm.set(u'Maynard')
+        >>> cityDm.get()
+        u'Maynard'
+        
+        The value can be accessed through the adapter itself as well:
+        
+        >>> IAddress(stephan).city
+        u'Maynard'
+        
+        While we think that implicitly looking up an adapter is not the cleanest
+        solution, it allows us to mimic the behavior of ``zope.formlib``. We think
+        that we will eventually provide alternative ways to accomplish the same in a
+        more explicit way.
+        
+        Finally, if we try to set a value that is read-only, a type error is raised:
+        
+        >>> readOnlyName = zope.schema.TextLine(
+        ...     __name__='name',
+        ...     readonly=True)
+        
+        >>> nameDm = datamanager.AttributeField(stephan, readOnlyName)
+        >>> nameDm.set(u'Stephan')
+        Traceback (most recent call last):
+        ...
+        TypeError: Can't set values on read-only fields
+        (name=name, class=__builtin__.Person)
+        
+        
+        Dictionary Field Manager
+        ------------------------
+        
+        Another implementation of the data manager interface is provided by the
+        dictionary field manager, which does not expect an instance with attributes as
+        its context, but a dictionary. It still uses a field to determine the key to
+        modify.
+        
+        >>> personDict = {}
+        >>> nameDm = datamanager.DictionaryField(personDict, IPerson['name'])
+        
+        The datamanager can really only deal with dictionaries and no other types:
+        
+        >>> datamanager.DictionaryField([], IPerson['name'])
+        Traceback (most recent call last):
+        ...
+        ValueError: Data are not a dictionary: <type 'list'>
+        
+        Let's now access the name:
+        
+        >>> nameDm.get()
+        <NOVALUE>
+        
+        Initially we get the default value (as specified in the field), since the
+        person dictionariy has no entry. If no default value has been specified in the
+        field, the missing value is returned.
+        
+        Now we set a value and it should be available:
+        
+        >>> nameDm.set(u'Roger Ineichen')
+        
+        >>> nameDm.get()
+        u'Roger Ineichen'
+        >>> personDict
+        {'name': u'Roger Ineichen'}
+        
+        Since this dictionary is not security proxied, any field can be accessed and
+        written to:
+        
+        >>> nameDm.canAccess()
+        True
+        >>> nameDm.canWrite()
+        True
+        
+        As with the attribute data manager, readonly fields cannot be set:
+        
+        >>> nameDm = datamanager.DictionaryField(personDict, readOnlyName)
+        >>> nameDm.set(u'Stephan')
+        Traceback (most recent call last):
+        ...
+        TypeError: Can't set values on read-only fields name=name
+        
+        
+        Cleanup
+        -------
+        
+        We clean up the changes we made in these examples:
+        
+        >>> endInteraction()
+        >>> ignore = setSecurityPolicy(oldpolicy)
+        
+        ==============
+        Data Converter
+        ==============
+        
+        The data converter is the component that converts an internal data value as
+        described by a field to an external value as required by a widget and vice
+        versa. The goal of the converter is to avoid field and widget proliferation
+        solely to handle different types of values. The purpose of fields is to
+        describe internal data types and structures and that of widgets to provide one
+        particular mean of input.
+        
+        The only two discriminators for the converter are the field and the widget.
+        
+        Let's look at the ``Int`` field to ``TextWidget`` converter as an example:
+        
+        >>> import zope.schema
+        >>> age = zope.schema.Int(
+        ...     __name__='age',
+        ...     title=u'Age',
+        ...     min=0)
+        
+        >>> from z3c.form.testing import TestRequest
+        >>> from z3c.form import widget
+        >>> text = widget.Widget(TestRequest())
+        
+        >>> from z3c.form import converter
+        >>> conv = converter.FieldDataConverter(age, text)
+        
+        The converter can now convert any integer to a the value the test widget deals
+        with, which is an ASCII string:
+        
+        >>> conv.toWidgetValue(34)
+        u'34'
+        
+        When the missing value is passed in, an empty string should be returned:
+        
+        >>> conv.toWidgetValue(age.missing_value)
+        u''
+        
+        Of course, values can also be converted from a widget value to field value:
+        
+        >>> conv.toFieldValue('34')
+        34
+        
+        Of course, trying to convert a non-integer string representation fails in a
+        conversion error:
+        
+        >>> conv.toFieldValue('3.4')
+        Traceback (most recent call last):
+        ...
+        ValueError: invalid literal for int(): 3.4
+        
+        Also, the conversion to the field value also validates the data; in this case
+        negative values are not allowed:
+        
+        >>> conv.toFieldValue('-34')
+        Traceback (most recent call last):
+        ...
+        TooSmall: (-34, 0)
+        
+        That's pretty much the entire API. When dealing with converters within the
+        component architecture, everything is a little bit simpler. So let's register
+        the converter:
+        
+        >>> import zope.component
+        >>> zope.component.provideAdapter(converter.FieldDataConverter)
+        
+        Once we ensure that our widget is a text widget, we can lookup the adapter:
+        
+        >>> import zope.interface
+        >>> from z3c.form import interfaces
+        >>> zope.interface.alsoProvides(text, interfaces.ITextWidget)
+        
+        >>> zope.component.getMultiAdapter((age, text), interfaces.IDataConverter)
+        <DataConverter from Int to Widget>
+        
+        For field-widgets there is a helper adapter that makes the lookup even
+        simpler:
+        
+        >>> zope.component.provideAdapter(converter.FieldWidgetDataConverter)
+        
+        After converting our simple widget to a field widget,
+        
+        >>> fieldtext = widget.FieldWidget(age, text)
+        
+        we can now lookup the data converter adapter just by the field widget itself:
+        
+        >>> interfaces.IDataConverter(fieldtext)
+        <DataConverter from Int to Widget>
+        
+        
+        Date Data Converter
+        -------------------
+        
+        Since the ``Date`` field does not provide ``IFromUnicode``, we have to provide
+        a custom data converter. This default one is not very sophisticated and is
+        inteded for use with the text widget:
+        
+        >>> date = zope.schema.Date()
+        
+        >>> ddc = converter.DateDataConverter(date, text)
+        >>> ddc
+        <DataConverter from Date to Widget>
+        
+        Dates are simply converted to ISO format:
+        
+        >>> import datetime
+        >>> bday = datetime.date(1980, 1, 25)
+        
+        >>> ddc.toWidgetValue(bday)
+        u'1980-01-25'
+        
+        The converter only knows how to convert this particular format back to a
+        datetime value:
+        
+        >>> ddc.toFieldValue(u'1980-01-25')
+        datetime.date(1980, 1, 25)
+        
+        
+        Time Data Converter
+        -------------------
+        
+        Since the ``Time`` field does not provide ``IFromUnicode``, we have to provide
+        a custom data converter. This default one is not very sophisticated and is
+        inteded for use with the text widget:
+        
+        >>> time = zope.schema.Time()
+        
+        >>> tdc = converter.TimeDataConverter(time, text)
+        >>> tdc
+        <DataConverter from Time to Widget>
+        
+        Dates are simply converted to ISO format:
+        
+        >>> noon = datetime.time(12, 0, 0)
+        
+        >>> tdc.toWidgetValue(noon)
+        u'12:00:00'
+        
+        The converter only knows how to convert this particular format back to a
+        datetime value:
+        
+        >>> tdc.toFieldValue(u'12:00:00')
+        datetime.time(12, 0)
+        
+        
+        Datetime Data Converter
+        -----------------------
+        
+        Since the ``Datetime`` field does not provide ``IFromUnicode``, we have to
+        provide a custom data converter. This default one is not very sophisticated
+        and is inteded for use with the text widget:
+        
+        >>> dtField = zope.schema.Datetime()
+        
+        >>> dtdc = converter.DatetimeDataConverter(dtField, text)
+        >>> dtdc
+        <DataConverter from Datetime to Widget>
+        
+        Dates are simply converted to ISO format:
+        
+        >>> bdayNoon = datetime.datetime(1980, 1, 25, 12, 0, 0)
+        
+        >>> dtdc.toWidgetValue(bdayNoon)
+        u'1980-01-25 12:00:00'
+        
+        The converter only knows how to convert this particular format back to a
+        datetime value:
+        
+        >>> dtdc.toFieldValue(u'1980-01-25 12:00:00')
+        datetime.datetime(1980, 1, 25, 12, 0)
+        
+        
+        Timedelta Data Converter
+        ------------------------
+        
+        Since the ``Timedelta`` field does not provide ``IFromUnicode``, we have to
+        provide a custom data converter. This default one is not very sophisticated
+        and is inteded for use with the text widget:
+        
+        >>> timedelta = zope.schema.Timedelta()
+        
+        >>> tddc = converter.TimedeltaDataConverter(timedelta, text)
+        >>> tddc
+        <DataConverter from Timedelta to Widget>
+        
+        Dates are simply converted to ISO format:
+        
+        >>> allOnes = datetime.timedelta(1, 3600+60+1)
+        
+        >>> tddc.toWidgetValue(allOnes)
+        u'1 day, 1:01:01'
+        
+        The converter only knows how to convert this particular format back to a
+        datetime value:
+        
+        >>> tddc.toFieldValue(u'1 day, 1:01:01')
+        datetime.timedelta(1, 3661)
+        
+        
+        Sequence Data Converter
+        -----------------------
+        
+        For widgets and fields that work with choices of a sequence, a special data
+        converter is required that works with terms. A prime example is a choice
+        field. Before we can use the converter, we have to register the terms adapter:
+        
+        >>> from z3c.form import term
+        >>> zope.component.provideAdapter(term.ChoiceTerms)
+        
+        Let's now create a choice field and a widget:
+        
+        >>> from zope.schema.vocabulary import SimpleVocabulary
+        
+        >>> gender = zope.schema.Choice(
+        ...     vocabulary = SimpleVocabulary([
+        ...              SimpleVocabulary.createTerm(0, 'm', u'male'),
+        ...              SimpleVocabulary.createTerm(1, 'f', u'female'),
+        ...              ]) )
+        
+        >>> from z3c.form import widget
+        >>> seqWidget = widget.SequenceWidget(TestRequest())
+        
+        We now use the field and widget to instantiate the converter:
+        
+        >>> sdv = converter.SequenceDataConverter(gender, seqWidget)
+        
+        We can now convert a real value to a widget value, which will be the term's
+        token:
+        
+        >>> sdv.toWidgetValue(0)
+        ['m']
+        
+        The result is always a sequence, since sequence widgets only deal collections
+        of values. Of course, we can convert the widget value back to an internal
+        value:
+        
+        >>> sdv.toFieldValue(['m'])
+        0
+        
+        Sometimes a field is not required. In those cases, the value can be the
+        missing value of the field:
+        
+        >>> gender.missing_value = 'missing'
+        
+        >>> sdv.toWidgetValue(gender.missing_value)
+        ['--NOVALUE--']
+        
+        Similarly, if "no value" has been specified in the widget, the missing value
+        of the field is returned:
+        
+        >>> sdv.toFieldValue([u'--NOVALUE--'])
+        'missing'
+        
+        Collection Sequence Data Converter
+        ----------------------------------
+        
+        For widgets and fields that work with a sequence of choices, another data
+        converter is required that works with terms. A prime example is a list
+        field. Before we can use the converter, we have to register the terms adapter:
+        
+        >>> from z3c.form import term
+        >>> zope.component.provideAdapter(term.CollectionTerms)
+        
+        Let's now create a set field and a widget:
+        
+        >>> genders = zope.schema.List(value_type=gender)
+        >>> seqWidget = widget.SequenceWidget(TestRequest())
+        
+        We now use the field and widget to instantiate the converter:
+        
+        >>> csdv = converter.CollectionSequenceDataConverter(genders, seqWidget)
+        
+        We can now convert a real value to a widget value, which will be the term's
+        token:
+        
+        >>> csdv.toWidgetValue([0])
+        ['m']
+        
+        The result is always a sequence, since sequence widgets only deal collections
+        of values. Of course, we can convert the widget value back to an internal
+        value:
+        
+        >>> csdv.toFieldValue(['m'])
+        [0]
+        
+        For some field, like the ``Set``, the collection type is a tuple. Sigh. In
+        these cases we use the last entry in the tuple as the type to use:
+        
+        >>> genders = zope.schema.Set(value_type=gender)
+        >>> seqWidget = widget.SequenceWidget(TestRequest())
+        
+        >>> csdv = converter.CollectionSequenceDataConverter(genders, seqWidget)
+        
+        >>> csdv.toWidgetValue(set([0]))
+        ['m']
+        
+        >>> csdv.toFieldValue(['m'])
+        set([0])
+        
+        =====
+        Terms
+        =====
+        
+        Terms are used to provide choices for sequence widgets or any other construct
+        needing them. Since Zope 3 already has sources and vocabularies, the base
+        terms class simply builds on them.
+        
+        Thus, let's create a vocabulary first:
+        
+        >>> from zope.schema import vocabulary
+        >>> ratings = vocabulary.SimpleVocabulary([
+        ...     vocabulary.SimpleVocabulary.createTerm(0, '0', u'bad'),
+        ...     vocabulary.SimpleVocabulary.createTerm(1, '1', u'okay'),
+        ...     vocabulary.SimpleVocabulary.createTerm(2, '2', u'good')
+        ...     ])
+        
+        Now we can create the terms object:
+        
+        >>> from z3c.form import term
+        >>> terms = term.Terms()
+        >>> terms.terms = ratings
+        
+        Getting a term from a given value is simple:
+        
+        >>> terms.getTerm(0).title
+        u'bad'
+        >>> terms.getTerm(3)
+        Traceback (most recent call last):
+        ...
+        LookupError: 3
+        
+        When converting values from their Web representation back to the internal
+        representation, we have to be able to look up a term by its token:
+        
+        >>> terms.getTermByToken('0').title
+        u'bad'
+        >>> terms.getTerm('3')
+        Traceback (most recent call last):
+        ...
+        LookupError: 3
+        
+        However, often we just want the value so asking for the value that is
+        represented by a token saves usually one line of code:
+        
+        >>> terms.getValue('0')
+        0
+        >>> terms.getValue('3')
+        Traceback (most recent call last):
+        ...
+        LookupError: 3
+        
+        You can also iterate through all terms:
+        
+        >>> [entry.title for entry in terms]
+        [u'bad', u'okay', u'good']
+        
+        Or ask how many terms you have in the first place:
+        
+        >>> len(terms)
+        3
+        
+        Finally the API allows you to check whether a particular value is available in
+        the terms:
+        
+        >>> 0 in terms
+        True
+        >>> 3 in terms
+        False
+        
+        Now, there are several terms implementations that were designed for particular
+        fields. Within the framework, terms are used as adapters with the follwoing
+        discriminators: context, request, form, field, and widget.
+        
+        The first terms implementation is for ``Choice`` fields:
+        
+        >>> import zope.schema
+        
+        >>> ratingField = zope.schema.Choice(
+        ...     title=u'Rating',
+        ...     vocabulary=ratings)
+        
+        >>> terms = term.ChoiceTerms(None, None, None, ratingField, None)
+        >>> [entry.title for entry in terms]
+        [u'bad', u'okay', u'good']
+        
+        A similar terms implementation exists for a ``Bool`` field:
+        
+        >>> truthField = zope.schema.Bool()
+        
+        >>> terms = term.BoolTerms(None, None, None, truthField, None)
+        >>> [entry.title for entry in terms]
+        [u'yes', u'no']
+        
+        Finally, there is a terms adapter for all collections:
+        
+        >>> ratingsField = zope.schema.List(
+        ...     title=u'Ratings',
+        ...     value_type=ratingField)
+        
+        >>> terms = term.CollectionTerms(None, None, None, ratingsField, None)
+        >>> [entry.title for entry in terms]
+        [u'bad', u'okay', u'good']
+        
+        =============================
+        Utility Functions and Classes
+        =============================
+        
+        This file documents the utility functiona and classes that are otherwise not
+        tested.
+        
+        >>> from z3c.form import util
+        
+        
+        ``getWidgetById(form, id)`` Function
+        ------------------------------------
+        
+        Given a form and a widget id, this function extracts the widget for you. First
+        we need to create a properly developed form:
+        
+        >>> import zope.interface
+        >>> import zope.schema
+        
+        >>> class IPerson(zope.interface.Interface):
+        ...     name = zope.schema.TextLine(title=u'Name')
+        
+        >>> from z3c.form import form, field
+        >>> class AddPerson(form.AddForm):
+        ...     fields = field.Fields(IPerson)
+        
+        >>> from z3c.form import testing
+        >>> testing.setupFormDefaults()
+        
+        >>> addPerson = AddPerson(None, testing.TestRequest())
+        >>> addPerson.update()
+        
+        We can now ask for the widget:
+        
+        >>> util.getWidgetById(addPerson, 'form.widgets.name')
+        <TextWidget 'form.widgets.name'>
+        
+        The widget id can be split into a prefix and a widget name. The id must always
+        start with the correct prefix, otherwise a value error is raised:
+        
+        >>> util.getWidgetById(addPerson, 'myform.widgets.name')
+        Traceback (most recent call last):
+        ...
+        ValueError: Id 'myform.widgets.name' must start with prefix 'form.widgets.'
+        
+        If the widget is not found but the prefix is correct, ``None`` is returned:
+        
+        >>> util.getWidgetById(addPerson, 'form.widgets.myname')
+        
+Keywords: zope3 form widget
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Framework :: Zope3
