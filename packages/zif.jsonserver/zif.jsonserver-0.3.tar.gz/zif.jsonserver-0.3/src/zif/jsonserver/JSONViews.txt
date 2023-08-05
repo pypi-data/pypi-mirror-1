@@ -1,0 +1,247 @@
+JSON Views are used when an HTTP GET is a reasonable way to get some 
+JSON-formatted data from the server, for example, if you have a javascript 
+library that employs JSON GETs, e.g., Dojo.
+
+A JSON View is simply a page that, instead of HTML, is a JSON representation of
+some data.
+
+To do this you need to create a view class and register it in ZCML.
+
+We'll follow the xmlrpc README to demonstrate.
+
+First, write a view class, descended from JSONView.  Whatever is returned in the
+render method is what will be sent as a response. The usual view instance
+variables, context and request, are available.
+
+::
+
+    >>> from zif.jsonserver import JSONView
+    >>> class FolderListing(JSONView):
+    ...     def render(self):
+    ...         return list(self.context.keys())
+
+Register it as a view.  Usually, this will be a browser:page or browser:view 
+directive (I'm not sure which is really preferred, either should work.).  
+browser2:page should also work, though I have not tried it.
+
+::
+
+    >>> from zope.configuration import xmlconfig
+    >>> ignored = xmlconfig.string("""
+    ... <configure
+    ...   xmlns="http://namespaces.zope.org/zope"
+    ...   xmlns:browser="http://namespaces.zope.org/browser"
+    ...   >
+    ...  <!-- allow browser directives here -->
+    ...  <include package="zope.app.publisher.browser" file="meta.zcml" />
+    ...  <browser:page
+    ...     name="folderlist"
+    ...     for="zope.app.folder.folder.IFolder"
+    ...     class="zif.jsonserver.JSONViews.FolderListing"
+    ...     permission="zope.ManageContent"
+    ...     />
+    ... </configure>
+    ... """)
+
+Let's set up a browser.
+
+::
+
+    >>> from zope.testbrowser.testing import Browser
+    >>> browser = Browser('http://localhost/')
+    >>> #N.B.,this was how I figured out the need for the IJSONWriter utility...
+    >>> #browser.handleErrors = False
+    >>> browser.addHeader('Authorization','Basic mgr:mgrpw')
+
+Almost exactly like the xmlrpc example, we add some items to the root folder.
+
+::
+
+    >>> typeName = "BrowserAdd__zope.app.folder.folder.Folder"
+    >>> newValue = 'f1'
+    >>> browser.open('/@@contents.html?type_name=%s&new_value=%s' % (typeName,
+    ... newValue))
+    >>> newValue = 'f2'
+    >>> browser.open('/@@contents.html?type_name=%s&new_value=%s' % (typeName,
+    ... newValue))
+
+Before we can JSONView, there needs to be an IJSONWriter utility.  Here's one.
+
+::
+
+    >>> from zope.app.testing import ztapi
+    >>> from zif.jsonserver import jsoncomponent
+    >>> from zif.jsonserver.interfaces import IJSONWriter
+    >>> ztapi.provideUtility(IJSONWriter, jsoncomponent.JSONWriter())
+
+We reset the browser just for fun...
+
+::
+
+    >>> browser = Browser('http://localhost/')
+
+Now, we can call our new JSONView and get a response:
+
+::
+
+    >>> browser.open('/folderlist')
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 401: Unauthorized
+
+That was expected  Let's view again, and provide authentication this time.
+Content-type is set appropriately.
+
+::
+
+    >>> browser.addHeader('Authorization','Basic mgr:mgrpw')
+    >>> browser.open('/folderlist')
+    >>> browser.headers['content-type']
+    'application/json;charset=utf-8'
+    >>> s = browser.contents
+    >>> s == '["f1", "f2"]' or s == '["f1","f2"]'
+    True
+
+Pretty cool, yes?  This is much smaller than a similar xmlrpc response.
+
+But what about parameters?  Let's create another class with a parameter and an
+optional parameter.  We'll also do some local error handling.  There's no real 
+standard on error handling in JSON, so you may need to commune with the client 
+implementation to see how to handle errors. 
+
+::
+
+    >>> import decimal
+    >>> class FolderStupidSum(JSONView):
+    ...     """return two values and their sum"""
+    ...     def render(self, a, b=0):
+    ...         try:
+    ...             a = decimal.Decimal(a)
+    ...             b = decimal.Decimal(b)
+    ...         except decimal.InvalidOperation:
+    ...             self.request.response.setStatus(500)
+    ...             return {'error':'bad params','a':a, 'b':b}
+    ...         return {'a':a,'b':b,'sum':a+b}
+
+First, a hack to make the page template file findable, then register the sum 
+page and a sum_form page.
+
+::
+
+    >>> import os
+    >>> loc = os.path.dirname(__file__)
+    >>> pt = os.path.join(loc,'tests','test_sum_form.pt')
+    >>> from zope.configuration import xmlconfig
+    >>> ignored = xmlconfig.string("""
+    ... <configure
+    ...   xmlns="http://namespaces.zope.org/zope"
+    ...   xmlns:browser="http://namespaces.zope.org/browser"
+    ...   >
+    ...  <!-- allow browser directives here -->
+    ...  <include package="zope.app.publisher.browser" file="meta.zcml" />
+    ...  <browser:page
+    ...     name="sum"
+    ...     for="zope.app.folder.folder.IFolder"
+    ...     class="zif.jsonserver.JSONViews.FolderStupidSum"
+    ...     permission="zope.ManageContent"
+    ...     />
+    ...  <browser:page
+    ...     name="sum_form.html"
+    ...     for="zope.app.folder.folder.IFolder"
+    ...     template="%s"
+    ...     permission="zope.ManageContent"
+    ...     />
+    ... </configure>
+    ... """ % pt)
+
+Start a new browser.
+
+::
+
+    >>> browser = Browser('http://localhost/')
+    >>> #browser.handleErrors = False
+    >>> browser.addHeader('Authorization','Basic mgr:mgrpw')
+
+Let's do a couple of views.  Browser is already authenticated.  Asssure the 
+parameters in the GET match the names in the render method.  Default values
+in the method signature are OK, and probably a good idea.
+
+::
+
+    >>> browser.open('/sum?a=5')
+
+We are expecting something that looks like '{"a":5,"sum":5,"b":0}'
+
+::
+
+    >>> '"a"' in browser.contents
+    True
+    >>> '"b"' in browser.contents
+    True
+    >>> '"sum"' in browser.contents
+    True
+    >>> browser.contents.count('5') == 2
+    True
+
+This request should get something that looks like '{"a":5,"sum":15,"b":10}'
+
+::
+
+    >>> browser.open('/sum?a=5&b=10')
+    >>> browser.contents.count('15') == 1
+    True
+
+This request does not send enough parameters.  The error I get is
+'{"error":"render() takes at least 2 arguments (1 given)"}'
+
+::
+
+    >>> browser.open('/sum')
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 500: Internal Server Error
+    >>> 'error' in browser.contents
+    True
+
+This request also does not send enough parameters, because the parameter 
+provided does not match the method signature.  Same error as above.
+
+::
+
+    >>> browser.open('/sum?d=20')
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 500: Internal Server Error
+    >>> 'error' in browser.contents
+    True
+
+Let's see if the local error handling works. We should get an HTTP error and 
+something like '{"a":"zzz5","b":"10","error":"bad params"}
+
+::
+
+    >>> browser.handleErrors = True
+    >>> browser.open('/sum?a=zzz5&b=10')
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 500: Internal Server Error
+    >>> 'zzz5' in browser.contents
+    True
+    >>> 'bad params' in browser.contents
+    True
+
+Now, let's open the test form in the browser so that we can see if POST works.
+Ordinarily, a POST for a JSONView would be done in an XHR, but we are just
+testing functionality here.
+
+::
+
+    >>> browser.open('/sum_form.html')
+    >>> a = browser.getControl(name='a')
+    >>> b = browser.getControl(name='b')
+    >>> a.value="34"
+    >>> b.value="66"
+    >>> submit = browser.getControl(name="submit")
+    >>> submit.click()
+    >>> '"sum":100' in browser.contents
+    True
