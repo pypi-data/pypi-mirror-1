@@ -1,0 +1,194 @@
+AstroGrid-D HTTP service protocol
+=================================
+
+The current version of the protocol support insert, retrieve, query and delete.
+
+<context>, a URI path string. Ex: /path/to/context/
+
+<RDF/XML data>, a string with RDF serialized using the RDF/XML format 
+described in: http://www.w3.org/TR/rdf-syntax-grammar/
+
+<SPARQL query>, a SPARQL query according to the SPARQL spec: 
+http://www.w3.org/TR/rdf-sparql-query/. The string is encoded according to:
+http://www.w3.org/TR/html4/interact/forms.html#h-17.13.4.1
+
+<SPARQL XML Result>, SPARQL results in XML: 
+http://www.w3.org/TR/rdf-sparql-XMLres/
+
+<SPARQL JSON Result>, SPARQL results in JSON: 
+http://www.w3.org/2001/sw/DataAccess/json-sparql/
+
+Operations on contexts
+----------------------
+
+- Create or replace RDF data at context <context>:
+
+PUT /context/<context>
+Content-Type: application/rdf+xml
+Content-Length: nnn
+
+<RDF/XML data>
+
+Valid return:
+HTTP/1.1 201 Created
+
+Invalid return:
+HTTP/1.1 500 INTERNAL SERVER ERROR
+
+Returned if the parsing failed.
+
+- Retrieve RDF/XML data at context <context>:
+
+GET /context/<context>
+
+Valid return:
+HTTP/1.1 200 OK
+
+<RDF/XML data>
+
+- Delete context <context>:
+
+DELETE /context/<context>
+
+Valid return:
+HTTP/1.1 204 No Content
+
+- Update context <context>
+
+POST /context/<context>?action=<action>
+Content-Type: application/rdf+xml
+Content-Length: nnn
+
+<RDF/XML data>
+
+<action> can be any of the following:
+
+update - overwrite any matching existing (subject, predicate)-pairs in 
+         the graph. Matching can only be done on URIRefs, not on blank nodes.
+add    - Adds the triples in the uploaded graph to the graph stored at 
+         <context>
+remove - Removes any matching triples in the given graph from the graph
+         stored at <context>
+         
+Valid return:
+HTTP/1.1 200 OK
+
+HTTP/1.1 404 NOT FOUND
+
+This is returned if the <context> does not exist. That means it needs to be
+created using PUT /context/<context>
+
+Invalid return:
+HTTP/1.1 500 INTERNAL SERVER ERROR
+
+Returned if the parsing of the input data failed.
+
+System operations
+-----------------
+
+/system provide metadata on stored contexts. Adding, deleting and updating 
+contexts under the /context/-path is reflected in under the /system/-path.
+
+Context metadata include (as of v. 0.0.3):
+
+ts  - The timestamp when the context was added or changed.
+ttl - The time in seconds the context will be available in the storage until
+      removed by a garbage collector.
+
+Retrive context metadata:
+
+GET /system/<context>
+
+Valid return:
+HTTP/1.1 200 OK
+
+<RDF/XML data>
+
+Update context metadata:
+
+Note that the <RDF/XML> metadata must specify the context that should be 
+updated. The following RDF/XML updates the context "blub".
+
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF
+   xmlns:icecore="http://icecore.gac-grid.org/system/"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+>
+  <rdf:Description rdf:about="http://icecore.gac-grid.org/context/blub">
+    <icecore:ttl>40.0</icecore:ttl>
+  </rdf:Description>
+</rdf:RDF>
+
+Note that the URI in rdf:about is a predefined value currently set to 
+"http://icecore.gac-grid.org/context/". This was choosen to be independent
+of machine-changes. http://icecore.gac-grid.org does necessarily point to
+a network accessible machine. 
+
+POST /system/<context>
+Content-Type: application/rdf+xml
+Content-Length: nnn
+
+<RDF/XML data>
+
+Valid return:
+HTTP/1.1 200 OK
+
+Invalid return:
+HTTP/1.1 404 NOT FOUND
+
+This is returned if the <context> does not exist.
+
+HTTP/1.1 500 INTERNAL SERVER ERROR
+
+Returned if the parsing of the input data failed.
+
+
+Query
+-----
+
+Query without format, this defaults to the SPARQL XML format:
+
+GET /query/query?query=<SPARQL query>
+Content-Type: x-www-form-urlencoded
+
+Valid return:
+
+HTTP/1.1 200 OK
+
+<SPARQL XML Result>
+
+
+Query with results in the SPARQL XML format:
+
+GET /query?query=<SPARQL query>&format=xml
+Content-Type: x-www-form-urlencoded
+
+Valid return:
+
+HTTP/1.1 200 OK
+
+<SPARQL XML Result>
+
+Query with results in the JSON format:
+
+GET /query?query=<SPARQL query>&format=json
+Content-Type: x-www-form-urlencoded
+
+Valid return:
+
+HTTP/1.1 200 OK
+
+<SPARQL JSON Result>
+
+SPARQL queries can include a FROM NAMED statement indicating the graph/context
+which the query should execute over. Multiple FROM NAMED are allowed. Example
+
+PREFIX exterms: <http://www.example.org/terms/>
+SELECT ?date 
+
+FROM NAMED <http://icecore.gac-grid.org/context/test#context>
+
+WHERE { <http://www.example.org/index.html> exterms:creation-date ?date . }
+
+"test" in http://icecore.gac-grid.org/context/test#context can be replaced
+by any context available in the information service.
