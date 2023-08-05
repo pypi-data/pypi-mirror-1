@@ -1,0 +1,218 @@
+
+Integration tests of the views
+==============================
+
+Let's create geometry and placemark mocks:
+    
+    >>> from zope.interface import implements
+    >>> from zgeo.geographer.interfaces import IGeoItem
+    >>> from zgeo.geographer.interfaces import IGeometry
+    >>> from zope.dublincore.interfaces import ICMFDublinCore
+    >>> from zope.traversing.browser.interfaces import IAbsoluteURL
+    >>> from zope.traversing.adapters import DefaultTraversable
+    >>> from zope.traversing.interfaces import ITraversable
+    >>> from zope.publisher.interfaces.browser import IBrowserRequest
+    >>> from zope.component import provideAdapter
+    >>> from zope.interface import implements, Interface
+
+We need a view to provide IAbsoluteURL from the mocks and a marker interface
+
+    >>> class IMarker(Interface):
+    ...     pass
+    >>> class AbsoluteURL(object):
+    ...     def __init__(self, context, request):
+    ...         self.context = context
+    ...     def __call__(self):
+    ...         return self.context.absolute_url()
+    >>> provideAdapter(AbsoluteURL, adapts=(IMarker, IBrowserRequest), provides=IAbsoluteURL)
+
+    >>> class Point(object):
+    ...     implements(IGeometry)
+    ...     def __init__(self, long, lat):
+    ...         self.type = 'Point'
+    ...         self.long = long
+    ...         self.lat = lat
+    ...     @property
+    ...     def coordinates(self):
+    ...         return (self.long, self.lat)
+
+    >>> class Placemark(object):
+    ...     implements((IMarker, IGeoItem, ICMFDublinCore))
+    ...     def __init__(self, id, summary, long, lat):
+    ...         self.id = id
+    ...         self.properties = {'summary': summary}
+    ...         self.geometry = Point(long, lat)
+    ...     def absolute_url(self):
+    ...         return 'http://example.com/%s' % self.id
+    ...     def Title(self):
+    ...         return self.id.capitalize()
+    ...     def Description(self):
+    ...         return self.properties['summary']
+    ...     def CreationDate(self):
+    ...         return '2007-12-07 12:00:00'
+    ...     def ModificationDate(self):
+    ...         return '2007-12-07 12:01:00'
+
+Create a placemark instance
+
+    >>> placemark = Placemark('a', "Place marked 'A'", -105.08, 40.59)
+
+Test rendering of the view
+
+    >>> provideAdapter(DefaultTraversable, (Interface,), ITraversable)
+    >>> from zope.publisher.browser import TestRequest
+    >>> request = TestRequest()
+    >>> from zope.component import getMultiAdapter
+    >>> view = getMultiAdapter((placemark, request), name=u'atom-link-entry')
+    >>> view
+    <Products.Five.metaclass.LinkEntry object at ...>
+    
+    >>> print view()
+    <?xml version="1.0" encoding="utf-8"?>
+    <entry xmlns="http://www.w3.org/2005/Atom"
+           xmlns:georss="http://www.georss.org/georss"
+           xmlns:gml="http://www.opengis.net/gml">
+    <BLANKLINE>
+    <BLANKLINE>
+        <title>A</title>
+        <link rel="alternate" href="http://example.com/a">http://example.com/a</link>
+        <id>http://example.com/a/@@atom-link-entry</id>
+        <updated>2007-12-07T12:01:00-07:00</updated>
+        <summary>Place marked 'A'</summary>
+    <BLANKLINE>
+    <BLANKLINE>
+        <georss:where>
+          <gml:Point>
+            <gml:pos>40.590000 -105.080000</gml:pos>
+          </gml:Point>
+        </georss:where>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    </entry>
+    <BLANKLINE>
+    <BLANKLINE>
+
+Test the feed view
+
+    >>> class Collection(dict):
+    ...     implements((IMarker, ICMFDublinCore))
+    ...     def absolute_url(self):
+    ...         return 'http://example.com/collection'
+    ...     def Creator(self):
+    ...         return 'Homer J. Simpson'
+    ...     def Title(self):
+    ...         return 'Test Collection'
+    ...     def ModificationDate(self):
+    ...         return '2007-12-07 12:01:00'
+    ...     def __call__(self):
+    ...         return 'http://example.com/collection'
+
+    >>> collection = Collection()
+    >>> collection['a'] = placemark
+    >>> request = TestRequest()
+    >>> from zope.component import getMultiAdapter
+    >>> view = getMultiAdapter((collection, request), name=u'atom-subscription-feed')
+    >>> view
+    <Products.Five.metaclass.SubscriptionFeed object at ...>
+
+    >>> print view()
+    <?xml version="1.0" encoding="utf-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom"
+          xmlns:georss="http://www.georss.org/georss"
+          xmlns:gml="http://www.opengis.net/gml">
+    <BLANKLINE>
+    <BLANKLINE>
+      <title>Test Collection</title>
+      <link rel="alternate" href="http://example.com/collection">http://example.com/collection</link>
+      <link rel="self" type="application/atom+xml"
+            href="http://example.com/collection/@@atom-subscription-feed"/>
+      <link rel="previous-archive" type="application/atom+xml"
+            href="None"/>
+      <updated>2007-12-07T12:01:00-07:00</updated>
+      <author>
+        <name>Homer J. Simpson</name>
+        <uri></uri>
+        <email></email>
+      </author>
+      <id>http://example.com/collection/@@atom-subscription-feed</id>
+    <BLANKLINE>
+      <entry>
+        <title>A</title>
+        <link rel="alternate" href="http://example.com/a">http://example.com/a</link>
+        <id>http://example.com/a/@@atom-link-entry</id>
+        <updated>2007-12-07T12:01:00-07:00</updated>
+        <summary>Place marked 'A'</summary>
+    <BLANKLINE>
+        <georss:where>
+          <gml:Point>
+            <gml:pos>40.590000 -105.080000</gml:pos>
+          </gml:Point>
+        </georss:where>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+      </entry>
+    <BLANKLINE>
+    </feed>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+
+Test the search feed XML
+
+    >>> request = TestRequest()
+    >>> from zope.component import getMultiAdapter
+    >>> view = getMultiAdapter((collection, request), name=u'atom-search-feed')
+    >>> view
+    <Products.Five.metaclass.SearchFeed object at ...>
+
+    >>> print view()
+    <?xml version="1.0" encoding="utf-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom"
+          xmlns:georss="http://www.georss.org/georss"
+          xmlns:gml="http://www.opengis.net/gml"
+          xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
+    <BLANKLINE>
+    <BLANKLINE>
+      <title>Test Collection</title>
+      <opensearch:totalResults>1</opensearch:totalResults>
+      <opensearch:startPage>1</opensearch:startPage>
+      <opensearch:itemsPerPage>20</opensearch:itemsPerPage>
+      <link rel="alternate" href="http://example.com/collection">http://example.com/collection</link>
+      <link rel="first" type="application/atom+xml"
+            href="http://example.com/collection/@@atom-search-feed"/>
+      <link rel="last" type="application/atom+xml"
+            href="http://example.com/collection/@@atom-search-feed?page=-1"/>
+    <BLANKLINE>
+    <BLANKLINE>
+      <updated>2007-12-07T12:01:00-07:00</updated>
+      <author>
+        <name>Homer J. Simpson</name>
+        <uri></uri>
+        <email></email>
+      </author>
+      <id>http://example.com/collection/@@atom-search-feed</id>
+    <BLANKLINE>
+      <entry>
+        <title>A</title>
+        <link rel="alternate" href="http://example.com/a">http://example.com/a</link>
+        <id>http://example.com/a/@@atom-link-entry</id>
+        <updated>2007-12-07T12:01:00-07:00</updated>
+        <summary>Place marked 'A'</summary>
+    <BLANKLINE>
+        <georss:where>
+          <gml:Point>
+            <gml:pos>40.590000 -105.080000</gml:pos>
+          </gml:Point>
+        </georss:where>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+      </entry>
+    <BLANKLINE>
+    </feed>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+
