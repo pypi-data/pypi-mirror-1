@@ -1,0 +1,38 @@
+#!/usr/bin/env python
+
+import genx
+
+w = genx.Writer()
+nsdef = w.declareNamespace("http://default", "")
+nspref = w.declareNamespace("http://pref", "pref")
+e = w.declareElement("e")
+edef = w.declareElement("edef", nsdef)
+epref = w.declareElement("epref", nspref)
+
+fp = file("/tmp/test.xml", "w")
+w.startDocFile(fp)
+w.startElement(edef)
+w.addNamespace(nspref)
+w.startElement(e)
+w.endElement()
+w.startElement(epref)
+w.unsetDefaultNamespace()
+w.startElement(e)
+w.endElement()
+w.endElement()
+w.endElement()
+w.endDocument()
+
+fp2 = file("/tmp/test2.xml", "w")
+w.startDocFile(fp2)
+w.startElement(edef)
+w.addNamespace(nspref)
+w.startElement(e)
+w.endElement()
+w.startElement(epref)
+#w.unsetDefaultNamespace()
+w.startElement(e)
+w.endElement()
+w.endElement()
+w.endElement()
+w.endDocument()
