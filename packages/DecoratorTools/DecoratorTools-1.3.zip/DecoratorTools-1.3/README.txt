@@ -1,0 +1,537 @@
+Class, Function, and Assignment Decorators for Python 2.3+
+==========================================================
+
+Want to use decorators, but still need to support Python 2.3?  Wish you could
+have class decorators, decorate arbitrary assignments, or match decorated
+function signatures to their original functions?  Then you need
+"DecoratorTools".  Some quick examples::
+
+    # Method decorator example
+    from peak.util.decorators import decorate
+
+    class Demo1(object):
+        decorate(classmethod)   # equivalent to @classmethod
+        def example(cls):
+            print "hello from", cls
+
+
+    # Class decorator example
+    from peak.util.decorators import decorate_class
+
+    def my_class_decorator():
+        def decorator(cls):
+            print "decorating", cls
+            return cls
+        decorate_class(decorator)
+
+    class Demo2:
+        my_class_decorator()
+
+    # "decorating <class Demo2>" will be printed when execution gets here
+
+
+Installing DecoratorTools (using ``"easy_install DecoratorTools"`` or
+``"setup.py install"``) gives you access to the ``peak.util.decorators``
+module.  The tools in this module have been bundled for years inside of PEAK,
+PyProtocols, RuleDispatch, and the zope.interface package, so they have been
+widely used and tested.  (Unit tests are also included, of course.)
+
+This standalone version is backward-compatible with the bundled versions, so you
+can mix and match decorators from this package with those provided by
+zope.interface, TurboGears, etc.
+
+For complete documentation, see the `DecoratorTools manual`_.
+
+Changes since version 1.2:
+
+  * Added ``rewrap()`` function and ``template_function`` decorator to support
+    signature matching for decorated functions.  (These features are similar to
+    the ones provided by Michele Simionato's "decorator" package, but do not
+    require Python 2.4 and don't change the standard idioms for creating
+    decorator functions.)
+
+  * ``decorate_class()`` will no longer apply duplicate class decorator
+    callbacks unless the ``allow_duplicates`` argument is true.
+
+Changes since version 1.1:
+
+  * Fixed a problem where instances of different struct types could equal each
+    other
+
+Changes since version 1.0:
+
+  * The ``struct()`` decorator makes it easy to create tuple-like data
+    structure types, by decorating a constructor function.
+
+.. _DecoratorTools Manual: http://peak.telecommunity.com/DevCenter/DecoratorTools#toc
+
+.. _toc:
+
+.. contents:: **Table of Contents**
+
+You may access any of the following APIs by importing them from
+``peak.util.decorators``:
+
+
+Simple Decorators
+-----------------
+
+decorate(\*decorators)
+    Apply `decorators` to the subsequent function definition or assignment
+    statement, thereby allowing you to conviently use standard decorators with
+    Python 2.3 and up (i.e., no ``@`` syntax required), as shown in the
+    following table of examples::
+
+        Python 2.4+               DecoratorTools
+        ------------              --------------
+        @classmethod              decorate(classmethod)
+        def blah(cls):            def blah(cls):
+            pass                      pass
+
+        @foo
+        @bar(baz)                 decorate(foo, bar(baz))
+        def spam(bing):           def spam(bing):
+            """whee"""                """whee"""
+
+decorate_class(decorator [, depth=2, frame=None])
+    Set up `decorator` to be passed the containing class after its creation.
+
+    This function is designed to be called by a decorator factory function
+    executed in a class suite.  It is not used directly; instead you simply
+    give your users a "magic function" to call in the body of the appropriate
+    class.  Your "magic function" (i.e. a decorator factory function) then
+    calls ``decorate_class`` to register the decorator to be called when the
+    class is created.  Multiple decorators may be used within a single class,
+    although they must all appear *after* the ``__metaclass__`` declaration, if
+    there is one.
+
+    The registered decorator will be given one argument: the newly created
+    containing class.  The return value of the decorator will be used in place
+    of the original class, so the decorator should return the input class if it
+    does not wish to replace it.  Example::
+
+        >>> from peak.util.decorators import decorate_class
+
+        >>> def demo_class_decorator():
+        ...     def decorator(cls):
+        ...         print "decorating", cls
+        ...         return cls
+        ...     decorate_class(decorator)
+
+        >>> class Demo:
+        ...     demo_class_decorator()
+        decorating __builtin__.Demo
+
+    In the above example, ``demo_class_decorator()`` is the decorator factory
+    function, and its inner function ``decorator`` is what gets called to
+    actually decorate the class.  Notice that the factory function has to be
+    called within the class body, even if it doesn't take any arguments.
+
+    If you are just creating simple class decorators, you don't need to worry
+    about the `depth` or `frame` arguments here.  However, if you are creating
+    routines that are intended to be used within other class or method
+    decorators, you will need to pay attention to these arguments to ensure
+    that ``decorate_class()`` can find the frame where the class is being
+    defined.  In general, the simplest way to do this is for the function
+    that's called in the class body to get its caller's frame with
+    ``sys._getframe(1)``, and then pass that frame down to whatever code will
+    be calling ``decorate_class()``.  Alternately, you can specify the `depth`
+    that ``decorate_class()`` should call ``sys._getframe()`` with, but this
+    can be a bit trickier to compute correctly.
+
+    Note, by the way that ``decorate_class()`` ignores duplicate callbacks::
+
+        >>> def hello(cls):
+        ...     print "decorating", cls
+        ...     return cls
+
+        >>> def do_hello():
+        ...     decorate_class(hello)
+
+        >>> class Demo:
+        ...     do_hello()
+        ...     do_hello()
+        decorating __builtin__.Demo
+
+    Unless the ``allow_duplicates`` argument is set to a true value::
+
+        >>> def do_hello():
+        ...     decorate_class(hello, allow_duplicates=True)
+
+        >>> class Demo:
+        ...     do_hello()
+        ...     do_hello()
+        decorating __builtin__.Demo
+        decorating __builtin__.Demo
+    
+
+The ``struct()`` Decorator
+--------------------------
+
+The ``struct()`` decorator creates a tuple subclass with the same name and
+docstring as the decorated function.  The class will have read-only properties
+with the same names as the function's arguments, and the ``repr()`` of its
+instances will look like a call to the original function::
+
+    >>> from peak.util.decorators import struct
+
+    >>> def X(a,b,c):
+    ...     """Demo type"""
+    ...     return a,b,c
+
+    >>> X = struct()(X)    # can't use decorators above functions in doctests
+
+    >>> v = X(1,2,3)
+    >>> v
+    X(1, 2, 3)
+    >>> v.a
+    1
+    >>> v.b
+    2
+    >>> v.c
+    3
+
+    >>> help(X) # doctest: +NORMALIZE_WHITESPACE
+    Help on class X:
+    <BLANKLINE>
+    class X(__builtin__.tuple)
+     |  Demo type
+     |
+     |  Method resolution order:
+     |      X
+     |      __builtin__.tuple
+     |      __builtin__.object
+     |
+     |  Methods defined here:
+     |
+     |  __repr__(self)
+     |
+     |  ----------------------------------------------------------------------
+     |  Static methods defined here:
+     |
+     |  __new__(cls, *args, **kw)
+     |
+     |  ----------------------------------------------------------------------
+     |  ...s defined here:
+     |
+     |  a...
+     |
+     |  b...
+     |
+     |  c...
+     |
+     |  ----------------------------------------------------------------------
+     |  Data and other attributes defined here:
+     |
+     |  __args__ = ['a', 'b', 'c']...
+     |
+     |  __star__ = None
+     |
+     |  ...
+
+The function should return a tuple of values in the same order as its argument
+names, as it will be used by the class' constructor. The function can perform
+validation, add defaults, and/or do type conversions on the values.
+
+If the function takes a ``*``, argument, it should flatten this argument
+into the result tuple, e.g.::
+
+    >>> def pair(first, *rest):
+    ...     return (first,) + rest
+    >>> pair = struct()(pair)
+
+    >>> p = pair(1,2,3,4)
+    >>> p
+    pair(1, 2, 3, 4)
+    >>> p.first
+    1
+    >>> p.rest
+    (2, 3, 4)
+
+Internally, ``struct`` types are actually tuples::
+
+    >>> print tuple.__repr__(X(1,2,3))
+    (<class 'X'>, 1, 2, 3)
+
+The internal representation contains the struct's type object, so that structs
+of different types will not compare equal to each other::
+
+    >>> def Y(a,b,c):
+    ...     return a,b,c
+    >>> Y = struct()(Y)
+
+    >>> X(1,2,3) == X(1,2,3)
+    True
+    >>> Y(1,2,3) == Y(1,2,3)
+    True
+    >>> X(1,2,3) == Y(1,2,3)
+    False
+
+Note, however, that this means that if you want to unpack them or otherwise
+access members directly, you must include the type entry, or use a slice::
+
+    >>> a, b, c = X(1,2,3)  # wrong
+    Traceback (most recent call last):
+      ...
+    ValueError: too many values to unpack
+
+    >>> t, a, b, c = X(1,2,3)       # right
+    >>> a, b, c    = X(1,2,3)[1:]   # ok, if perhaps a bit unintuitive
+
+The ``struct()`` decorator takes optional mixin classes (as positional
+arguments), and dictionary entries (as keyword arguments).  The mixin
+classes will be placed before ``tuple`` in the resulting class' bases, and
+the dictionary entries will be placed in the class' dictionary.  These
+entries take precedence over any default entries (e.g. methods, properties,
+docstring, etc.) that are created by the ``struct()`` decorator::
+
+    >>> class Mixin(object):
+    ...     __slots__ = []
+    ...     def foo(self): print "bar"
+
+    >>> def demo(a, b):
+    ...     return a, b
+
+    >>> demo = struct(Mixin, reversed=property(lambda self: self[:0:-1]))(demo)
+    >>> demo(1,2).foo()
+    bar
+    >>> demo(3,4).reversed
+    (4, 3)
+    >>> demo.__mro__
+    (<class 'demo'>, <class ...Mixin...>, <type 'tuple'>, <type 'object'>)
+
+Note that using mixin classes will result in your new class' instances having
+a ``__dict__`` attribute, unless they are new-style classes that set
+``__slots__`` to an empty list.  And if they have any slots other than
+``__weakref__`` or ``__dict__``, this will cause a type error due to layout
+conflicts.  In general, it's best to use mixins only for adding methods, not
+data.
+
+Finally, note that if your function returns a non-tuple result, it will be
+returned from the class' constructor.  This is sometimes useful::
+
+    >>> def And(a, b):
+    ...     if a is None: return b
+    ...     return a, b
+    >>> And = struct()(And)
+
+    >>> And(1,2)
+    And(1, 2)
+
+    >>> And(None, 27)
+    27
+
+
+Signature Matching
+------------------
+
+One of the drawbacks to using function decorators is that using ``help()`` or
+other documentation tools on a decorated function usually produces unhelpful
+results::
+
+    >>> def before_and_after(message):
+    ...     def decorator(func):
+    ...         def decorated(*args, **kw):
+    ...             print "before", message
+    ...             try:
+    ...                 return func(*args, **kw)
+    ...             finally:
+    ...                 print "after", message
+    ...         return decorated
+    ...     return decorator
+
+    >>> def foo(bar, baz):
+    ...     """Here's some doc"""
+
+    >>> foo(1,2)
+    >>> help(foo)               # doctest: -NORMALIZE_WHITESPACE
+    Help on function foo:
+    ...
+    foo(bar, baz)
+        Here's some doc
+    ...
+
+    >>> decorated_foo = before_and_after("hello")(foo)
+    >>> decorated_foo(1,2)
+    before hello
+    after hello
+
+    >>> help(decorated_foo)     # doctest: -NORMALIZE_WHITESPACE
+    Help on function decorated:
+    ...
+    decorated(*args, **kw)
+    ...
+
+So DecoratorTools provides you with two tools to improve this situation.
+First, the ``rewrap()`` function provides a simple way to match the signature,
+module, and other characteristics of the original function::
+
+    >>> from peak.util.decorators import rewrap
+
+    >>> def before_and_after(message):
+    ...     def decorator(func):
+    ...         def decorated(*args, **kw):
+    ...             print "before", message
+    ...             try:
+    ...                 return func(*args, **kw)
+    ...             finally:
+    ...                 print "after", message
+    ...         return rewrap(func, decorated)
+    ...     return decorator
+
+    >>> decorated_foo = before_and_after("hello")(foo)
+    >>> decorated_foo(1,2)
+    before hello
+    after hello
+
+    >>> help(decorated_foo)     # doctest: -NORMALIZE_WHITESPACE
+    Help on function foo:
+    ...
+    foo(bar, baz)
+        Here's some doc
+    ...
+
+The ``rewrap()`` function returns you a new function object with the same
+attributes (including ``__doc__``, ``__dict__``, ``__name__``, ``__module__``,
+etc.) as the original function, but which calls the decorated function.
+
+If you want the same signature but don't want the overhead of another calling
+level at runtime, you can use the ``@template_function`` decorator instead.
+The downside to this approach, however, is that it is more complex to use and
+makes debugging the wrapper function more difficult (because its source can't
+be seen in a Python debugger).  So, this approach is only recommended for
+the most performance-intensive of decorators.  If you need to use it, it looks
+something like this::
+
+    >>> from peak.util.decorators import template_function
+
+    >>> def before_and_after(message):
+    ...     def decorator(func):
+    ...         [template_function()]   # could also be @template_function in 2.4
+    ...         def decorate(__func, __message):
+    ...             '''
+    ...             print "before", __message
+    ...             try:
+    ...                 return __func($args)
+    ...             finally:
+    ...                 print "after", __message
+    ...             '''
+    ...         return decorate(func, message)
+    ...     return decorator
+
+    >>> decorated_foo = before_and_after("hello")(foo)
+    >>> decorated_foo(1,2)
+    before hello
+    after hello
+
+    >>> help(decorated_foo)     # doctest: -NORMALIZE_WHITESPACE
+    Help on function foo:
+    ...
+    foo(bar, baz)
+        Here's some doc
+    ...
+
+As you can see, the process is somewhat more complex.  Any values you wish
+the generated function to be able to access (aside from builtins) must be
+declared as arguments to the decorating function, and all arguments must be
+named so as not to conflict with the names of any of the decorated function's
+arguments.  The docstring must either fit on one line, or begin with a newline
+and have its contents indented by at least two spaces.  The string ``$args``
+may be used one or more times in the docstring, whenver calling the original
+function.  The first argument of the decorating function must always be the
+original function.
+    
+
+Advanced Decorators
+-------------------
+
+The ``decorate_assignment()`` function can be used to create standalone "magic"
+decorators that work in Python 2.3 and up, and which can also be used to
+decorate arbitrary assignments as well as function/method definitions.  For
+example, if you wanted to create an ``info(**kwargs)`` decorator that could be
+used either with or without an ``@``, you could do something like::
+
+    from peak.util.decorators import decorate_assignment
+
+    def info(**kw):
+        def callback(frame, name, func, old_locals):
+            func.__dict__.update(kw)
+            return func
+        return decorate_assignment(callback)
+
+    info(foo="bar")     # will set dummy.foo="bar"; @info() would also work
+    def dummy(blah):
+        pass
+
+As you can see, this ``info()`` decorator can be used without an ``@`` sign
+for backward compatibility with Python 2.3.  It can also be used *with* an
+``@`` sign, for forward compatibility with Python 2.4 and up.
+
+Here's a more detailed reference for the ``decorate_assignment()`` API:
+
+decorate_assignment(callback [, depth=2, frame=None])
+    Call `callback(frame, name, value, old_locals)` on next assign in `frame`.
+
+    If a `frame` isn't supplied, a frame is obtained using
+    ``sys._getframe(depth)``.  `depth` defaults to 2 so that the correct frame
+    is found when ``decorate_assignment()`` is called from a decorator factory
+    that was called in the target usage context.
+
+    When `callback` is invoked, `old_locals` contains the frame's local
+    variables as they were *before* the assignment, thus allowing the callback
+    to access the previous value of the assigned variable, if any.
+
+    The callback's return value will become the new value of the variable.
+    `name` will contain the name of the variable being created or modified,
+    and `value` will be the thing being decorated.  `frame` is the Python frame
+    in which the assignment occurred.
+
+    This function also returns a decorator function for forward-compatibility
+    with Python 2.4 ``@`` syntax.  Note, however, that if the returned decorator
+    is used with Python 2.4 ``@`` syntax, the callback `name` argument may be
+    ``None`` or incorrect, if the `value` is not the original function (e.g.
+    when multiple decorators are used).
+
+
+Utility/Introspection Functions
+-------------------------------
+
+``peak.util.decorators`` also exposes these additional utility and
+introspection functions that it uses internally:
+
+frameinfo(frame)
+    Return a ``(kind, module, locals, globals)`` tuple for a frame
+
+    The `kind` returned is a string, with one of the following values:
+
+    * ``"exec"``
+    * ``"module"``
+    * ``"class"``
+    * ``"function call"``
+    * ``"unknown"``
+
+    The `module` returned is the Python module object whose globals are in
+    effect for the frame, or ``None`` if the globals don't include a value for
+    ``__name__``.
+
+metaclass_is_decorator(mc)
+    Return truth if the given metaclass is a class decorator metaclass inserted
+    into a class by ``decorate_class()``, or by another class decorator
+    implementation that follows the same protocol (such as the one in
+    ``zope.interface``).
+
+metaclass_for_bases(bases, explicit_mc=None)
+    Given a sequence of 1 or more base classes and an optional explicit
+    ``__metaclass__``, return the metaclass that should be used.  This
+    routine basically emulates what Python does to determine the metaclass
+    when creating a class, except that it does *not* take a module-level
+    ``__metaclass__`` into account, only the arguments as given.  If there
+    are no base classes, you should just directly use the module-level
+    ``__metaclass__`` or ``types.ClassType`` if there is none.
+
+
+Mailing List
+------------
+
+Please direct questions regarding this package to the PEAK mailing list; see
+http://www.eby-sarna.com/mailman/listinfo/PEAK/ for details.
