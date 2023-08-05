@@ -1,0 +1,107 @@
+=======================================
+ Creating a restricted database object
+=======================================
+
+
+Create a new database
+=====================
+
+Let us create a new standard Schevo database::
+
+  >>> from schevo.test import DocTest
+  >>> t = DocTest("""
+  ...
+  ...     class Foo(E.Entity):
+  ...
+  ...         name = f.unicode()
+  ...
+  ...         _key(name)
+  ...
+  ...     class Bar(E.Entity):
+  ...     
+  ...         foo = f.entity('Foo')
+  ...         sequence = f.integer()
+  ...         quality = f.float()
+  ...         
+  ...         _key(foo, sequence) 
+  ...     """)
+
+We can get the list of extent names from it::
+
+  >>> t.db.extent_names()
+  ['Bar', 'Foo']
+
+
+Create a new policy
+===================
+
+Let us create a new policy that by default allows all actions and has
+no overriding behavior defined::
+
+  >>> from schevopolicy.schema import policy_from_string
+  >>> policy = policy_from_string(t.db, """
+  ...     default = ALLOW
+  ...     """)
+
+
+Create a context
+================
+
+A context is what the security policy uses to determine access to
+database resources.  A context could simply be a string containing a
+username, or it could be a dictionary or other object that stores more
+complex information needed to determine access.
+
+For this example, let us use a string for a context::
+
+  >>> context = 'jdoe'
+
+
+Create a restricted database
+============================
+
+A restricted database is an API layer that mirrors the standard Schevo
+database access API when operations are allowed, and raises
+`schevopolicy.error.Unauthorized` errors when operations are
+disallowed.
+
+For a web application, it is assumed that you keep a policy instance
+around across requests. For each request you create a context instance
+that contains information about the authenticated user (if there is
+one), then you create a restricted database based on that context.
+
+Let us create a restricted database::
+
+  >>> rdb = policy(context)
+
+
+Operations with the restricted database
+=======================================
+
+Use the restricted database instance as you would a normal database
+instance::
+
+  >>> rdb.extent_names()
+  ['Bar', 'Foo']
+
+
+Unauthorized actions
+====================
+
+Let us create a new policy where all actions are disallowed by
+default::
+
+  >>> strictpolicy = policy_from_string(t.db, """
+  ...     default = DENY
+  ...     """)
+
+Create a restricted database for it::
+
+  >>> strictrdb = strictpolicy(context)
+
+We can no longer list the extents::
+
+  >>> strictrdb.extent_names()  #doctest: +ELLIPSIS
+  Traceback (most recent call last):
+    ...
+  Unauthorized: ...
