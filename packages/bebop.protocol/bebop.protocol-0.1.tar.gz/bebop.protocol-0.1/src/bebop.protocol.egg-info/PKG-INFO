@@ -1,0 +1,538 @@
+Metadata-Version: 1.0
+Name: bebop.protocol
+Version: 0.1
+Summary: This package allows to register components from Python. It also provides a basic implementation of generic functions in Zope3
+Home-page: http://svn.kmrc.de/projects/devel/bebop.protocol
+Author: Bebop Team
+Author-email: uwe_oestermeier@iwm-kmrc.de
+License: GPL
+Description: Bebop Protocol
+        ==============
+        
+        This package contains a extension to Zope3 which simplifies the registration
+        of components.
+        
+        Zope3 has been criticized as an overly complex and difficult to learn framework.
+        Especially the ZCML configuration language and the missing Python API for
+        configuration actions has been a topic of debate.
+        
+        This package tries to combine the conciseness of Python with the explicitness,
+        fine-grained configurability, and conflict management of ZCML. A protocol is a
+        Python object that defines how a component is registered and configured, how
+        the component is called, and how it is unregistered. Protocols are used and
+        extended by declarations, i.e. class advisors and decorators that correspond
+        to existing ZCML directives. All declarations within a package can be activated
+        with a single line of ZCML. The equivalent ZCML configuration can be recorded
+        for documentary purposes and used as a basis for more selective configurations
+        and overloads.
+        
+        Since the protocol package mimics the ZCML directives as closely as possible
+        it provides no extra learning curve for the experienced Zope3 programmer.
+        Predefined protocols are available for adapters, utilities, subscribers, pages,
+        and menus. Since protocols are extensible, they can also be used to define
+        generic functions and extend the component architecture with special forms
+        of utilities and adapter lookup without the need to define new ZCML directives.
+        
+        
+        Detailed Documentation
+        **********************
+        
+        =========
+        Protocols
+        =========
+        
+        This package defines Protocols that use Zope's component registry.
+        It was inspired by Tim Hochberg's way to register generic functions.
+        
+        http://mail.python.org/pipermail/python-3000/2006-April/000394.html
+        
+        Basically a Protocol says how a component is configured and how it is called.
+        Therefore each Protocol has two main methods: configure and __call__.
+        The configure method triggers the configuration actions which in turn
+        ensure the registration/activation of the protocol elements.
+        This is typically done in production mode via a few ZCML directives
+        which are part of the protocol package. Since you often want to
+        extend a protocol with application specific behavior you can
+        also activate protocol additions via ZCML.
+        
+        Most protocols support an `activate` method. This method
+        registers all component declarations that have been collected
+        in the protocol. A typical use case are doctests where you want to
+        ensure that protocol elements like adapters and utilities are registered.
+        
+        In the following we describe how protocols interact with content classes,
+        adapters, utilities, and subscribers. See browser.txt for view related
+        protocols and generic.txt for an implementation of generic functions.
+        
+        
+        Hello World
+        ===========
+        
+        Let's start with "hello world". In demo/hello you find the usual structure
+        of a Zope3 application:
+        
+        interfaces.py: the involved (public) interfaces which are needed
+        to make things replaceable and extensible
+        world.py:      the content class and a basic implementation
+        of the content related interfaces
+        greeting.py:   the view that shows the mini program to the user
+        configure.zcml the ZCML statements which feed the component registries
+        
+        All this can be reduced to a single file (demo/hello/allinone.py):
+        
+        from persistent import Persistent
+        from zope.publisher.browser import BrowserView
+        
+        from bebop.protocol import protocol
+        from bebop.protocol import browser
+        
+        class World(Persistent):
+        pass
+        
+        greet = protocol.GenericFunction('IGreet')
+        @greet.when(World)
+        def greet_world(world):
+        return 'world'
+        
+        class Greeting(BrowserView):
+        browser.page(World, name="greet", permission='zope.Public')
+        
+        def __call__(self):
+        return "Hello %s" % greet(self.context)
+        
+        
+        Note that this file contains no reference to external interfaces and no
+        ZCML. Even the model and the view are in the same file. That of course
+        works only in simple cases, in more complex applications it may be
+        necessary to split things up, and then the traditional Zope3 structure
+        make of course much more sense. So this example is not intended to show
+        that there is something inherently bad with Zope3's verbosity.
+        To the contrary: We strive at a simplification that integrates well
+        with existing Zope3 packages and at the same time allows to simplify
+        things without loosing the explicitness of Zope3.
+        
+        The example illustrates two main ideas which are the core of this package:
+        
+        1. ZCML statements integrated into the Python code as class advisors
+        and method decorators
+        
+        2. A generic function ``greet``that replaces all the IGreetable, IGreet
+        interfaces without loosing the replaceability and extensibility
+        of the Zope component architecture.
+        
+        The necessary ZCML can be generated from the source code since most of
+        the class advisors and decorators are equivalent to existing ZCML
+        statements. The browser.pages directive, for instance, exactly matches
+        the following ZCML snippet:
+        
+        &lt;browser:pages name="greet"/&gt;
+        
+        The generic function ``greet`` however goes beyond the simple idea
+        of putting configuration statements into the code. It show's that Zope3's
+        component architecture is rich enough to maintain extensions which
+        were not anticipated by the original design. If we look at the complete
+        generated ZCML of this example we see that the generic function is
+        registered as an adapter for an interface that is generated by the
+        GenericFunction factory:
+        
+        &gt;&gt;&gt; from bebop.protocol.directive import record
+        &gt;&gt;&gt; print record(module='bebop.protocol.demo.hello.allinone')
+        &lt;configure
+        xmlns:browser="http://namespaces.zope.org/browser"
+        xmlns:zope="http://namespaces.zope.org/zope"
+        &gt;
+        &lt;!-- GENERATED PROTOCOL. DO NOT MODIFY OR INCLUDE --&gt;
+        &lt;browser:page
+        class="bebop.protocol.demo.hello.allinone.Greeting"
+        layer="zope.publisher.interfaces.browser.IDefaultBrowserLayer"
+        for="bebop.protocol.demo.hello.allinone.World"
+        permission="zope.Public"
+        name="greet"
+        attribute="__call__"
+        /&gt;
+        &lt;zope:adapter
+        factory="bebop.protocol.demo.hello.allinone.greet_world"
+        provides="bebop.protocol.demo.hello.allinone.IGreet"
+        for="bebop.protocol.demo.hello.allinone.World"
+        /&gt;
+        &lt;/configure&gt;
+        
+        
+        Both ideas are elaborated in the following. Protocols are the basic
+        building blocks of this approach.
+        
+        
+        Class Protocol
+        ==============
+        
+        For many cases it is sufficient to use the predefined protocols. The class
+        protocol may serve as an example. It closely mimics the ZCML class
+        directive since the protocol does exactly what the directive does: it
+        configures the security machinery. There's only one important difference.
+        The protocol is completely written in Python, and the corresponding
+        ZCML directives are generated from the Python code.
+        
+        &gt;&gt;&gt; class IPerson(zope.interface.Interface):
+        ...     name = zope.interface.Attribute(u'The name of the person')
+        ...     email = zope.interface.Attribute(u'The email address')
+        
+        &gt;&gt;&gt; from bebop.protocol import protocol
+        &gt;&gt;&gt; class Person(object):
+        ...     zope.interface.implements(IPerson)
+        ...     protocol.classProtocol.require(
+        ...         permission="zope.View",
+        ...         interface=IPerson)
+        
+        We could have used `require` as a shorthand for `classProtocol.require`.
+        The more explict form was choosen to make clear that the a predefined protocol
+        instance is involved.
+        
+        The protocol collects all declarations and allows to configure the described
+        objects according to these declarations. We can inspect the protocol by
+        calling it's report method. This method returns the corresponding configuration
+        statements which belong to a set of modules:
+        
+        &gt;&gt;&gt; print protocol.classProtocol.record(modules=('bebop.protocol.readme',))
+        &lt;configure
+        xmlns:zope="http://namespaces.zope.org/zope"
+        &gt;
+        &lt;!-- GENERATED PROTOCOL. DO NOT MODIFY OR INCLUDE --&gt;
+        &lt;zope:class class="bebop.protocol.readme.Person"&gt;
+        &lt;zope:require
+        permission="zope.View"
+        interface="bebop.protocol.readme.IPerson"
+        /&gt;
+        &lt;/class&gt;
+        &lt;/configure&gt;
+        
+        Since this written record is like a contract further modifications to the
+        protocol are prohibited:
+        
+        &gt;&gt;&gt; class Employee(object):
+        ...     zope.interface.implements(IPerson)
+        ...     protocol.classProtocol.require(
+        ...         permission="zope.View",
+        ...         interface=IPerson)
+        Traceback (most recent call last):
+        ...
+        ProtocolError: protocol 'class' is written and must be reopened ...
+        
+        We must explicitely reopen the protocol to allow further extensions:
+        
+        &gt;&gt;&gt; protocol.classProtocol.reopen()
+        &gt;&gt;&gt; class Employee2(object):
+        ...     zope.interface.implements(IPerson)
+        ...     protocol.classProtocol.require(
+        ...         permission="zope.View",
+        ...         interface=IPerson)
+        
+        Declarations as such have no consequences (as in politics). We have
+        enact the protocol in order to use the declarations. Typically this
+        is done in ZCML. We need to load the metaconfiguration first:
+        
+        &gt;&gt;&gt; from zope.configuration import xmlconfig
+        &gt;&gt;&gt; import bebop.protocol
+        &gt;&gt;&gt; context = xmlconfig.file('meta.zcml',  bebop.protocol)
+        
+        The most powerfull way to enact protocols is a call to the protocol
+        directive.  This directive recursively collects all used protocols in
+        all modules of a package, enacts the declarations, and records the
+        corresponding ZCML directives in a singe file:
+        
+        &gt;&gt;&gt; protocol_zcml = '''&lt;configure
+        ...       xmlns="http://iwm-kmrc.de/bebop"
+        ...      &gt;
+        ...     &lt;protocol package="bebop.protocol.demo.package"
+        ...               record="demo/package/protocol.zcml"/&gt;
+        ... &lt;/configure&gt;'''
+        &gt;&gt;&gt; ignore = xmlconfig.string(protocol_zcml, context=context)
+        
+        If you compare the demo code in bebop.protocol.demo.package with the
+        resulting configuration, you can estimate the amount of saved typed text:
+        
+        &gt;&gt;&gt; print open(context.path('demo/package/protocol.zcml')).read()
+        &lt;configure
+        xmlns:zope="http://namespaces.zope.org/zope"
+        &gt;
+        &lt;!-- GENERATED PROTOCOL. DO NOT MODIFY OR INCLUDE --&gt;
+        &lt;zope:adapter
+        factory="bebop.protocol.demo.package.adapter.SampleAdapter"
+        for="zope.interface.Interface"
+        /&gt;
+        &lt;zope:adapter
+        factory="bebop.protocol.demo.package.adapter.NamedSampleAdapter"
+        for="zope.interface.Interface"
+        name="demo"
+        /&gt;
+        &lt;zope:adapter
+        factory="bebop.protocol.demo.package.adapter.SampleMultiAdapter"
+        for="str int"
+        /&gt;
+        &lt;zope:adapter
+        factory="bebop.protocol.demo.package.adapter.TrustedAdapter"
+        for="dict"
+        trusted="True"
+        /&gt;
+        &lt;zope:utility
+        factory="bebop.protocol.demo.package.utility.SampleUtility"
+        /&gt;
+        &lt;zope:utility
+        component="bebop.protocol.demo.package.utility.sampleComponent"
+        /&gt;
+        &lt;zope:utility
+        component="bebop.protocol.demo.package.utility.SampleComponentUtility"
+        provides="zope.component.interfaces.IFactory"
+        /&gt;
+        &lt;zope:utility
+        permission="zope.View"
+        factory="bebop.protocol.demo.package.utility.SampleNamedUtility"
+        name="demo"
+        /&gt;
+        &lt;zope:subscriber
+        handler="bebop.protocol.demo.package.subscriber.sampleSubscriber"
+        for="bebop.protocol.demo.package.interfaces.ISampleEvent"
+        /&gt;
+        &lt;zope:class class="bebop.protocol.demo.package.security.SampleClass"&gt;
+        &lt;zope:factory
+        id="bebop.protocol.demo.package.security.SampleClass"
+        /&gt;
+        &lt;zope:require
+        permission="zope.View"
+        interface="...demo.package.interfaces.ISampleClass"
+        /&gt;
+        &lt;zope:require
+        permission="zope.MangeContent"
+        interface="...demo.package.interfaces.IProtectedMethods"
+        /&gt;
+        &lt;zope:allow
+        interface="...demo.package.interfaces.IPublicMethods"
+        /&gt;
+        &lt;zope:require
+        permission="zope.MangeContent"
+        set_attributes="protected_attribute"
+        /&gt;
+        &lt;/class&gt;
+        &lt;/configure&gt;
+        
+        Let's check whether the protocol directive registers the components correctly:
+        
+        &gt;&gt;&gt; from bebop.protocol.demo.package import interfaces
+        &gt;&gt;&gt; from bebop.protocol.demo.package.utility import sampleComponent
+        &gt;&gt;&gt; utility = zope.component.getUtility(interfaces.ISampleComponentUtility)
+        &gt;&gt;&gt; utility == sampleComponent
+        True
+        
+        &gt;&gt;&gt; from bebop.protocol.demo.package.utility import SampleComponentUtility
+        &gt;&gt;&gt; factory = zope.component.getUtility(zope.component.interfaces.IFactory)
+        &gt;&gt;&gt; factory == SampleComponentUtility
+        True
+        
+        &gt;&gt;&gt; from bebop.protocol.demo.package.subscriber import SampleEvent
+        &gt;&gt;&gt; import zope.event
+        &gt;&gt;&gt; zope.event.notify(SampleEvent())
+        sampleEventSubscriber called
+        
+        Sometimes, mostly in tests, it might be usefull to activate the protocol
+        directly.  Most protocols support activate and deactivate methods which
+        register and unregister the corresponding components. The classPotocol
+        above is an exception to this rule since this protocol is not able to
+        revert the security settings. All following protocols can be activated
+        and deactivated at will.
+        
+        
+        Adapter Protocol
+        ================
+        
+        The adapter protocol mimics the ZCML adapter directive. The protocol.adapter
+        declaration says that an object or function can be used as an adapter:
+        
+        &gt;&gt;&gt; class ISample(zope.interface.Interface):
+        ...     def foo(self):
+        ...         pass
+        
+        &gt;&gt;&gt; class Adapted(object):
+        ...     pass
+        &gt;&gt;&gt; class SampleAdapter(object):
+        ...     zope.interface.implements(ISample)
+        ...     protocol.adapter(Adapted, permission='zope.View')
+        ...     def __init__(self, context):
+        ...         self.context = context
+        ...     def foo(self):
+        ...         print 'foo'
+        
+        The protocol has to be activated before we can use the adapter:
+        
+        &gt;&gt;&gt; ISample(Adapted()).foo()
+        Traceback (most recent call last):
+        ...
+        TypeError: ('Could not adapt', &lt;bebop.protocol.readme.Adapted object at ...
+        
+        We need an explicit activation of the underlying protocol:
+        
+        &gt;&gt;&gt; protocol.adapterProtocol.activate()
+        
+        After the protocol has been activated the adapter works as expected:
+        
+        &gt;&gt;&gt; ISample(Adapted()).foo()
+        foo
+        
+        Functions can also be declared as adapter factories. This is done by calling
+        protocol.adapter as a function decorator:
+        
+        &gt;&gt;&gt; class ISampleAnnotation(zope.interface.Interface):
+        ...     pass
+        &gt;&gt;&gt; class SampleAnnotations(object):
+        ...     def __init__(self, context):
+        ...         self.context = context
+        
+        &gt;&gt;&gt; @protocol.adapter(Adapted, provides=ISampleAnnotation)
+        ... def sampleannotation(obj):
+        ...     return SampleAnnotations(obj)
+        &gt;&gt;&gt; ISampleAnnotation(Adapted())
+        &lt;bebop.protocol.readme.SampleAnnotations object at ...&gt;
+        
+        Let's see what has been recorded:
+        
+        &gt;&gt;&gt; adapterProtocol = protocol.adapterProtocol
+        &gt;&gt;&gt; print adapterProtocol.record(modules=('bebop.protocol.readme',))
+        &lt;configure
+        xmlns:zope="http://namespaces.zope.org/zope"
+        &gt;
+        &lt;!-- GENERATED PROTOCOL. DO NOT MODIFY OR INCLUDE --&gt;
+        &lt;zope:adapter
+        factory="bebop.protocol.readme.SampleAdapter"
+        for="bebop.protocol.readme.Adapted"
+        permission="zope.View"
+        /&gt;
+        &lt;zope:adapter
+        factory="bebop.protocol.readme.sampleannotation"
+        provides="bebop.protocol.readme.ISampleAnnotation"
+        for="bebop.protocol.readme.Adapted"
+        /&gt;
+        &lt;/configure&gt;
+        
+        &gt;&gt;&gt; protocol.adapterProtocol.reopen()
+        
+        
+        Utility Protocol
+        ================
+        
+        In ZCML you can declare a utility factory or a component. The same can be
+        done with the protocol.utility declaration:
+        
+        &gt;&gt;&gt; class SampleUtility(object):
+        ...     zope.interface.implements(ISample)
+        &gt;&gt;&gt; protocol.utility(factory=SampleUtility, name='test1')
+        
+        In cases were the name and module can be deduced from the object (e.g.
+        classes and functions), you can provide the object itself:
+        
+        &gt;&gt;&gt; def utilityFunction(): print "called utility function"
+        &gt;&gt;&gt; protocol.utility(
+        ...     component=utilityFunction,
+        ...     provides=ISample,
+        ...     name='test3')
+        
+        If you assign a component to a variable for future reference you have to
+        use a syntax which deviates a little from the corresponding ZCML directive
+        since the variable name is available to the component itself (the module can
+        be taken from the internal stack frame of the utility call):
+        
+        &gt;&gt;&gt; sampleUtility = SampleUtility()
+        &gt;&gt;&gt; protocol.utility(
+        ...     component=sampleUtility,
+        ...     variable='sampleUtility',
+        ...     name='test2')
+        
+        Let's see how these declarations have been recorded:
+        
+        &gt;&gt;&gt; utilityProtocol = protocol.utilityProtocol
+        &gt;&gt;&gt; print utilityProtocol.record(modules=('bebop.protocol.readme',))
+        &lt;configure
+        xmlns:zope="http://namespaces.zope.org/zope"
+        &gt;
+        &lt;!-- GENERATED PROTOCOL. DO NOT MODIFY OR INCLUDE --&gt;
+        &lt;zope:utility
+        factory="bebop.protocol.readme.SampleUtility"
+        name="test1"
+        /&gt;
+        &lt;zope:utility
+        component="bebop.protocol.readme.utilityFunction"
+        provides="bebop.protocol.readme.ISample"
+        name="test3"
+        /&gt;
+        &lt;zope:utility
+        component="bebop.protocol.readme.sampleUtility"
+        name="test2"
+        /&gt;
+        &lt;/configure&gt;
+        
+        Since the underlying protocol has not been activated yet the objects are
+        not registered:
+        
+        &gt;&gt;&gt; zope.component.getUtility(ISample, name='test1')
+        Traceback (most recent call last):
+        ...
+        ComponentLookupError: (&lt;InterfaceClass ...readme.ISample&gt;, 'test1')
+        
+        The utilities can be used only after an explicit activation:
+        
+        &gt;&gt;&gt; protocol.utilityProtocol.activate()
+        &gt;&gt;&gt; zope.component.getUtility(ISample, name='test1')
+        &lt;bebop.protocol.readme.SampleUtility object at ...&gt;
+        
+        &gt;&gt;&gt; sampleUtility is zope.component.getUtility(ISample, name='test2')
+        True
+        
+        &gt;&gt;&gt; zope.component.getUtility(ISample, name='test3')()
+        called utility function
+        
+        
+        Subscriber Protocol
+        ===================
+        
+        A subscriber can be declared as follows:
+        
+        &gt;&gt;&gt; from zope.lifecycleevent.interfaces import IObjectCreatedEvent
+        &gt;&gt;&gt; @protocol.subscriber(IPerson, IObjectCreatedEvent)
+        ... def personCreatedHandler(obj, event):
+        ...     print "personCreatedHandler called"
+        
+        This corresponds to the following ZCML:
+        
+        &gt;&gt;&gt; subscriberProtocol = protocol.subscriberProtocol
+        &gt;&gt;&gt; print subscriberProtocol.record(modules=('bebop.protocol.readme',))
+        &lt;configure
+        xmlns:zope="http://namespaces.zope.org/zope"
+        &gt;
+        &lt;!-- GENERATED PROTOCOL. DO NOT MODIFY OR INCLUDE --&gt;
+        &lt;zope:subscriber
+        handler="bebop.protocol.readme.personCreatedHandler"
+        for="bebop.protocol.readme.IPerson ...IObjectCreatedEvent"
+        /&gt;
+        &lt;/configure&gt;
+        
+        Again the corresponding protocol must be activated:
+        
+        &gt;&gt;&gt; subscriberProtocol.activate()
+        
+        &gt;&gt;&gt; person = Person()
+        &gt;&gt;&gt; event = zope.lifecycleevent.ObjectCreatedEvent(person)
+        &gt;&gt;&gt; zope.component.event.objectEventNotify(event)
+        personCreatedHandler called
+        
+        
+        Download
+        **********************
+        
+Keywords: zope3 ZCML generation configuration
+Platform: any
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: GNU General Public License (GPL)
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Framework :: Zope3
