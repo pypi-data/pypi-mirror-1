@@ -1,0 +1,228 @@
+<%global>
+    import string, re
+</%global>
+
+<%method user>
+	<%init>
+	return m.get_session().get('user', None)
+	</%init>
+</%method>
+
+<%method securehref>
+    <%args>
+        href
+        action
+    </%args>
+    <%init>
+        user = m.get_session().get('user', None)
+    </%init>
+% if action.access(user, **ARGS):
+    <a href="<% href %>"><% m.content() %></a>
+% else:
+    <span class="grey"><% m.content() %></span>
+%
+    
+</%method>
+
+<%method entryform>
+    <%args>
+        name=None
+        action=None
+        onsubmit=None
+        ajaxtarget=None
+        form=None
+    </%args>
+    <%init>
+    if form is not None:
+        name = form.name
+        m.attributes[(self.owner.id, 'form')] = form
+    if ajaxtarget is not None:
+        onsubmit = m.comp("SELF:ajaxaction", target=ajaxtarget, form=form, name=name) + ";return false;"
+    </%init>
+    <form method="post" name="<% name %>" action="<% action %>" onsubmit="<% onsubmit %>">
+        <&|SELF:fields&>
+        <% m.content() %>
+        </&>
+    </form>
+    <%cleanup>
+        try:
+            del m.attributes[(self.owner.id, 'form')]
+        except KeyError:
+            pass
+    </%cleanup>
+</%method>
+
+<%method ajaxaction>
+    <%args>
+        target
+        form=None
+        name=None
+    </%args>
+    <%init>
+    if form is not None:
+        if name is None:
+            name = form.name
+        formargs = m.scomp('SELF:formargs', form=form)
+    else:
+        formargs = ''
+    return target + "(%s)" % formargs
+    </%init>
+</%method>
+
+<%method formargs trim="both">
+    <%args>
+        form
+        name=None
+    </%args>
+getargs(document.<% name or form.name %>, <% string.join(["'%s'" % f.displayname for f in form], ',') %>)
+</%method>
+
+
+<%method fields>
+    <table>
+        <% m.content() %>
+    </table>
+</%method>
+
+<%method field>
+    <%args>
+        type
+        name=None
+        field=None
+    </%args>
+    <%init>
+        label = m.content()
+        if field is None:
+            form = m.attributes.get((self.owner.id, 'form'), None)
+            if form is not None and name:
+		field = form.get(name, None)
+
+        if field is not None:
+            ARGS['name'] = field.displayname
+            ARGS.setdefault('value', field.display)
+            ARGS['data'] = field.data
+            ARGS['field'] = field
+        else:
+            if name is not None:
+                ARGS.setdefault('value', m.root_request_args.get(name, None))
+        component = m.fetch_component("SELF:%s" % type)
+    </%init>
+% if component.attributes.get('hidden', False) or not label:
+    <% m.comp(component, **ARGS) %>
+% else:
+    <tr>
+        <td valign="top"><% label %></td>
+        <td><%python>m.comp(component, **ARGS)</%python>
+%   if field is not None:
+        <& /form:fieldstatus, field=field &>
+%
+        </td>
+    </tr>
+%
+</%method>
+
+<%method row>
+    <%args>
+        colspan=None
+    </%args>
+    <tr>
+        <td <% colspan and 'colspan="%s"' % colspan or '' %>>
+        <% m.content() %>
+        </td>
+    </tr>
+</%method>
+
+
+<%method text>
+<%args>
+    size=20
+    name
+    value
+</%args>
+<input type="text" size="<% size %>" name="<% name %>" value="<% value %>">
+</%method>
+
+<%method password>
+<%args>
+    size=20
+    name
+    value
+</%args>
+<input type="password" size="<% size %>" name="<% name %>" value="<% value %>">
+</%method>
+
+<%method textarea>
+<%args>
+    rows=5
+    cols=50
+    name
+    value
+</%args>
+<textarea rows="<% rows %>" cols="<% cols %>" name="<% name %>"><% value %></textarea>
+</%method>
+
+<%method hidden>
+<%args>
+    name=None
+    value
+</%args>
+<%attr>
+    hidden=True
+</%attr>
+<input type="hidden" name="<% name %>" value="<% value %>">
+</%method>
+
+<%method dropdown>
+<%args>
+    name
+    data=()
+    onselect=None
+    value=None
+</%args>
+<select name="<% name %>" <% onselect and 'onChange="%s(this.value)"' % onselect or "" %>>
+% for entry in data:
+<option value="<% entry[0] %>" <% value == entry[0] and 'selected' %> ><% entry[1] %></option>
+%
+% if m.has_content():
+<% m.content() %>
+%
+</select>
+</%method>
+
+<%method submit>
+    <%args>
+        value
+    </%args>
+    <input type="submit" value="<% value %>">
+</%method>
+
+<%method button>
+    <%args>
+        value
+        onclick
+    </%args>
+    <input type="button" value="<% value %>" onClick=<% repr(str(onclick)) %>>
+</%method>
+
+<%method popup>
+    <%args>
+        name
+    </%args>
+    <!-- popup <% name %>-->
+    <tr><td colspan="2"><div id="<% name %>"><% m.content() %></div></td></tr>
+    <!-- end popup -->
+</%method>
+
+<%method confirm>
+<%args>
+	yes
+	no
+</%args>
+<div class="confirm">
+<% m.content() %><br/>
+<center>
+    <&/components:field, type="button", value="Yes", onclick=yes &>
+    <&/components:field, type="button", value="No", onclick=no &>
+</center>    
+</div>
+</%method>
