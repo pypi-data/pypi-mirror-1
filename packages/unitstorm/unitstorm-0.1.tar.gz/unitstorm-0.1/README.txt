@@ -1,0 +1,73 @@
+unitstorm
+=========
+
+.. contents:
+
+Introduction
+------------
+
+`Storm <https://storm.canonical.com>`_ is a fast, small and powerful object-relational mapper.
+Try it to use in db-aware applications.
+
+Effective unit-testing DB-models needed:
+
+* easy access to testing-DB inside testcases
+* setting up testing-DB before each test (and tear down after)
+
+To help in this unitstorm provides class *ModelTestCase*,
+that can be used both in `unittest <http://docs.python.org/lib/module-unittest.html>`_
+and `nosetest <http://somethingaboutorange.com/mrl/projects/nose/>`_ testing frameworks.
+
+Simple example
+--------------
+::
+
+    from unitstorm import ModelTestCase
+    from os import path
+    
+    import models as model # models define somewhere else
+    
+    class TestMyModel(ModelTestCase):
+        dburi = 'postgres://test:test@localhost/test'
+        
+        fixtures = path.join(path.dirname(__file__), 'fixtures')
+        
+        fixture_setup = 'create.sql', 'filldata.sql'
+        fixture_teardown = 'drop.sql'
+        
+        sql_setup = 'INSERT INTO my_model (id, name) VALUES (1, "foo");',\
+            'INSERT INTO my_model (id, name) VALUES (2, "bar");'
+        sql_teardown = 'DELETE FROM my_model WHERE id = 1;'
+        
+        def test_stub(self):
+            assert self.store.get(model.MyModel, 1).name == "foo"
+
+TODO more description (look sources)
+
+``dburi``
+
+``db``
+
+``store``
+
+``fixtures``
+
+``fixture_setup``
+
+``fixture_teardown``
+
+``sql_setup``
+
+``sql_teardown``
+
+Execution order: fixture_setup, sql_setup, test, sql_teardown, fixture_teardown
+
+Legal
+-----
+
+Unitstorm is a part of
+`storm support tools <http://vsevolod.balashov.name/code/storm/>`_
+and distributed under terms of
+`GNU LGPL v.2.1 <http://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt>`_.
+
+Copyright 2007 - 2008 `Vsevolod Balashov <http://vsevolod.balashov.name/>`_.
