@@ -1,0 +1,54 @@
+from rect import Rect
+
+
+class QuadTree(object):
+    def __init__(self, xywh):
+        self.rect = Rect(xywh)
+
+    def __repr__(self):
+        return "<%s %s>" % (self.__class__.__name__, (self.rect.left, self.rect.bottom, self.rect.right, self.rect.top))
+
+    def query(self, rect):
+        """
+        Return likely intersections with rect.
+        """
+        if hasattr(self, 'leaves'):
+            return self.leaves.values()
+        else:
+            results = []
+            for c in self.children:
+                if c.rect.intersects(rect):
+                    results.extend(c.query(rect))
+            return set(results)
+
+    def insert(self, id, rect):
+        """
+        Insert a rect with an id into the index.
+        """
+        if hasattr(self, 'leaves'):
+            self.leaves[rect] = id
+        else:
+            for c in self.children:
+                if c.rect.intersects(rect):
+                    c.insert(id, rect)
+
+
+def index(size, center=(0.0,0.0), depth=5, level=0):
+    """
+    Build a spatial index using a Quadtree.
+    """
+    level += 1
+    if level > depth: return
+    x,y = center
+    w = size * 0.5
+    n = QuadTree((x-w,y-w,size,size))
+    cw = w * 0.5
+    bl = init(w, (x-cw,y-cw), depth, level)
+    tl = init(w, (x-cw,y+cw), depth, level)
+    tr = init(w, (x+cw,y+cw), depth, level)
+    br = init(w, (x+cw,y-cw), depth, level)
+    n.children = (bl, tl, tr, br)
+    if level == depth:
+        n.leaves = {}
+    return n
+
