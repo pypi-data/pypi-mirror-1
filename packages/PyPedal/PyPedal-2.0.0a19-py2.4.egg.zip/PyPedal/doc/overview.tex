@@ -1,0 +1,231 @@
+\chapter{High-Level Overview}
+\label{cha:high-level-overview}
+
+\begin{quote}
+In this chapter, a high-level overview of \PYPEDAL{} is provided, giving
+the reader the definitions of the key components of the system. This section
+defines the concepts used by the remaining sections.
+\end{quote}
+
+\section{Interacting with PyPedal}
+\label{sec:interacting}
+\index{interacting with PyPedal}
+There are two ways to interact with \PyPedal{}: interactively\index{interacting with PyPedal!interactively} from a Python command line, and programmatically\index{interacting with PyPedal!programmatically} using a script that is run using the Python interpreter.  The latter is preferred to the former for any but trivial examples, although it is useful to work with the command line while learning how to use \PyPedal{}.  A number of sample programs are included with the \PyPedal{} distribution.  Examples of both styles of interaction may be found in the tutorial (Chapter \ref{tutorial}).
+
+\section{The PyPedal Object Model}
+\label{sec:pypedal-objects}
+\index{objects}
+
+At the heart of \PyPedal{} are four different types of objects.  These objects
+combine data and the code that operate on those data into one convenient package.
+Although most \PyPedal{} users will only work directly with one or two of these
+objects it is worthwhile to know a little about all of them.  An instance of the
+\textbf{NewPedigree} class stores a pedigree read from an input file, as well as
+metadata about that pedigree.  The pedigree is a Python list of \textbf{NewAnimal}
+objects.  Information about the pedigree, such as the number and identity of founders,
+is contained in an instance of the \textbf{PedigreeMetadata} class.
+
+The fourth \PyPedal{} class, \textbf{New{AM}atrix}, is used to manipulate numerator
+relationship matrices (NRM).  When working with large pedigrees it can take a long
+time to compute the elements of a NRM, and having an easy way to save and restore
+them is quite convenient.
+
+Here is an example of Python code using the NewPedigree object (\texttt{examples/new_lacy.py}):
+\begin{verbatim}
+import pyp_newclasses, pyp_nrm. pyp_metrics
+from pyp_utils import pyp_nice_time
+
+options = {}
+options['messages'] = 'verbose'
+options['renumber'] = 0
+options['counter'] = 5
+
+if __name__ == '__main__':
+    print 'Starting pypedal.py at %s' % (pyp_nice_time())
+    # Example taken from Lacy (1989), Appendix A.
+    options['pedfile'] = 'new_lacy.ped'
+    options['pedformat'] = 'asd'
+    options['pedname'] = 'Lacy Pedigree'
+    example = pyp_newclasses.NewPedigree(options)
+    example.load()
+    if example.kw['messages'] == 'verbose':
+        print '[INFO]: Calling pyp_metrics.effective_founders_lacy at %s' % (pyp_nice_time())
+    pyp_metrics.effective_founders_lacy(example)
+\end{verbatim}
+See section \ref{sec:tip:from-pypedal-import}.
+
+\section{Pedigree Files}
+\label{sec:pedigree-files}
+\index{pedigree files}
+Pedigree files consist of plain-text files (also known as ASCII or flatfiles) whose rows contain
+records on individual animals and whose columns contain different variables.  The columns are
+delimited (separated from one another) by some character such as a space or a tab (\\t).  Pedigree
+files may also contain comments (notes) about the pedigree that are ignored by \PyPedal{}; comments
+always begin with an octothorpe (\#).  For example, the following pedigree contains records for 13
+animals, and each record contains three variables (animal ID, sire ID, and dam ID):
+\begin{verbatim}
+# This pedigree is taken from Boichard et al. (1997).
+# Each records contains an animal ID, a sire ID, and
+# a dam ID.
+1 0 0
+2 0 0
+3 0 0
+4 0 0
+5 2 3
+6 0 0
+7 5 6
+8 0 0
+9 1 2
+10 4 5
+11 7 8
+12 7 8
+13 7 8
+\end{verbatim}
+When this pedigree is processed by \PyPedal{} the comments are ignored.  If you need to change the
+default column separator, which is a space (' '), set the \texttt{sepchar} option to the desired
+value.  For example, if your columns are tab-delimited you would set the option as:
+\begin{verbatim}
+options['sepchar'] = '\t'
+\end{verbatim}
+Options are discussed at length in section \ref{sec:pypedal-options}.
+
+\subsection{Pedigree Format Codes}
+\label{sec:pedigree-format-codes}
+\index{pedigree format codes}
+Pedigree format codes consisting of a string of characters are used to describe
+the contents of a pedigree file.  The simplest pedigree file that can be read by \PyPedal{}
+is shown above; the pedigree format for this file is \texttt{asd}.  A pedigree format is required
+for reading a pedigree; there is no default code used, and \PyPedal{} wil halt with an error if you
+do not specify one.  You specify the format using an option statement at the start of your program:
+\begin{verbatim}
+options['pedformat'] = 'asd'
+\end{verbatim}
+Please note that the format codes are case-sensitive, which means that 'a' is considered to be a different character than 'A'.  The codes currently recognized by \PyPedal{} are:
+\begin{itemize}
+\item a = animal (REQUIRED)
+\item s = sire (REQUIRED)
+\item d = dam (REQUIRED)
+\item g = generation
+\item x = sex
+\item b = birthyear (YYYY)
+\item f = inbreeding
+\item r = breed
+\item n = name
+\item y = birthdate in "MMDDYYYY" format
+\item l = alive (1) or dead (0)
+\item e = age
+\item A = animal ID as a string (cannot contain sepchar)
+\item S = sire ID as a string (cannot contain sepchar)
+\item D = dam ID as a string (cannot contain sepchar)
+\item L = alleles (two alleles separated by a non-null character)
+\end{itemize}
+As noted, all pedigrees must contain columns corresponding to animals, sires, and dams.  Pedigree codes should be entered in the same order in which the columns occur in the pedigee file.  The character that separates alleles when the 'L' format code is used cannot be the same character used to separate columns in the pedigree file.  If you do use the same character, \PyPedal{} will write an error message to the log file and screen and halt.
+
+If you used an earlier version of \PyPedal{} you may have added a pedigree format string, e.g. \texttt{\% asd}, to your pedigree file(s).  You no longer need to include that string in your pedigrees, and if \PyPedal{} sees one while reading a pedigree file it will ignore that line.
+\subsection{Options}
+\label{sec:pypedal-options}
+\index{options}
+Many aspects of \PyPedal{}'s operation can be controlled using a series of options.  A complete list of these options, their defaults, and a brief desription of their purpose is presented in Table \ref{tbl:options}.  Options are stored in a Python dictionary that you must create in your programs.  You must specify values for the \texttt{pedfile} and \texttt{pedformat} options; all others are optional.  \texttt{pedfile} is a string containing the name of the file from which your pedigree will be read.  \texttt{pedformat} is a string containing a pedigree format code (see section \ref{sec:pedigree-format-codes}) for each column in the datafile in the order in which those columns occur.  The following code fragement demonstrates how options are specified.
+\begin{verbatim}
+options = {}
+options['messages'] = 'verbose'
+options['renumber'] = 0
+options['counter'] = 5
+options['pedfile'] = 'new_lacy.ped'
+options['pedformat'] = 'asd'
+options['pedname'] = 'Lacy Pedigree'
+example = pyp_newclasses.NewPedigree(options)
+\end{verbatim}
+First, a dictionary named 'options' is created; you may use any name you like as long as it is a valid Python variable name.  Next, values are assigned to several options.  Finally, 'options' is passed to pyp_newclasses.NewPedigree(), which requires that you pass it a dictionary of options.  If you do not provide any options, \PyPedal{} will halt with an error.
+\begin{center}
+    \begin{table}
+        \caption{Options for controlling PyPedal.}
+        \label{tbl:options}
+        \centerline{
+        \begin{tabular}{llp{4in}}
+            \hline
+            Option & Default & Note(s) \\
+            \hline
+            alleles\_sepchar  & '/'          & The character separating the two alleles in an animal's allelotype. 'alleles\_sepchar' must NOT be the same as 'sepchar'! \\
+            counter          & 1000         & How often should PyPedal write a note to the screen when reading large pedigree files. \\
+            database\_name   & 'pypedal'    & The name of the database to be used when using the pyp\_reports nodule. \\
+            dbtable_name     & filetag      & The name of the database table to which the current pedigree will be written when using the pyp_reports module. \\
+            debug\_messages  & 0            & Indicates whether or not PyPedal should print debugging information. \\
+            f_computed       & 0            & Indicates whether or not CoI have been computed for animals in the current pedigree.  If the pedigree format string includes 'f' this will be set to 1; it is also set to 1 on a successful return from pyp_nrm/inbreeding(). \\
+            file\_io         & 1            & When true, routines that can write results to output files will do so and put messages in the program log to that effect. \\
+            filetag          & pedfile      & A filetag is a descriptive label attached to output files created when processing a pedigree.  By default the filetag is based on 'pedfile', minus its file extension. \\
+            form\_nrm        & 0            & Indicates whether or not to form a NRM and bind it to the pedigree as an instance of a NewAMatrix object. \\
+            log_long_filenames & 0            & When nonzero long logfile names will be used, which means that logfilenames will include datestamps. \\
+            log_ped_lines    & 0            & When \> 0 indicates how many lines read from the pedigree file should be printed in the log file for debugging purposes. \\
+            logfile          & filetag.log  & The name of the file to which PyPedal should write messages about its progress. \\
+            messages         & 'verbose'    & How chatty should be PyPedal be with respect to messages to the user.  'verbose' indicates that all status messages will be written to STDOUT, while 'quiet' suppresses all output to STDOUT. \\
+            missing\_parent  & '0'          & Indicates what code is used to identify missing/unknown parentsin the pedigree file. \\
+            nrm\_method      & 'nrm'        & Specifies that an NRM formed from the current pedigree as an instance of a NewAMatrix object should ('frm') or should not ('nrm') be corrected for parental inbreeding. \\
+            pedfile          & None         & File from which pedigree is read; must provide. \\
+            pedformat        & 'asd'        & See PEDIGREE\_FORMAT\_CODES for details. \\
+            pedname          & 'Untitled'   & A name/title for your pedigree. \\
+            pedgree\_is\_renumbered & 0     & Indicates whether or not the pedigree has been renumbered. \\
+            renumber         & 0            & Renumber the pedigree after reading from file (0/1). \\
+            sepchar          & ' '          & The character separating columns of input in the pedfile. \\
+            set\_ancestors   & 0            & Iterate over the pedigree to assign ancestors lists to parents in the pedigree (0/1). \\
+            set\_alleles     & 0            & Assign alleles for use in gene-drop simulations (0/1). \\
+            set\_generations & 0            & Iterate over the pedigree to infer generations (0/1). \\
+            slow\_reorder    & 1            & Option to override the slow, but more correct, reordering routine used by PyPedal by default (0/1).  ONLY CHANGE THIS IF YOU REALLY UNDERSTAND WHAT IT DOES!  Careless use of this option can lead to erroneous results. \\
+            \hline
+        \end{tabular}}
+    \end{table}
+\end{center}
+A single \PyPedal{} program may be used to read one or more pedigrees.  Each pedigree that you read must be passed its own dictionary of options.  The easiest way to do this is by creating a dictionary with global options.  You can then customize the dictionary for each pedigree you want to read.  Once you have created a \PyPedal{} pedigree by calling pyp_newclasses.NewPedigree(options) you can change the options dictionary without affecting that pedigree because it has a separate copy of those options stored in its 'kw' attribute.  The following code fragment demonstrates how to read two pedigree files using the same dictionary of options.
+\begin{verbatim}
+options = {}
+options['messages'] = 'verbose'
+options['renumber'] = 0
+options['counter'] = 5
+
+if __name__ == '__main__':
+#   Read the first pedigree
+    options['pedfile'] = 'new_lacy.ped'
+    options['pedformat'] = 'asd'
+    options['pedname'] = 'Lacy Pedigree'
+    example1 = pyp_newclasses.NewPedigree(options)
+    example1.load()
+#   Read the second pedigree
+    options['pedfile'] = 'new_boichard.ped'
+    options['pedformat'] = 'asdg'
+    options['pedname'] = 'Boichard Pedigree'
+    example2 = pyp_newclasses.NewPedigree(options)
+    example2.load()
+\end{verbatim}
+Note that \texttt{pedformat} only needs to be changed if the two pedigrees have different formats.  Only \texttt{pedfile} \textbf{has} to be changed at all.
+
+All pedigree options other than \texttt{pedfile} and \texttt{pedformat} have default values.  If you provide a value that is invalid the option will revert to the default.  In most cases, a message to that effect will also be placed in the log file.
+
+\section{Logging}
+\label{sec:logging}
+\index{logging}
+\PyPedal{} uses the \texttt{logging} module that is part of the Python standard library to record events during pedigree processing.  Informative messages, as well as warnings and errors, are written to the logfile, which can be found in the directory from which you ran \PyPedal{}.  An example of a log from a successful (error-free) run of a program is presented below:
+\begin{verbatim}
+Fri, 06 May 2005 10:27:22 INFO     Logfile boichard2.log instantiated.
+Fri, 06 May 2005 10:27:22 INFO     Preprocessing boichard2.ped
+Fri, 06 May 2005 10:27:22 INFO     Opening pedigree file
+Fri, 06 May 2005 10:27:22 INFO     Pedigree comment (line 1): # This pedigree is taken from Boicherd et al. (1997).
+Fri, 06 May 2005 10:27:22 INFO     Pedigree comment (line 2): # It contains two unrelated families.
+Fri, 06 May 2005 10:27:22 WARNING  Encountered deprecated pedigree format string (% asdg
+) on line 3 of the pedigree file.
+Fri, 06 May 2005 10:27:22 WARNING  Reached end-of-line in boichard2.ped after reading 23 lines.
+Fri, 06 May 2005 10:27:22 INFO     Closing pedigree file
+Fri, 06 May 2005 10:27:22 INFO     Assigning offspring
+Fri, 06 May 2005 10:27:22 INFO     Creating pedigree metadata object
+Fri, 06 May 2005 10:27:22 INFO     Forming A-matrix from pedigree
+Fri, 06 May 2005 10:27:22 INFO     Formed A-matrix from pedigree
+\end{verbatim}
+The \texttt{WARNING}s let you know when something unexpected or unusual has happened, although you might argue that coming to the end of an input file is neither.  If you get unexpected results from your program make sure that you check the logfile for details -- some subroutines return default values such as -999 when a problem occurs but do not halt the program.  Note that comments found in the pedigree file are written to the log, as are deprecated pedigree format strings used by earlier versions of \PyPedal{}.  When an error from which \PyPedal{} cannot recover occurs a message is written to both the screen and the logfile.  We can see from the following log that the number of columns in the pedigree file did not match the number of columns in the pedigree format option.
+\begin{verbatim}
+Thu, 04 Aug 2005 15:36:18 INFO     Logfile hartlandclark.log instantiated.
+Thu, 04 Aug 2005 15:36:18 INFO     Preprocessing hartlandclark.ped
+Thu, 04 Aug 2005 15:36:18 INFO     Opening pedigree file
+Thu, 04 Aug 2005 15:36:18 INFO     Pedigree comment (line 1): # Pedigree from van Noordwijck and Scharloo (1981) as presented
+Thu, 04 Aug 2005 15:36:18 INFO     Pedigree comment (line 2): # in Hartl and Clark (1989), p. 242.
+Thu, 04 Aug 2005 15:36:18 ERROR    The record on line 3 of file hartlandclark.ped does not have the same number of columns (4) as the pedigree format string (asd) says that it should (3). Please check your pedigree file and the pedigree format string for errors.
+\end{verbatim}
+There is no sensible "best guess" that \PyPedal{} can make about handling this situation, so it halts.  There are some cases where \PyPedal{} does "guess" how it should proceed in the face of ambiguity, which is why it is always a good idea to check for \texttt{WARNING}s in your logfiles.
