@@ -1,0 +1,59 @@
+#-*- coding: utf-8 -*-
+#############################################################################
+#                                                                           #
+#   Copyright (c) 2007-2008 Gregor Giesen <giesen@zaehlwerk.net>            #
+#                                                                           #
+# This program is free software; you can redistribute it and/or modify      #
+# it under the terms of the GNU General Public License as published by      #
+# the Free Software Foundation; either version 3 of the License, or         #
+# (at your option) any later version.                                       #
+#                                                                           #
+# This program is distributed in the hope that it will be useful,           #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of            #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the             #
+# GNU General Public License for more details.                              #
+#                                                                           #
+# You should have received a copy of the GNU General Public License         #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.     #
+#                                                                           #
+#############################################################################
+"""
+$Id$
+"""
+__docformat__ = 'reStructuredText'
+
+from zw.widget.i18n import MessageFactory as _
+
+import zope.schema.interfaces
+from zope.component import adapts
+from z3c.form.converter import BaseDataConverter
+from z3c.form.interfaces import IWidget
+
+
+class LinesDataConverter(BaseDataConverter):
+    """A lines to list or tuple converter.
+    """
+    adapts(zope.schema.interfaces.IList, IWidget)
+    
+    def toFieldValue(self, value):
+        """See z3c.form.interfaces.IDataConverter.
+        """
+        if value is None or value == u'':
+            return self.field.missing_value
+
+        if '\r\n' in value:
+            lines = value.split(u'\r\n')
+        else:
+            lines = value.split(u'\n')
+            
+        if hasattr(self.field.value_type, 'fromUnicode'):
+            return [ self.field.value_type.fromUnicode(line) for line
+                     in lines ]
+        return lines
+
+    def toWidgetValue(self, value):
+        """See z3c.form.interfaces.IDataConverter.
+        """
+        if value is self.field.missing_value:
+            return u''
+        return u'\n'.join( [ unicode(item) for item in value ] )
