@@ -1,0 +1,54 @@
+#!/usr/bin/env python
+""" Preprocessor class
+    project: pypp
+    
+    @author: Jean-Lou Dupont
+"""
+__author__  = "Jean-Lou Dupont"
+__version__ = "$Id: preprocessor.py 14 2009-03-19 15:57:53Z jeanlou.dupont $"
+
+__all__ = ['Tpl']
+
+try:
+    from mako.template import Template
+    from mako.lookup import TemplateLookup
+except:
+    raise RuntimeError( "pypp: Mako template package not found. Please install" )
+ 
+ 
+def stripLeadingHash(text):
+    """ Strips the leading # from open & close Mako tags
+        i.e. #<%    #</%
+    """
+    return text.replace('#<%','<%').replace('#</%','</%')
+ 
+def stripLeadingHashFromVar(text):
+    """ Strips the leading # from variable references
+        i.e.  #${ 
+    """
+    return text.replace('#${', '${')
+ 
+class Tpl(object):
+    """ Template based on the Mako engine
+    """
+    def __init__(self, input, dirs = None):
+        """ The directory path of the input file
+            serves as configuration for the template
+            directory by default. If *dirs* is specified,
+            it takes precedence.
+            
+            @param input: the input file (complete file path)
+            @param dirs: the template directory list   
+        """
+        self.input = input
+        self.dirs = dirs
+            
+    def render(self, **params):
+        """ Performs the preprocessing.
+            @param params: the input parameters
+            @return: rendered text            
+        """
+        lookup = TemplateLookup(directories = self.dirs) if self.dirs else None
+        tpl = Template(text=self.input, lookup=lookup, 
+                       cache_enabled=False, preprocessor=[stripLeadingHash, stripLeadingHashFromVar])
+        return tpl.render(**params)
