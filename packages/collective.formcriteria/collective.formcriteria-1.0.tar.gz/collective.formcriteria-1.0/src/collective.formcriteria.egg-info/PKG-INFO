@@ -1,0 +1,784 @@
+Metadata-Version: 1.0
+Name: collective.formcriteria
+Version: 1.0
+Summary: Add forms for user enterable search criteria to collections.
+Home-page: http://pypi.python.org/pypi/collective.formcriteria
+Author: Ross Patterson
+Author-email: me@rpatterson.net
+License: GPL
+Description: .. -*-doctest-*-
+        
+        =======================
+        collective.formcriteria
+        =======================
+        
+        This package extends the Products.ATContentTypes.criteria types to
+        create a search forms.  Specifically, any criterion fields which are
+        selected in each criterion's "Form Fields", then those fields will be
+        rendered on the search form.  The values set on the criteria edit form
+        become the default values on the search form.  Search terms submitted
+        through the search form supplement any criteria not on the search
+        form.  IOW, criteria not appearing on the form become the base query
+        built into the search form.
+        
+        A new "Search Form" display layout is provided that renders the search
+        form and the collection body text but no results.  The search form on
+        this layout will display results using the layout specified in the
+        "Form Results Layout" field of the collection's edit form.
+        
+        The search form can also be rendered in a search form portlet based on
+        plone.portlet.collection.  The portlet will not render on the search
+        form view or the criteria edit form but otherwise will render the
+        search form for the designated collection according to the portlet
+        settings.
+        
+        Thus the collection can use either the search form or a results
+        listing as the display layout.  Users can initiate searches using
+        either the form or the portlet.  The portlet also reflects any
+        submitted search terms and thus provides a convenient way for users to
+        refine their searches.
+        
+        Multiple sort criteria can also be added that will render user
+        selectable sort links on the batch macro.  See
+        collective/formcriteria/criteria/sort.txt for more details.
+        
+        Also provided is an alternative display layout that uses the folder
+        contents table.  This layout is not yet fully functional but provides
+        the basis for some very rich site admin functionality.
+        
+        WARNING: Uninstall
+        ==================
+        
+        Uninstalling this product after having added any collections or adding
+        criteria to any collections, even ones added before install, is
+        untested and may leave your collections broken.
+        
+        Form Criteria
+        =============
+        
+        Start with a collection and some content for search results.
+        
+        >>> from Products.PloneTestCase import ptc
+        >>> self.login()
+        >>> foo_topic = self.folder['foo-topic-title']
+        >>> foo_topic
+        <Topic at /plone/Members/test_user_1_/foo-topic-title>
+        >>> self.folder['bar-document-title']
+        <ATDocument at /plone/Members/test_user_1_/bar-document-title>
+        >>> self.folder['baz-event-title']
+        <ATEvent at /plone/Members/test_user_1_/baz-event-title>
+        
+        Create the browser object we'll be using.
+        
+        >>> from Products.Five.testbrowser import Browser
+        >>> browser = Browser()
+        >>> browser.handleErrors = False
+        
+        Log in as a normal user.
+        
+        >>> browser.open(portal.absolute_url())
+        >>> browser.getLink('Log in').click()
+        >>> browser.getControl('Login Name').value = ptc.default_user
+        >>> browser.getControl(
+        ...     'Password').value = ptc.default_password
+        >>> browser.getControl('Log in').click()
+        
+        Change the display layout of the collection to the "Search Form".
+        
+        >>> browser.open(foo_topic.absolute_url())
+        >>> browser.getLink('Search Form').click()
+        >>> print browser.contents
+        <...
+        ...View changed...
+        
+        Login as a user that can manage portlets.
+        
+        >>> owner_browser = Browser()
+        >>> owner_browser.handleErrors = False
+        >>> owner_browser.open(portal.absolute_url())
+        >>> owner_browser.getLink('Log in').click()
+        >>> owner_browser.getControl(
+        ...     'Login Name').value = ptc.portal_owner
+        >>> owner_browser.getControl(
+        ...     'Password').value = ptc.default_password
+        >>> owner_browser.getControl('Log in').click()
+        
+        Add the search form portlet for this collection to the folder.
+        
+        >>> owner_browser.open(folder.absolute_url())
+        >>> owner_browser.getLink('Manage portlets').click()
+        >>> owner_browser.getControl(
+        ...     'Search form portlet', index=1).selected = True
+        >>> owner_browser.getForm(index=3).submit() # manually w/o JS
+        >>> print owner_browser.contents
+        <...
+        ...Add Search Form Portlet...
+        
+        >>> header = owner_browser.getControl('Portlet header')
+        >>> header.value = 'Foo Search Form Title'
+        >>> foo_topic_path = '/'.join(
+        ...     ('',)+ foo_topic.getPhysicalPath()[
+        ...         len(portal.getPhysicalPath()):])
+        >>> header.mech_form.new_control(
+        ...     type='checkbox', name="form.target_collection",
+        ...     attrs=dict(checked='checked', value=foo_topic_path))
+        >>> owner_browser.getControl('Save').click()
+        >>> print owner_browser.contents
+        <...
+        ...Foo Search Form Title...
+        
+        Go to the collection's edit tab and set the "Form Results Layout"
+        field.
+        
+        >>> browser.getLink('Edit').click()
+        >>> browser.getControl('Collection').selected = True
+        >>> browser.getControl('Save').click()
+        >>> print browser.contents
+        <...
+        ...Changes saved...
+        
+        Go to the "Criteria" tab and add a criterion for the workflow state
+        that won't appear on the form.  Then set the query term to return only
+        published content.
+        
+        >>> browser.getLink('Criteria').click()
+        >>> form = browser.getForm(name='criteria_select')
+        >>> form.getControl('State').selected = True
+        >>> form.getControl(
+        ...     'Select values from list', index=1).selected = True
+        >>> form.getControl('Add criteria').click()
+        >>> print browser.contents
+        <...
+        ...State...
+        ...Select values from list...
+        
+        Since the test browser doesn't have JavaScript, test the
+        discrimination of criteria types by index manually.
+        
+        >>> foo_topic.allowedCriteriaForField('review_state')
+        ['FormSelectionCriterion', 'FormCheckboxCriterion',
+        'FormSimpleStringCriterion', 'FormListCriterion',
+        'FormCommaCriterion', 'FormSortCriterion']
+        >>> foo_topic.allowedCriteriaForField(
+        ...     'review_state', display_list=True)
+        <DisplayList
+        [('FormSelectionCriterion', 'Select values from list'),
+        ('FormCheckboxCriterion', 'Check values'),
+        ('FormSimpleStringCriterion', 'Text'),
+        ('FormListCriterion', 'List of values'),
+        ('FormCommaCriterion', 'Enter comma separated values'),
+        ('FormSortCriterion', 'Sort results')] at ...>
+        
+        Set the query term and save.
+        
+        >>> form = browser.getForm(action="criterion_edit_form", index=0)
+        >>> form.getControl('published').selected = True
+        >>> form.getControl('Save').click()
+        >>> print browser.contents
+        <...
+        ...Changes saved...
+        
+        Open another browser as an anonymous user.
+        
+        >>> anon_browser = Browser()
+        >>> anon_browser.handleErrors = False
+        
+        Before the topic has any form criteria, the search form is not
+        present.
+        
+        >>> anon_browser.open(foo_topic.absolute_url()+'/atct_topic_view')
+        >>> anon_browser.getForm(name="formcriteria_search")
+        Traceback (most recent call last):
+        LookupError
+        
+        Add a simple string criterion for the SearchableText index on the
+        criteria tab.
+        
+        >>> form = browser.getForm(name='criteria_select')
+        >>> form.getControl('Search Text').selected = True
+        >>> form.getControl(name="criterion_type").getControl(
+        ...     'Text', index=1).selected = True
+        >>> form.getControl('Add criteria').click()
+        >>> print browser.contents
+        <...
+        ...Search Text...
+        ...A simple string criterion...
+        
+        Select the criterion's 'value' field as a form field so it will appear
+        on the search form.
+        
+        >>> browser.getControl(
+        ...     name='crit__SearchableText_FormSimpleStringCriterion'
+        ...     '_formFields:list').getControl('Value').selected = True
+        
+        Set a default search term.
+        
+        >>> browser.getControl(
+        ...     name="crit__SearchableText_FormSimpleStringCriterion"
+        ...     "_value").value = 'bar'
+        >>> browser.getControl(name="form.button.Save").click()
+        >>> print browser.contents
+        <...
+        ...Changes saved...
+        
+        If no form value have been submitted, such as on a fresh load of the
+        topic view, the default term will be used in the query returning only
+        one of the content objects.
+        
+        >>> len(foo_topic.queryCatalog())
+        1
+        
+        >>> anon_browser.open(foo_topic.absolute_url()+'/atct_topic_view')
+        >>> anon_browser.getLink('Bar Document Title')
+        <Link text='Bar Document Title'
+        url='http://nohost/plone/Members/test_user_1_/bar-document-title'>
+        >>> anon_browser.getLink('Baz Event Title')
+        Traceback (most recent call last):
+        LinkNotFoundError
+        
+        Now that a form criterion has been added, the search form is
+        rendered.
+        
+        >>> anon_browser.open(foo_topic.absolute_url())
+        >>> form = anon_browser.getForm(name="formcriteria_search")
+        
+        Criterion fields that haven't been selected in "Form Fields" don't
+        appear on the search form.
+        
+        >>> form.getControl(
+        ...     name='form_crit__SearchableText_FormSimpleStringCriterion'
+        ...     '_formFields:list')
+        Traceback (most recent call last):
+        LookupError: name
+        'form_crit__SearchableText_FormSimpleStringCriterion_formFields:list'
+        
+        The label for the criterion corresponds to the form element for the
+        first criterion field.
+        
+        >>> ctl = form.getControl('Search Text')
+        
+        Enter a search term and submit the query.  The topic will now list the
+        other content object.
+        
+        >>> ctl.value = 'baz'
+        >>> form.getControl(name='submit').click()
+        >>> anon_browser.getLink('Bar Document Title')
+        Traceback (most recent call last):
+        LinkNotFoundError
+        >>> anon_browser.getLink('Baz Event Title')
+        <Link text='Baz Event Title'
+        url='http://nohost/plone/Members/test_user_1_/baz-event-title'>
+        
+        Since the search form has been submitted, the results are rendered on
+        the layout specified by the "Form Results Layout".
+        
+        >>> anon_browser.url.startswith(
+        ...     'http://nohost/plone/Members/test_user_1_/foo-topic-title'
+        ...     '/atct_topic_view')
+        True
+        
+        The search form portlet also reflects the search term submitted rather
+        than the default value submitted on the criteria tab.
+        
+        >>> form = anon_browser.getForm(name="formcriteria_search")
+        >>> ctl = form.getControl('Search Text')
+        >>> ctl.value
+        'baz'
+        
+        If the search form is submitted from this page, the results are still
+        rendered on the same view.
+        
+        >>> ctl.value = 'bar'
+        >>> form.getControl(name='submit').click()
+        >>> anon_browser.url.startswith(
+        ...     'http://nohost/plone/Members/test_user_1_/foo-topic-title'
+        ...     '/atct_topic_view')
+        True
+        
+        Values are also ignored if submitted for criteria fields which are not
+        listed in "Form Fields".
+        
+        >>> crit = foo_topic.getCriterion(
+        ...     'SearchableText_FormSimpleStringCriterion')
+        >>> crit.setFormFields([])
+        >>> anon_browser.open(
+        ...     foo_topic.absolute_url()+'/atct_topic_view'
+        ...     '?form_crit__SearchableText_FormSimpleStringCriterion'
+        ...     '_value=baz')
+        >>> anon_browser.getLink('Bar Document Title')
+        <Link text='Bar Document Title'
+        url='http://nohost/plone/Members/test_user_1_/bar-document-title'>
+        >>> anon_browser.getLink('Baz Event Title')
+        Traceback (most recent call last):
+        LinkNotFoundError
+        >>> crit.setFormFields(['value'])
+        
+        The search form portlet successfully renders when viewed on a context
+        other than the portlet.
+        
+        >>> anon_browser.open(folder.absolute_url())
+        >>> form = anon_browser.getForm(name="formcriteria_search")
+        
+        Ensure that collective.formcriteria doesn't break existing ATTopic
+        instances such as those created by default in a Plone site.
+        
+        >>> owner_browser.open(portal.news.absolute_url())
+        >>> print owner_browser.contents
+        <...
+        ...Site News...
+        ...There are currently no items in this folder...
+        
+        >>> owner_browser.getLink('Criteria').click()
+        >>> print owner_browser.contents
+        <...
+        ...Criteria for News...
+        
+        Contents View
+        =============
+        
+        Change the topic's display layout and the search form results layout
+        to the contents view.
+        
+        >>> foo_topic.setFormLayout('folder_contents_view')
+        >>> browser.open(foo_topic.absolute_url())
+        >>> browser.getLink('Tabular Form').click()
+        >>> print browser.contents
+        <...
+        ...View changed...
+        
+        The view renders the contents form.
+        
+        >>> browser.getForm(name="folderContentsForm")
+        <zope.testbrowser.browser.Form object at ...>
+        
+        The topic contents are listed in the contents table form.
+        
+        >>> browser.getControl('Bar Document Title')
+        <ItemControl name='paths:list' type='checkbox'
+        optionValue='/plone/Members/test_user_1_/bar-document-title'
+        selected=False>
+        >>> browser.getControl('Baz Event Title')
+        Traceback (most recent call last):
+        LookupError: label 'Baz Event Title'
+        
+        The search form is also rendered if form criteria are present.
+        
+        >>> form = browser.getForm(name="formcriteria_search")
+        
+        The contents view also reflects user submitted criteria.
+        
+        >>> form.getControl(
+        ...     name='form_crit__SearchableText_FormSimpleStringCriterion'
+        ...     '_value').value = 'baz'
+        >>> form.getControl(name='submit').click()
+        >>> browser.getControl('Bar Document Title')
+        Traceback (most recent call last):
+        LookupError: label 'Bar Document Title'
+        >>> browser.getControl('Baz Event Title')
+        <ItemControl name='paths:list' type='checkbox'
+        optionValue='/plone/Members/test_user_1_/baz-event-title'
+        selected=False>
+        
+        Make sure none of the collective.formcriteria extensions interfere
+        with existing ATTopic instances.
+        
+        >>> browser.open(portal.events.aggregator.absolute_url())
+        
+        .. -*-doctest-*-
+        
+        =======
+        Sorting
+        =======
+        
+        Two kinds of sort criteria are supported.  Multiple fixed sort
+        criteria can be defined allowing the user to select from among them
+        using links on the batch macro.  One form sort criterion can be added
+        per collection to allows the user to specify a sort on the sort form.
+        If both are used, and the user has both submitted a sort from the form
+        and selected a sort from the batch links, the latter criterion in the
+        list of criteria takes effect.
+        
+        Form sort criteria are not yet implemented.
+        
+        Fixed Sort Criteria
+        ===================
+        
+        Set the item count to 1 so that batches will only have one item.
+        
+        >>> foo_topic = self.folder['foo-topic-title']
+        >>> foo_topic.setItemCount(1)
+        
+        Open a browser and log in as a normal user.
+        
+        >>> from Products.Five.testbrowser import Browser
+        >>> from Products.PloneTestCase import ptc
+        >>> browser = Browser()
+        >>> browser.handleErrors = False
+        >>> browser.open(portal.absolute_url())
+        >>> browser.getLink('Log in').click()
+        >>> browser.getControl('Login Name').value = ptc.default_user
+        >>> browser.getControl(
+        ...     'Password').value = ptc.default_password
+        >>> browser.getControl('Log in').click()
+        
+        Load the criteria edit form of a collection.
+        
+        >>> browser.open(foo_topic.absolute_url())
+        >>> browser.getLink('Criteria').click()
+        
+        The sort selection form has been removed from the criteria tab.
+        
+        >>> browser.getForm(action="criterion_edit_form", index=1)
+        Traceback (most recent call last):
+        IndexError: list index out of range
+        
+        Instead, multiple sort criteria can be added to a collection using the
+        normal criterion add form on the criteria tab.
+        
+        >>> form = browser.getForm(name="criteria_select")
+        >>> form.getControl('Relevance').selected = True
+        >>> form.getControl('Sort results').selected = True
+        >>> form.getControl('Add criteria').click()
+        >>> print browser.contents
+        <...
+        ...Added criterion FormSortCriterion for field unsorted...
+        
+        Add another sort criterion for the Date field reversed.
+        
+        >>> form = browser.getForm(name="criteria_select")
+        >>> form.getControl('Effective Date').selected = True
+        >>> form.getControl('Sort results').selected = True
+        >>> form.getControl('Add criteria').click()
+        >>> print browser.contents
+        <...
+        ...Added criterion FormSortCriterion for field effective...
+        
+        Change the display layout of the collection to the "Search Form" then
+        submit a search criteria to test that the sort links preserve search
+        criteria.
+        
+        >>> foo_topic.setLayout('criteria_form')
+        >>> foo_topic.addCriterion(
+        ...     'SearchableText','FormSimpleStringCriterion'
+        ...     ).setFormFields(['value'])
+        >>> browser.getLink('View').click()
+        >>> form = browser.getForm(name="formcriteria_search")
+        >>> form.getControl('Search Text').value = 'blah'
+        >>> form.getControl(name='submit').click()
+        
+        When the batch macro is rendered on a collection view, such as one of
+        the listings, it includes links to the different possible sorts in
+        order.  By default, the first sort criteria is selected.  The sort
+        links also have id's and CSS classes for styling support.
+        
+        >>> print browser.contents
+        <...
+        ...Sort on:...
+        ...class="formcriteriaSortField...
+        ...id="formcriteria-sort-crit__unsorted_FormSortCriterion...Relevance</span>...
+        ...class="formcriteriaSortField...
+        ...id="formcriteria-sort-crit__effective_FormSortCriterion...Effective Date...
+        >>> browser.getLink('Relevance')
+        Traceback (most recent call last):
+        LinkNotFoundError
+        
+        The results are listed in order of weight.
+        
+        >>> browser.getLink('Baz Event Title')
+        <Link text='Baz Event Title'
+        url='http://nohost/plone/Members/test_user_1_/baz-event-title'>
+        >>> browser.getLink('Bar Document Title')
+        Traceback (most recent call last):
+        LinkNotFoundError
+        
+        When a sort link is clicked, that sort will show as selected and
+        results will be sorted according to the sort criteria.
+        
+        >>> browser.getLink('Effective Date').click()
+        >>> print browser.contents
+        <...
+        ...Sort on:...
+        ...Relevance...
+        ...Effective Date</span>...
+        >>> browser.getLink('Effective Date')
+        Traceback (most recent call last):
+        LinkNotFoundError
+        >>> browser.getLink('Relevance')
+        <Link text='Relevance'
+        url='http://nohost/plone/Members/test_user_1_/foo-topic-title/atct_topic_view?crit__unsorted_FormSortCriterion:boolean=True&form_crit__SearchableText_FormSimpleStringCriterion_value=blah&submit=Search'>
+        
+        The results reflect that the search query is preserved across the new
+        sort selection.
+        
+        >>> browser.getLink('Bar Document Title')
+        <Link text='Bar Document Title'
+        url='http://nohost/plone/Members/test_user_1_/bar-document-title'>
+        >>> browser.getLink('Baz Event Title')
+        Traceback (most recent call last):
+        LinkNotFoundError
+        
+        If the next batch is selected the sort and search query are
+        preserved.
+        
+        >>> browser.getLink('Next 1 items').click()
+        >>> browser.getLink('Bar Document Title')
+        Traceback (most recent call last):
+        LinkNotFoundError
+        >>> browser.getLink('Baz Event Title')
+        <Link text='Baz Event Title'
+        url='http://nohost/plone/Members/test_user_1_/baz-event-title'>
+        
+        The batch macro will render the sort links even if there's only one
+        batch.
+        
+        >>> foo_topic.setItemCount(0)
+        >>> browser.open(foo_topic.absolute_url()+'/atct_topic_view')
+        >>> browser.getLink('Effective Date')
+        <Link text='Effective Date'
+        url='http://nohost/plone/Members/test_user_1_/foo-topic-title/atct_topic_view?test=&crit__effective_FormSortCriterion:boolean=True'>
+        
+        Ensure that the extended sort criteria work inside previously created
+        ATTopic instances.
+        
+        >>> topic = portal.events.aggregator
+        >>> topic.setSortCriterion('effective', True)
+        >>> topic.queryCatalog()[0].getObject()
+        <ATEvent at /plone/Members/test_user_1_/baz-event-title>
+        
+        Grouped Listing
+        ===============
+        
+        A variation on the default collection view is provided that lists
+        items grouped by the sort used.  This requires that the index used for
+        sorting is also in the catalog metadata columns and this available on
+        the catalog brains.
+        
+        Sort by creator to that we get at least one group with multiple
+        items.
+        
+        >>> foo_topic.deleteCriterion('crit__unsorted_FormSortCriterion')
+        >>> foo_topic.setSortCriterion('Creator', False)
+        
+        Select the layout.
+        
+        >>> browser.open(foo_topic.absolute_url())
+        >>> browser.getLink('Grouped Listing').click()
+        >>> print browser.contents
+        <...
+        ...View changed...
+        
+        Now the items are grouped by the sort values.
+        
+        >>> print browser.contents
+        <...
+        ...<dl...
+        ...<dt...bar_creator_id...</dt>...
+        ...<dd...
+        ...Baz Event Title...
+        ...</dd...
+        ...<dt...foo_creator_id...</dt>...
+        ...<dd...
+        ...Foo Event Title...
+        ...Bar Document Title...
+        ...</dd...
+        ...</dl>...
+        
+        The grouped listing layout requires a sort criterion to render and
+        raises an error if one is not present.
+        
+        >>> foo_topic.deleteCriterion('crit__Creator_ATSortCriterion')
+        >>> browser.open(foo_topic.absolute_url())
+        Traceback (most recent call last):
+        AssertionError: ...
+        
+        The batch macros still work for topics that have no sort criteria.
+        
+        >>> foo_topic.setLayout('criteria_form')
+        >>> browser.open(foo_topic.absolute_url())
+        >>> form = browser.getForm(name="formcriteria_search")
+        >>> form.getControl('Search Text').value = 'blah'
+        >>> form.getControl(name='submit').click()
+        >>> 'Sort on:' in browser.contents
+        False
+        
+        Form Sort
+        =========
+        
+        TODO: Not implemented yet
+        
+        An widget is avialable for selecting which of the possible
+        sort fields should be available for sorting on.  The InAndOutWidget is
+        used so that the order can be specified.
+        
+        TODO >>> print browser.contents
+        <...
+        <div class="field ArchetypesInAndOutWidget
+        kssattr-atfieldname-sortFields"
+        id="archetypes-fieldname-sortFields">...
+        ...>Relevance</option>...
+        ...>Effective Date</option>...
+        
+        The InAndOutWidget uses JavaScript so we'll set the field manually for
+        testing.
+        
+        TODO >>> self.login()
+        TODO >>> foo_topic.setSortFields(['', 'effective', 'Type'])
+        
+        TODO >>> form = browser.getForm(name="criteria_select")
+        TODO >>> form.getControl('Sort Order').selected = True
+        
+        Form sort criteria default to sorting on the "Relevance" field
+        corresponds to a sort by weight for searches that include queries
+        against indexs that support weighted results.
+        
+        TODO >>> form = browser.getForm(action="criterion_edit_form", index=0)
+        TODO >>> form.getControl('Relevance').selected
+        True
+        
+        Changelog
+        =========
+        
+        1.0 - 2009-04-20
+        ----------------
+        
+        * Ensure that only formFields are taken from the request
+        * Fix ignored integer range criteria (reported by SimO)
+        * Use a browser layer (suggested by optilude)
+        * Add ids and CSS classes to the batch_macro sort links (aaronv)
+        * Fix a bug with the "operator" field.  Thanks to Mauro!
+        
+        0.9.5 - 2009-03-06
+        ------------------
+        
+        * Move package to src directory and fix testing buildout
+        * Register criteria AT types using the right package name
+        * Fix a bug with the JavaScript that narrows the criteria types by
+        index/field
+        * Use separate meta_types instead of overwriting the ATCT meta types,
+        may be backwards incompatible for previous installations
+        
+        0.9.4 - 2009-02-08
+        ------------------
+        
+        * Add a layout that lists items grouped by the sort used
+        * Fix KeyError: u'unsorted' bug for existing ATTopics as reported by
+        jonstahl
+        
+        0.9.3 - 2009-01-31
+        ------------------
+        
+        * Fix widget JavaScript and CSS for search form portlet
+        
+        0.9.2 - 2009-01-31
+        ------------------
+        
+        * Clarify selected sort
+        * Make portlet usable outside the context of the collection
+        * Fix portlet class
+        * Don't render hour and minute fields on date
+        
+        0.9.1 - 2009-01-30
+        ------------------
+        
+        * Move the search form viewlet into a portlet
+        * Patch the ATCT addCrierion method to properly initialize criteria so
+        that they can safely be created in code
+        * Use the same mismatched meta_type ATCT for the
+        FormDateCriterion
+        
+        0.9 - 2009-01-29
+        ----------------
+        
+        * Fix incompatibility when extended sort criterion were added to
+        existing ATCT ATTopic instances
+        
+        0.8 - 2009-01-29
+        ----------------
+        
+        * Added multiple sort links to the batch macro
+        
+        0.7 - 2009-01-28
+        ----------------
+        
+        * Change to use the same names as ATCT where appropriate to avoid some
+        problems where the ATCT names are expected.
+        * Flesh out the GenericSetup profile with all other bits in the Plone
+        profile that make reference to criteria.
+        
+        0.6 - 2009-01-26
+        ----------------
+        
+        * Use a form prefix for the search form.  Fixes calendar JavaScript
+        bug.
+        * Fix criterion label to point to the correct form input
+        * Allow widget special help/description to appear even if the label
+        isn't rendered and use this for the comma widget
+        * Fix the handling of postbacks in the comma widget
+        * Use a "Search Form" view that only renders the search form
+        * Added boolean criteria
+        * Added date criteria
+        * Added path criteria
+        * Added relative path criteria
+        * Added integer criteria
+        
+        0.5 - 2009-01-25
+        ----------------
+        
+        * Form criteria are now designated by selecting which fields of each
+        criterion should be rendered on the search form
+        * Improve label handling.  Remove labels for 'value' field and
+        "required" markers for all fields.
+        * Make the search form collapsible and start collapsed when the form
+        has been submitted
+        * Add a comma separated criterion
+        
+        0.4 - 2009-01-15
+        ----------------
+        
+        * Add list criterion
+        * Add selection criterion
+        * Fix the form for access by anonymous users
+        
+        0.3 - 2009-01-15
+        ----------------
+        
+        * Fully re-use the AT edit widgets
+        * Support criteria with multiple fields
+        * Use the widgets to process the form values
+        * Add checkbox criterion based on FormSelectionCriterion,
+        FormPortalTypeCriterion, and FormReferenceCriterion
+        * Add a date range form criterion (JS calendar not working yet)
+        
+        0.2 - 2008-05-27
+        ----------------
+        
+        * Fix i18n_domain in ZCML
+        * Make the authenticator view conditional for Plone 3.0 compatibility
+        
+        0.1 - 2008-05-24
+        ----------------
+        
+        * Initial release
+        
+        
+        TODO
+        ====
+        
+        * Form sort criteria
+        
+        * Add single selection (pulldown, radio) criteria (davisagli)
+        
+        * Fix folder_contents view to support deleting, etc.
+        
+        * Use subcollections to support AdvancedQuery operations
+        
+        Collections will act as grouping/parenthesis *and* operators.  IOW,
+        a collection will have a boolean field to set whether it uses AND or
+        OR to find the intersection or union of its result sets.
+        Sub-collections will not acquire criteria but instead parent
+        collections will treat sub-collections as criteria groupings.  Not
+        yet sure how to handle sorting.
+        
+Platform: UNKNOWN
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
