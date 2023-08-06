@@ -1,0 +1,49 @@
+from Products.validation.interfaces.IValidator import IValidator
+from base import BaseGalleryTypeValidator
+from collective.plonetruegallery.utils import getGalleryAdapter
+from collective.plonetruegallery.interfaces import IFlickrAdapter
+
+class ValidateFlickrUsername(BaseGalleryTypeValidator):
+        
+    def __call__(self, username, **kwargs):
+        req = kwargs['REQUEST']
+        gallery = kwargs['instance']
+        
+        adapter = IFlickrAdapter(gallery)
+        if req.get('type') == adapter.name:
+            
+            if len(username) == 0:
+                return ("Flickr Error: You must specify a username.")
+            
+            try:
+                gallery.flickr_userid = adapter.getFlickrUserid(username)
+                if gallery.flickr_userid is None:
+                    return ("Flickr Error: Could not validate flickr user.")
+            except:
+                return ("Flickr Error: Could not validate flickr user.")
+
+        return True
+
+
+class ValidateFlickrSet(BaseGalleryTypeValidator):
+    
+    def __call__(self, photoset, **kwargs):
+        req = kwargs['REQUEST']
+        gallery = kwargs['instance']
+        adapter = IFlickrAdapter(gallery)
+
+        if req.get('type') == adapter.name:
+            
+            if len(photoset) == 0:
+                return ("Flickr Error: You must specify a flickr set to use.")
+            
+            try:
+                userid = adapter.getFlickrUserid(req.get('flickrUsername'))
+                gallery.flickr_photosetid = adapter.getFlickrPhotosetId(photoset, userid)
+
+                if gallery.flickr_photosetid is None:
+                    return ("Flickr Error: Could not find flickr set.")
+            except:
+                return ("Flickr Error: Could not find flickr set.")
+
+        return True
