@@ -1,0 +1,1403 @@
+diff -Naur src/Include/code.h patched/Include/code.h
+--- src/Include/code.h	2008-03-26 15:01:37.000000000 -0700
++++ patched/Include/code.h	2008-12-01 15:06:28.283527000 -0800
+@@ -10,6 +10,7 @@
+ typedef struct {
+     PyObject_HEAD
+     int co_argcount;		/* #arguments, except *args */
++    int co_kwonlyargcount;	/* #keyword only arguments */ // py3k
+     int co_nlocals;		/* #local variables */
+     int co_stacksize;		/* #entries needed for evaluation stack */
+     int co_flags;		/* CO_..., see below */
+diff -Naur src/Include/funcobject.h patched/Include/funcobject.h
+--- src/Include/funcobject.h	2007-12-18 18:37:44.000000000 -0800
++++ patched/Include/funcobject.h	2008-12-01 16:00:55.444522000 -0800
+@@ -10,7 +10,7 @@
+ /* Function objects and code objects should not be confused with each other:
+  *
+  * Function objects are created by the execution of the 'def' statement.
+- * They reference a code object in their func_code attribute, which is a
++ * They reference a code object in their __code__ attribute, which is a
+  * purely syntactic object, i.e. nothing more than a compiled version of some
+  * source code lines.  There is one code object per source code "fragment",
+  * but each code object can be referenced by zero or many function objects
+@@ -20,15 +20,17 @@
+ 
+ typedef struct {
+     PyObject_HEAD
+-    PyObject *func_code;	/* A code object */
++    PyObject *func_code;	/* A code object, the __code__ attribute */
+     PyObject *func_globals;	/* A dictionary (other mappings won't do) */
+     PyObject *func_defaults;	/* NULL or a tuple */
++    PyObject *func_kwdefaults;	/* NULL or a dict */
+     PyObject *func_closure;	/* NULL or a tuple of cell objects */
+     PyObject *func_doc;		/* The __doc__ attribute, can be anything */
+     PyObject *func_name;	/* The __name__ attribute, a string object */
+     PyObject *func_dict;	/* The __dict__ attribute, a dict or NULL */
+     PyObject *func_weakreflist;	/* List of weak references */
+     PyObject *func_module;	/* The __module__ attribute, can be anything */
++    PyObject *func_annotations;	/* Annotations, a dict or NULL */
+ 
+     /* Invariant:
+      *     func_closure contains the bindings for func_code->co_freevars, so
+@@ -47,8 +49,12 @@
+ PyAPI_FUNC(PyObject *) PyFunction_GetModule(PyObject *);
+ PyAPI_FUNC(PyObject *) PyFunction_GetDefaults(PyObject *);
+ PyAPI_FUNC(int) PyFunction_SetDefaults(PyObject *, PyObject *);
++PyAPI_FUNC(PyObject *) PyFunction_GetKwDefaults(PyObject *);
++PyAPI_FUNC(int) PyFunction_SetKwDefaults(PyObject *, PyObject *);
+ PyAPI_FUNC(PyObject *) PyFunction_GetClosure(PyObject *);
+ PyAPI_FUNC(int) PyFunction_SetClosure(PyObject *, PyObject *);
++PyAPI_FUNC(PyObject *) PyFunction_GetAnnotations(PyObject *);
++PyAPI_FUNC(int) PyFunction_SetAnnotations(PyObject *, PyObject *);
+ 
+ /* Macros for direct access to these values. Type checks are *not*
+    done, so use with care. */
+@@ -60,8 +66,12 @@
+ 	(((PyFunctionObject *)func) -> func_module)
+ #define PyFunction_GET_DEFAULTS(func) \
+ 	(((PyFunctionObject *)func) -> func_defaults)
++#define PyFunction_GET_KW_DEFAULTS(func) \
++	(((PyFunctionObject *)func) -> func_kwdefaults)
+ #define PyFunction_GET_CLOSURE(func) \
+ 	(((PyFunctionObject *)func) -> func_closure)
++#define PyFunction_GET_ANNOTATIONS(func) \
++	(((PyFunctionObject *)func) -> func_annotations)
+ 
+ /* The classmethod and staticmethod types lives here, too */
+ PyAPI_DATA(PyTypeObject) PyClassMethod_Type;
+diff -Naur src/Include/patchlevel.h patched/Include/patchlevel.h
+--- src/Include/patchlevel.h	2008-10-01 14:46:40.000000000 -0700
++++ patched/Include/patchlevel.h	2008-11-17 19:01:08.108316000 -0800
+@@ -27,7 +27,7 @@
+ #define PY_RELEASE_SERIAL	0
+ 
+ /* Version as a string */
+-#define PY_VERSION      	"2.6"
++#define PY_VERSION      	"2.6.py3to2" // py3k
+ /*--end constants--*/
+ 
+ /* Subversion Revision number of this file (not of the repository) */
+diff -Naur src/Modules/_py3to2module.c patched/Modules/_py3to2module.c
+--- src/Modules/_py3to2module.c	1969-12-31 16:00:00.000000000 -0800
++++ patched/Modules/_py3to2module.c	2008-11-25 07:24:56.402798000 -0800
+@@ -0,0 +1,424 @@
++#include "Python.h"
++#include "Python-ast.h"
++
++#include "node.h"
++#include "code.h"
++#include "eval.h"
++
++#include <ctype.h>
++
++//////////////////////////////////////////////////////////////// py3k beg - header
++#define py3k_PyUnicode_Check(x) PyString_Check(x)
++#define py3k_PyUnicode_AS_UNICODE PyString_AS_STRING
++
++static PyObject *compile(PyObject *str, char *filename, char *mode, int flags, int dont_inherit) {
++	PyObject *func = PyDict_GetItemString(PyEval_GetBuiltins(), "_compile"); // get function
++	if (!(func && PyCallable_Check(func))) {PyErr_SetString(PyExc_NotImplementedError, "py3k_compile"); return NULL;}
++	return PyObject_CallFunction(func, "Ossii", str, filename, mode, flags, dont_inherit);
++}
++//////////////////////////////////////////////////////////////// py3k end
++
++static PyObject *
++builtin___build_class__(PyObject *self, PyObject *args, PyObject *kwds)
++{
++	PyObject *func, *name, *bases, *mkw, *meta, *prep, *ns, *cell;
++	PyObject *cls = NULL;
++	Py_ssize_t nargs, nbases;
++
++	assert(args != NULL);
++	if (!PyTuple_Check(args)) {
++		PyErr_SetString(PyExc_TypeError,
++				"__build_class__: args is not a tuple");
++		return NULL;
++	}
++	nargs = PyTuple_GET_SIZE(args);
++	if (nargs < 2) {
++		PyErr_SetString(PyExc_TypeError,
++				"__build_class__: not enough arguments");
++		return NULL;
++	}
++	func = PyTuple_GET_ITEM(args, 0); /* Better be callable */
++	name = PyTuple_GET_ITEM(args, 1);
++	if (!py3k_PyUnicode_Check(name)) {
++		PyErr_SetString(PyExc_TypeError,
++				"__build_class__: name is not a string");
++		return NULL;
++	}
++	bases = PyTuple_GetSlice(args, 2, nargs);
++	if (bases == NULL)
++		return NULL;
++	nbases = nargs - 2;
++
++	if (kwds == NULL) {
++		meta = NULL;
++                mkw = NULL;
++        }
++	else {
++		mkw = PyDict_Copy(kwds); /* Don't modify kwds passed in! */
++		if (mkw == NULL) {
++			Py_DECREF(bases);
++			return NULL;
++		}
++		meta = PyDict_GetItemString(mkw, "metaclass");
++		if (meta != NULL) {
++			Py_INCREF(meta);
++			if (PyDict_DelItemString(mkw, "metaclass") < 0) {
++				Py_DECREF(meta);
++				Py_DECREF(mkw);
++				Py_DECREF(bases);
++				return NULL;
++			}
++		}
++	}
++	if (meta == NULL) {
++		if (PyTuple_GET_SIZE(bases) == 0)
++			meta = (PyObject *) (&PyType_Type);
++		else {
++			PyObject *base0 = PyTuple_GET_ITEM(bases, 0);
++			meta = (PyObject *) (base0->ob_type);
++		}
++		Py_INCREF(meta);
++	}
++	prep = PyObject_GetAttrString(meta, "__prepare__");
++	if (prep == NULL) {
++		PyErr_Clear();
++		ns = PyDict_New();
++	}
++	else {
++		PyObject *pargs = Py_BuildValue("OO", name, bases);
++		if (pargs == NULL) {
++			Py_DECREF(prep);
++			Py_DECREF(meta);
++			Py_XDECREF(mkw);
++			Py_DECREF(bases);
++			return NULL;
++		}
++		ns = PyEval_CallObjectWithKeywords(prep, pargs, mkw);
++		Py_DECREF(pargs);
++		Py_DECREF(prep);
++		if (ns == NULL) {
++			Py_DECREF(meta);
++			Py_XDECREF(mkw);
++			Py_DECREF(bases);
++			return NULL;
++		}
++	}
++	cell = PyObject_CallFunctionObjArgs(func, ns, NULL);
++	if (cell != NULL) {
++		PyObject *margs;
++		margs = Py_BuildValue("OOO", name, bases, ns);
++		if (margs != NULL) {
++			cls = PyEval_CallObjectWithKeywords(meta, margs, mkw);
++			Py_DECREF(margs);
++		}
++		if (cls != NULL && PyCell_Check(cell)) {
++			Py_INCREF(cls);
++			PyCell_SET(cell, cls);
++		}
++		Py_DECREF(cell);
++	}
++	Py_DECREF(ns);
++	Py_DECREF(meta);
++	Py_XDECREF(mkw);
++	Py_DECREF(bases);
++	return cls;
++}
++
++PyDoc_STRVAR(build_class_doc,
++"__build_class__(func, name, *bases, metaclass=None, **kwds) -> class\n\
++\n\
++Internal helper function used by the class statement.");
++
++static PyObject *
++builtin_compile(PyObject *self, PyObject *args, PyObject *kwds)
++{
++	char *str;
++	char *filename;
++	char *startstr;
++	int mode = -1;
++	int dont_inherit = 0;
++	int supplied_flags = 0;
++	PyCompilerFlags cf;
++	PyObject *cmd;
++	static char *kwlist[] = {"source", "filename", "mode", "flags",
++				 "dont_inherit", NULL};
++	// int start[] = {Py_file_input, Py_eval_input, Py_single_input};
++
++	if (!PyArg_ParseTupleAndKeywords(args, kwds, "Oss|ii:compile",
++					 kwlist, &cmd, &filename, &startstr,
++					 &supplied_flags, &dont_inherit))
++		return NULL;
++
++	cf.cf_flags = supplied_flags | PyCF_SOURCE_IS_UTF8;
++
++	if (supplied_flags &
++	    ~(PyCF_MASK | PyCF_MASK_OBSOLETE | PyCF_DONT_IMPLY_DEDENT | PyCF_ONLY_AST))
++	{
++		PyErr_SetString(PyExc_ValueError,
++				"compile(): unrecognised flags");
++		return NULL;
++	}
++	/* XXX Warn if (supplied_flags & PyCF_MASK_OBSOLETE) != 0? */
++
++	if (!dont_inherit) {
++		PyEval_MergeCompilerFlags(&cf);
++	}
++
++	if (strcmp(startstr, "exec") == 0)
++		mode = 0;
++	else if (strcmp(startstr, "eval") == 0)
++		mode = 1;
++	else if (strcmp(startstr, "single") == 0)
++		mode = 2;
++	else {
++		PyErr_SetString(PyExc_ValueError,
++				"compile() arg 3 must be 'exec', 'eval' or 'single'");
++		return NULL;
++	}
++
++	if (PyAST_Check(cmd)) {
++		PyObject *result;
++		if (supplied_flags & PyCF_ONLY_AST) {
++			Py_INCREF(cmd);
++			result = cmd;
++		}
++		else {
++			PyArena *arena;
++			mod_ty mod;
++
++			arena = PyArena_New();
++			mod = PyAST_obj2mod(cmd, arena, mode);
++			if (mod == NULL) {
++				PyArena_Free(arena);
++				return NULL;
++			}
++			result = (PyObject*)PyAST_Compile(mod, filename,
++							  &cf, arena);
++			PyArena_Free(arena);
++		}
++		return result;
++	}
++
++	return compile(cmd, filename, startstr, supplied_flags, dont_inherit); // py3k
++}
++
++PyDoc_STRVAR(compile_doc,
++"compile(source, filename, mode[, flags[, dont_inherit]]) -> code object\n\
++\n\
++Compile the source string (a Python module, statement or expression)\n\
++into a code object that can be executed by exec() or eval().\n\
++The filename will be used for run-time error messages.\n\
++The mode must be 'exec' to compile a module, 'single' to compile a\n\
++single (interactive) statement, or 'eval' to compile an expression.\n\
++The flags argument, if present, controls which future statements influence\n\
++the compilation of the code.\n\
++The dont_inherit argument, if non-zero, stops the compilation inheriting\n\
++the effects of any future statements in effect in the code calling\n\
++compile; if absent or zero these statements do influence the compilation,\n\
++in addition to any features explicitly specified.");
++
++static PyObject *
++builtin_eval(PyObject *self, PyObject *args)
++{
++	PyObject *cmd;
++	// PyObject *cmd, *result, *tmp = NULL;
++	PyObject *globals = Py_None, *locals = Py_None;
++	// char *str;
++	// PyCompilerFlags cf;
++
++	if (!PyArg_UnpackTuple(args, "eval", 1, 3, &cmd, &globals, &locals))
++		return NULL;
++	if (locals != Py_None && !PyMapping_Check(locals)) {
++		PyErr_SetString(PyExc_TypeError, "locals must be a mapping");
++		return NULL;
++	}
++	if (globals != Py_None && !PyDict_Check(globals)) {
++		PyErr_SetString(PyExc_TypeError, PyMapping_Check(globals) ?
++			"globals must be a real dict; try eval(expr, {}, mapping)"
++			: "globals must be a dict");
++		return NULL;
++	}
++	if (globals == Py_None) {
++		globals = PyEval_GetGlobals();
++		if (locals == Py_None)
++			locals = PyEval_GetLocals();
++	}
++	else if (locals == Py_None)
++		locals = globals;
++
++	if (globals == NULL || locals == NULL) {
++		PyErr_SetString(PyExc_TypeError, 
++			"eval must be given globals and locals "
++			"when called without a frame");
++		return NULL;
++	}
++
++	if (PyDict_GetItemString(globals, "__builtins__") == NULL) {
++		if (PyDict_SetItemString(globals, "__builtins__",
++					 PyEval_GetBuiltins()) != 0)
++			return NULL;
++	}
++
++	if (!PyCode_Check(cmd)) { // py3k
++		if((cmd = compile(cmd, "", "eval", 0, 0)) == NULL) return NULL; // py3k
++	} // py3k
++
++	// if (PyCode_Check(cmd)) {
++		if (PyCode_GetNumFree((PyCodeObject *)cmd) > 0) {
++			PyErr_SetString(PyExc_TypeError,
++		"code object passed to eval() may not contain free variables");
++			return NULL;
++		}
++		return PyEval_EvalCode((PyCodeObject *) cmd, globals, locals);
++	// }
++}
++
++PyDoc_STRVAR(eval_doc,
++"eval(source[, globals[, locals]]) -> value\n\
++\n\
++Evaluate the source in the context of globals and locals.\n\
++The source may be a string representing a Python expression\n\
++or a code object as returned by compile().\n\
++The globals must be a dictionary and locals can be any mapping,\n\
++defaulting to the current globals and locals.\n\
++If only globals is given, locals defaults to it.\n");
++
++static PyObject *
++builtin_exec(PyObject *self, PyObject *args)
++{
++	PyObject *v;
++	PyObject *prog, *globals = Py_None, *locals = Py_None;
++	int plain = 0;
++
++	if (!PyArg_ParseTuple(args, "O|OO:exec", &prog, &globals, &locals))
++		return NULL;
++	
++	if (globals == Py_None) {
++		globals = PyEval_GetGlobals();
++		if (locals == Py_None) {
++			locals = PyEval_GetLocals();
++			plain = 1;
++		}
++		if (!globals || !locals) {
++			PyErr_SetString(PyExc_SystemError,
++					"globals and locals cannot be NULL");
++			return NULL;
++		}
++	}
++	else if (locals == Py_None)
++		locals = globals;
++
++	if (!PyDict_Check(globals)) {
++		PyErr_Format(PyExc_TypeError, "exec() arg 2 must be a dict, not %.100s",
++			     globals->ob_type->tp_name);
++		return NULL;
++	}
++	if (!PyMapping_Check(locals)) {
++		PyErr_Format(PyExc_TypeError,
++		    "arg 3 must be a mapping or None, not %.100s",
++		    locals->ob_type->tp_name);
++		return NULL;
++	}
++	if (PyDict_GetItemString(globals, "__builtins__") == NULL) {
++		if (PyDict_SetItemString(globals, "__builtins__",
++					 PyEval_GetBuiltins()) != 0)
++			return NULL;
++	}
++
++	if (!PyCode_Check(prog)) { // py3k
++		if((prog = compile(prog, "", "exec", 0, 0)) == NULL) return NULL; // py3k
++	} // py3k
++
++	// if (PyCode_Check(prog)) {
++		if (PyCode_GetNumFree((PyCodeObject *)prog) > 0) {
++			PyErr_SetString(PyExc_TypeError,
++				"code object passed to exec() may not "
++				"contain free variables");
++			return NULL;
++		}
++		v = PyEval_EvalCode((PyCodeObject *) prog, globals, locals);
++	// }
++	if (v == NULL)
++		return NULL;
++	Py_DECREF(v);
++	Py_RETURN_NONE;
++}
++
++PyDoc_STRVAR(exec_doc,
++"exec(object[, globals[, locals]])\n\
++\n\
++Read and execute code from a object, which can be a string, a code\n\
++object or a file object.\n\
++The globals and locals are dictionaries, defaulting to the current\n\
++globals and locals.  If only globals is given, locals defaults to it.");
++
++static PyMethodDef builtin_methods[] = {
++ 	{"__build_class__", (PyCFunction)builtin___build_class__,
++         METH_VARARGS | METH_KEYWORDS, build_class_doc},
++ 	// {"__import__",	(PyCFunction)builtin___import__, METH_VARARGS | METH_KEYWORDS, import_doc},
++ 	// {"abs",		builtin_abs,        METH_O, abs_doc},
++ 	// {"all",		builtin_all,        METH_O, all_doc},
++ 	// {"any",		builtin_any,        METH_O, any_doc},
++ 	// {"ascii",	builtin_ascii,      METH_O, ascii_doc},
++	// {"bin",		builtin_bin,	    METH_O, bin_doc},
++ 	// {"chr",		builtin_chr,        METH_VARARGS, chr_doc},
++ 	// {"cmp",		builtin_cmp,        METH_VARARGS, cmp_doc},
++ 	{"compile",	(PyCFunction)builtin_compile,    METH_VARARGS | METH_KEYWORDS, compile_doc},
++ 	// {"delattr",	builtin_delattr,    METH_VARARGS, delattr_doc},
++ 	// {"dir",		builtin_dir,        METH_VARARGS, dir_doc},
++ 	// {"divmod",	builtin_divmod,     METH_VARARGS, divmod_doc},
++ 	{"eval",	builtin_eval,       METH_VARARGS, eval_doc},
++	{"exec",        builtin_exec,       METH_VARARGS, exec_doc},
++ 	// {"format",	builtin_format,     METH_VARARGS, format_doc},
++ 	// {"getattr",	builtin_getattr,    METH_VARARGS, getattr_doc},
++ 	// {"globals",	(PyCFunction)builtin_globals,    METH_NOARGS, globals_doc},
++ 	// {"hasattr",	builtin_hasattr,    METH_VARARGS, hasattr_doc},
++ 	// {"hash",	builtin_hash,       METH_O, hash_doc},
++ 	// {"hex",		builtin_hex,        METH_O, hex_doc},
++ 	// {"id",		builtin_id,         METH_O, id_doc},
++ 	// {"input",	builtin_input,      METH_VARARGS, input_doc},
++ 	// {"isinstance",  builtin_isinstance, METH_VARARGS, isinstance_doc},
++ 	// {"issubclass",  builtin_issubclass, METH_VARARGS, issubclass_doc},
++ 	// {"iter",	builtin_iter,       METH_VARARGS, iter_doc},
++ 	// {"len",		builtin_len,        METH_O, len_doc},
++ 	// {"locals",	(PyCFunction)builtin_locals,     METH_NOARGS, locals_doc},
++ 	// {"max",		(PyCFunction)builtin_max,        METH_VARARGS | METH_KEYWORDS, max_doc},
++ 	// {"min",		(PyCFunction)builtin_min,        METH_VARARGS | METH_KEYWORDS, min_doc},
++	// {"next",	(PyCFunction)builtin_next,       METH_VARARGS, next_doc},
++ 	// {"oct",		builtin_oct,        METH_O, oct_doc},
++ 	// {"ord",		builtin_ord,        METH_O, ord_doc},
++ 	// {"pow",		builtin_pow,        METH_VARARGS, pow_doc},
++ 	// {"print",	(PyCFunction)builtin_print,      METH_VARARGS | METH_KEYWORDS, print_doc},
++ 	// {"repr",	builtin_repr,       METH_O, repr_doc},
++ 	// {"round",	(PyCFunction)builtin_round,      METH_VARARGS | METH_KEYWORDS, round_doc},
++ 	// {"setattr",	builtin_setattr,    METH_VARARGS, setattr_doc},
++ 	// {"sorted",	(PyCFunction)builtin_sorted,     METH_VARARGS | METH_KEYWORDS, sorted_doc},
++ 	// {"sum",		builtin_sum,        METH_VARARGS, sum_doc},
++ 	// {"vars",	builtin_vars,       METH_VARARGS, vars_doc},
++	{NULL,		NULL},
++};
++
++PyDoc_STRVAR(builtin_doc,
++"py3to2 Built-in functions, exceptions, and other objects");
++
++// PyObject *initpy3k_builtins(void) {
++				// return Py_InitModule("py3k_builtins", builtin_methods);
++// }
++// PyMODINIT_FUNC inittiming(void)
++// {
++    // if (PyErr_WarnPy3k("the timing module has been removed in "
++                        // "Python 3.0; use time.clock() instead", 2) < 0)
++        // return;
++   //  
++	// (void)Py_InitModule("timing", timing_methods);
++// }
++
++PyMODINIT_FUNC init_py3to2(void)
++{
++	PyObject *mod;
++	mod = Py_InitModule4("_py3to2", builtin_methods,
++			     builtin_doc, (PyObject *)NULL,
++			     PYTHON_API_VERSION);
++	if (mod == NULL)
++		return NULL;
++}
+diff -Naur src/Modules/Setup.local patched/Modules/Setup.local
+--- src/Modules/Setup.local	1969-12-31 16:00:00.000000000 -0800
++++ patched/Modules/Setup.local	2008-11-17 19:01:38.788807000 -0800
+@@ -0,0 +1,2 @@
++# Edit this file for local setup changes
++_py3to2 _py3to2module.o
+diff -Naur src/Objects/codeobject.c patched/Objects/codeobject.c
+--- src/Objects/codeobject.c	2008-06-08 21:58:54.000000000 -0700
++++ patched/Objects/codeobject.c	2008-12-02 00:50:38.380124000 -0800
+@@ -80,6 +80,7 @@
+ 	co = PyObject_NEW(PyCodeObject, &PyCode_Type);
+ 	if (co != NULL) {
+ 		co->co_argcount = argcount;
++		co->co_kwonlyargcount = (int)0; // py3k
+ 		co->co_nlocals = nlocals;
+ 		co->co_stacksize = stacksize;
+ 		co->co_flags = flags;
+@@ -112,6 +113,7 @@
+ 
+ static PyMemberDef code_memberlist[] = {
+ 	{"co_argcount",	T_INT,		OFF(co_argcount),	READONLY},
++	{"co_kwonlyargcount",	T_INT,	OFF(co_kwonlyargcount),	READONLY}, // py3k
+ 	{"co_nlocals",	T_INT,		OFF(co_nlocals),	READONLY},
+ 	{"co_stacksize",T_INT,		OFF(co_stacksize),	READONLY},
+ 	{"co_flags",	T_INT,		OFF(co_flags),		READONLY},
+@@ -246,6 +248,19 @@
+ 				    code, consts, ournames, ourvarnames,
+ 				    ourfreevars, ourcellvars, filename,
+ 				    name, firstlineno, lnotab);
++	// py3k beg - PEP3102  Keyword-Only Arguments
++	if (co != NULL && kw != NULL && PyDict_Check(kw)) {
++		PyObject *x = PyDict_GetItemString(kw, "co_kwonlyargcount");
++		if (x != NULL) {
++			int kwonlyargcount = (int)PyInt_AsLong(x);
++			if (kwonlyargcount < 0) {
++				if (!PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "code: kwonlyargcount must not be negative");
++				co = NULL; goto cleanup;
++			}
++			((PyCodeObject *)co)->co_kwonlyargcount = kwonlyargcount;
++		}
++	}
++	// py3k end
+   cleanup:
+ 	Py_XDECREF(ournames);
+ 	Py_XDECREF(ourvarnames);
+diff -Naur src/Objects/funcobject.c patched/Objects/funcobject.c
+--- src/Objects/funcobject.c	2008-06-08 21:58:54.000000000 -0700
++++ patched/Objects/funcobject.c	2008-12-02 02:02:31.077316000 -0800
+@@ -24,6 +24,7 @@
+ 		op->func_name = ((PyCodeObject *)code)->co_name;
+ 		Py_INCREF(op->func_name);
+ 		op->func_defaults = NULL; /* No default arguments */
++		op->func_kwdefaults = NULL; // py3k
+ 		op->func_closure = NULL;
+ 		consts = ((PyCodeObject *)code)->co_consts;
+ 		if (PyTuple_Size(consts) >= 1) {
+@@ -37,6 +38,7 @@
+ 		op->func_doc = doc;
+ 		op->func_dict = NULL;
+ 		op->func_module = NULL;
++		op->func_annotations = NULL; // py3k
+ 
+ 		/* __module__: If module name is in globals, use it.
+ 		   Otherwise, use None.
+@@ -329,6 +331,137 @@
+ 	return 0;
+ }
+ 
++//////////////////////////////////////////////////////////////// py3k beg
++PyObject *
++PyFunction_GetKwDefaults(PyObject *op)
++{
++	if (!PyFunction_Check(op)) {
++		PyErr_BadInternalCall();
++		return NULL;
++	}
++	return ((PyFunctionObject *) op) -> func_kwdefaults;
++}
++
++int
++PyFunction_SetKwDefaults(PyObject *op, PyObject *defaults)
++{
++	if (!PyFunction_Check(op)) {
++		PyErr_BadInternalCall();
++		return -1;
++	}
++	if (defaults == Py_None)
++		defaults = NULL;
++	else if (defaults && PyDict_Check(defaults)) {
++		Py_INCREF(defaults);
++	}
++	else {
++		PyErr_SetString(PyExc_SystemError,
++				"non-dict keyword only default args");
++		return -1;
++	}
++	Py_XDECREF(((PyFunctionObject *)op) -> func_kwdefaults);
++	((PyFunctionObject *) op) -> func_kwdefaults = defaults;
++	return 0;
++}
++
++PyObject *
++PyFunction_GetAnnotations(PyObject *op)
++{
++	if (!PyFunction_Check(op)) {
++		PyErr_BadInternalCall();
++		return NULL;
++	}
++	return ((PyFunctionObject *) op) -> func_annotations;
++}
++
++int
++PyFunction_SetAnnotations(PyObject *op, PyObject *annotations)
++{
++	if (!PyFunction_Check(op)) {
++		PyErr_BadInternalCall();
++		return -1;
++	}
++	if (annotations == Py_None)
++		annotations = NULL;
++	else if (annotations && PyDict_Check(annotations)) {
++		Py_INCREF(annotations);
++	}
++	else {
++		PyErr_SetString(PyExc_SystemError,
++				"non-dict annotations");
++		return -1;
++	}
++	Py_XDECREF(((PyFunctionObject *)op) -> func_annotations);
++	((PyFunctionObject *) op) -> func_annotations = annotations;
++	return 0;
++}
++
++static PyObject *
++func_get_kwdefaults(PyFunctionObject *op)
++{
++	if (op->func_kwdefaults == NULL) {
++		Py_INCREF(Py_None);
++		return Py_None;
++	}
++	Py_INCREF(op->func_kwdefaults);
++	return op->func_kwdefaults;
++}
++
++static int
++func_set_kwdefaults(PyFunctionObject *op, PyObject *value)
++{
++	PyObject *tmp;
++
++	if (value == Py_None)
++		value = NULL;
++	/* Legal to del f.func_kwdefaults.
++	 * Can only set func_kwdefaults to NULL or a dict. */
++	if (value != NULL && !PyDict_Check(value)) {
++		PyErr_SetString(PyExc_TypeError,
++			"__kwdefaults__ must be set to a dict object");
++		return -1;
++	}
++	tmp = op->func_kwdefaults;
++	Py_XINCREF(value);
++	op->func_kwdefaults = value;
++	Py_XDECREF(tmp);
++	return 0;
++}
++
++static PyObject *
++func_get_annotations(PyFunctionObject *op)
++{
++	if (op->func_annotations == NULL) {
++		op->func_annotations = PyDict_New();
++		if (op->func_annotations == NULL)
++			return NULL;
++	}
++	Py_INCREF(op->func_annotations);
++	return op->func_annotations;
++}
++
++static int
++func_set_annotations(PyFunctionObject *op, PyObject *value)
++{
++	PyObject *tmp;
++
++	if (value == Py_None)
++		value = NULL;
++	/* Legal to del f.func_annotations.
++	 * Can only set func_annotations to NULL (through C api)
++	 * or a dict. */
++	if (value != NULL && !PyDict_Check(value)) {
++		PyErr_SetString(PyExc_TypeError,
++			"__annotations__ must be set to a dict object");
++		return -1;
++	}
++	tmp = op->func_annotations;
++	Py_XINCREF(value);
++	op->func_annotations = value;
++	Py_XDECREF(tmp);
++	return 0;
++}
++
+ static PyGetSetDef func_getsetlist[] = {
+         {"func_code", (getter)func_get_code, (setter)func_set_code},
+         {"__code__", (getter)func_get_code, (setter)func_set_code},
+@@ -340,8 +473,11 @@
+ 	{"__dict__", (getter)func_get_dict, (setter)func_set_dict},
+ 	{"func_name", (getter)func_get_name, (setter)func_set_name},
+ 	{"__name__", (getter)func_get_name, (setter)func_set_name},
++	{"__kwdefaults__", (getter)func_get_kwdefaults, (setter)func_set_kwdefaults}, // py3k
++	{"__annotations__", (getter)func_get_annotations, (setter)func_set_annotations}, // py3k
+ 	{NULL} /* Sentinel */
+ };
++//////////////////////////////////////////////////////////////// py3k end
+ 
+ PyDoc_STRVAR(func_doc,
+ "function(code, globals[, name[, argdefs[, closure]]])\n\
+@@ -459,6 +595,8 @@
+ 	Py_XDECREF(op->func_doc);
+ 	Py_XDECREF(op->func_dict);
+ 	Py_XDECREF(op->func_closure);
++	Py_XDECREF(op->func_kwdefaults); // py3k
++	Py_XDECREF(op->func_annotations); // py3k
+ 	PyObject_GC_Del(op);
+ }
+ 
+@@ -481,6 +619,8 @@
+ 	Py_VISIT(f->func_name);
+ 	Py_VISIT(f->func_dict);
+ 	Py_VISIT(f->func_closure);
++	Py_VISIT(f->func_kwdefaults); // py3k
++	Py_VISIT(f->func_annotations); // py3k
+ 	return 0;
+ }
+ 
+@@ -526,7 +666,7 @@
+ 		PyFunction_GET_GLOBALS(func), (PyObject *)NULL,
+ 		&PyTuple_GET_ITEM(arg, 0), PyTuple_Size(arg),
+ 		k, nk, d, nd,
+-		PyFunction_GET_CLOSURE(func));
++		func); // py3k - replace func->closure w/ func
+ 
+ 	if (k != NULL)
+ 		PyMem_DEL(k);
+diff -Naur src/Objects/typeobject.c patched/Objects/typeobject.c
+--- src/Objects/typeobject.c	2008-08-26 15:42:08.000000000 -0700
++++ patched/Objects/typeobject.c	2008-12-02 01:38:14.714021000 -0800
+@@ -6553,18 +6553,84 @@
+ 	}
+ }
+ 
++//////////////////////////////////////////////////////////////// py3k beg - PEP3135  New Super
++#include "frameobject.h"
++
+ static int
+ super_init(PyObject *self, PyObject *args, PyObject *kwds)
+ {
+ 	superobject *su = (superobject *)self;
+-	PyTypeObject *type;
++	PyTypeObject *type = NULL;
+ 	PyObject *obj = NULL;
+ 	PyTypeObject *obj_type = NULL;
+ 
+ 	if (!_PyArg_NoKeywords("super", kwds))
+ 		return -1;
+-	if (!PyArg_ParseTuple(args, "O!|O:super", &PyType_Type, &type, &obj))
++	if (!PyArg_ParseTuple(args, "|O!O:super", &PyType_Type, &type, &obj))
+ 		return -1;
++
++        if (type == NULL) {
++		/* Call super(), without args -- fill in from __class__
++		   and first local variable on the stack. */
++		PyFrameObject *f = PyThreadState_GET()->frame;
++		PyCodeObject *co = f->f_code;
++		int i, n;
++		if (co == NULL) {
++			PyErr_SetString(PyExc_SystemError,
++					"super(): no code object");
++			return -1;
++		}
++		if (co->co_argcount == 0) {
++			PyErr_SetString(PyExc_SystemError,
++					"super(): no arguments");
++			return -1;
++		}
++		obj = f->f_localsplus[0];
++		if (obj == NULL) {
++			PyErr_SetString(PyExc_SystemError,
++					"super(): arg[0] deleted");
++			return -1;
++		}
++		if (co->co_freevars == NULL)
++			n = 0;
++		else {
++			assert(PyTuple_Check(co->co_freevars));
++			n = PyTuple_GET_SIZE(co->co_freevars);
++		}
++		for (i = 0; i < n; i++) {
++			PyObject *name = PyTuple_GET_ITEM(co->co_freevars, i);
++			assert(PyString_Check(name)); // py3k
++                        if (!strcmp(PyString_AS_STRING(name), "__class__")) { // py3k
++				Py_ssize_t index = co->co_nlocals + 
++					PyTuple_GET_SIZE(co->co_cellvars) + i;
++				PyObject *cell = f->f_localsplus[index];
++				if (cell == NULL || !PyCell_Check(cell)) {
++					PyErr_SetString(PyExc_SystemError,
++					  "super(): bad __class__ cell");
++					return -1;
++				}
++				type = (PyTypeObject *) PyCell_GET(cell);
++				if (type == NULL) {
++					PyErr_SetString(PyExc_SystemError,
++					  "super(): empty __class__ cell");
++					return -1;
++				}
++				if (!PyType_Check(type)) {
++				    PyErr_Format(PyExc_SystemError,
++				      "super(): __class__ is not a type (%s)",
++				      Py_TYPE(type)->tp_name);
++				    return -1;
++				}
++				break;
++			}
++		}
++		if (type == NULL) {
++			PyErr_SetString(PyExc_SystemError,
++					"super(): __class__ cell not found");
++			return -1;
++		}
++        }
++
+ 	if (obj == Py_None)
+ 		obj = NULL;
+ 	if (obj != NULL) {
+@@ -6581,13 +6647,20 @@
+ }
+ 
+ PyDoc_STRVAR(super_doc,
++"super() -> same as super(__class__, <first argument>)\n"
+ "super(type) -> unbound super object\n"
+ "super(type, obj) -> bound super object; requires isinstance(obj, type)\n"
+ "super(type, type2) -> bound super object; requires issubclass(type2, type)\n"
+ "Typical use to call a cooperative superclass method:\n"
+ "class C(B):\n"
+ "    def meth(self, arg):\n"
+-"	 super(C, self).meth(arg)");
++"	 super().meth(arg)\n"
++"This works for class methods too:\n"
++"class C(B):\n"
++"    @classmethod\n"
++"    def cmeth(cls, arg):\n"
++"	 super().cmeth(arg)\n");
++//////////////////////////////////////////////////////////////// py3k end
+ 
+ static int
+ super_traverse(PyObject *self, visitproc visit, void *arg)
+diff -Naur src/Python/ceval.c patched/Python/ceval.c
+--- src/Python/ceval.c	2008-07-25 15:13:52.000000000 -0700
++++ patched/Python/ceval.c	2008-12-01 23:52:35.879499000 -0800
+@@ -490,6 +490,39 @@
+ 	return 0;
+ }
+ 
++//////////////////////////////////////////////////////////////// py3k beg - header
++// new opcodes
++#define py3k_SET_ADD 17 // 17 in py3k
++#define py3k_STORE_LOCALS 69 // 69 in py3k
++#define py3k_LOAD_BUILD_CLASS 34 // 71 in py3k
++#define py3k_MAKE_BYTES 35 // 85 in py3k
++#define py3k_POP_EXCEPT 36 // 89 in py3k
++#define py3k_WITH_CLEANUP 37 // 81 in py2x - replace WITH_CLEANUP
++#define py3k_END_FINALLY 38 // 88 in py2x - replace END_FINALLY
++#define py3k_UNPACK_EX 94 // 94 in py3k
++#define py3k_BUILD_SET 192 // 104 in py3k
++#define py3k_MAKE_FUNCTION 193 // 132 in py2x - replace MAKE_FUNCTION
++#define EXCEPT_HANDLER 257
++#define PyLong_AS_LONG(op) PyLong_AsLong(op)
++#define UNWIND_EXCEPT_HANDLER(b) \
++	{ \
++		PyObject *type, *value, *traceback; \
++		assert(STACK_LEVEL() >= (b)->b_level + 3); \
++		while (STACK_LEVEL() > (b)->b_level + 3) { \
++			value = POP(); \
++			Py_XDECREF(value); \
++		} \
++		type = tstate->exc_type; \
++		value = tstate->exc_value; \
++		traceback = tstate->exc_traceback; \
++		tstate->exc_type = POP(); \
++		tstate->exc_value = POP(); \
++		tstate->exc_traceback = POP(); \
++		Py_XDECREF(type); \
++		Py_XDECREF(value); \
++		Py_XDECREF(traceback); \
++	}
++
+ /* Status code for main loop (reason for stack unwind) */
+ enum why_code {
+ 		WHY_NOT =	0x0001,	/* No error */
+@@ -498,11 +531,13 @@
+ 		WHY_RETURN =	0x0008,	/* 'return' statement */
+ 		WHY_BREAK =	0x0010,	/* 'break' statement */
+ 		WHY_CONTINUE =	0x0020,	/* 'continue' statement */
+-		WHY_YIELD =	0x0040	/* 'yield' operator */
++		WHY_YIELD =	0x0040,	/* 'yield' operator */
++		WHY_SILENCED =	0x0080,	/* Exception silenced by 'with' */
+ };
+ 
+ static enum why_code do_raise(PyObject *, PyObject *, PyObject *);
+-static int unpack_iterable(PyObject *, int, PyObject **);
++static int unpack_iterable(PyObject *, int, int, PyObject **);
++//////////////////////////////////////////////////////////////// py3k end
+ 
+ /* for manipulating the thread switch and periodic "stuff" - used to be
+    per thread, now just a pair o' globals */
+@@ -950,6 +985,260 @@
+ 
+ 		/* case STOP_CODE: this is an error! */
+ 
++		//////////////////////////////////////////////////////////////// py3k beg - add new opcodes here
++		case py3k_SET_ADD:
++			w = POP();
++			v = POP();
++			err = PySet_Add(v, w);
++			Py_DECREF(v);
++			Py_DECREF(w);
++			if (err == 0) {
++				PREDICT(JUMP_ABSOLUTE);
++				continue;
++			}
++			break;
++
++		case py3k_STORE_LOCALS:
++			x = POP();
++			v = f->f_locals;
++			Py_XDECREF(v);
++			f->f_locals = x;
++			continue;
++
++		case py3k_LOAD_BUILD_CLASS:
++			x = PyDict_GetItemString(f->f_builtins,
++						 "__build_class__");
++			if (x == NULL) {
++				PyErr_SetString(PyExc_ImportError,
++						"__build_class__ not found");
++				break;
++			}
++			Py_INCREF(x);
++			PUSH(x);
++			break;
++
++		// case py3k_MAKE_BYTES - unused
++
++		case py3k_POP_EXCEPT:
++			{
++				PyTryBlock *b = PyFrame_BlockPop(f);
++				if (b->b_type != EXCEPT_HANDLER) {
++					PyErr_SetString(PyExc_SystemError,
++						"popped block is not an except handler");
++					why = WHY_EXCEPTION;
++					break;
++				}
++				UNWIND_EXCEPT_HANDLER(b);
++			}
++			continue;
++
++		case py3k_WITH_CLEANUP:
++		{
++			/* At the top of the stack are 1-3 values indicating
++			   how/why we entered the finally clause:
++			   - TOP = None
++			   - (TOP, SECOND) = (WHY_{RETURN,CONTINUE}), retval
++			   - TOP = WHY_*; no retval below it
++			   - (TOP, SECOND, THIRD) = exc_info()
++			   Below them is EXIT, the context.__exit__ bound method.
++			   In the last case, we must call
++			     EXIT(TOP, SECOND, THIRD)
++			   otherwise we must call
++			     EXIT(None, None, None)
++
++			   In all cases, we remove EXIT from the stack, leaving
++			   the rest in the same order.
++
++			   In addition, if the stack represents an exception,
++			   *and* the function call returns a 'true' value, we
++			   "zap" this information, to prevent END_FINALLY from
++			   re-raising the exception.  (But non-local gotos
++			   should still be resumed.)
++			*/
++
++			PyObject *exit_func = POP();
++			u = TOP();
++			if (u == Py_None) {
++				v = w = Py_None;
++			}
++			else if (PyLong_Check(u)) {
++				u = v = w = Py_None;
++			}
++			else {
++				v = SECOND();
++				w = THIRD();
++			}
++			/* XXX Not the fastest way to call it... */
++			x = PyObject_CallFunctionObjArgs(exit_func, u, v, w,
++							 NULL);
++			Py_DECREF(exit_func);
++			if (x == NULL)
++				break; /* Go to error exit */
++			if (u != Py_None && PyObject_IsTrue(x)) {
++				/* There was an exception and a True return */
++				STACKADJ(-2);
++				SET_TOP(PyLong_FromLong((long) WHY_SILENCED));
++				Py_DECREF(u);
++				Py_DECREF(v);
++				Py_DECREF(w);
++			}
++			Py_DECREF(x);
++			PREDICT(END_FINALLY);
++			break;
++		}
++
++		case py3k_END_FINALLY:
++			v = POP();
++			if (PyLong_Check(v)) {
++				why = (enum why_code) PyLong_AS_LONG(v);
++				assert(why != WHY_YIELD);
++				if (why == WHY_RETURN ||
++				    why == WHY_CONTINUE)
++					retval = POP();
++				if (why == WHY_SILENCED) {
++					/* An exception was silenced by 'with', we must
++					manually unwind the EXCEPT_HANDLER block which was
++					created when the exception was caught, otherwise
++					the stack will be in an inconsistent state. */
++					PyTryBlock *b = PyFrame_BlockPop(f);
++					if (b->b_type != EXCEPT_HANDLER) {
++						PyErr_SetString(PyExc_SystemError,
++							"popped block is not an except handler");
++						why = WHY_EXCEPTION;
++					}
++					else {
++						UNWIND_EXCEPT_HANDLER(b);
++						why = WHY_NOT;
++					}
++				}
++			}
++			else if (PyExceptionClass_Check(v)) {
++				w = POP();
++				u = POP();
++				PyErr_Restore(v, w, u);
++				why = WHY_RERAISE;
++				break;
++			}
++			else if (v != Py_None) {
++				PyErr_SetString(PyExc_SystemError,
++					"'finally' pops bad exception");
++				why = WHY_EXCEPTION;
++			}
++			Py_DECREF(v);
++			break;
++
++		case py3k_UNPACK_EX:
++		{
++			int totalargs = 1 + (oparg & 0xFF) + (oparg >> 8);
++			v = POP();
++
++			if (unpack_iterable(v, oparg & 0xFF, oparg >> 8,
++					    stack_pointer + totalargs)) {
++				stack_pointer += totalargs;
++			} else {
++				why = WHY_EXCEPTION;
++			}
++			Py_DECREF(v);
++			break;
++		}
++
++		case py3k_BUILD_SET:
++			x = PySet_New(NULL);
++			if (x != NULL) {
++				for (; --oparg >= 0;) {
++					w = POP();
++					if (err == 0)
++						err = PySet_Add(x, w);
++					Py_DECREF(w);
++				}
++				if (err != 0) {
++					Py_DECREF(x);
++					break;
++				}
++				PUSH(x);
++				continue;
++			}
++			break;
++
++		case py3k_MAKE_FUNCTION:
++		{
++		    int posdefaults = oparg & 0xff;
++		    int kwdefaults = (oparg>>8) & 0xff;
++		    int num_annotations = (oparg >> 16) & 0x7fff;
++
++			v = POP(); /* code object */
++			x = PyFunction_New(v, f->f_globals);
++			Py_DECREF(v);
++
++			if (x != NULL && opcode == MAKE_CLOSURE) {
++				v = POP();
++				err = PyFunction_SetClosure(x, v);
++				Py_DECREF(v);
++			}
++
++			if (x != NULL && num_annotations > 0) {
++				Py_ssize_t name_ix;
++				u = POP(); /* names of args with annotations */
++				v = PyDict_New();
++				if (v == NULL) {
++					Py_DECREF(x);
++					x = NULL;
++					break;
++				}
++				name_ix = PyTuple_Size(u);
++				assert(num_annotations == name_ix+1);
++				while (name_ix > 0) {
++					--name_ix;
++					t = PyTuple_GET_ITEM(u, name_ix);
++					w = POP();
++					/* XXX(nnorwitz): check for errors */
++					PyDict_SetItem(v, t, w);
++					Py_DECREF(w);
++				}
++
++				err = PyFunction_SetAnnotations(x, v);
++				Py_DECREF(v);
++				Py_DECREF(u);
++			}
++
++			/* XXX Maybe this should be a separate opcode? */
++			if (x != NULL && posdefaults > 0) {
++				v = PyTuple_New(posdefaults);
++				if (v == NULL) {
++					Py_DECREF(x);
++					x = NULL;
++					break;
++				}
++				while (--posdefaults >= 0) {
++					w = POP();
++					PyTuple_SET_ITEM(v, posdefaults, w);
++				}
++				err = PyFunction_SetDefaults(x, v);
++				Py_DECREF(v);
++			}
++			if (x != NULL && kwdefaults > 0) {
++				v = PyDict_New();
++				if (v == NULL) {
++					Py_DECREF(x);
++					x = NULL;
++					break;
++				}
++				while (--kwdefaults >= 0) {
++					w = POP(); /* default value */
++					u = POP(); /* kw only arg name */
++					/* XXX(nnorwitz): check for errors */
++					PyDict_SetItem(v, u, w);
++					Py_DECREF(w);
++					Py_DECREF(u);
++				}
++				err = PyFunction_SetKwDefaults(x, v);
++				Py_DECREF(v);
++			}
++			PUSH(x);
++			break;
++		}
++		//////////////////////////////////////////////////////////////// py3k end
++
+ 		case NOP:
+ 			goto fast_next_opcode;
+ 
+@@ -1812,7 +2101,7 @@
+ 					Py_INCREF(w);
+ 					PUSH(w);
+ 				}
+-			} else if (unpack_iterable(v, oparg,
++			} else if (unpack_iterable(v, oparg, -1, // py3k
+ 						   stack_pointer + oparg)) {
+ 				stack_pointer += oparg;
+ 			} else {
+@@ -2712,6 +3001,13 @@
+ 	   PyObject **args, int argcount, PyObject **kws, int kwcount,
+ 	   PyObject **defs, int defcount, PyObject *closure)
+ {
++	// py3k beg
++	PyObject *kwdefs = NULL; // recall fast_function passed func instead of func->closure
++	if (closure != NULL && !PyTuple_CheckExact(closure)) {
++		kwdefs = PyFunction_GET_KW_DEFAULTS(closure);
++		closure = PyFunction_GET_CLOSURE(closure);
++	}
++	// py3k end
+ 	register PyFrameObject *f;
+ 	register PyObject *retval = NULL;
+ 	register PyObject **fastlocals, **freevars;
+@@ -2733,7 +3029,7 @@
+ 	fastlocals = f->f_localsplus;
+ 	freevars = f->f_localsplus + co->co_nlocals;
+ 
+-	if (co->co_argcount > 0 ||
++	if (co->co_argcount > 0 || co->co_kwonlyargcount > 0 || // py3k
+ 	    co->co_flags & (CO_VARARGS | CO_VARKEYWORDS)) {
+ 		int i;
+ 		int n = argcount;
+@@ -2742,7 +3038,7 @@
+ 			kwdict = PyDict_New();
+ 			if (kwdict == NULL)
+ 				goto fail;
+-			i = co->co_argcount;
++			i = co->co_argcount + co->co_kwonlyargcount; // py3k
+ 			if (co->co_flags & CO_VARARGS)
+ 				i++;
+ 			SETLOCAL(i, kwdict);
+@@ -2771,7 +3067,7 @@
+ 			u = PyTuple_New(argcount - n);
+ 			if (u == NULL)
+ 				goto fail;
+-			SETLOCAL(co->co_argcount, u);
++			SETLOCAL(co->co_argcount + co->co_kwonlyargcount, u); // py3k
+ 			for (i = n; i < argcount; i++) {
+ 				x = args[i];
+ 				Py_INCREF(x);
+@@ -2792,13 +3088,13 @@
+ 			/* Speed hack: do raw pointer compares. As names are
+ 			   normally interned this should almost always hit. */
+ 			co_varnames = PySequence_Fast_ITEMS(co->co_varnames);
+-			for (j = 0; j < co->co_argcount; j++) {
++			for (j = 0; j < co->co_argcount + co->co_kwonlyargcount; j++) { // py3k
+ 				PyObject *nm = co_varnames[j];
+ 				if (nm == keyword)
+ 					goto kw_found;
+ 			}
+ 			/* Slow fallback, just in case */
+-			for (j = 0; j < co->co_argcount; j++) {
++			for (j = 0; j < co->co_argcount + co->co_kwonlyargcount; j++) { // py3k
+ 				PyObject *nm = co_varnames[j];
+ 				int cmp = PyObject_RichCompareBool(
+ 					keyword, nm, Py_EQ);
+@@ -2810,7 +3106,7 @@
+ 			/* Check errors from Compare */
+ 			if (PyErr_Occurred())
+ 				goto fail;
+-			if (j >= co->co_argcount) {
++			if (j >= co->co_argcount + co->co_kwonlyargcount) { // py3k
+ 				if (kwdict == NULL) {
+ 					PyErr_Format(PyExc_TypeError,
+ 					    "%.200s() got an unexpected "
+@@ -2835,6 +3131,30 @@
+ 			Py_INCREF(value);
+ 			SETLOCAL(j, value);
+ 		}
++		// py3k beg - PEP3102  Keyword-Only Arguments
++		if (co->co_kwonlyargcount > 0) {
++			for (i = co->co_argcount;
++			     i < co->co_argcount + co->co_kwonlyargcount;
++			     i++) {
++				PyObject *name, *def;
++				if (GETLOCAL(i) != NULL)
++					continue;
++				name = PyTuple_GET_ITEM(co->co_varnames, i);
++				def = NULL;
++				if (kwdefs != NULL)
++					def = PyDict_GetItem(kwdefs, name);
++				if (def != NULL) {
++					Py_INCREF(def);
++					SETLOCAL(i, def);
++					continue;
++				}
++				PyErr_Format(PyExc_TypeError,
++					"%.200s() needs keyword-only argument %s", // py3k
++					PyString_AsString(co->co_name), PyString_AsString(name)); // py3k
++				goto fail;
++			}
++		}
++		// py3k end
+ 		if (argcount < co->co_argcount) {
+ 			int m = co->co_argcount - defcount;
+ 			for (i = argcount; i < m; i++) {
+@@ -2880,7 +3200,7 @@
+ 		char *cellname, *argname;
+ 		PyObject *c;
+ 
+-		nargs = co->co_argcount;
++		nargs = co->co_argcount + co->co_kwonlyargcount; // py3k
+ 		if (co->co_flags & CO_VARARGS)
+ 			nargs++;
+ 		if (co->co_flags & CO_VARKEYWORDS)
+@@ -3219,12 +3539,15 @@
+ /* Iterate v argcnt times and store the results on the stack (via decreasing
+    sp).  Return 1 for success, 0 if error. */
+ 
++
+ static int
+-unpack_iterable(PyObject *v, int argcnt, PyObject **sp)
++unpack_iterable(PyObject *v, int argcnt, int argcntafter, PyObject **sp)
+ {
+-	int i = 0;
++	int i = 0, j = 0;
++	Py_ssize_t ll = 0;
+ 	PyObject *it;  /* iter(v) */
+ 	PyObject *w;
++	PyObject *l = NULL; /* variable list */
+ 
+ 	assert(v != NULL);
+ 
+@@ -3246,23 +3569,49 @@
+ 		*--sp = w;
+ 	}
+ 
+-	/* We better have exhausted the iterator now. */
+-	w = PyIter_Next(it);
+-	if (w == NULL) {
+-		if (PyErr_Occurred())
+-			goto Error;
+-		Py_DECREF(it);
+-		return 1;
++	if (argcntafter == -1) {
++		/* We better have exhausted the iterator now. */
++		w = PyIter_Next(it);
++		if (w == NULL) {
++			if (PyErr_Occurred())
++				goto Error;
++			Py_DECREF(it);
++			return 1;
++		}
++		Py_DECREF(w);
++		PyErr_SetString(PyExc_ValueError, "too many values to unpack");
++		goto Error;
++	}
++
++	l = PySequence_List(it);
++	if (l == NULL)
++		goto Error;
++	*--sp = l;
++	i++;
++
++	ll = PyList_GET_SIZE(l);
++	if (ll < argcntafter) {
++		PyErr_Format(PyExc_ValueError, "need more than %zd values to unpack",
++			     argcnt + ll);
++		goto Error;
+ 	}
+-	Py_DECREF(w);
+-	PyErr_SetString(PyExc_ValueError, "too many values to unpack");
+-	/* fall through */
++
++	/* Pop the "after-variable" args off the list. */
++	for (j = argcntafter; j > 0; j--, i++) {
++		*--sp = PyList_GET_ITEM(l, ll - j);
++	}
++	/* Resize the list. */
++	Py_SIZE(l) = ll - argcntafter;
++	Py_DECREF(it);
++	return 1;
++
+ Error:
+ 	for (; i > 0; i--, sp++)
+ 		Py_DECREF(*sp);
+ 	Py_XDECREF(it);
+ 	return 0;
+ }
++// py3k end
+ 
+ 
+ #ifdef LLTRACE
+@@ -3736,7 +4085,7 @@
+ 
+ 	PCALL(PCALL_FUNCTION);
+ 	PCALL(PCALL_FAST_FUNCTION);
+-	if (argdefs == NULL && co->co_argcount == n && nk==0 &&
++	if (argdefs == NULL && co->co_argcount == n && co->co_kwonlyargcount == 0 && nk==0 && // py3k
+ 	    co->co_flags == (CO_OPTIMIZED | CO_NEWLOCALS | CO_NOFREE)) {
+ 		PyFrameObject *f;
+ 		PyObject *retval = NULL;
+@@ -3775,7 +4124,7 @@
+ 	return PyEval_EvalCodeEx(co, globals,
+ 				 (PyObject *)NULL, (*pp_stack)-n, na,
+ 				 (*pp_stack)-2*nk, nk, d, nd,
+-				 PyFunction_GET_CLOSURE(func));
++				 func); // py3k - replace func->closure w/ func
+ }
+ 
+ static PyObject *
+diff -Naur src/Python/pythonrun.c patched/Python/pythonrun.c
+--- src/Python/pythonrun.c	2008-08-23 22:04:52.000000000 -0700
++++ patched/Python/pythonrun.c	2008-11-17 23:28:09.731330000 -0800
+@@ -353,6 +353,7 @@
+ Py_Initialize(void)
+ {
+ 	Py_InitializeEx(1);
++	PyRun_SimpleString("import py3to2_init"); // py3k
+ }
+ 
+ 
