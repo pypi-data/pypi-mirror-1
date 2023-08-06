@@ -1,0 +1,189 @@
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"
+      lang="en"
+      metal:use-macro="here/main_template/macros/master"
+      i18n:domain="plone">
+  <body>
+    <div metal:fill-slot="main">
+      <div metal:define-macro="body">
+
+        <div i18n:domain="listen">
+
+        <div id="listen-actions" class="selfclear">
+            <form name="search" method="get"
+                  id="search-form"
+                  tal:attributes="action string:${context/absolute_url}/search">
+              <input type="text" name="search_text"
+                     tal:attributes="value request/search_text|nothing" />
+              <input class="context" type="submit" name="submit" value="Search" />
+            </form>
+            <a class="listen-invite-members" href="invite_members">
+              <button type="button" class="standalone">Invite new members</button>
+            </a>
+        </div>
+
+        <div id="navigation" class="enableFormTabbing">
+
+          <!-- manage allowed senders -->
+          <fieldset id="fieldset-detailsview">
+              <legend id="fieldsetlegend-detailsview">Current Members</legend>
+              <form name="manage-form"
+                    id="manage-form"
+                    tal:condition="view/allowed_senders_data"
+                    tal:attributes="action request/ACTUAL_URL"
+                    tal:define="errors view/errors|nothing"
+                    method="post">
+
+                  <table id="members-listing">
+                    <tr>
+                      <th i18n:translate="">Address/User ID</th>
+                      <th i18n:translate="">Position</th>
+                      <tal:management_options condition="view/can_manage_membership">
+                      <th i18n:translate="">Subscribed</th>
+                      <th i18n:translate="">Remove</th>
+                      </tal:management_options>
+                    </tr>
+                    
+                    <tr tal:repeat="user view/allowed_senders_data"
+                        tal:attributes="class python:repeat['user'].odd() and 'odd' or 'even'">
+                      <!-- Address/User ID -->
+                      <tal:member condition="python:not view.is_email(user)">
+                        <td>
+                        <a tal:define="ms context/portal_membership;
+                                       href python:ms.getHomeUrl(user)"
+                           tal:omit-tag="not:href"
+                           tal:content="user"
+                           tal:attributes="title user;
+                                           href href" />
+                        </td>
+                      </tal:member>
+                      <td tal:condition="python:view.is_email(user)" tal:content="structure python:view.obfct_de(user)" />
+                      <!-- position -->
+                      <td>
+                        <tal:position_select condition="python:view.show_position_menu(user)">
+                          <select tal:attributes="name python:'position_'+user">
+                            <option value="member"
+                                    tal:attributes="selected python:not view.is_manager(user) and 'selected' or nothing">Member</option>
+                            <option value="manager"
+                                    tal:attributes="selected python:view.is_manager(user) and 'selected' or nothing">Manager</option>
+                          </select>
+                        </tal:position_select>
+                        <span tal:condition="python:not view.show_position_menu(user)"
+                              tal:content="python:view.user_position(user)">
+                        </span>
+                      </td>
+                      <tal:management_options condition="view/can_manage_membership">
+                      <!-- subscribed -->
+                      <td tal:define="subscribed python:view.is_subscribed(user) and 1 or 0">
+                        <input type="checkbox" tal:attributes="name python:'subscribed_'+user; checked subscribed" />
+                        <input type="hidden"
+                               tal:condition="subscribed"
+                               tal:attributes="name python:'wassubscribed_'+user"
+                               />
+                      </td>
+                      <!-- remove-->
+                      <td>
+                        <input type="checkbox" tal:attributes="name python:'remove_'+user" />
+                      </td>
+                      </tal:management_options>
+                      <!--
+                      <td>
+                        <span tal:replace="python: view.pending_status(user) " />
+                      </td>
+                      -->
+		    </tr>
+
+		  </table>
+
+          <input class="context" type="submit" name="manage_senders" i18n:attributes="value"
+                 tal:condition="view/can_manage_membership"
+                 value="save changes" />
+               
+		<p tal:content="python: errors" />
+	      </form>
+              <div tal:condition="not:view/allowed_senders_data">
+                <p>This list does not have any members.</p>
+              </div>
+	    </fieldset>
+	    
+	    <!-- pending moderation -->
+	    <fieldset id="fieldset-pendingmembermoderationview"
+              tal:define="pending view/pending_member_posts"
+              tal:condition="view/can_manage_membership">
+	      <legend id="fieldsetlegend-pendingmembermoderationview">
+		Pending Members
+        <span tal:condition="pending"
+              tal:content="python:'(%s)' % len(pending)" />
+
+		<div tal:condition="not:pending">
+		  There are no new users pending moderation.
+		</div>
+
+		<form name="moderate-members-form"
+		      method="post"
+		      id="moderate-members-form"
+		      tal:attributes="action request/ACTUAL_URL"
+		      tal:condition="pending">
+
+		<table class="listen-moderation-table">
+		  <tr>
+		    <th>Email</th>
+		    <th>Post</th>
+		    <th>Accept</th>
+		    <th>Deny</th>
+		  </tr>
+
+		      <!-- row for the member -->
+              <tr tal:repeat="postdata pending"
+                  tal:attributes="class python:repeat['postdata'].odd() and 'odd' or 'even'">
+                <tal:vars define="email postdata/email; posts postdata/posts">
+            <td>
+              <a tal:attributes="href string:mailto:${email}"
+			     tal:content="email">blah@blah.com</a>
+			</td>
+			<td class="listen-moderation-table-post">
+			  <dl class="collapsible inline collapsedOnLoad">
+
+                <tal:post repeat="post posts">
+
+			      <dt class="collapsibleHeader"
+				  tal:content="python:post['header'].get('subject','No Subject')">
+			        Subject
+			      </dt>
+			      <dd class="collapsibleContent">
+			        <pre tal:content="post/body">
+			        Post Body
+			        </pre>
+			      </dd>
+                </tal:post>
+			  </dl>
+			</td>
+			<td>
+			  <input type="radio" 
+				 value="approve"
+				 tal:attributes="name
+                 string:moderate-user-${email}"/>
+			</td>
+			<td>
+			  <input type="radio"
+				 value="deny"
+				 tal:attributes="name
+                 string:moderate-user-${email}"/>
+			</td>
+            </tal:vars>
+		      </tr>
+		</table>
+
+		<input type="submit" class="context"
+		       name="pending_members"
+		       value="save changes"/>
+
+		</form>
+	      </legend>
+	    </fieldset>
+
+	  </div> <!-- navigation -->
+	</div>
+      </div>
+    </div>
+  </body>
+</html>
