@@ -1,0 +1,18 @@
+Introduction
+============
+
+This package provides a new portlet, the "True review list", and an associated
+view, @@true_review_list.
+
+Unlike the regular review list portlet and view, it takes the "Review portal
+content" permission into account, via a custom indexer for a catalog index
+called 'reviewerRolesAndUsers'. Thus, it will only show content for which
+the current user has this permission. The portlet can also be limited to only
+show certain workflow states (defaulting to 'pending') and types.
+
+Note that it does not use worklists directly, so if you are relying on custom
+per-workflow worklists, you should still use the default portlet.
+
+Installation requires Plone 3.3. You will not need to install a ZCML slug -
+just add it to your buildout's 'eggs' list or as a new requirement in the
+setup.py of your product.
