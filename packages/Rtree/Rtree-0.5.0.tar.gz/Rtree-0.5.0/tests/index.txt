@@ -1,0 +1,253 @@
+Testing Rtree
+================
+
+    >>> from rtree import index
+    >>> from rtree.index import Rtree
+
+Ensure libspatialindex version is >= 1.4.0
+    >>> index.sidx_version.split('.')[1] >= 4
+    True
+    
+Make an instance, index stored in memory
+    
+    >>> p = index.Property()
+    
+    >>> idx = index.Index(properties=p)
+    >>> idx
+    <rtree.index.Index object at 0x...>
+    
+Add 100 largish boxes randomly distributed over the domain
+    
+    >>> for i, coords in enumerate(boxes15):
+    ...     idx.add(i, coords)
+    
+    >>> hits = [n for n in idx.intersection((0, 0, 60, 60))]
+    >>> len(hits)
+    10
+    
+    >>> hits
+    [0L, 4L, 16L, 27L, 35L, 40L, 47L, 50L, 76L, 80L]
+
+Insert an object into the index that can be pickled 
+
+    >>> idx.insert(4321, (34.3776829412, 26.7375853734, 49.3776829412, 41.7375853734), obj=42)
+
+Fetch our straggler that contains a pickled object    
+    >>> hits = [n for n in idx.intersection((0, 0, 60, 60), objects=True)]
+    >>> for i in hits:
+    ...     if i.id == 4321:
+    ...         i.object
+    ...         i.bounds
+    42
+    [34.3776829412, 49.3776829412, 26.737585373400002, 41.737585373400002]
+
+Find the three items nearest to this one
+    >>> hits = [n for n in idx.nearest((0,0,10,10), 3)]
+    >>> hits
+    [76L, 48L, 19L]
+    >>> len(hits)
+    3
+    
+    >>> idx.bounds
+    [-186.673789279, 184.76138755599999, -96.717721818399994, 96.604369977800005]
+
+Delete index members
+
+    >>> for i, coords in enumerate(boxes15):
+    ...     idx.delete(i, coords)
+
+Delete our straggler too
+    >>> idx.delete(4321, (34.3776829412, 26.7375853734, 49.3776829412, 41.7375853734) )
+
+Check that we have deleted stuff
+
+    >>> hits = 0
+    >>> hits = [n for n in idx.intersection((0, 0, 60, 60))]
+    >>> len(hits)
+    0
+    
+#    >>> assert(idx.valid())
+
+Check that nearest returns *all* of the items that are nearby
+    >>> idx2 = Rtree()
+    >>> idx2
+    <rtree.index.Rtree object at 0x...>
+
+    >>> locs = [(14, 10, 14, 10), 
+    ...         (16, 10, 16, 10)]
+    
+    >>> for i, (minx, miny, maxx, maxy) in enumerate(locs):
+    ...        idx2.add(i, (minx, miny, maxx, maxy))
+
+    >>> sorted(idx2.nearest((15, 10, 15, 10), 1))
+    [0L, 1L]
+
+
+Check that nearest returns *all* of the items that are nearby (with objects)
+    >>> idx2 = Rtree()
+    >>> idx2
+    <rtree.index.Rtree object at 0x...>
+
+    >>> locs = [(14, 10, 14, 10), 
+    ...         (16, 10, 16, 10)]
+    
+    >>> for i, (minx, miny, maxx, maxy) in enumerate(locs):
+    ...        idx2.add(i, (minx, miny, maxx, maxy), obj=42)
+
+    >>> sorted([i.id for i in idx2.nearest((15, 10, 15, 10), 1, objects=True)])
+    [0L, 1L]
+
+
+
+    >>> idx2 = Rtree()
+    >>> idx2
+    <rtree.index.Rtree object at 0x...>
+            
+    >>> locs = [(2, 4), (6, 8), (10, 12), (11, 13), (15, 17), (13, 20)]
+    
+    >>> for i, (start, stop) in enumerate(locs):
+    ...        idx2.add(i, (start, 1, stop, 1))
+    
+    >>> sorted(idx2.nearest((13, 0, 20, 2), 1))
+    [3L, 4L, 5L]
+
+Default page size 4096
+
+    >>> idx3 = Rtree("defaultidx")
+    >>> for i, coords in enumerate(boxes15):
+    ...     idx3.add(i, coords)
+    >>> hits = [n for n in idx3.intersection((0, 0, 60, 60))]
+    >>> len(hits)
+    10
+
+Make sure to delete the index or the file is not flushed and it 
+will be invalid
+
+    >>> del idx3
+
+Page size 3
+
+    >>> idx4 = Rtree("pagesize3", pagesize=3)
+    >>> for i, coords in enumerate(boxes15):
+    ...     idx4.add(i, coords)
+    >>> hits = [n for n in idx4.intersection((0, 0, 60, 60))]
+    >>> len(hits)
+    10
+    
+    del idx4
+    
+Test invalid name
+
+    >>> inv = Rtree("bogus/foo")
+    Traceback (most recent call last):
+    ...
+    IOError: Unable to open file 'bogus/foo.idx' for index storage
+
+Load a persisted index
+
+    >>> import shutil
+    >>> _ = shutil.copy("defaultidx.dat", "testing.dat")
+    >>> _ = shutil.copy("defaultidx.idx", "testing.idx")
+
+    # >>> import pdb;pdb.set_trace()
+
+    >>> idx = Rtree("testing")
+    >>> hits = [n for n in idx.intersection((0, 0, 60, 60))]
+    >>> len(hits)
+    10
+
+Make a 3D index
+    >>> p = index.Property()
+    >>> p.dimension = 3
+    
+    >>> idx3d = index.Index(properties=p)
+    >>> idx3d
+    <rtree.index.Index object at 0x...>
+    
+    >>> idx3d.insert(1, (0, 0, 60, 60, 23.0, 42.0))
+    
+    >>> idx3d.intersection( (-1, -1, 62, 62, 22, 43))
+    [1L]
+
+Check that we can make an index with custom filename extensions
+
+    >>> p = index.Property()
+    >>> p.dat_extension = 'data'
+    >>> p.idx_extension = 'index'
+    
+    >>> idx_cust = Rtree('custom', properties=p)
+    >>> for i, coords in enumerate(boxes15):
+    ...     idx_cust.add(i, coords)
+    >>> hits = [n for n in idx_cust.intersection((0, 0, 60, 60))]
+    >>> len(hits)
+    10
+    
+    >>> del idx_cust
+    
+Reopen the index
+    >>> p2 = index.Property()
+    >>> p2.dat_extension = 'data'
+    >>> p2.idx_extension = 'index'
+    
+    >>> idx_cust2 = Rtree('custom', properties=p2)    
+    >>> hits = [n for n in idx_cust2.intersection((0, 0, 60, 60))]
+    >>> len(hits)
+    10
+    
+    >>> del idx_cust2
+
+Adding the same id twice does not overwrite existing data
+
+    >>> r = Rtree()
+    >>> r.add(1, (2, 2))
+    >>> r.add(1, (3, 3))
+    >>> r.intersection((0, 0, 5, 5))
+    [1L, 1L]
+
+A stream of data need that needs to be an iterator that will raise a 
+StopIteration.  It must be in the following form:
+
+(id, (minx, maxx, miny, maxy, minz, maxz, ..., ..., mink, maxk), object)
+
+The object can be None, but you must put a place holder of 'None' there.
+Because of the desire for kD support, we must not interleave the 
+coordinates when using a stream.
+
+    >>> p = index.Property()
+    >>> data = []
+    >>> for i, (minx, miny, maxx, maxy) in enumerate(boxes15):
+    ...        data.append((i, (minx, maxx, miny, maxy), 42))
+    >>> len(data)
+    100
+    >>> strm_idx = index.Rtree(data, properties = p)
+
+    >>> hits = [n for n in strm_idx.intersection((0, 0, 60, 60))]
+    >>> len(hits)
+    10
+    
+    >>> sorted(hits)
+    [0L, 4L, 16L, 27L, 35L, 40L, 47L, 50L, 76L, 80L]
+
+    >>> hits = [n for n in strm_idx.intersection((0, 0, 60, 60), objects=True)]
+    >>> len(hits)
+    10
+    
+    >>> hits[0].object
+    42
+
+Try streaming against a persisted index
+    >>> strm_idx = index.Rtree('streamed', data, properties = p)
+
+    >>> hits = [n for n in strm_idx.intersection((0, 0, 60, 60))]
+    >>> len(hits)
+    10
+    
+    >>> sorted(hits)
+    [0L, 4L, 16L, 27L, 35L, 40L, 47L, 50L, 76L, 80L]
+
+    >>> hits = [n for n in strm_idx.intersection((0, 0, 60, 60), objects=True)]
+    >>> len(hits)
+    10
+    
+    >>> hits[0].object
+    42
