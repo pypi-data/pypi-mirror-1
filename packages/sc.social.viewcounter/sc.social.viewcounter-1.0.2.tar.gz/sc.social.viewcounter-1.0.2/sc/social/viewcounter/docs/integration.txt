@@ -1,0 +1,61 @@
+Integration test
+================
+    
+    >>> from sc.social.viewcounter.browser import portlet as vcPortlet
+    >>> from zope.component import getUtility, getMultiAdapter
+    >>> from plone.portlets.interfaces import IPortletType
+    >>> from plone.portlets.interfaces import IPortletManager
+    >>> from plone.portlets.interfaces import IPortletRenderer
+    >>> self.loginAsPortalOwner()
+    >>> portal = self.portal
+    >>> wt = portal.portal_workflow
+
+First we create a Hello World document on the portal root :
+
+    >>> documentId = portal.invokeFactory(type_name='Document',
+    ...                                   id='hello_world',
+    ...                                   title='Hello World!')
+    >>> document = portal[documentId]
+    >>> wt.doActionFor(document,'publish')
+    >>> documentUID = document.UID()
+
+Still as Portal Owner we call the logger view (@@vc_view):
+
+    >>> document.restrictedTraverse('@@vc_view')()
+
+Now we ask for the report, that should give us only 1 access to our document:
+
+    >>> allTime = portal.restrictedTraverse('@@vc_reports').viewsAllTime()
+    >>> self.failUnless(allTime[0][3]==1)
+    >>> self.failUnless(documentUID==allTime[0][0])
+
+As an anonymous user, we access our logger view three more times:
+    
+    >>> self.logout()
+    >>> document.restrictedTraverse('@@vc_view')()
+    >>> document.restrictedTraverse('@@vc_view')()
+    >>> document.restrictedTraverse('@@vc_view')()
+
+And now the report should be slightly different:
+    
+    >>> allTime = portal.restrictedTraverse('@@vc_reports').viewsAllTime()
+    >>> self.failUnless(allTime[0][3]==4)
+    >>> self.failUnless(documentUID==allTime[0][0])
+
+Keyword Search
+**************
+In order to narrow our results it's possible to provide a dictionary to be used as keyword argument by the report view.
+
+To test it, we will populate the database with historical accesses:
+
+   >>> self.populateViewCounter()
+
+Now, we will ask for a ranking of contents tagged with as 'odd content':
+
+   >>> kw = {'Subject':['odd content']}
+   >>> allTimeOdd = portal.restrictedTraverse('@@vc_reports').viewsAllTime(**kw)
+
+Results will be a subset from the search for all contents:
+    
+    >>> allTime = portal.restrictedTraverse('@@vc_reports').viewsAllTime()
+    >>> self.failUnless(len(allTime)>len(allTimeOdd))
