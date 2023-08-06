@@ -1,0 +1,129 @@
+ZCML directives
+===============
+
+  >>> from zope.configuration.xmlconfig import xmlconfig, XMLConfig
+  >>> from StringIO import StringIO
+
+Load meta configuration.
+  
+  >>> import repoze.bfg.skins
+  >>> XMLConfig('meta.zcml', repoze.bfg.skins)()
+
+To keep the examples simple, we define a ZCML-template.
+  
+  >>> template = """\
+  ... <configure
+  ...     xmlns="http://namespaces.zope.org/zope"
+  ...     xmlns:bfg="http://namespaces.repoze.org/bfg">
+  ...   %s
+  ... </configure>"""
+
+  
+Registering a template directory
+--------------------------------
+
+The most simple registration makes templates available for any context
+and any request type.
+
+  >>> xmlconfig(StringIO(template % ("""\
+  ...   <bfg:templates
+  ...     directory="%s/tests/templates"
+  ...   />""" % path)))
+
+Let's set up a context and test request.
+
+  >>> from repoze.bfg.interfaces import IRequest
+  >>> from webob import Request
+  >>> request = Request({})
+  >>> interface.alsoProvides(request, IRequest)
+
+  >>> class Context(object):
+  ...     pass
+  >>> context = Context()
+
+The template directory contains two templates, "hello.pt" and
+"world.pt". We'll verify that corresponding views have been
+registered with the component architecture.
+
+  >>> from repoze.bfg.interfaces import IView
+  >>> print component.getMultiAdapter(
+  ...    (context, request), IView, name=u"hello")
+  200 OK
+  content-type: text/html; charset=UTF-8
+  Content-Length: ...
+  <BLANKLINE>
+  <html>
+    <span>Hello,</span>
+    <span>world!</span>
+  </html>
+
+Template Registry
+-----------------
+
+In order to get notified if an template gets added to a registered template
+directory, the ZCML directive also registers a event subscriber which adds
+templates it discovers to a registry.  We won't test that directly, but rather
+test the behavior we want.
+
+This is only working if the settings have auto_reload set to "true".
+
+  >>> from repoze.bfg.interfaces import ISettings
+  >>> class MockSettings(object):
+  ...     interface.implements(ISettings)
+  ...     reload_templates = True
+  >>> component.provideUtility(MockSettings())
+
+Create a template in the path we register above:
+
+  >>> new_template_path.endswith("new.pt")
+  True
+  >>> file(new_template_path, "w").write("""\
+  ... <html xmlns="http://www.w3.org/1999/xhtml"
+  ...       xmlns:metal="http://xml.zope.org/namespaces/metal">
+  ...   <span>Hello,</span>
+  ...   <span metal:use-macro="macros.world" />
+  ... </html>""")
+
+Now fire the "INewRequest" event.
+
+  >>> from zope.event import notify
+  >>> from repoze.bfg.events import NewRequest
+  >>> notify(NewRequest(None))
+
+The template should now be available:
+
+  >>> print component.getMultiAdapter(
+  ...    (context, request), IView, name=u"new")
+  200 OK
+  content-type: text/html; charset=UTF-8
+  Content-Length: ...
+  <BLANKLINE>
+  <html>
+    <span>Hello,</span>
+    <span>world!</span>
+  </html>
+
+Template API
+------------
+
+  >>> from repoze.bfg.skins.interfaces import IApi
+
+The following mock method will let us verify that templates can access
+API components.
+  
+  >>> def mock_api(context, request): return repr(context)
+  
+  >>> component.provideAdapter(
+  ...     mock_api, (Context, IRequest), IApi, name="test")
+
+  >>> print component.getMultiAdapter(
+  ...    (context, request), IView, name=u"api")
+  200 OK
+  content-type: text/html; charset=UTF-8
+  Content-Length: ...
+  <BLANKLINE>
+  <html>
+    Hello, <Context object at ...>!
+  </html>
+  <BLANKLINE>
+
