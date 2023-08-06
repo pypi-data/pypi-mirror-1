@@ -1,0 +1,1 @@
+{"name":"foo", "models":{"Foo":{"name":"Foo", "parent_class":"SQLObject", "table_name":"", "id_name":"", "columns":{}, "relations":{}}}, "ordered_models":[]}
