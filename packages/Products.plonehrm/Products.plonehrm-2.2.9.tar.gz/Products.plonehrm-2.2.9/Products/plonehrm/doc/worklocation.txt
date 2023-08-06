@@ -1,0 +1,169 @@
+plonehrm worklocations
+======================
+
+In plonehrm there are work locations. They are used to cluster the
+employees. Since we'll need to access these worklocation objects
+frequently from the code, there needs to be an easy way to get the
+relevant information.
+
+This is where the worklocation state view comes in. This view allows
+the plonehrm (or third party) code to e.g. check which worklocation we
+are currently looking at.
+
+
+Request
+-------
+
+Before we can start, we need to do a bit of setup. We need a dummy
+request to feed the view. However, since we are going to cache the
+result of the methods in the view, we need to make sure the dummy
+request is annotatable.
+
+    >>> from zope.publisher.browser import TestRequest
+    >>> from zope.annotation.interfaces import IAttributeAnnotatable
+    >>> from zope.interface import classImplements
+    >>> classImplements(TestRequest, IAttributeAnnotatable)
+    >>> request = TestRequest()
+
+Context is a worklocation
+-------------------------
+
+The first thing we are interested in is whether the current context is
+a worklocation. Let's instantiate the worklocation state view with the
+portal as context first to make sure it is not a worklocation.
+
+    >>> from zope.component import getMultiAdapter
+    >>> wl_state_view = getMultiAdapter((self.portal, request),
+    ...                                 name=u'worklocation_state')
+    >>> wl_state_view.is_worklocation()
+    False
+
+So let's create a worklocation, use it as the context for the view and
+confirm that it is a worklocation.
+
+  >>> self.setRoles(['Manager'])
+  >>> self.portal.invokeFactory('WorkLocation', id='location1')
+  'location1'
+  >>> wl_state_view = getMultiAdapter((self.portal.location1, request),
+  ...                                 name=u'worklocation_state')
+  >>> wl_state_view.is_worklocation()
+  True
+
+When we create an employee and use that as the context, the view
+correctly confirms that an employee isn't a worklocation.
+
+  >>> self.portal.location1.invokeFactory('Employee', id='employee1')
+  'employee1'
+  >>> wl_state_view = getMultiAdapter((self.portal.location1.employee1, request),
+  ...                                 name=u'worklocation_state')
+  >>> wl_state_view.is_worklocation()
+  False
+
+
+Worklocation in the hierarchy
+-----------------------------
+
+There are also cases where we want to know if we are somewhere in a
+worklocation.
+
+  >>> wl_state_view = getMultiAdapter((self.portal.location1, request),
+  ...                                 name=u'worklocation_state')
+  >>> wl_state_view.in_worklocation()
+  True
+
+But the current context doesn't have to be a worklocation, as long as
+the parent (or the parent of the parent, etc.) is to be a
+worklocation.
+
+  >>> wl_state_view = getMultiAdapter((self.portal.location1.employee1, request),
+  ...                                 name=u'worklocation_state')
+  >>> wl_state_view.in_worklocation()
+  True
+
+Checking this from the portal root still doesn't result in a worklocation:
+
+    >>> wl_state_view = getMultiAdapter((self.portal, request),
+    ...                                 name=u'worklocation_state')
+    >>> wl_state_view.in_worklocation()
+    False
+
+
+Get the worklocation
+--------------------
+
+While it's great that we can test whether the current context is a
+worklocation or not, we will also want to just retrieve the
+worklocation in the acquisition chain. In other words, if the current
+context is an employee, we want to get its worklocation.
+
+  >>> wl_state_view = getMultiAdapter((self.portal.location1.employee1, request),
+  ...                                 name=u'worklocation_state')
+  >>> wl_state_view.current_worklocation()
+  <WorkLocation at /plone/location1>
+
+This also works if the context is the worklocation itself.
+
+  >>> wl_state_view = getMultiAdapter((self.portal.location1, request),
+  ...                                 name=u'worklocation_state')
+  >>> wl_state_view.current_worklocation()
+  <WorkLocation at /plone/location1>
+
+However, if we use the portal root as the context, we will not be
+returned a worklocation.
+
+  >>> wl_state_view = getMultiAdapter((self.portal, request),
+  ...                                 name=u'worklocation_state')
+  >>> wl_state_view.current_worklocation() is None
+  True
+
+
+Get all worklocations
+---------------------
+
+There are cases where you are interested in all the
+worklocations. Let's first remove the location to see what happens
+when there are no worklocations at all.
+
+  >>> self.portal.manage_delObjects('location1')
+  >>> wl_state_view = getMultiAdapter((self.portal, request),
+  ...                                 name=u'worklocation_state')
+  >>> wl_state_view.all_worklocations()
+  []
+
+Now we can add worklocations again to prove that they are found
+correctly. However, since the results of the method are cached, we
+need to instantiate the view again. (Otherwise the location still isn't
+found.) Since the cached versions are stored on the request, we'll
+create a new request.
+
+  >>> self.portal.invokeFactory('WorkLocation', id='location1')
+  'location1'
+  >>> wl_state_view.all_worklocations()
+  []
+  >>> wl_state_view = getMultiAdapter((self.portal, TestRequest()),
+  ...                                 name=u'worklocation_state')
+  >>> wl_state_view.all_worklocations()
+  [<Products.ZCatalog.Catalog.mybrains object at ...>]
+
+Let's add another couple of worklocations.
+
+  >>> self.portal.invokeFactory('WorkLocation', id='location2')
+  'location2'
+  >>> self.portal.invokeFactory('WorkLocation', id='location3')
+  'location3'
+  >>> wl_state_view = getMultiAdapter((self.portal, TestRequest()),
+  ...                                 name=u'worklocation_state')
+  >>> wl_state_view.all_worklocations()
+  [<Products.ZCatalog.Catalog.mybrains object at ...>,
+   <Products.ZCatalog.Catalog.mybrains object at ...>,
+   <Products.ZCatalog.Catalog.mybrains object at ...>]
+
+To prove that the context of the view doesn't matter, we'll
+instantiate the view with a worklocation as the context.
+
+  >>> wl_state_view = getMultiAdapter((self.portal.location1, TestRequest()),
+  ...                                 name=u'worklocation_state')
+  >>> wl_state_view.all_worklocations()
+  [<Products.ZCatalog.Catalog.mybrains object at ...>,
+   <Products.ZCatalog.Catalog.mybrains object at ...>,
+   <Products.ZCatalog.Catalog.mybrains object at ...>]
