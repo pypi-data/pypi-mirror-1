@@ -1,0 +1,43 @@
+Introduction
+============
+
+This package will provide rudimentary OpenID support for Plone sites that are
+using Remember-based member objects.  It supports creation of a member object
+immediately following an initial successful OpenID authentication, or attaching
+OpenID accounts to existing member objects.
+
+Installation
+============
+
+Install the RemOpenId egg into your python environment using buildout, pip,
+or the installer of your choice.  Then add 'topp.remopenid' to your ZCML
+packages (usually by setting the 'zcml' value in the 'instance' section of
+your buildout) and restart Zope.  Install the "TOPP RemOpenId" product into
+your Plone site, and voila.
+
+NOTE: For OpenID support to work, you must allow users to register to your
+site.  To do this visit the Security configlet in the Site Setup and ensure
+that 'Enable self-registration' is checked.
+
+WARNING: When you install this product into a Plone site, it will reconfigure
+your site's PAS folder (i.e. acl_users).  While this isn't usually a problem
+in standard Remember sites, if you've made your own customizations to the PAS
+configuration, installing RemOpenId may cause you to lose them.  Use at your
+own risk, and always back up important data before trying new software.
+
+Usage
+=====
+
+Once RemOpenId has been installed, OpenID login forms will start to show up on
+your site, just like if you were to install OpenID support into a non-Remember
+Plone site.  When users new to your site successfully authenticate with
+OpenID URLs, they will be presented with a completion form where they can
+enter a username and email address to finalize their site registration.
+
+Additionally, an OpenID Accounts portlet will show up on the member preferences
+edit page for every site member.  This portlet will list any associated OpenID
+URLs, and will provide a simple form for registering new ones.
+
+There is not at this time any way to delete OpenID account associations,
+although if the member object is deleted the OpenID association will be reset
+and future uses of an associated OpenID URL will be treated as unknown users.
