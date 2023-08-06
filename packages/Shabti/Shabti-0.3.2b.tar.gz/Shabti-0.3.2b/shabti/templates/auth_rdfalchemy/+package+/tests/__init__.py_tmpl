@@ -1,0 +1,143 @@
+"""Pylons application test package
+
+This package assumes the Pylons environment is already loaded, such as
+when this script is imported from the `nosetests --with-pylons=test.ini`
+command.
+
+This module initializes the application via ``websetup`` (`paster
+setup-app`) and provides the base testing objects.
+"""
+from unittest import TestCase
+
+from paste.deploy import loadapp
+from paste.script.appinstall import SetupCommand
+from pylons import config, url
+from routes.util import URLGenerator
+from webtest import TestApp
+import pylons.test
+import datetime
+import hashlib
+
+from {{package}}.model import user
+from rdflib import URIRef, Namespace, Literal
+from rdfalchemy.Literal import Literal
+
+__all__ = ['environ', 'url', 'TestController', 
+            'TestModel', 'TestAuthenticatedController']
+
+
+# Invoke websetup with the current config file
+# SetupCommand('setup-app').run([config['__file__']])
+
+# additional imports ...
+import os
+from paste.deploy import appconfig
+from {{package}}.config.environment import load_environment
+
+here_dir = os.path.dirname(__file__)
+conf_dir = os.path.dirname(os.path.dirname(here_dir))
+
+test_file = os.path.join(conf_dir, 'test.ini')
+conf = appconfig('config:' + test_file)
+load_environment(conf.global_conf, conf.local_conf)
+environ = {}
+
+from {{package}}.model import rdfmodel
+from rdfalchemy import *
+rdfSubject.db = config['rdfalchemy.ra_engine']
+
+class TestModel(TestCase):
+    graph = None
+    def setUp(self):
+        conf.local_conf['rdfalchemy.identifier'] = Literal('shabti_triplestore')
+        if config['rdfalchemy.dburi'].lower().startswith('zodb://'):
+            import transaction
+        self.graph = rdfSubject.db
+        import os
+        # Do the namespace bindings
+        for curi, url in [('foaf', "http://xmlns.com/foaf/0.1/"),
+                          ('usr', "http://islab.hanyang.ac.kr/damls/User.daml#"),
+                          ('purl', "http://purl.org/dc/terms/"),
+                          ('dc', "http://purl.org/dc/elements/1.1/"),
+                          ('cc', "http://web.resource.org/cc/"),
+                          ('xmls', 'http://www.w3.org/2001/XMLSchema#'),
+                          ('shusr', "http://example.org/user/"),
+                          ('shgp', 'http://example.org/group/'),
+                          ('ical', "http://ilrt.org/discovery/2001/06/schemas/ical-full/hybrid.rdf#")]:
+            self.graph.bind(curi, url)
+        USR = Namespace("http://example.org/user/")
+        GP = Namespace("http://example.org/group/")
+        
+        admn = rdfmodel.User()
+        admn.username = "admin"
+        admn.password = "d033e22ae348aeb5660fc2140aec35850c4da997"
+        admn.password_check = "d033e22ae348aeb5660fc2140aec35850c4da997"
+        admn.email = "admin@example.org"
+        admn.created = datetime.datetime.utcnow()
+        admn.active = 1
+        
+        # Create user "gjh", password "graham"
+        gjh = rdfmodel.User()
+        gjh.username = u"gjh"
+        gjh.password = "5ca27e75aea3e5e83a04c6cfa5f1b63d358cd03d"
+        gjh.password_check = "5ca27e75aea3e5e83a04c6cfa5f1b63d358cd03d"
+        gjh.email = "gjh@example.org"
+        gjh.created = datetime.datetime.utcnow()
+        gjh.active = 1
+        
+        # Create admin group
+        gadmin = rdfmodel.Group(description = u"Administration group")
+        gadmin.created = datetime.datetime.utcnow()
+        gadmin.active = 1
+        gadmin.users = [admn, gjh] # --- Wrong. Try again
+        
+        # # Confirm graph status and commit (the latter is 
+        # # probably unnecessary)
+        assert len(self.graph) == 18
+        
+        if config['rdfalchemy.dburi'].lower().startswith('zodb://'):
+            transaction.commit()
+        else:
+            self.graph.commit()
+        print(self.graph.serialize(format='n3'))
+    
+    
+    def tearDown(self):
+        if self.graph:
+            self.graph.close()
+            if config['rdfalchemy.dburi'].lower().startswith('sqlite:///'):
+                self.graph.destroy(config['rdfalchemy.dburi'][10:])
+            else:
+                self.graph.destroy(config['rdfalchemy.dburi'])
+    
+
+
+class TestController(TestModel):
+    
+    def __init__(self, *args, **kwargs):
+        if pylons.test.pylonsapp:
+            wsgiapp = pylons.test.pylonsapp
+        else:
+            wsgiapp = loadapp('config:%s' % config['__file__'])
+        self.app = TestApp(wsgiapp)
+        url._push_object(URLGenerator(config['routes.map'], environ))
+        TestCase.__init__(self, *args, **kwargs)
+    
+
+
+class TestAuthenticatedController(TestModel):
+    
+    def __init__(self, *args, **kwargs):
+        if pylons.test.pylonsapp:
+            wsgiapp = pylons.test.pylonsapp
+        else:
+            wsgiapp = loadapp('config:%s' % config['__file__'])
+        self.app = TestApp(wsgiapp, extra_environ=dict(REMOTE_USER='admin'))
+        url._push_object(URLGenerator(config['routes.map'], environ))
+        TestCase.__init__(self, *args, **kwargs)
+    
+
+
+
+
+

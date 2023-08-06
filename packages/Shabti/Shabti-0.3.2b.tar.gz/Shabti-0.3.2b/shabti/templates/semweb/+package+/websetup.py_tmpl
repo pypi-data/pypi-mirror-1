@@ -1,0 +1,139 @@
+"""Setup the {{package}} application"""
+import logging
+log = logging.getLogger(__name__)
+
+from {{package}}.config.environment import load_environment
+
+from paste.deploy import loadapp
+from pylons import config
+from elixir import *
+from {{package}} import model
+from {{package}}.model.rdfmodel import *
+from StringIO import StringIO
+
+from {{package}}.model import user
+from rdflib import URIRef, Namespace, Literal
+from rdfalchemy.Literal import Literal
+
+def setup_app(command, conf, vars):
+    """Place any commands to setup {{package}} here"""
+    load_environment(conf.global_conf, conf.local_conf)
+    import datetime
+    import hashlib
+
+    # Relational modelling component
+
+    # model.metadata.create_all(checkfirst=True)
+    # modelling stuff here ...
+    # model.Session.commit()
+
+    # RDF modelling component
+
+    # Alternative means of creating the (MySQL) tables
+
+    # import rdflib
+    # from rdflib.Graph import Graph
+    # from rdflib import plugin
+    # from rdflib.store import Store
+    # from rdflib import URIRef
+    # storeIdentifier = "shabti_triplestore"
+    # default_graph_uri = "http://shabti.bel-epa.com/data"
+    # conspec = "host=localhost,user=httpd,db=shabti_triplestore"
+    # store = 'MySQL'
+    # s = plugin.get(store, Store)(storeIdentifier)
+    # # s.destroy(conspec)
+    # s.open(conspec, create=True)
+    # graph = Graph(s, identifier = URIRef(default_graph_uri))
+    # s.commit()
+    # s.close()
+    
+    # Initial priming of graph with data
+    
+    config['rdfalchemy.identifier'] = Literal("shabti_rdf") # Probably pointless
+    if config['rdfalchemy.dburi'].lower().startswith('zodb://'):
+        import transaction
+    graph = rdfSubject.db = config['rdfalchemy.ra_engine']
+    import os
+
+    # Either ...
+    
+    # graph.load(os.getcwd()+'/data/shabti_triplestore.xml')
+    
+    # or ...
+    
+    # Do the namespace bindings
+    for curi, url in [('foaf', "http://xmlns.com/foaf/0.1/"),
+                      ('usr', "http://islab.hanyang.ac.kr/damls/User.daml#"),
+                      ('purl', "http://purl.org/dc/terms/"),
+                      ('dc', "http://purl.org/dc/elements/1.1/"),
+                      ('cc', "http://web.resource.org/cc/"),
+                      ('xmls', 'http://www.w3.org/2001/XMLSchema#'),
+                      ('shusr', "http://example.org/user/"),
+                      ('shgp', 'http://example.org/group/')]:
+        graph.bind(curi, url)
+    USR = Namespace("http://example.org/user/")
+    GP = Namespace("http://example.org/group/")
+    
+    admn = model.rdfmodel.User()
+    admn.username = u"admin"
+    admn.password = "d033e22ae348aeb5660fc2140aec35850c4da997"
+    admn.password_check = "d033e22ae348aeb5660fc2140aec35850c4da997"
+    admn.email = "admin@example.org"
+    admn.created = datetime.datetime.utcnow()
+    admn.active = 1
+    
+    # Create user "gjh", password "graham"
+    gjh = model.rdfmodel.User()
+    gjh.username = u"gjh"
+    gjh.password = "5ca27e75aea3e5e83a04c6cfa5f1b63d358cd03d"
+    gjh.password_check = "5ca27e75aea3e5e83a04c6cfa5f1b63d358cd03d"
+    gjh.email = "gjh@example.org"
+    gjh.created = datetime.datetime.utcnow()
+    gjh.active = 1
+    
+    # Create admin group
+    gadmin = model.rdfmodel.Group()
+    gadmin.description = u"Administration group"
+    gadmin.created = datetime.datetime.utcnow()
+    gadmin.active = 1
+    gadmin.users = [admn, gjh] # --- Wrong. Try again
+
+    # Non-BNode version, but ClassInstances is always empty
+
+    # Create user "admin", password "admin"
+    # admn = model.rdfmodel.User(URIRef(USR.admin),
+    #     username = u"admin",
+    #     password = "d033e22ae348aeb5660fc2140aec35850c4da997",
+    #     password_check = "admin",
+    #     email = "admin@example.org",
+    #     created = datetime.datetime.utcnow(),
+    #     active = 1)
+    # 
+
+    # # Create user "gjh", password "graham"
+    # gjh = model.rdfmodel.User(URIRef(USR.gjh),
+    #     username = u"gjh",
+    #     password = "5ca27e75aea3e5e83a04c6cfa5f1b63d358cd03d",
+    #     password_check = "graham",
+    #     email = "gjh@example.org",
+    #     created = datetime.datetime.utcnow(),
+    #     active = 1)
+    
+    # # Create admin group
+    # gadmin = model.rdfmodel.Group(URIRef(GP.admingrp),
+    #     description = u"Administration group",
+    #     created = datetime.datetime.utcnow(),
+    #     active = 1,
+    #     users = [admn, gjh])
+
+
+
+    # Confirm graph status and commit (the latter is probably unnecessary)
+    # print len(graph)
+    assert len(graph) == 18
+    if config['rdfalchemy.dburi'].lower().startswith('zodb://'):
+        transaction.commit()
+    else:
+        graph.commit()
+    print graph.serialize()
+    graph.close()

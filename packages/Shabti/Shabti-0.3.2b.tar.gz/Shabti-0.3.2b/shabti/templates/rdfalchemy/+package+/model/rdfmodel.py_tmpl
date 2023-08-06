@@ -1,0 +1,51 @@
+from pylons import config
+# this has the rdfSubject and descriptor stuff
+from rdfalchemy import *
+from rdfalchemy.orm import mapper
+from {{package}}.model import meta
+from rdflib import ConjunctiveGraph
+
+# from rdfalchemy import engine_from_config as rdf_engine_from_config
+
+import logging
+log=logging.getLogger('rdfalchemy')
+
+# use the engine opened in load_environment
+# rdfSubject.db = config['pylons.g'].ra_engine
+try:
+    rdfSubject.db = config['rdfalchemy.ra_engine']
+except KeyError:
+    rdfSubject.db = ConjunctiveGraph()
+
+ov = Namespace("http://owl.openvest.org/2005/10/Portfolio#")
+vcard = Namespace("http://www.w3.org/2006/vcard/ns#")
+xbrli=Namespace('http://www.xbrl.org/2003/instance#')
+xlink=Namespace("http://www.w3.org/1999/xlink#")
+edgarns = Namespace('http://www.sec.gov/Archives/edgar')
+
+class XbrlFile(rdfSubject):
+    rdf_type = ov.XbrlFile
+    schemas = rdfMultiple(ov.usesXbrlSchema,
+                          range_type=ov.XbrlSchema)
+    linkbases = rdfMultiple(ov.usesXbrlLinkbase,
+                            range_type=ov.XbrlLinkbase)
+    webUri = rdfSingle(ov.documentWebURI)
+    @property
+    def transitive_schemas(self):
+        return [XbrlSchema(s)
+                    for s in self.db.transitive_objects(
+                            self.resUri,ov.usesXbrlSchema)]
+class XbrlLinkbase(XbrlFile):
+    rdf_type = ov.XbrlLinkbase
+
+#  other model info here
+
+class Company(rdfSubject):
+    rdf_type = ov.Company
+    symbol = rdfSingle(ov.symbol,'symbol')  #second param is optional
+    cik = rdfSingle(ov.secCik)
+    companyName = rdfSingle(ov.companyName)
+    address = rdfSingle(vcard.adr)
+    stock = rdfMultiple(ov.hasIssue)
+
+mapper()
