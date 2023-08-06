@@ -1,0 +1,138 @@
+The problem:
+
+* an individual child changes
+
+* this means that in the EDITABLE view, we should see this child, 
+  and not the original PUBLISHED child
+
+* in the PUBLISHED view we should see the PUBLISHED child only
+
+* when the child is published, the previously published child should
+  be archived. However, it cannot point to the previous archived 
+  parent just like that. The previously archived parent would have
+  one child too many.
+
+* therefore, when a child is archived by itself, a *new* archived
+  object could be constructed from the previously archived parent.
+  The child would point to this parent. Its children are the same
+  as before, except for the newly archived child.
+
+* this is a reasonably expensive operation. An alternative, equally
+  expensive, would be for the parent be turned EDITABLE as soon as a
+  child is edited. In this case, publication is as before, and less
+  complicated, as the new EDITABLE children are automatically
+  connected to the right parent. This should also simplify the
+  relations.
+
+* but effectively this means that if *one* aspect of the db is edited
+  through the relations *all* the database is made editable.
+
+* but this would need to be done for consistent archiving anyway.
+
+* we can give up archive consistency as an alternative. When
+  publishing an independent node, the previously archived version of
+  that node stays present.
+
+* we can also make the previously archived node point to the currently
+  published object, but in the archived state. In a normal query it
+  would not be picked up.
+
+
+* when querying, only get published or editable version, how?
+
+* getting only published: filter all parts of the join by Class.status
+  == PUBLISHED in addition to the main query. But how does this work
+  with relations?
+
+* with relations, could add explicit primaryjoins that get only the
+  EDITABLE versions or only the PUBLISHED verions. We could base it on
+  the state of the place where the relation originates.
+
+* how would we find out EDITABLE related objects of an object that is
+  itself PUBLISHED? Could we do this through the same relation? Or do
+  we need to a custom query?
+
+* we could place two relations on the object: foo, and foo_editable.
+  foo_editable would only return editable objects. That would 
+  allow any access we want, as long as we follow the right relations.
+
+* how does that affect the publication story? We need to mark
+  relations as "true" relations perhaps, or at least track whether
+  we've already versioned those objects, or only version those objects
+  that are needed.
+
+* we should maintain a timestamp to indicate the last time a workflow
+  change was issued. We could maintain a creation-date timestamp too.
+
+* avoid session.execute() because this needs expunging to get expected
+  state.
+
+* implement editable, published, archived and all relations.
+
+* make sure relation overlaps don't lead to trouble when updating
+  stuff in publish/edit.
+
+* the main relation should be the published relation? or editable?
+
+* maintain published_under_edit information
+
+
+Test plan:
+
+* one to many
+
+  * a
+
+  * a edit
+
+  * a edit, publish
+
+  * a edit, publish, re-edit, publish (archive)
+
+  * same for a with relations
+
+  * b edit
+
+  * b edit, publish
+  
+  * b edit, publish, re-edit, publish (archive)
+
+  * recursive relations
+
+  * publish new relation to unpublished object: what happens?
+    Disallow this?
+ 
+  * test archiving
+
+* many to one
+
+* many to many
+
+
+* if we allow updating and editing of relations directly, the 
+  archive will not be coherent relation wise. This because relations 
+  of a published object may pertain to an archived object.
+
+* perhaps a workflow_timestamp constrained query can help. The relations
+  are:
+
+  * the published objects if the workflow timestamp <= archived
+    timestamp.
+
+  * the newest archived or published object for which the workflow
+    timestamp <= archived timestamp but where the timestamp > the
+    timestamp of the previously archived object.
+ 
+  * I don't think this is entirely correct. Specifically how does
+    relation sharing work here exactly? And how does the edit
+    publishing action handle this?
+
+* the plan: do convert it to use properties on top of a dynamic relation.
+  add these dynamically.
+
+  The main attribute (bs) is everything.
+
+  The other attributes are _published, _editable, _archived.
+
+  The update relationship involve pulling in the attributes from
+  the published version.
