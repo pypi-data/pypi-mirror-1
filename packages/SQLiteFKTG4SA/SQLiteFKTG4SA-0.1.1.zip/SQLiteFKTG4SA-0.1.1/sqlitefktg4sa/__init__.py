@@ -1,0 +1,1 @@
+from core import SqliteFkTriggerGenerator, auto_assign
