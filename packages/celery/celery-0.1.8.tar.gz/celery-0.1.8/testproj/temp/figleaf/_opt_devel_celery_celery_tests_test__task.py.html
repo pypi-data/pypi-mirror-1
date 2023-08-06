@@ -1,0 +1,155 @@
+source file: <b>/opt/devel/celery/celery/tests/test_task.py</b><br>
+
+
+file stats: <b>119 lines, 118 executed: 99.2% covered</b>
+<pre>
+<font color="green">   1. import unittest</font>
+<font color="green">   2. import uuid</font>
+<font color="green">   3. import logging</font>
+<font color="green">   4. from StringIO import StringIO</font>
+<font color="black">   5. </font>
+<font color="green">   6. from celery import task</font>
+<font color="green">   7. from celery import registry</font>
+<font color="green">   8. from celery.log import setup_logger</font>
+<font color="green">   9. from celery import messaging</font>
+<font color="black">  10. </font>
+<font color="black">  11. </font>
+<font color="green">  12. def get_string_io_logger():</font>
+<font color="red">  13.     sio = StringIO()</font>
+<font color="green">  14.     logger = setup_logger(loglevel=logging.INFO, logfile=sio)</font>
+<font color="green">  15.     return logger, sio</font>
+<font color="green">  16. </font>
+<font color="green">  17. </font>
+<font color="green">  18. # Task run functions can't be closures/lambdas, as they're pickled.</font>
+<font color="green">  19. def return_True(self, **kwargs):</font>
+<font color="green">  20.     return True</font>
+<font color="black">  21. </font>
+<font color="green">  22. </font>
+<font color="green">  23. def raise_exception(self, **kwargs):</font>
+<font color="green">  24.     raise Exception(&quot;%s error&quot; % self.__class__)</font>
+<font color="green">  25. </font>
+<font color="green">  26. </font>
+<font color="green">  27. class IncrementCounterTask(task.Task):</font>
+<font color="green">  28.     name = &quot;c.unittest.increment_counter_task&quot;</font>
+<font color="green">  29.     count = 0</font>
+<font color="black">  30. </font>
+<font color="green">  31.     def run(self, increment_by, **kwargs):</font>
+<font color="green">  32.         increment_by = increment_by or 1</font>
+<font color="green">  33.         self.__class__.count += increment_by</font>
+<font color="green">  34. </font>
+<font color="green">  35. </font>
+<font color="green">  36. class TestCeleryTasks(unittest.TestCase):</font>
+<font color="green">  37. </font>
+<font color="green">  38.     def createTaskCls(self, cls_name, task_name=None):</font>
+<font color="green">  39.         attrs = {}</font>
+<font color="green">  40.         if task_name:</font>
+<font color="green">  41.             attrs[&quot;name&quot;] = task_name</font>
+<font color="green">  42.         cls = type(cls_name, (task.Task, ), attrs)</font>
+<font color="green">  43.         cls.run = return_True</font>
+<font color="green">  44.         return cls</font>
+<font color="green">  45. </font>
+<font color="green">  46.     def assertNextTaskDataEquals(self, consumer, task_id, task_name,</font>
+<font color="green">  47.             **kwargs):</font>
+<font color="green">  48.         next_task = consumer.fetch()</font>
+<font color="green">  49.         task_data = consumer.decoder(next_task.body)</font>
+<font color="green">  50.         self.assertEquals(task_data[&quot;celeryID&quot;], task_id)</font>
+<font color="green">  51.         self.assertEquals(task_data[&quot;celeryTASK&quot;], task_name)</font>
+<font color="green">  52.         for arg_name, arg_value in kwargs.items():</font>
+<font color="green">  53.             self.assertEquals(task_data.get(arg_name), arg_value)</font>
+<font color="black">  54. </font>
+<font color="green">  55.     def test_raising_task(self):</font>
+<font color="green">  56.         rtask = self.createTaskCls(&quot;RaisingTask&quot;, &quot;c.unittest.t.rtask&quot;)</font>
+<font color="green">  57.         rtask.run = raise_exception</font>
+<font color="green">  58.         sio = StringIO()</font>
+<font color="black">  59. </font>
+<font color="green">  60.         taskinstance = rtask()</font>
+<font color="green">  61.         taskinstance(loglevel=logging.INFO, logfile=sio)</font>
+<font color="green">  62.         self.assertTrue(sio.getvalue().find(&quot;Task got exception&quot;) != -1)</font>
+<font color="black">  63. </font>
+<font color="green">  64.     def test_incomplete_task_cls(self):</font>
+<font color="green">  65.         class IncompleteTask(task.Task):</font>
+<font color="green">  66.             name = &quot;c.unittest.t.itask&quot;</font>
+<font color="green">  67. </font>
+<font color="green">  68.         self.assertRaises(NotImplementedError, IncompleteTask().run)</font>
+<font color="green">  69. </font>
+<font color="green">  70.     def test_regular_task(self):</font>
+<font color="green">  71.         T1 = self.createTaskCls(&quot;T1&quot;, &quot;c.unittest.t.t1&quot;)</font>
+<font color="green">  72.         self.assertTrue(isinstance(T1(), T1))</font>
+<font color="green">  73.         self.assertTrue(T1().run())</font>
+<font color="green">  74.         self.assertTrue(callable(T1()),</font>
+<font color="green">  75.                 &quot;Task class is callable()&quot;)</font>
+<font color="green">  76.         self.assertTrue(T1()(),</font>
+<font color="green">  77.                 &quot;Task class runs run() when called&quot;)</font>
+<font color="black">  78. </font>
+<font color="black">  79.         # task without name raises NotImplementedError</font>
+<font color="green">  80.         T2 = self.createTaskCls(&quot;T2&quot;)</font>
+<font color="green">  81.         self.assertRaises(NotImplementedError, T2)</font>
+<font color="black">  82. </font>
+<font color="green">  83.         registry.tasks.register(T1)</font>
+<font color="green">  84.         t1 = T1()</font>
+<font color="green">  85.         consumer = t1.get_consumer()</font>
+<font color="green">  86.         consumer.discard_all()</font>
+<font color="green">  87.         self.assertTrue(consumer.fetch() is None)</font>
+<font color="black">  88. </font>
+<font color="black">  89.         # Without arguments.</font>
+<font color="green">  90.         tid = t1.delay()</font>
+<font color="green">  91.         self.assertNextTaskDataEquals(consumer, tid, t1.name)</font>
+<font color="black">  92. </font>
+<font color="black">  93.         # With arguments.</font>
+<font color="green">  94.         tid2 = task.delay_task(t1.name, name=&quot;George Constanza&quot;)</font>
+<font color="green">  95.         self.assertNextTaskDataEquals(consumer, tid2, t1.name,</font>
+<font color="green">  96.                 name=&quot;George Constanza&quot;)</font>
+<font color="black">  97. </font>
+<font color="green">  98.         self.assertRaises(registry.tasks.NotRegistered, task.delay_task,</font>
+<font color="green">  99.                 &quot;some.task.that.should.never.exist.X.X.X.X.X&quot;)</font>
+<font color="black"> 100. </font>
+<font color="black"> 101.         # Discarding all tasks.</font>
+<font color="green"> 102.         task.discard_all()</font>
+<font color="green"> 103.         tid3 = task.delay_task(t1.name)</font>
+<font color="green"> 104.         self.assertEquals(task.discard_all(), 1)</font>
+<font color="green"> 105.         self.assertTrue(consumer.fetch() is None)</font>
+<font color="black"> 106. </font>
+<font color="green"> 107.         self.assertFalse(task.is_done(tid))</font>
+<font color="green"> 108.         task.mark_as_done(tid, result=None)</font>
+<font color="green"> 109.         self.assertTrue(task.is_done(tid))</font>
+<font color="black"> 110. </font>
+<font color="black"> 111. </font>
+<font color="green"> 112.         publisher = t1.get_publisher()</font>
+<font color="green"> 113.         self.assertTrue(isinstance(publisher, messaging.TaskPublisher))</font>
+<font color="black"> 114. </font>
+<font color="green"> 115.     def test_taskmeta_cache(self):</font>
+<font color="black"> 116.         # TODO Needs to test task meta without TASK_META_USE_DB.</font>
+<font color="green"> 117.         tid = str(uuid.uuid4())</font>
+<font color="green"> 118.         ckey = task.gen_task_done_cache_key(tid)</font>
+<font color="green"> 119.         self.assertTrue(ckey.rfind(tid) != -1)</font>
+<font color="black"> 120. </font>
+<font color="black"> 121. </font>
+<font color="green"> 122. class TestTaskSet(unittest.TestCase):</font>
+<font color="black"> 123. </font>
+<font color="green"> 124.     def test_counter_taskset(self):</font>
+<font color="green"> 125.         ts = task.TaskSet(IncrementCounterTask, [</font>
+<font color="green"> 126.             {},</font>
+<font color="green"> 127.             {&quot;increment_by&quot;: 2},</font>
+<font color="green"> 128.             {&quot;increment_by&quot;: 3},</font>
+<font color="green"> 129.             {&quot;increment_by&quot;: 4},</font>
+<font color="green"> 130.             {&quot;increment_by&quot;: 5},</font>
+<font color="green"> 131.             {&quot;increment_by&quot;: 6},</font>
+<font color="green"> 132.             {&quot;increment_by&quot;: 7},</font>
+<font color="green"> 133.             {&quot;increment_by&quot;: 8},</font>
+<font color="green"> 134.             {&quot;increment_by&quot;: 9},</font>
+<font color="black"> 135.         ])</font>
+<font color="green"> 136.         self.assertEquals(ts.task_name, IncrementCounterTask.name)</font>
+<font color="green"> 137.         self.assertEquals(ts.total, 9)</font>
+<font color="black"> 138. </font>
+<font color="green"> 139.         taskset_id, subtask_ids = ts.run()</font>
+<font color="black"> 140. </font>
+<font color="green"> 141.         consumer = IncrementCounterTask().get_consumer()</font>
+<font color="green"> 142.         for subtask_id in subtask_ids:</font>
+<font color="green"> 143.             m = consumer.decoder(consumer.fetch().body)</font>
+<font color="green"> 144.             self.assertEquals(m.get(&quot;celeryTASKSET&quot;), taskset_id)</font>
+<font color="green"> 145.             self.assertEquals(m.get(&quot;celeryTASK&quot;), IncrementCounterTask.name)</font>
+<font color="green"> 146.             self.assertEquals(m.get(&quot;celeryID&quot;), subtask_id)</font>
+<font color="green"> 147.             IncrementCounterTask().run(increment_by=m.get(&quot;increment_by&quot;))</font>
+<font color="green"> 148.         self.assertEquals(IncrementCounterTask.count, sum(xrange(1, 10)))</font>
+</pre>
+

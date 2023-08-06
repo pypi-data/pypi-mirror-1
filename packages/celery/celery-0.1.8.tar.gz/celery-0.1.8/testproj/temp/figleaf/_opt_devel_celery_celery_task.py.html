@@ -1,0 +1,287 @@
+source file: <b>/opt/devel/celery/celery/task.py</b><br>
+
+
+file stats: <b>112 lines, 100 executed: 89.3% covered</b>
+<pre>
+<font color="green">   1. from carrot.connection import DjangoAMQPConnection</font>
+<font color="green">   2. from celery.log import setup_logger</font>
+<font color="green">   3. from celery.conf import TASK_META_USE_DB</font>
+<font color="green">   4. from celery.registry import tasks</font>
+<font color="green">   5. from celery.messaging import TaskPublisher, TaskConsumer</font>
+<font color="green">   6. from celery.models import TaskMeta</font>
+<font color="green">   7. from django.core.cache import cache</font>
+<font color="green">   8. from datetime import timedelta</font>
+<font color="green">   9. import uuid</font>
+<font color="green">  10. import traceback</font>
+<font color="black">  11. </font>
+<font color="black">  12. </font>
+<font color="green">  13. def delay_task(task_name, **kwargs):</font>
+<font color="black">  14.     &quot;&quot;&quot;Delay a task for execution by the ``celery`` daemon.</font>
+<font color="black">  15. </font>
+<font color="black">  16.     Examples</font>
+<font color="black">  17.     --------</font>
+<font color="black">  18.         &gt;&gt;&gt; delay_task(&quot;update_record&quot;, name=&quot;George Constanza&quot;, age=32)</font>
+<font color="black">  19. </font>
+<font color="black">  20.     &quot;&quot;&quot;</font>
+<font color="green">  21.     if task_name not in tasks:</font>
+<font color="green">  22.         raise tasks.NotRegistered(</font>
+<font color="green">  23.                 &quot;Task with name %s not registered in the task registry.&quot; % (</font>
+<font color="green">  24.                     task_name))</font>
+<font color="green">  25.     publisher = TaskPublisher(connection=DjangoAMQPConnection)</font>
+<font color="green">  26.     task_id = publisher.delay_task(task_name, **kwargs)</font>
+<font color="green">  27.     publisher.close()</font>
+<font color="green">  28.     return task_id</font>
+<font color="black">  29. </font>
+<font color="black">  30. </font>
+<font color="green">  31. def discard_all():</font>
+<font color="black">  32.     &quot;&quot;&quot;Discard all waiting tasks.</font>
+<font color="black">  33. </font>
+<font color="black">  34.     This will ignore all tasks waiting for execution, and they will</font>
+<font color="black">  35.     be deleted from the messaging server.</font>
+<font color="black">  36. </font>
+<font color="black">  37.     Returns the number of tasks discarded.</font>
+<font color="black">  38. </font>
+<font color="black">  39.     &quot;&quot;&quot;</font>
+<font color="green">  40.     consumer = TaskConsumer(connection=DjangoAMQPConnection)</font>
+<font color="green">  41.     discarded_count = consumer.discard_all()</font>
+<font color="green">  42.     consumer.close()</font>
+<font color="green">  43.     return discarded_count</font>
+<font color="black">  44. </font>
+<font color="black">  45. </font>
+<font color="green">  46. def gen_task_done_cache_key(task_id):</font>
+<font color="black">  47.     &quot;&quot;&quot;Generate a cache key for marking a task as done.&quot;&quot;&quot;</font>
+<font color="green">  48.     return &quot;celery-task-done-marker-%s&quot; % task_id</font>
+<font color="black">  49. </font>
+<font color="black">  50. </font>
+<font color="green">  51. def mark_as_done(task_id, result):</font>
+<font color="black">  52.     &quot;&quot;&quot;Mark task as done (executed).</font>
+<font color="black">  53. </font>
+<font color="black">  54.     if ``settings.TASK_META_USE_DB`` is ``True``, this will</font>
+<font color="black">  55.     use the :class:`celery.models.TaskMeta` model, if not memcached</font>
+<font color="black">  56.     is used.</font>
+<font color="black">  57. </font>
+<font color="black">  58.     &quot;&quot;&quot;</font>
+<font color="green">  59.     if result is None:</font>
+<font color="green">  60.         result = True</font>
+<font color="green">  61.     if TASK_META_USE_DB:</font>
+<font color="green">  62.         TaskMeta.objects.mark_as_done(task_id)</font>
+<font color="black">  63.     else:</font>
+<font color="red">  64.         cache_key = gen_task_done_cache_key(task_id)</font>
+<font color="red">  65.         cache.set(cache_key, result)</font>
+<font color="black">  66. </font>
+<font color="black">  67. </font>
+<font color="green">  68. def is_done(task_id):</font>
+<font color="black">  69.     &quot;&quot;&quot;Returns ``True`` if task with ``task_id`` has been executed.&quot;&quot;&quot;</font>
+<font color="green">  70.     if TASK_META_USE_DB:</font>
+<font color="green">  71.         return TaskMeta.objects.is_done(task_id)</font>
+<font color="black">  72.     else:</font>
+<font color="red">  73.         cache_key = gen_task_done_cache_key(task_id)</font>
+<font color="red">  74.         return bool(cache.get(cache_key))</font>
+<font color="black">  75. </font>
+<font color="black">  76. </font>
+<font color="green">  77. class Task(object):</font>
+<font color="black">  78.     &quot;&quot;&quot;A task that can be delayed for execution by the ``celery`` daemon.</font>
+<font color="black">  79. </font>
+<font color="black">  80.     All subclasses of ``Task`` has to define the ``name`` attribute, which is</font>
+<font color="black">  81.     the name of the task that can be passed to ``celery.task.delay_task``,</font>
+<font color="black">  82.     it also has to define the ``run`` method, which is the actual method the</font>
+<font color="black">  83.     ``celery`` daemon executes. This method does not support positional</font>
+<font color="black">  84.     arguments, only keyword arguments.</font>
+<font color="black">  85. </font>
+<font color="black">  86.     Examples</font>
+<font color="black">  87.     --------</font>
+<font color="black">  88. </font>
+<font color="black">  89.     This is a simple task just logging a message,</font>
+<font color="black">  90. </font>
+<font color="black">  91.         &gt;&gt;&gt; from celery.task import tasks, Task</font>
+<font color="black">  92.         &gt;&gt;&gt; class MyTask(Task):</font>
+<font color="black">  93.         ...     name = &quot;mytask&quot;</font>
+<font color="black">  94.         ...</font>
+<font color="black">  95.         ...     def run(self, some_arg=None, **kwargs):</font>
+<font color="black">  96.         ...         logger = self.get_logger(**kwargs)</font>
+<font color="black">  97.         ...         logger.info(&quot;Running MyTask with arg some_arg=%s&quot; %</font>
+<font color="black">  98.         ...                     some_arg))</font>
+<font color="black">  99.         ... tasks.register(MyTask)</font>
+<font color="black"> 100. </font>
+<font color="black"> 101.     You can delay the task using the classmethod ``delay``...</font>
+<font color="black"> 102. </font>
+<font color="black"> 103.         &gt;&gt;&gt; MyTask.delay(some_arg=&quot;foo&quot;)</font>
+<font color="black"> 104. </font>
+<font color="black"> 105.     ...or using the ``celery.task.delay_task`` function, by passing the</font>
+<font color="black"> 106.     name of the task.</font>
+<font color="black"> 107. </font>
+<font color="black"> 108.         &gt;&gt;&gt; from celery.task import delay_task</font>
+<font color="black"> 109.         &gt;&gt;&gt; delay_task(MyTask.name, some_arg=&quot;foo&quot;)</font>
+<font color="black"> 110. </font>
+<font color="green"> 111.     &quot;&quot;&quot;</font>
+<font color="green"> 112.     name = None</font>
+<font color="green"> 113.     type = &quot;regular&quot;</font>
+<font color="black"> 114. </font>
+<font color="green"> 115.     def __init__(self):</font>
+<font color="green"> 116.         if not self.name:</font>
+<font color="green"> 117.             raise NotImplementedError(&quot;Tasks must define a name attribute.&quot;)</font>
+<font color="black"> 118. </font>
+<font color="green"> 119.     def __call__(self, **kwargs):</font>
+<font color="black"> 120.         &quot;&quot;&quot;The ``__call__`` is called when you do ``Task().run()`` and calls</font>
+<font color="black"> 121.         the ``run`` method. It also catches any exceptions and logs them.&quot;&quot;&quot;</font>
+<font color="green"> 122.         try:</font>
+<font color="green"> 123.             retval = self.run(**kwargs)</font>
+<font color="green"> 124.         except Exception, e:</font>
+<font color="green"> 125.             logger = self.get_logger(**kwargs)</font>
+<font color="green"> 126.             logger.critical(&quot;Task got exception %s: %s\n%s&quot; % (</font>
+<font color="green"> 127.                                 e.__class__, e, traceback.format_exc()))</font>
+<font color="green"> 128.             return</font>
+<font color="black"> 129.         else:</font>
+<font color="green"> 130.             return retval</font>
+<font color="black"> 131. </font>
+<font color="green"> 132.     def run(self, **kwargs):</font>
+<font color="black"> 133.         &quot;&quot;&quot;The actual task. All subclasses of :class:`Task` must define</font>
+<font color="black"> 134.         the run method, if not a ``NotImplementedError`` exception is raised.</font>
+<font color="black"> 135.         &quot;&quot;&quot;</font>
+<font color="green"> 136.         raise NotImplementedError(&quot;Tasks must define a run method.&quot;)</font>
+<font color="black"> 137. </font>
+<font color="green"> 138.     def get_logger(self, **kwargs):</font>
+<font color="black"> 139.         &quot;&quot;&quot;Get a process-aware logger object.&quot;&quot;&quot;</font>
+<font color="green"> 140.         return setup_logger(**kwargs)</font>
+<font color="black"> 141. </font>
+<font color="green"> 142.     def get_publisher(self):</font>
+<font color="black"> 143.         &quot;&quot;&quot;Get a celery task message publisher.&quot;&quot;&quot;</font>
+<font color="green"> 144.         return TaskPublisher(connection=DjangoAMQPConnection)</font>
+<font color="black"> 145. </font>
+<font color="green"> 146.     def get_consumer(self):</font>
+<font color="black"> 147.         &quot;&quot;&quot;Get a celery task message consumer.&quot;&quot;&quot;</font>
+<font color="green"> 148.         return TaskConsumer(connection=DjangoAMQPConnection)</font>
+<font color="black"> 149. </font>
+<font color="green"> 150.     @classmethod</font>
+<font color="black"> 151.     def delay(cls, **kwargs):</font>
+<font color="black"> 152.         &quot;&quot;&quot;Delay this task for execution by the ``celery`` daemon(s).&quot;&quot;&quot;</font>
+<font color="green"> 153.         return delay_task(cls.name, **kwargs)</font>
+<font color="black"> 154. </font>
+<font color="black"> 155. </font>
+<font color="green"> 156. class TaskSet(object):</font>
+<font color="black"> 157.     &quot;&quot;&quot;A task containing several subtasks, making it possible</font>
+<font color="black"> 158.     to track how many, or when all of the tasks are completed.</font>
+<font color="black"> 159. </font>
+<font color="black"> 160.     Example Usage</font>
+<font color="black"> 161.     --------------</font>
+<font color="black"> 162. </font>
+<font color="black"> 163.         &gt;&gt;&gt; from djangofeeds.tasks import RefreshFeedTask</font>
+<font color="black"> 164.         &gt;&gt;&gt; taskset = TaskSet(RefreshFeedTask, args=[</font>
+<font color="black"> 165.         ...                 {&quot;feed_url&quot;: &quot;http://cnn.com/rss&quot;},</font>
+<font color="black"> 166.         ...                 {&quot;feed_url&quot;: &quot;http://bbc.com/rss&quot;},</font>
+<font color="black"> 167.         ...                 {&quot;feed_url&quot;: &quot;http://xkcd.com/rss&quot;}])</font>
+<font color="black"> 168. </font>
+<font color="black"> 169.         &gt;&gt;&gt; taskset_id, subtask_ids = taskset.run()</font>
+<font color="black"> 170. </font>
+<font color="black"> 171. </font>
+<font color="green"> 172.     &quot;&quot;&quot;</font>
+<font color="black"> 173. </font>
+<font color="green"> 174.     def __init__(self, task, args):</font>
+<font color="black"> 175.         &quot;&quot;&quot;``task`` can be either a fully qualified task name, or a task</font>
+<font color="black"> 176.         class, args is a list of arguments for the subtasks.</font>
+<font color="black"> 177.         &quot;&quot;&quot;</font>
+<font color="black"> 178. </font>
+<font color="green"> 179.         try:</font>
+<font color="green"> 180.             task_name = task.name</font>
+<font color="red"> 181.         except AttributeError:</font>
+<font color="red"> 182.             task_name = task</font>
+<font color="black"> 183. </font>
+<font color="green"> 184.         self.task_name = task_name</font>
+<font color="green"> 185.         self.arguments = args</font>
+<font color="green"> 186.         self.total = len(args)</font>
+<font color="black"> 187. </font>
+<font color="green"> 188.     def run(self):</font>
+<font color="black"> 189.         &quot;&quot;&quot;Run all tasks in the taskset.</font>
+<font color="black"> 190. </font>
+<font color="black"> 191.         Returns a tuple with the taskset id, and a list of subtask id's.</font>
+<font color="black"> 192. </font>
+<font color="black"> 193.         Examples</font>
+<font color="black"> 194.         --------</font>
+<font color="black"> 195.             &gt;&gt;&gt; ts = RefreshFeeds([&quot;http://foo.com/rss&quot;, http://bar.com/rss&quot;])</font>
+<font color="black"> 196.             &gt;&gt;&gt; taskset_id, subtask_ids = ts.run()</font>
+<font color="black"> 197.             &gt;&gt;&gt; taskset_id</font>
+<font color="black"> 198.             &quot;d2c9b261-8eff-4bfb-8459-1e1b72063514&quot;</font>
+<font color="black"> 199.             &gt;&gt;&gt; subtask_ids</font>
+<font color="black"> 200.             [&quot;b4996460-d959-49c8-aeb9-39c530dcde25&quot;,</font>
+<font color="black"> 201.             &quot;598d2d18-ab86-45ca-8b4f-0779f5d6a3cb&quot;]</font>
+<font color="black"> 202.             &gt;&gt;&gt; time.sleep(10)</font>
+<font color="black"> 203.             &gt;&gt;&gt; is_done(taskset_id)</font>
+<font color="black"> 204.             True</font>
+<font color="black"> 205.         &quot;&quot;&quot;</font>
+<font color="green"> 206.         taskset_id = str(uuid.uuid4())</font>
+<font color="green"> 207.         publisher = TaskPublisher(connection=DjangoAMQPConnection)</font>
+<font color="green"> 208.         subtask_ids = []</font>
+<font color="green"> 209.         for arg in self.arguments:</font>
+<font color="green"> 210.             subtask_id = publisher.delay_task_in_set(task_name=self.task_name,</font>
+<font color="green"> 211.                                                      taskset_id=taskset_id,</font>
+<font color="green"> 212.                                                      task_kwargs=arg)</font>
+<font color="green"> 213.             subtask_ids.append(subtask_id)</font>
+<font color="green"> 214.         publisher.close()</font>
+<font color="green"> 215.         return taskset_id, subtask_ids</font>
+<font color="black"> 216. </font>
+<font color="black"> 217. </font>
+<font color="green"> 218. class PeriodicTask(Task):</font>
+<font color="black"> 219.     &quot;&quot;&quot;A periodic task is a task that behaves like a cron job.</font>
+<font color="black"> 220. </font>
+<font color="black"> 221.     The ``run_every`` attribute defines how often the task is run (its</font>
+<font color="black"> 222.     interval), it can be either a ``datetime.timedelta`` object or a integer</font>
+<font color="black"> 223.     specifying the time in seconds.</font>
+<font color="black"> 224. </font>
+<font color="black"> 225.     You have to register the periodic task in the task registry.</font>
+<font color="black"> 226. </font>
+<font color="black"> 227.     Examples</font>
+<font color="black"> 228.     --------</font>
+<font color="black"> 229. </font>
+<font color="black"> 230.         &gt;&gt;&gt; from celery.task import tasks, PeriodicTask</font>
+<font color="black"> 231.         &gt;&gt;&gt; from datetime import timedelta</font>
+<font color="black"> 232.         &gt;&gt;&gt; class MyPeriodicTask(PeriodicTask):</font>
+<font color="black"> 233.         ...     name = &quot;my_periodic_task&quot;</font>
+<font color="black"> 234.         ...     run_every = timedelta(seconds=30)</font>
+<font color="black"> 235.         ...</font>
+<font color="black"> 236.         ...     def run(self, **kwargs):</font>
+<font color="black"> 237.         ...         logger = self.get_logger(**kwargs)</font>
+<font color="black"> 238.         ...         logger.info(&quot;Running MyPeriodicTask&quot;)</font>
+<font color="black"> 239.         &gt;&gt;&gt; tasks.register(MyPeriodicTask)</font>
+<font color="black"> 240. </font>
+<font color="green"> 241.     &quot;&quot;&quot;</font>
+<font color="green"> 242.     run_every = timedelta(days=1)</font>
+<font color="green"> 243.     type = &quot;periodic&quot;</font>
+<font color="black"> 244. </font>
+<font color="green"> 245.     def __init__(self):</font>
+<font color="green"> 246.         if not self.run_every:</font>
+<font color="red"> 247.             raise NotImplementedError(</font>
+<font color="black"> 248.                     &quot;Periodic tasks must have a run_every attribute&quot;)</font>
+<font color="black"> 249. </font>
+<font color="black"> 250.         # If run_every is a integer, convert it to timedelta seconds.</font>
+<font color="green"> 251.         if isinstance(self.run_every, int):</font>
+<font color="green"> 252.             self.run_every = timedelta(seconds=self.run_every)</font>
+<font color="black"> 253. </font>
+<font color="green"> 254.         super(PeriodicTask, self).__init__()</font>
+<font color="black"> 255. </font>
+<font color="black"> 256. </font>
+<font color="green"> 257. class TestTask(Task):</font>
+<font color="green"> 258.     &quot;&quot;&quot;A simple test task that just logs something.&quot;&quot;&quot;</font>
+<font color="green"> 259.     name = &quot;celery.test_task&quot;</font>
+<font color="black"> 260. </font>
+<font color="green"> 261.     def run(self, some_arg, **kwargs):</font>
+<font color="red"> 262.         logger = self.get_logger(**kwargs)</font>
+<font color="red"> 263.         logger.info(&quot;TestTask got some_arg=%s&quot; % some_arg)</font>
+<font color="green"> 264. tasks.register(TestTask)</font>
+<font color="black"> 265. </font>
+<font color="black"> 266. </font>
+<font color="green"> 267. class DeleteExpiredTaskMetaTask(PeriodicTask):</font>
+<font color="black"> 268.     &quot;&quot;&quot;A periodic task that deletes expired task metadata every day.</font>
+<font color="black"> 269. </font>
+<font color="black"> 270.     It's only registered if ``settings.CELERY_TASK_META_USE_DB`` is set.</font>
+<font color="green"> 271.     &quot;&quot;&quot;</font>
+<font color="green"> 272.     name = &quot;celery.delete_expired_task_meta&quot;</font>
+<font color="green"> 273.     run_every = timedelta(days=1)</font>
+<font color="black"> 274. </font>
+<font color="green"> 275.     def run(self, **kwargs):</font>
+<font color="red"> 276.         logger = self.get_logger(**kwargs)</font>
+<font color="red"> 277.         logger.info(&quot;Deleting expired task meta objects...&quot;)</font>
+<font color="red"> 278.         TaskMeta.objects.delete_expired()</font>
+<font color="green"> 279. if TASK_META_USE_DB:</font>
+<font color="green"> 280.     tasks.register(DeleteExpiredTaskMetaTask)</font>
+</pre>
+
