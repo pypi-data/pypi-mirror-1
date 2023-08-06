@@ -1,0 +1,263 @@
+:mod:`cli` --- command line tools
+=================================
+
+.. module:: cli
+    :synopsis: Command line tools.
+.. moduleauthor:: Will Maier <willmaier@ml1.net>
+.. sectionauthor:: Will Maier <willmaier@ml1.net>
+
+:mod:`cli` provides a suite of tools that simplify the process of
+developing testable, robust and easy-to-use command line applications.
+With :mod:`cli`, your scripts (and larger applications) can use Python's
+extensive standard library to parse configuration files and command line
+parameters, log messages and even daemonize. All of these services are
+made available through the :class:`cli.app.Application` class, an instance of
+which is passed to your script at run time. Even though it is
+featureful, :mod:`cli` is decidedly unmagical.
+
+Installing :mod:`cli`
+---------------------
+
+.. highlight:: none
+
+You can install the latest stable version of :mod:`cli` using :command:`pip`::
+    
+    $ pip install pyCLI
+
+You can also browse the project's `Mercurial`_ `repository`_. If you'd
+like to contribute changes, start by cloning the repository::
+
+    $ hg clone http://code.lfod.us/cli
+
+.. _Mercurial:  http://mercurial.selenic.com/
+.. _repository: http://code.lfod.us/cli
+
+You can also follow the project's `changelog`_.
+
+.. _changelog:  http://code.lfod.us/cli/log
+
+A quick tour of :mod:`cli`'s features
+-------------------------------------
+
+.. highlight:: python
+
+Command line parsing::
+
+    #!/usr/bin/env python
+    import cli
+
+    @cli.CommandLineApp
+    def ls(app):
+        pass
+    
+    ls.add_param("-l", "--long", help="list in long format", default=False, action="store_true")
+
+    if __name__ == "__main__":
+        ls.run()
+
+.. highlight:: none
+
+When run, this script produces the following output::
+
+    $ python ls.py -h
+    usage: ls [-h] [-l]
+
+    optional arguments:
+      -h, --help  show this help message and exit
+      -l, --long  list in long format
+
+.. highlight:: python
+
+Logging::
+
+    #!/usr/bin/env python
+    import time
+    import cli
+    @cli.LoggingApp
+    def sleep(app):
+        app.log.debug("About to sleep for %d seconds" % app.params.seconds)
+        time.sleep(app.params.seconds)
+    
+    sleep.add_param("seconds", help="time to sleep", default=1, type=int)
+
+    if __name__ == "__main__":
+        sleep.run()
+
+.. highlight:: none
+
+Which produces the following::
+
+    $ python sleep.py -h
+    usage: sleep [-h] [-l] [-q] [-s] [-v] seconds
+
+    positional arguments:
+      seconds        time to sleep
+
+    optional arguments:
+      -h, --help     show this help message and exit
+      -l, --logfile  log to file (default: log to stdout)
+      -q, --quiet    decrease the verbosity
+      -s, --silent   only log warnings
+      -v, --verbose  raise the verbosity
+    $ python sleep.py -vv 3
+    About to sleep for 3 seconds
+
+.. highlight:: python
+
+Daemonizing::
+
+    #!/usr/bin/env python
+    import cli
+    @cli.DaemonizingApp
+    def daemon(app):
+        if app.params.daemonize:
+            app.log.info("About to daemonize")
+            app.daemonize()
+
+    if __name__ == "__main__":
+        daemon.run()
+
+.. highlight:: none
+
+And on the command line::
+
+    $ python daemon.py -h
+    usage: daemon [-h] [-l] [-q] [-s] [-v] [-d] [-u USER] [-p PIDFILE]
+
+    optional arguments:
+      -h, --help            show this help message and exit
+      -l, --logfile         log to file (default: log to stdout)
+      -q, --quiet           decrease the verbosity
+      -s, --silent          only log warnings
+      -v, --verbose         raise the verbosity
+      -d, --daemonize       run the application in the background
+      -u USER, --user USER  change to USER[:GROUP] after daemonizing
+      -p PIDFILE, --pidfile PIDFILE
+                            write PID to PIDFILE after daemonizing
+    $ python daemon.py -d -vv
+    About to daemonize
+
+.. highlight:: python
+
+Basic usage
+-----------
+
+While the :mod:`cli` modules provide a simple API for designing your own
+applications, the default implementations are intended to be flexible
+enough to cover most use cases. No matter which :class:`cli.app.Application` you
+use, the basic pattern is the same: create a callable that does the
+work, wrap it in an :class:`cli.app.Application`, add some parameters and call
+its :meth:`run` method.
+
+Your callable may be a simple function or a more complex class that
+implements the :meth:`__call__` protocol. Either way, it should accept a
+single :data:`app` instance as its only argument. It will use this
+object to interact with the application framework, find out what
+arguments were passed on the command line, log messages, etc.
+
+You can wrap the callable in one of two ways. First,
+:class:`cli.app.Application` can be thought of as a decorator (see :pep:`318`
+for more information). For example::
+
+    @cli.Application
+    def yourapp(app):
+        do_stuff()
+
+If you need to pass keyword arguments to the application, you can still
+use the decorator pattern::
+
+    @cli.CommandLineApp(argv=["-v"])
+    def yourapp(app):
+        do_stuff()
+
+If you don't like decorators (or your interpreter doesn't support them),
+you can also simply pass your application callable to the
+:class:`cli.app.Application`::
+
+    def yourapp(app):
+        do_stuff()
+
+    yourapp = cli.CommandLineApp(yourapp)
+
+Most of the supplied :class:`cli.app.Application` implementations support
+parameters. Parameters determine how your users interact with your
+program on the command line. To add parameters to your application, call
+:meth:`add_param` after you've wrapped your callable::
+
+    yourapp.add_param("-v", "--verbose", help="increase the verbosity", default=0, action="count")
+
+The interface here is the same as that implemented by
+:class:`argparse.ArgumentParser`. In this case, an :attr:`verbose`
+attribute will be created on the :attr:`app.params` object with an
+integer representing the desired verbosity level.
+
+Once you've added all the parameters you need (if any -- the default
+implementations include sensible defaults), simply call the :meth:`run`
+method on the wrapped callable. It's best to do this only if your script
+is actually being run, so shield it with a conditional::
+
+    if __name__ == "__main__":
+        yourapp.run()
+
+This will allow you to import your application and tweak it
+programmatically from another script without actually invoking it.
+
+Command line best practices
+---------------------------
+
+Extending :class:`cli.app.Application`
+--------------------------------------
+
+API
+---
+
+.. automodule:: cli.app
+
+.. autoclass:: cli.app.Application
+    :members:
+
+.. autoclass:: cli.app.CommandLineApp
+    :members:
+
+.. automodule:: cli.log
+
+.. autoclass:: cli.log.LoggingApp
+    :members:
+
+.. autoclass:: cli.log.CommandLineLogger
+    :members:
+
+.. automodule:: cli.daemon
+
+.. autoclass:: cli.daemon.DaemonizingApp
+    :members:
+
+Testing :class:`cli`
+--------------------
+
+cli ships with a number of unit tests that help ensure that the code run
+correctly. The tests live in the ``tests`` package and can be run by
+``setup.py``::
+
+    $ python setup.py test
+
+You can get a sense for how completely the unit tests exercise cli by
+running the coverage_ tool::
+
+    $ coverage run --branch setup.py test
+
+``coverage`` tracks the code statements and branches that the test suite
+touches and can generate a report listing the lines of code that are
+missed::
+
+    $ coverage report -m --omit "tests,/home/will/lib,lib/cli/ext,setup"
+
+It's useful to omit the third party code directory (``ext``) as well as
+the path to the Python standard library as well as ``setup.py`` and the
+tests themselves.
+
+All new code in cli should be accompanied by unit tests. Eventually,
+the unit tests should be complemented by a set of functional tests
+(especially to stress things like the daemon code).
+
+.. _coverage:   http://nedbatchelder.com/code/coverage/
