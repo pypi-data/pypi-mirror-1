@@ -1,0 +1,96 @@
+=============
+Django Notify
+=============
+
+A Django application which provides temporary notifications.
+
+Notification messages persist until a request retrieves them.
+
+
+Installation
+============
+
+Add the middleware to your ``MIDDLEWARE_CLASSES`` setting (the default
+temporary storage relies on Django's ``contrib.sessions`` application, so place
+this after ``SessionMiddleware``)::
+
+    'django_notify.middleware.NotificationsMiddleware',
+
+To make it easy to access notifications in templates, add the context processor
+into your ``TEMPLATE_CONTEXT_PROCESSORS`` setting::
+
+    'django_notify.context_processors.notifications',
+
+
+Usage
+=====
+
+Adding a temporary notification message
+---------------------------------------
+
+The middleware adds an instance of a temporary storage class called
+``notifications`` to your ``request``. To add a notification, call::
+
+    request.notifications.add('Hello world.')
+
+You can optionally provide a string containing tags (which is usually
+represented as HTML classes for the message)::
+
+    request.notifications.add('Your rating is over 9000!', 'error')
+
+Displaying temporary notifications
+----------------------------------
+
+In your template (rendered with RequestContext or with
+``request.notifications`` passed as ``notifications`` in its context) using
+something like::
+
+	{% if notifications %}
+	<ul class="notifications">
+		{% for message in notifications %}
+		<li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+		{% endfor %}
+	</ul>
+	{% endif %}
+
+The notifications are marked to be cleared when the storage instance is
+iterated (cleared when the response is processed). To avoid the notifications
+being cleared, you can set ``request.notifications.used = False`` after
+iterating.
+
+
+Temporary Storage Backends
+==========================
+
+Django notify can use different backends to store temporary messages. To change
+which backend is being used, add a ``NOTIFICATIONS_STORAGE`` to your settings,
+referencing to the module and class of the storage class. For example::
+
+    NOTIFICATIONS_STORAGE = 'cookie.CookieStorage'
+
+Django Notify first looks for the module inside of ``django_notify.storage``,
+and if not found, tries to import the full given module directly.
+
+Three temporary storage classes are included in Django Notify:
+
+``'session.SessionStorage'``
+    This class stores all messages inside of the request's session. It
+    requires Django's ``contrib.session`` application.
+
+``'cookie.CookieStorage'``
+    This class stores the notification data in a cookie (signed with a secret
+    hash to prevent manipulation) to persist notifications across requests.
+    Old messages are dropped if the cookie data size would exceed 4096 bytes.
+
+``'fallback.FallbackStorage'``
+    This is the default temporary storage class.
+
+    This class uses CookieStorage for all notification messages, falling back
+    to using SessionStorage for the messages which could not fit in a single
+    cookie.
+
+    Since it is uses SessionStorage, it also requires Django's
+    ``contrib.session`` application. 
+
+To write your own, subclass the ``BaseStorage`` class in
+``django_notify.storage.base`` and write ``_get`` and ``_store`` methods.
