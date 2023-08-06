@@ -1,0 +1,202 @@
+==============
+Lazy Lists
+==============
+
+A LazyList presents a sequence facade on any iterable.
+
+    >>> def make_ten():
+    ...     for x in range(10):
+    ...         yield x
+
+    >>> import zc.lazylist
+    >>> l = zc.lazylist.LazyList(iter(make_ten()))
+    >>> l[0]
+    0
+
+
+len()
+=====
+
+The len() of a LazyList that hasn't been accessed returns the correct value.
+
+    >>> def make_ten():
+    ...     for x in range(10):
+    ...         yield x
+
+    >>> l = zc.lazylist.LazyList(make_ten())
+    >>> len(l)
+    10
+
+Even though we've consumed the first item from the iterator, we can still
+retrieve it.
+
+    >>> l[0]
+    0
+
+The values are in the internal buffer that keeps the consumed portion of the
+iterator around for future random access.
+
+    >>> l.data
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    >>> l[7]
+    7
+
+The buffer only includes the part of the iterator we've consumed.
+
+    >>> l = zc.lazylist.LazyList(make_ten())
+    >>> l[2:5]
+    [2, 3, 4]
+    >>> l.data
+    [0, 1, 2, 3, 4]
+
+And len() continues to return the correct result.
+
+    >>> len(l)
+    10
+
+Calling bool() on an iterable doesn't consume any items unnecessarily.
+
+    >>> l = zc.lazylist.LazyList(iter(make_ten()))
+    >>> l.data
+    []
+    >>> bool(l)
+    True
+    >>> l.data
+    [0]
+
+Calling len() will consume the entire iterable if the underlying iterable
+doesn't support len().
+
+    >>> def generator():
+    ...     yield 0
+    ...     yield 1
+    ...     yield 2
+    ...     yield 3
+    >>> l = zc.lazylist.LazyList(generator())
+    >>> len(l)
+    4
+    >>> l.data
+    [0, 1, 2, 3]
+
+...but if it does, no items will be consumed.
+
+    >>> l = zc.lazylist.LazyList([1, 2, 3])
+    >>> len(l)
+    3
+    >>> l.data
+    []
+
+If the iterable doesn't support len() and we know the length, we can provide it
+directly.
+
+    >>> l = zc.lazylist.LazyList(make_ten(), length=10)
+    >>> len(l)
+    10
+
+When the length is provided the iterator isn't consumed in order to find the
+length.
+
+    >>> l.data
+    []
+
+
+Slicing
+=======
+
+    >>> l = zc.lazylist.LazyList(make_ten())
+    >>> l[2:5]
+    [2, 3, 4]
+
+Negative indices and slices work.
+
+    >>> l[-1]
+    9
+    >>> l[-2:-1]
+    [8]
+    >>> l[-5:8]
+    [5, 6, 7]
+
+If we try to access an index that's out of range, we get an IndexError.
+
+    >>> l[20]
+    Traceback (most recent call last):
+        ...
+    IndexError: 20
+
+
+Adding LazyLists
+====================
+
+We can add two LazyLists together.
+
+    >>> l1 = zc.lazylist.LazyList(generator())
+    >>> l2 = zc.lazylist.LazyList(generator())
+    >>> l = l1 + l2
+
+We get a LazyList back.
+
+    >>> type(l)
+    <class 'zc.lazylist.LazyList'>
+
+The same goes for adding other sequence types and a LazyList.
+
+    >>> type([1, 2, 3] + l)
+    <class 'zc.lazylist.LazyList'>
+    >>> type((1, 2, 3) + l)
+    <class 'zc.lazylist.LazyList'>
+    >>> type(l + [1, 2, 3])
+    <class 'zc.lazylist.LazyList'>
+    >>> type(l + (1, 2, 3))
+    <class 'zc.lazylist.LazyList'>
+
+
+Fetching Values
+===============
+
+Fetching the first few values from the LazyList causes the first sequence to
+materialze values, but leave the second unmolested.
+
+    >>> l[1]
+    1
+    >>> l1.data
+    [0, 1]
+    >>> l2.data
+    []
+
+We can request the whole concatenation and we get what we expect.
+
+    >>> list(l)
+    [0, 1, 2, 3, 0, 1, 2, 3]
+
+
+Infinite Iterables
+==================
+
+Even infinite iterables can be used (but don't try to call len() on the
+resulting LazyList).
+
+    >>> import itertools
+    >>> infinite = itertools.cycle([1, 2, 3])
+    >>> l = zc.lazylist.LazyList(infinite)
+
+    >>> l[:6]
+    [1, 2, 3, 1, 2, 3]
+
+    >>> l[100]
+    2
+    >>> len(l.data)
+    101
+
+    >>> l[1000]
+    2
+    >>> len(l.data)
+    1001
+
+If you're paranoid, you can None for "length", just in case len() gets called.
+
+    >>> infinite = itertools.cycle([1, 2, 3])
+    >>> l = zc.lazylist.LazyList(infinite, length=None)
+    >>> len(l)
+    Traceback (most recent call last):
+        ...
+    RuntimeError: Calling len() on this object is not allowed.
