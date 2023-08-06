@@ -1,0 +1,107 @@
+Setup environment.:
+
+    >>> import ZODB.tests.util
+    >>> db = ZODB.tests.util.DB()
+    >>> conn = db.open()
+    >>> root = conn.root()
+    
+    >>> from zodbcode.module import ManagedRegistry
+    >>> registry = root['registry'] = ManagedRegistry()
+    >>> from zope.component.persistentregistry import PersistentComponents
+    >>> manager = root['manager'] = PersistentComponents()
+    
+    >>> from zope.component import provideUtility, getUtility
+    
+    >>> from cornerstone.soup.interfaces import ISoup
+    >>> from cornerstone.soup.tests.env import MySoup
+    >>> soup = MySoup()
+    >>> provideUtility(soup, ISoup, name=u'mysoup')
+    >>> getUtility(ISoup, name=u'mysoup')
+    <MySoup at mysoup>
+    
+    >>> manager.registerUtility(soup, ISoup, name=u'mysoup')
+    >>> manager.getUtility(ISoup, name=u'mysoup')
+    <MySoup at mysoup>
+    
+    >>> getUtility(ISoup, name=u'mysoup') \
+    ...     is manager.getUtility(ISoup, name=u'mysoup')
+    True
+    
+    >>> from zope.intid.interfaces import IIntIds
+    >>> from five.intid.intid import OFSIntIds
+    >>> intids = OFSIntIds()
+    >>> provideUtility(intids, IIntIds, name=u'mysoup')
+    >>> getUtility(IIntIds, name=u'mysoup')
+    <five.intid.intid.OFSIntIds object at ...>
+    
+    >>> manager.registerUtility(intids, IIntIds, name=u'mysoup')
+    >>> manager.getUtility(IIntIds, name=u'mysoup')
+    <five.intid.intid.OFSIntIds object at ...>
+    
+    >>> from transaction import commit
+    >>> commit()
+    
+    >>> #conn.close()
+    >>> #db.close()
+    
+Load ZCML configuration of cornerstone.soup:
+    
+    >>> import cornerstone.soup
+    >>> from zope.configuration.xmlconfig import XMLConfig
+    >>> config = XMLConfig('configure.zcml', cornerstone.soup)
+
+Register the Catalog Factory as utility.:
+
+    >>> zcml = """
+    ... <configure xmlns="http://namespaces.zope.org/zope">
+    ...   <utility
+    ...     name="mysoup"
+    ...     factory="cornerstone.soup.tests.env.MyCatalogFactory"
+    ...     provides="cornerstone.soup.interfaces.ICatalogFactory"
+    ...   />
+    ... </configure>
+    ... """
+    >>> from zope.configuration.xmlconfig import string
+    >>> context = string(zcml, config.context)
+
+XXX: We want to have handler(s) to react on adding of records if desired.
+
+The intids utility:
+
+    >>> getUtility(IIntIds, name=u'mysoup')
+    <five.intid.intid.OFSIntIds object at ...>
+
+Our soup:
+
+    >>> #soup = getUtility(ISoup, name='mysoup')
+    >>> soup
+    <MySoup at mysoup>
+
+Our catalog factory.
+
+    >>> from cornerstone.soup.interfaces import ICatalogFactory
+    >>> getUtility(ICatalogFactory, name='mysoup')
+    <cornerstone.soup.tests.env.MyCatalogFactory object at ...>
+    
+Now create a Record
+
+    >>> from cornerstone.soup import Record
+    >>> record = Record(user='user1')
+
+and check wether we get a key reference for it.
+
+    >>> from zope.keyreference.interfaces import IKeyReference
+    >>> IKeyReference(record)
+    Traceback (most recent call last):
+      ...
+    NotYet
+    
+    >>> #id = soup.add(record)
+    >>> #soup.query(user='user1')
+    [<Record at /plone/mysoup/record>]
+    
+    >>> #soup.query(user='nonexist')
+    []
+    
+    >>> #conn.close()
+    >>> #db.close()
