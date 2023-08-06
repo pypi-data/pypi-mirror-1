@@ -1,0 +1,120 @@
+======================================
+Handling the response to an AT command
+======================================
+
+Strings received in response to an AT command are either unformatted text or
+represent a list of values using a defined syntax. The parseResponse function
+implements these syntax rules.
+
+  >>> from phebe.response import parseResponse
+
+The function takes one parameter, the response line as a unicode string, and
+returns a Python list containing the represented data as Python values. The
+line is assumed to be stripped of any AT command prefix and leading as well as
+trailing whitespace.
+
+Response values are separated by commas, without any whitespace in between. An
+empty response line will be read as an empty list of response values.
+
+  >>> parseResponse(u'')
+  []
+
+Values may be omitted; an omitted value will be read as Python None. If the
+response starts with a comma, the first value is taken to be omitted.
+
+  >>> parseResponse(u',1')
+  [None, 1]
+
+Any two consecutive commas mean that the value between them is omitted.
+
+  >>> parseResponse(u'1,,2')
+  [1, None, 2]
+
+A trailing comma doesn't matter, but several trailing commas give rise to
+omitted values.
+
+  >>> parseResponse(u'1,')
+  [1]
+  >>> parseResponse(u'1,,')
+  [1, None]
+  >>> parseResponse(u',,')
+  [None, None]
+
+As you could already see, integer numbers are just written down in decimal
+representation. Number ranges are denoted by the first and the last number,
+separated by a dash. They will be read into RangeList instances.
+
+  >>> parseResponse(u'1-5')
+  [RangeList((1, 6))]
+
+Character strings are delimited by double quotes and will be read into unicode
+strings.
+
+  >>> parseResponse(u'"Hello world."')
+  [u'Hello world.']
+  >>> parseResponse(u'"\xe4\xf6\xfc\xdf"')
+  [u'\xe4\xf6\xfc\xdf']
+
+Apart from integers, range lists, and strings, the list of response values may
+contain nested lists of values. They are delimited by parentheses and their
+content is subject to the same syntax rules as the complete response string.
+
+Let's see the simple stuff wrapped in a nested list.
+
+  >>> parseResponse(u'()')
+  [[]]
+  >>> parseResponse(u'(1)')
+  [[1]]
+  >>> parseResponse(u'("Hello world.")')
+  [[u'Hello world.']]
+  >>> parseResponse(u'(4-9)')
+  [[RangeList((4, 10))]]
+  >>> parseResponse(u'(1, 2, 3)')
+  [[1, 2, 3]]
+
+Nested lists work nice alongside other values and may be nested deeper than
+one level.
+
+  >>> parseResponse(u'(1,2),3')
+  [[1, 2], 3]
+  >>> parseResponse(u'(1,"Hello"),(2,"world")')
+  [[1, u'Hello'], [2, u'world']]
+  >>> parseResponse(u'0,(1,(2,(3,4)))')
+  [0, [1, [2, [3, 4]]]]
+  >>> parseResponse(u'(((0,1),2),3),4')
+  [[[[0, 1], 2], 3], 4]
+
+Value omission works inside lists.
+
+  >>> parseResponse(u'(1,)')
+  [[1]]
+  >>> parseResponse(u'(1,,)')
+  [[1, None]]
+  >>> parseResponse(u'(,1)')
+  [[None, 1]]
+  >>> parseResponse(u'(1,,2)')
+  [[1, None, 2]]
+  >>> parseResponse(u'(,)')
+  [[None]]
+  >>> parseResponse(u'(,,)')
+  [[None, None]]
+
+And of course, it works alongside them.
+
+  >>> parseResponse(u',(1)')
+  [None, [1]]
+  >>> parseResponse(u'(1),')
+  [[1]]
+  >>> parseResponse(u'(1),,')
+  [[1], None]
+
+Any value which cannot be interpreted by the above rules will be read as a
+byte string.
+
+  >>> parseResponse(u'1,234A,5')
+  [1, '234A', 5]
+
+
+.. Local Variables:
+.. mode: rst
+.. End:
