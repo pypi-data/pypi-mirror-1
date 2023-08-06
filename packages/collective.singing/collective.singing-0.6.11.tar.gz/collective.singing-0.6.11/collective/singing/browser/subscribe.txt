@@ -1,0 +1,369 @@
+Subscriptions
+=============
+
+Defining a channel
+------------------
+
+Subscription forms operate on channels.  To be able to make
+subscriptions, we create a minimal channel that has one composer and
+no collector.  Our composer has a title and a schema that represents
+the data it needs to create a message:
+
+  >>> from UserDict import DictMixin
+  >>> from zope import interface
+  >>> from zope import schema
+  >>> from collective.singing import interfaces
+  >>> import collective.singing.subscribe
+  >>> from collective.singing import tests
+
+  >>> class Channel(object):
+  ...     interface.implements(interfaces.IChannel)
+  ...     def __init__(self):
+  ...          self.subscriptions = tests.create_subscriptions()
+  ...          self.composers = dict(html=Composer())
+  ...          self.collector = Collector()
+  >>> __builtins__['Channel'] = Channel # make persistable
+
+Defining a composer
+-------------------
+
+Our composer has to have a title and a schema.  For the schema part,
+we'll require a valid e-mail address, and we'll make sure the user
+gets a nice error message if the e-mail address is not good:
+
+  >>> import re
+  >>> regex = r"[a-zA-Z0-9._%-]+@([a-zA-Z0-9-]+\.)*[a-zA-Z]{2,4}"
+  >>> class InvalidEmailAddress(schema.ValidationError):
+  ...     u"Your e-mail address is invalid"
+  >>> def check_email(value):
+  ...     if not re.match(regex, value):
+  ...         raise InvalidEmailAddress
+  ...     return True
+
+We'll define a composer schema and mark the email field as
+ISubscriptionKey.  This will allow us later to refuse duplicate
+subscriptions (for the same format):
+
+  >>> class IComposerSchema(interface.Interface):
+  ...     email = schema.TextLine(
+  ...         title=u"E-Mail address",
+  ...         constraint=check_email)
+  >>> interface.directlyProvides(IComposerSchema['email'],
+  ...                            collective.singing.interfaces.ISubscriptionKey)
+
+  >>> class Message(object):
+  ...     def __init__(self, payload):
+  ...         self.payload = payload
+
+  >>> class Composer(object):
+  ...     interface.implements(interfaces.IComposer,
+  ...                          interfaces.IComposerBasedSecret)
+  ...     title = 'HTML E-Mail'
+  ...     schema = IComposerSchema
+  ...
+  ...     def secret(self, data):
+  ...         return data['email']
+  ... 
+  ...     def render_confirmation(self, subscription):
+  ...         email = subscription.composer_data['email']
+  ...         return Message(
+  ...             u"This is a message to %s to confirm their subscription." %
+  ...             (email,))
+  ... 
+  ...     def render_forgot_secret(self, subscription):
+  ...         email = subscription.composer_data['email']
+  ...         return Message(
+  ...             u"This is a message to %s to remind them." %
+  ...             (email,))
+
+
+  >>> __builtins__['Composer'] = Composer # make persistable
+
+Note that our composer also implements ``IComposerBasedSecret``.  This
+will allow us to provide a secret, i.e. an ASCII string that
+identifies the user uniquely.  In our simplistic implementation, we
+just return the e-mail address of the user.
+
+The standard subscription process requires the composer to have a
+``render_confirmation`` method that requests the user to confirm their
+subscription.
+
+Sending the message is done using the ``IDispatch`` adapter.  Let's
+define a small dispatcher that prints out messages that it's supposed
+to send:
+
+  >>> from zope import component
+  >>> class Dispatch(object):
+  ...     interface.implements(interfaces.IDispatch)
+  ...     component.adapts(unicode)
+  ... 
+  ...     def __init__(self, message):
+  ...         self.message = message
+  ... 
+  ...     def __call__(self):
+  ...         print "This is your dispatcher speaking: ",
+  ...         print self.message
+  ...         return u'sent', None
+
+  >>> component.provideAdapter(Dispatch)
+
+Defining a collector
+--------------------
+
+The collector can add request its own data from the form.  Just like
+with the composer, it may define a schema for doing that:
+
+  >>> from collective.singing.browser.subscribe import Terms
+  >>> class ICollectorSchema(interface.Interface):
+  ...     colour = schema.Choice(
+  ...         title=u"Colour",
+  ...         vocabulary=Terms.fromValues(['yellow', 'red']),
+  ...         required=False)
+
+  >>> class Collector(object):
+  ...     interface.implements(interfaces.ICollector)
+  ...     schema = ICollectorSchema
+  >>> __builtins__['Collector'] = Collector # make persistable
+
+Setup form machinery
+--------------------
+
+Before we can proceed to instantiate our add form, let's set up some
+defaults for our forms.  This is of course only required in tests:
+
+  >>> from collective.singing.browser.tests import setup_defaults
+  >>> setup_defaults()
+
+Set up adapters
+---------------
+
+  >>> from zope import component
+  >>> component.provideAdapter(collective.singing.subscribe.catalog_data)
+
+Rendering the subscription add form
+-----------------------------------
+
+We can now instantiate our subscription add form.  Because our channel
+has only one format, we'll get straight to the form that lets us
+subscribe right away.
+
+  >>> from z3c.form.testing import TestRequest
+  >>> from collective.singing.browser.subscribe import Subscribe
+
+  >>> channel = Channel()
+  >>> subscribe = Subscribe(channel, TestRequest())
+
+  >>> html = subscribe()
+  >>> 'Fill in the information below to subscribe' in html
+  True
+  >>> 'E-Mail address' in html
+  True
+
+Making an error while submitting the subscription add form
+----------------------------------------------------------
+
+Providing an incorrect e-mail address will not add the subscription.
+Instead it will render the add form again and point to the error:
+
+  >>> request = TestRequest(form={
+  ...     'composer.widgets.email': u'http://testingundergroud.com',
+  ...     'format.widgets.format': [u'html'],
+  ...     'form.buttons.finish': u'Finish'}
+  ... )
+  >>> subscribe = Subscribe(channel, request)
+  >>> html = subscribe()
+  >>> 'There were errors' in html
+  True
+  >>> 'Your e-mail address is invalid' in html
+  True
+
+Successfully add a subscription through the form
+------------------------------------------------
+
+We'll submit the form correctly now, including a colour:
+
+  >>> len(channel.subscriptions)
+  0
+  >>> request.form['composer.widgets.email'] = u'daniel@testingunderground.com'
+  >>> request.form['collector.widgets.colour'] = [u'red']
+  >>> subscribe = Subscribe(channel, request)
+  >>> html = subscribe() # doctest: +NORMALIZE_WHITESPACE
+  This is your dispatcher speaking:
+    This is a message to daniel@testingunderground.com to confirm their
+    subscription.
+
+We're now subscribed to the channel:
+
+  >>> len(channel.subscriptions)
+  1
+  >>> list(channel.subscriptions.values()) \
+  ... # doctest: +NORMALIZE_WHITESPACE +ELLIPSIS
+  [<SimpleSubscription to <Channel object at ...>
+    with composerdata: {'email': u'daniel@testingunderground.com'},
+    collectordata: {'colour': 'red'},
+    and metadata: {'date': datetime.datetime(...),
+                   'format': 'html',
+                   'pending': True}>]
+
+  >>> 'Thanks for your subscription' in html
+  True
+
+Trying to subscribe again for the same format and e-mail address will
+produce a form error:
+
+  >>> html = subscribe()
+  >>> "You are already subscribed" in html
+  True
+
+Another language
+----------------
+
+The subscription add form will keep track of the preferred user's
+language as defined by the ``IUserPreferredLanguages`` adapter.  Let's
+define such an adapter:
+
+  >>> from zope.i18n.interfaces import IUserPreferredLanguages
+  >>> from zope.publisher.interfaces import IRequest
+  >>> class MyUserPreferredLanguages(object):
+  ...     component.adapts(IRequest)
+  ...     interface.implements(IUserPreferredLanguages)
+  ... 
+  ...     def __init__(self, request):
+  ...         pass
+  ...     def getPreferredLanguages(self):
+  ...         return ['ba', 'bm']
+  ... 
+  >>> component.provideAdapter(MyUserPreferredLanguages)
+
+  >>> request.form['composer.widgets.email'] = u'hanno@testingunderground.com'
+  >>> html = subscribe()
+  This is your dispatcher speaking:  This is a message to hanno@testingunderground.com to confirm their subscription.
+  >>> 'Thanks for your subscription' in html
+  True
+  >>> sub = [s for s in channel.subscriptions.values()
+  ...        if s.composer_data['email'].startswith('hanno')][0]
+  >>> sub.metadata['languages']
+  ['ba', 'bm']
+
+Another format
+--------------
+
+If there's more than one composer, i.e. more than one format, the add
+form will first ask us for the format.  To trigger this behaviour,
+we'll define another composer:
+
+  >>> class PlainTextEmailComposer(Composer):
+  ...     title = 'Plain text E-Mail'
+  >>> __builtins__['PlainTextEmailComposer'] = PlainTextEmailComposer
+
+  >>> channel.composers['plaintext'] = PlainTextEmailComposer()
+    
+  >>> request = TestRequest()
+  >>> subscribe = Subscribe(channel, request)
+  >>> html = subscribe()
+  >>> 'HTML E-Mail' in html, 'Plain text E-Mail' in html
+  (True, True)
+
+Let's select the plain-text format and "click" proceed:
+
+  >>> request.form.update({
+  ...     'format.widgets.format': [u'plaintext'],
+  ...     'form.buttons.proceed': u'Proceed',
+  ...     'form.widgets.step': u'1',
+  ... })
+  >>> html = subscribe()
+  >>> 'Finish' in html, 'Filters' in html
+  (True, False)
+
+We can now "finish" by providing an e-mail address:
+
+  >>> request.form['composer.widgets.email'] = u'daniel@testingunderground.com'
+  >>> request.form['collector.widgets.colour'] = [u'yellow']
+  >>> request.form['form.buttons.finish'] = u'Finish'
+
+  >>> 'Thanks for your subscription' in subscribe() \
+  ... # doctest: +NORMALIZE_WHITESPACE
+  This is your dispatcher speaking:
+    This is a message to daniel@testingunderground.com to confirm their
+    subscription.
+  True
+
+  >>> len(channel.subscriptions)
+  3
+
+  >>> html = [sub for sub in channel.subscriptions.values()
+  ...         if sub.metadata['format'] == 'html' and
+  ...         sub.composer_data['email'].startswith('daniel')][0]
+  >>> plaintext = [sub for sub in channel.subscriptions.values()
+  ...              if sub.metadata['format'] == 'plaintext' and
+  ...              sub.composer_data['email'].startswith('daniel')][0]
+
+The data we entered was stored correctly:
+
+  >>> dict(html.collector_data)
+  {'colour': 'red'}
+  >>> dict(plaintext.collector_data)
+  {'colour': 'yellow'}
+
+Also metadata was stored.  Note that the subscription is flagged as
+pending:
+
+  >>> from pprint import pprint
+  >>> pprint(dict(html.metadata)) # doctest: +ELLIPSIS
+  {'date': datetime.datetime(...),
+   'format': 'html',
+   'pending': True}
+
+Forgot secret
+-------------
+
+If a user tries to subscribe with an existing e-mail address, they'll
+get an option to have their secret sent to them again:
+
+  >>> html = subscribe()
+  >>> "You are already subscribed" in html
+  True
+  >>> "Send my subscription details" in html
+  True
+  >>> del request.form['form.buttons.finish']
+  >>> request.form['composer.buttons.forgot'] = (
+  ...     u'Send my subscription details')
+  >>> html = subscribe()
+  This is your dispatcher speaking:  This is a message to daniel@testingunderground.com to remind them.
+  >>> "We sent you a message" in html
+  True
+
+The ForgotSecret form does the same.  For this one to work, we'll need
+to register an IChannelLookup utility:
+
+  >>> def channel_lookup():
+  ...     return [channel]
+  >>> interface.directlyProvides(
+  ...     channel_lookup, collective.singing.interfaces.IChannelLookup)
+  >>> component.provideUtility(channel_lookup)
+
+  >>> from collective.singing.browser.subscribe import ForgotSecret
+  >>> request = TestRequest()
+  >>> request.form['form.widgets.address'] = u'daniel@testingunderground.com'
+  >>> request.form['form.buttons.send'] = u'Send'
+  >>> html = ForgotSecret(None, request)()
+  This is your dispatcher speaking:  This is a message to daniel@testingunderground.com to remind them.
+  >>> "We sent you a message" in html
+  True
+
+Unsubscribe
+-----------
+
+The unsubscribe view takes a parameter ``secret``.  It will then
+delete our subscriptions from the channel:
+
+  >>> from collective.singing.browser.subscribe import Unsubscribe
+  >>> request = TestRequest()
+  >>> request.form['secret'] = u'daniel@testingunderground.com'
+  >>> unsubscribe = Unsubscribe(channel, request)
+  >>> len(channel.subscriptions)
+  3
+  >>> unsubscribe() # doctest: +ELLIPSIS
+  u'...You have been unsubscribed...'
+  >>> len(channel.subscriptions)
+  1
