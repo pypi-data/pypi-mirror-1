@@ -1,0 +1,90 @@
+`pyunv` is a Python parser for SAP BusinessObjects universe (.unv) files.
+
+Introduction
+============
+
+PyUnv reads SAP BusinessObjects universe (.unv) files. In BusinessObjects, a 
+universe provides a metadata layer above enterprise databases, expressed in 
+language that is easier for business users to understand than the underlying 
+data structures. Universes are edited with the BusinessObjects Designer and 
+saved to universe files in an undocumented binary format. PyUnv can extract 
+most of this metadata from the universe file, enabling you to use it outside 
+BusinessObjects, or to create tools to streamline your BusinessObjects 
+development process.
+
+Audience
+========
+
+PyUnv is for developers who use SAP BusinessObjects and Python.
+
+Installation
+============
+
+Install PyUnv with easy_install::
+
+    easy_install pyunv
+
+Sample Usage
+============
+
+With PyUnv installed, this should work::
+
+    >>> from pyunv.reader import Reader
+    >>> from pyunv.csvwriter import CsvWriter
+    >>> universe = Reader(open('sample.unv', 'rb')).universe
+    >>> manifest = Manifest()
+    >>> manifest.save(open('manifest.txt', 'w'), universe)
+
+This will create a text manifest of the classes, objects, and conditions
+in your universe.
+
+Applications
+============
+
+I wrote the earliest versions of PyUnv to extract descriptions for classes, 
+objects, and conditions from the universe file. After reverse-engineering more 
+of the universe file format, I saw PyUnv as a way to workaround limitations of 
+the BusinessObjects development tools. For example, BusinessObjects Designer 
+provides no support for change tracking. If you want to know what changed 
+between two versions of a universe, you open the first universe in one 
+Designer window and the second in another window, and then compare them 
+visually. That is impractical for all but the simplest universes.
+
+With PyUnv, you can write a Python script that exports all of the universe 
+metadata to a text manifest file and use your favorite file comparison tool 
+(diff, p4diff, FileMerge, or even Microsoft Word) to highlight the differences. 
+To track changes over time, just store the manifest with your universe in a 
+version control system and you will be able to see what changed between any 
+two versions of the the universe.
+
+Roadmap
+=======
+
+At this point, PyUnv reads basic universe information and classes, objects, 
+conditions, tables, and virtual tables from a universe file. The Python objects 
+defined in PyUnv mirror the entities from the universe file, and are arranged in 
+memory in a tree structure as you would see them in Designer. For objects and 
+conditions, you can get the description, select statement, where statement, 
+and more.
+
+I test PyUnv with BusinessObjects XI R2.
+
+I am still reverse-engineering other metadata in the universe file. If you 
+have questions, or would like to help, just drop me a line.
+
+Change Log
+==========
+
+New in version 0.1.6
+--------------------
+ - Added the Manifest class to generate a text manifest for a BusinessObjects 
+   universe. Manifest uses the Mako template engine.
+ - Reader.read_short_string now strips carriage returns and line feeds from
+   universe strings. It returns a unicode string instead of a string tuple.
+
+New in version 0.1.5
+--------------------
+ - First PyPi release
+ - Reads basic universe parameters, classes, objects, conditions, tables, and
+   virtual tables.
+ - Tested with several BusinessObjects XI R2 universes and Python 2.6.
