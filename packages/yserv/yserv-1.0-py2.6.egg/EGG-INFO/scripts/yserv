@@ -1,0 +1,193 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+"""
+###########################################################################
+yserv (c)2009 manatlan@gmail.com
+###########################################################################
+Licensed under the GPL V2 terms (http://www.gnu.org/licenses/gpl-2.0.html)
+
+more infos on :
+http://www.manatlan.com/page/yserv
+"""
+
+###########################################################################
+
+# define port of the http server
+PORT=8080
+
+# define size of http response block
+BSIZE=8192
+
+###########################################################################
+import sys
+import os
+import stat
+import hashlib
+import time
+import zipfile
+from cStringIO import StringIO
+from BaseHTTPServer import BaseHTTPRequestHandler,HTTPServer
+import socket
+import urllib2
+import re
+
+
+
+def getMyIp():
+    dt = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(2.0)
+    try:
+        response = urllib2.urlopen("http://www.whatismyip.fr/raw/")
+        return re.findall("\d+\.\d+\.\d+\.\d+",response.read())[0]
+    except:
+        return socket.gethostname()
+    finally:
+        socket.setdefaulttimeout(dt)
+
+
+def isFreePort(p):
+    try:
+        s = socket.socket()
+        s.connect(('localhost', p))
+        s.close()
+        return False
+    except socket.error:
+        return True
+
+
+class MyServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        ip = self.client_address[0]
+        if self.path not in MyServer.files:
+            self.send_response(404, 'not found')
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write( "not found" )
+        else:
+            name,fid=MyServer.files[self.path]
+
+            self.send_response(200, 'OK')
+
+            self.send_header('Content-Description','File Transfer');
+            self.send_header('Content-Type','application/octet-stream');
+            self.send_header('Content-Disposition','attachment; filename="%s";'%name);
+
+            self.end_headers()
+
+            fid.seek(0,2)
+            max=fid.tell()
+            fid.seek(0)
+            while True:
+                buf=fid.read(BSIZE)
+                if buf:
+                    self.wfile.write(buf)
+                    print "Client %s at %02d%%" %(ip,(fid.tell()*100)/max)
+                else:
+                    print "Client %s end !" % ip
+                    break
+
+
+def zip(*paths):
+    assert len(paths)>=1
+
+    def walktree (top = ".", depthfirst = True):
+        try:
+            names = os.listdir(top)
+        except WindowsError: #protected dirs in win
+            names=[]
+
+        if not depthfirst:
+            yield top, names
+        for name in names:
+            try:
+                st = os.lstat(os.path.join(top, name))
+            except os.error:
+                continue
+            if stat.S_ISDIR(st.st_mode):
+                for (newtop, children) in walktree (os.path.join(top, name), depthfirst):
+                    yield newtop, children
+        if depthfirst:
+            yield top, names
+
+
+    list=[]
+    for path in paths:
+        if os.path.isdir(path):
+            for (basepath, children) in walktree(path,False):
+                  for child in children:
+                      f=os.path.join(basepath,child)
+                      if os.path.isfile(f):
+                          list.append( f )
+                          #~ list.append( f.encode(sys.getdefaultencoding()) )
+        else:
+            list.append( path )
+            #~ list.append( path.encode(sys.getdefaultencoding()) )
+
+    f=StringIO()
+
+    commonpath= os.path.commonprefix(list)
+
+    file = zipfile.ZipFile(f, "w")
+    for fname in list:
+        nfname=fname[len(commonpath):]
+        file.write(fname, nfname , zipfile.ZIP_DEFLATED)
+    file.close()
+
+    f.seek(0)
+    return f
+
+
+
+def serve(name,fid):
+    port=PORT
+    while not isFreePort(port): port+=1
+
+    ip=getMyIp()
+    cle="/"+hashlib.md5(str(time.time())).hexdigest()
+    MyServer.files={cle:(name,fid)}
+    print "As",name
+    print "At :"
+    print "http://%s:%d%s" % (ip,port,cle)
+    try:
+        HTTPServer(('', port), MyServer).serve_forever()
+    except KeyboardInterrupt:
+        print "Stop serving"
+        sys.exit(0)
+
+
+def main(argv):
+    if len(argv)<2:
+        print "missing file(s)"
+    elif len(argv)==2:
+        file=argv[1]
+        if os.path.isfile(file):
+            print "Serve file :",os.path.basename(file)
+            serve(os.path.basename(file),open(file,"rb"))
+        elif os.path.isdir(file):
+            name = os.path.basename(file.strip(" \\/"))
+            print "Serve folder :",name
+            print "zipping ..."
+            serve(name+".zip",zip(file))
+        else:
+            print "file not found"
+    else:
+        files=argv[1:]
+        print "Serve files :"
+        for f in files:
+            assert os.path.isfile(f) or os.path.isdir(f)
+            print " *",os.path.basename(f)
+        print "zipping ..."
+        serve("archive.zip",zip(*files))
+
+    print """USAGE: %s <file> [<file> ...]
+(c)2009 - manatlan@gmail.com
+Start a http server for sharing files
+""" % os.path.basename(argv[0])
+    return -1
+
+
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+
