@@ -1,0 +1,1 @@
+from rdf.term import *
