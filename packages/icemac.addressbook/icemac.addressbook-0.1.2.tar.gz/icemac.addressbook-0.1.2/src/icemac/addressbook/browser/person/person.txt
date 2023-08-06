@@ -1,0 +1,343 @@
+=================================
+ Adding and changing person data
+=================================
+
+Person data (name, address, ...) is stored in an address book.  The
+user can add and change the data of persons there.
+
+>>> from icemac.addressbook.testing import create_addressbook
+>>> from zope.testbrowser.testing import Browser
+>>> create_addressbook()
+<icemac.addressbook.addressbook.AddressBook object at 0x...>
+>>> browser = Browser()
+
+Add a person
+============
+
+Editors are allowed to add new persons with addresses, so we log-in as
+an editor. In the add menu there is a link to create a person:
+
+>>> browser.addHeader('Authorization', 'Basic editor:editor')
+>>> browser.open('http://localhost/++skin++AddressBook/ab')
+>>> browser.getLink('person').click()
+
+Person and address data are relatively complex. There are some
+required fields which lead to an error message when they are not
+filled. Some fields get parsed, so entering rubbish leads also to an
+error message. (Note: Germany is by default selected as country.
+Clicking on it, deselects it, so no country is selected afterwards.):
+
+>>> browser.getControl('birth date').value = u'qqqqq'
+>>> browser.getControl('e-mail address').value = u'qqqqq'
+>>> browser.getControl('URL').value = 'qqqqq'
+>>> browser.getControl('Germany').click() # deselects default selection
+>>> browser.getControl('Brandenburg').click()
+>>> browser.getControl('Add').click()
+>>> print browser.contents
+<!DOCTYPE...
+<div class="status">
+  <div class="summary">There were some errors.</div>
+  <ul class="errors">
+    <li>
+        last name:
+      <div class="error">Required input is missing.</div>
+    </li>
+    <li>
+        birth date:
+      <div class="error">The datetime string did not match the pattern u'yy/MM/dd'.</div>
+    </li>
+  </ul>
+</div>...
+<legend>Postal address</legend>
+<div class="status">
+  <ul class="errors">
+    <li>
+      <div class="error">You can't select a state without selecting a country.</div>
+    </li>
+  </ul>
+</div>...
+<div class="status">
+  <ul class="errors">
+    <li>
+      e-mail address:
+      <div class="error">Constraint not satisfied</div>
+    </li>
+  </ul>
+</div>...
+<div class="status">
+  <ul class="errors">
+    <li>
+      URL:
+      <div class="error">The specified URI is not valid.</div>
+    </li>
+  </ul>
+</div>...
+
+There are fields for the person's personal data:
+
+>>> browser.getControl('first name').value = u'Hans'
+>>> browser.getControl('last name').value = u'Tester'
+>>> browser.getControl('birth date').value = u'00/02/29'
+>>> browser.getControl('male').click()
+>>> browser.getControl('notes', index=0).value = u'first person\nfor tests'
+
+Fields for the primary address:
+
+>>> browser.getControl('street').value = u'c/o Mama\nDemoweg 23'
+>>> browser.getControl('city', index=0).value = u'Testhausen'
+>>> browser.getControl('zip').value = u'99999'
+>>> browser.getControl('Austria').click()
+>>> browser.getControl('Sachsen-Anhalt').click()
+>>> browser.getControl('notes', index=1).value = u'first address\nfor tests'
+
+Fields for the primary e-mail address:
+
+>>> browser.getControl('private', index=0).click()
+>>> browser.getControl('e-mail address').value = 'hans@example.com'
+>>> browser.getControl('notes', index=2).value = 'first e-mail\nfor tests'
+
+Fields for the primary home page address:
+
+>>> browser.getControl('work', index=1).click()
+>>> browser.getControl('URL').value = 'http://www.example.com'
+>>> browser.getControl('notes', index=3).value = 'first home page\nfor tests'
+
+Fields for the primary phone number:
+
+>>> browser.getControl('cell phone').click()
+>>> browser.getControl('number').value = u'112'
+>>> browser.getControl('notes', index=4).value = 'first phone number\nfor tests'
+
+As we selected a state which is outside the selected country we expext
+an error message when trying to add the record to the database:
+
+>>> browser.getControl('Add').click()
+>>> print browser.contents
+<!DOCTYPE...
+<legend>Postal address</legend>
+<div class="status">
+  <ul class="errors">
+    <li>
+      <div class="error">You selected a state which does not belong to the selected country.</div>
+    </li>
+  </ul>
+</div>...
+
+After filling out the fields correctly, we can add the record to the
+database and get back to the address book where the entry is
+displayed:
+
+>>> browser.getControl('Germany').click()
+>>> browser.handleErrors = False
+>>> browser.getControl('Add').click()
+>>> browser.url
+'http://localhost/++skin++AddressBook/ab'
+>>> print browser.contents
+<!DOCTYPE...
+...Tester, Hans...
+
+Editing a person
+================
+
+The entry is a link which leads to the edit page of the person. The
+displayed values are the ones entered before:
+
+>>> browser.getLink('Tester, Hans').click()
+>>> browser.getControl('first name').value
+'Hans'
+>>> browser.getControl('last name').value
+'Tester'
+>>> browser.getControl('birth date').value
+'00/02/29'
+>>> browser.getControl('male').selected
+True
+>>> print browser.getControl('notes', index=0).value
+first person
+for tests
+>>> print browser.getControl('street').value
+c/o Mama
+Demoweg 23
+>>> browser.getControl('city', index=0).value
+'Testhausen'
+>>> browser.getControl('zip').value
+'99999'
+>>> browser.getControl('Sachsen-Anhalt').selected
+True
+>>> browser.getControl('Germany').selected
+True
+>>> print browser.getControl('notes', index=1).value
+first address
+for tests
+>>> browser.getControl('private', index=0).selected
+True
+>>> browser.getControl('e-mail address').value
+'hans@example.com'
+>>> print browser.getControl('notes', index=2).value
+first e-mail
+for tests
+>>> browser.getControl('work', index=1).selected
+True
+>>> browser.getControl('URL').value
+'http://www.example.com'
+>>> print browser.getControl('notes', index=3).value
+first home page
+for tests
+>>> browser.getControl('cell phone').selected
+True
+>>> browser.getControl('number').value
+'112'
+>>> print browser.getControl('notes', index=4).value
+first phone number
+for tests
+
+If the user edits and decides to discard his changes he can choose the
+cancel button and is set back to the address book overview. The
+changes were not saved:
+
+>>> browser.getControl('first name').value = u'Petra'
+>>> browser.getControl('female').click()
+>>> browser.getControl('zip').value = u'88888'
+>>> browser.getControl('e-mail address').value = u'petra@example.com'
+>>> browser.getControl('URL').value = 'http://petra.example.com'
+>>> browser.getControl('number').value = u'110'
+>>> browser.getControl('Cancel').click()
+>>> browser.url
+'http://localhost/++skin++AddressBook/ab'
+>>> print browser.contents
+<!DOCTYPE...
+...Tester, Hans...
+>>> browser.getLink('Tester, Hans').click()
+>>> browser.getControl('first name').value
+'Hans'
+>>> browser.getControl('last name').value
+'Tester'
+>>> browser.getControl('birth date').value
+'00/02/29'
+>>> browser.getControl('male').selected
+True
+>>> print browser.getControl('notes', index=0).value
+first person
+for tests
+>>> browser.getControl('zip').value
+'99999'
+>>> browser.getControl('e-mail address').value
+'hans@example.com'
+>>> browser.getControl('URL').value
+'http://www.example.com'
+>>> browser.getControl('number').value
+'112'
+
+If the user edits and decides to save his changes he chooses the apply
+button. If there are errors in the input data an error message is
+displayed:
+
+>>> browser.getControl('first name').value = u'Petra'
+>>> browser.getControl('female').click()
+>>> browser.getControl('birth date').value = u'qqqq'
+>>> browser.getControl('zip').value = u'88888'
+>>> browser.getControl('e-mail address').value = u'petra@example.com'
+>>> browser.getControl('URL').value = 'http://petra.example.com'
+>>> browser.getControl('number').value = u'110'
+>>> browser.getControl('Apply').click()
+>>> print browser.contents
+<!DOCTYPE...
+<div class="status">
+  <div class="summary">There were some errors.</div>
+  <ul class="errors">
+    <li>
+        birth date:
+      <div class="error">The datetime string did not match the pattern u'yy/MM/dd'.</div>
+    </li>
+  </ul>
+</div>...
+
+After correction the errors and applying the changes the user is led
+back to the overview page of the address book:
+
+>>> browser.getControl('birth date').value = u'01/01/01'
+>>> browser.getControl('Apply').click()
+>>> browser.url
+'http://localhost/++skin++AddressBook/ab'
+>>> print browser.contents
+<!DOCTYPE...
+...Tester, Petra...
+
+To make sure the changes have been saved, he can visit the person's
+page again:
+
+>>> browser.getLink('Tester, Petra').click()
+>>> browser.getControl('first name').value
+'Petra'
+>>> browser.getControl('last name').value
+'Tester'
+>>> browser.getControl('birth date').value
+'01/01/01'
+>>> browser.getControl('female').selected
+True
+>>> browser.getControl('zip').value
+'88888'
+>>> browser.getControl('e-mail address').value
+'petra@example.com'
+>>> browser.getControl('URL').value
+'http://petra.example.com'
+>>> browser.getControl('number').value
+'110'
+
+Visitor
+=======
+
+Visitors can not chance any data, they can only view it:
+
+>>> visitor_browser = Browser()
+>>> visitor_browser.addHeader('Authorization', 'Basic visitor:visitor')
+>>> visitor_browser.open('http://localhost/++skin++AddressBook/ab')
+>>> visitor_browser.getLink('Tester, Petra').click()
+>>> print browser.contents
+<!DOCTYPE...
+...first name...Petra...
+...last name...Tester...
+...sex...female...
+...zip...88888...
+...e-mail address...petra@example.com...
+...URL...http://petra.example.com...
+...number...110...
+>>> visitor_browser.getControl('first name')
+Traceback (most recent call last):
+LookupError: label 'first name'
+
+As visitors can not delete persons there is no delete button:
+
+>>> visitor_browser.getControl('Delete').click()
+Traceback (most recent call last):
+LookupError: label 'Delete'
+
+Deleting a person
+=================
+
+To delete a person the user has to be at least an editor.  He has to
+go to the edit page of the person and has to choose the delete button
+there. He is presented with an `are you sure` formular.
+
+>>> browser.open('http://localhost/++skin++AddressBook/ab')
+>>> browser.getLink('Tester, Petra').click()
+>>> person_edit_form_url = browser.url
+>>> browser.getControl('Delete').click()
+>>> browser.url
+'http://localhost/++skin++AddressBook/ab/Person/@@delete.html'
+
+If he decides not to delete the entry he is led back to the person's
+edit form:
+
+>>> browser.getControl('No, cancel').click()
+>>> browser.url == person_edit_form_url
+True
+
+If he decides to delete the entry he is led back to the address book
+where the person is no longer listed:
+
+>>> browser.getControl('Delete').click()
+>>> browser.getControl('Yes, delete it').click()
+>>> browser.url
+'http://localhost/++skin++AddressBook/ab'
+>>> 'Tester, Petra' in browser.contents
+False
