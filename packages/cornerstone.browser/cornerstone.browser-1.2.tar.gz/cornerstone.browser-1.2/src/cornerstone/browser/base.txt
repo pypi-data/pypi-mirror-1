@@ -1,0 +1,228 @@
+========================
+cornerstone.browser.base
+========================
+
+Tests for our request mixin class
+---------------------------------
+
+Create test request and write some stuff on it. Read on to get what this is
+all about. Consider that cookies are prefixed by username (or 'anonymoususer' if
+not authenticated), so we have to set this explicit on our test request.
+
+    >>> from zope.publisher.browser import TestRequest
+    >>> request = TestRequest()
+    >>> request
+    <zope.publisher.browser.TestRequest instance URL=http://127.0.0.1>   
+
+    >>> def initRequest(request):
+    ...     request.form = dict()
+    ...     request_cookies = dict()
+    ...     request.form['p1'] = 'f1'
+    ...     request.form['p2'] = 'f2'
+    ...     request.form['p3'] = 'f3'
+    ...     request.form['cb1'] = True
+    ...     request.form['cb1_cb'] = '1'
+    ...     request.form['cb2'] = False
+    ...     request.form['cb2_cb'] = '1'
+    ...     request._cookies['anonymoususer.p1'] = 'c1'
+    ...     request._cookies['anonymoususer.p2'] = 'c2'
+    
+    >>> initRequest(request)
+    
+    >>> keys = request.form.keys()
+    >>> keys.sort()
+    >>> keys
+    ['cb1', 'cb1_cb', 'cb2', 'cb2_cb', 'p1', 'p2', 'p3']
+    
+    >>> keys = request.cookies.keys()
+    >>> keys.sort()
+    >>> keys
+    ['anonymoususer.p1', 'anonymoususer.p2']
+
+Create dummy item.
+
+    >>> from OFS.SimpleItem import SimpleItem
+    >>> item = SimpleItem()
+    >>> item
+    <SimpleItem at >
+
+Fake a session data manager...
+
+    >>> class DummySessionDataManager(object):
+    ...     session = None
+    ...     def getSessionData(self, create):
+    ...         if create:
+    ...             if not self.session:
+    ...                self.session = dict()
+    ...         return self.session
+
+...and assign it to dummy item.
+
+    >>> item.session_data_manager = DummySessionDataManager()
+    
+Import our RequestMixin derived class and initialize it.
+
+    >>> from cornerstone.browser.interfaces import REQUEST, COOKIE, SESSION
+    >>> from cornerstone.browser.interfaces import IRequestMixin
+    >>> from cornerstone.browser.base import RequestTool
+    >>> rtool = RequestTool(item, request)
+    >>> IRequestMixin.providedBy(rtool)
+    True
+
+Test base read and write functions.
+
+    >>> rtool.formvalue('p1')
+    'f1'
+    
+    >>> rtool.cookievalue('p1')
+    'c1'
+    
+    >>> rtool.sessionvalue('p1')
+    
+    >>> rtool.sessionset('p1', 's1')
+    >>> rtool.cookieset('p99', 'c99')
+    >>> rtool.request.response._cookies
+    {'anonymoususer.p99': {'path': '/', 'value': 'c99'}}
+    
+    >>> rtool.sessionvalue('p1')
+    's1'
+
+Lets check the same stuff when nameprefix is set on rtool.
+
+    >>> rtool.nameprefix = 'test'
+    
+    is none because theres no prefixed p1
+    >>> rtool.formvalue('p1')
+    
+    >>> rtool.request.form['test.p1'] = '_f1'
+    
+  With prefix this works
+  
+    >>> rtool.formvalue('p1')
+    '_f1'
+    
+  Unprefixed wor as well
+  
+    >>> rtool.formvalue('p1', nameprefix=None)
+    'f1'
+    
+  Same for cookies
+  
+    >>> rtool.request._cookies['anonymoususer.test.p1'] = '_c1'
+    >>> rtool.cookievalue('p1', nameprefix=None)
+    'c1'
+    
+    >>> rtool.cookievalue('p1')
+    '_c1'
+    
+  Session work as well
+  
+    >>> rtool.sessionset('p1', '_s1')
+    >>> rtool.sessionvalue('p1')
+    '_s1'
+    
+  As seen, if nameprefix is not set explicit, rtool.nameprefix is used.
+  be aware that nameprefix=False has a special meaning, this tells the
+  function to use self.nameprefix (which could be none and is not used then).
+  this flavour, if rtool.nameprefix is set, the nameprefix=None when calling
+  the function tells the tool to read non-prefixed parameters.
+    
+    we can use any other prefix as well
+    >>> rtool.sessionset('p1', '__s1', nameprefix='anothertest')
+    >>> rtool.sessionvalue('p1', nameprefix='anothertest')
+    '__s1'
+  
+  When requesting checkboxes, we have the problem that someone might want to
+  know if a checkbox was expliciz set to false. Therefor you can set kwarg
+  checkbox=True, this forces the function not only to check against the
+  requested param name, but also to a param postfixed with
+  rtool.checkboxpostfix. So if you want to make sure a checkbox is there and set
+  to False, provide a hidden field in the form with the set postfix and ask
+  for it by setting the flag pointed above. This behaviour only applies on
+  values read from form, it makes no sence to read this from session or cookie.
+  
+  Nameprefix has to be set to none due to our modifications on rtool above.
+    >>> rtool.formvalue('cb1', checkbox=True, nameprefix=None)
+    True
+    
+    >>> rtool.formvalue('cb1', default='inexistent', checkbox=True)
+    'inexistent'
+    
+    >>> rtool.formvalue('cb2', checkbox=True, nameprefix=None)
+    False
+    
+We also have a more convenience read function. The function requestvalue
+provides to define a read chain, first one found wins. You can provide the
+kwarg checkbox here as well, but notice that it only applies to values read
+from request.from. Lets have a look.
+
+    >>> rtool.requestvalue('p1', chain=(REQUEST, COOKIE, SESSION))
+    '_f1'
+    
+    >>> rtool.requestvalue('p1', chain=(COOKIE, SESSION, REQUEST))
+    '_c1'
+    
+    >>> rtool.requestvalue('p1', chain=(SESSION, REQUEST, COOKIE))
+    '_s1'
+    
+  Notice, since nameprefix is set on rtool, it was considered, we can read
+  the unprefixed values as well.
+  
+    >>> rtool.requestvalue('p1', chain=(REQUEST,), nameprefix=None)
+    'f1'
+    
+    >>> rtool.requestvalue('p1', chain=(COOKIE,), nameprefix=None)
+    'c1'
+    
+    >>> rtool.requestvalue('p1', chain=(SESSION,), nameprefix=None)
+    's1'
+    
+    >>> rtool.requestvalue('p3', chain=(SESSION, REQUEST), nameprefix=None)
+    'f3'
+    
+    >>> rtool.requestvalue('p3', 'inexistent',
+    ...                    chain=(SESSION,), nameprefix=None)
+    'inexistent'
+  
+  And check the checkbox stuff.
+  
+    >>> rtool.requestvalue('cb1', default='inexistent',
+    ...                    chain=(SESSION, REQUEST),
+    ...                    checkbox=True, nameprefix=None)
+    True
+    
+    >>> rtool.requestvalue('cb1', default='inexistent',
+    ...                    chain=(SESSION, COOKIE),
+    ...                    checkbox=True, nameprefix=None)
+    'inexistent'
+
+Theres a more advanced requestvalue function. The extended requestvalue function
+called xrequestvalue. After the regular lookup chain, if nothing was found yet,
+it first tries to lookup an IRequestDefaultValues adapter by nameprefix with
+rtool.context if rtool.nameprefix is set, otherwise tries to lookup an unnamed
+adapter for the same interface and object. If such an adapter is returned, an
+additional value lookup is made on it. Finally, if this fails as well, the
+default value is returned.
+
+   >>> from zope.interface import implements
+   >>> from cornerstone.browser.interfaces import IRequestDefaultValues
+   >>> class DummyDefaultValues(object):
+   ...     implements(IRequestDefaultValues)
+   ...     dummyvalues = {
+   ...         'p1': 'd1',
+   ...         'p2': 'd1',
+   ...     }
+   ...     def __init__(self, context):
+   ...         self.context = context
+   ...     def get(self, name, default):
+   ...         return self.dummyvalues.get(name, default)
+   
+   >>> zcml = """
+   ... <configure xmlns="http://namespaces.zope.org/zope">
+   ... </configure>
+   ... """
+   >>> from zope.configuration.xmlconfig import string
+   >>> context = string(zcml)
+
+Check the varios selected functions. These functions are useful for preselecting
+selection dropdowns or checkboxes.
