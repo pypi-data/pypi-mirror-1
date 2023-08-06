@@ -1,0 +1,356 @@
+Metadata-Version: 1.0
+Name: zc.comment
+Version: 0.1.0
+Summary: A simple comment package.
+Home-page: http://pypi.python.org/pypi/zc.comment
+Author: Zope Community
+Author-email: zope-dev@zope.org
+License: ZPL 2.1
+Description: A simple package to support a list of comments for an object.
+        
+        
+        Detailed Documentation
+        **********************
+        
+        ========
+        Comments
+        ========
+        
+        The comment package is a simple way to add comments to any ``IAnnotatable``
+        Zope content.  The datetime and current principals are stamped on to the
+        comment.  The comment body is currently simply unicode text but intended to be
+        html snippets ("rich text") at a later date.
+        
+        The inclusion of current principals requires an interaction, which is what we
+        need to set up before we can use the system here.  Below, we set up a dummy
+        interaction with dummy participants, create some content that is
+        ``IAttributeAnnotatable``, and then finally show the system in use.
+        
+        In order to create a participation, we need a few principals:
+        
+        >>> import zope.security.management
+        >>> import zope.security.interfaces
+        >>> from zope import interface
+        >>> class Principal(object):
+        ...     interface.implements(zope.security.interfaces.IPrincipal)
+        ...
+        ...     def __init__(self, id, title, description):
+        ...         self.id = id
+        ...         self.title = title
+        ...         self.description = description
+        ...
+        ...     def __repr__(self):
+        ...         return '<%s %r>' %(self.__class__.__name__, self.id)
+        
+        >>> alice = Principal('alice', 'Alice Aal', 'first principal')
+        >>> betty = Principal('betty', 'Betty Barnes', 'second principal')
+        
+        Now we can create a participation:
+        
+        >>> class Participation(object):
+        ...     zope.interface.implements(
+        ...         zope.security.interfaces.IParticipation,
+        ...         zope.publisher.interfaces.IRequest)
+        ...     interaction = principal = None
+        ...
+        ...     def __init__(self, principal):
+        ...         self.principal = principal
+        ...
+        ...     def __repr__(self):
+        ...         return '<%s %r>' %(self.__class__.__name__, self.principal)
+        
+        Next we need to make sute the annotation mechanism is setup, because the
+        comments adapter needs to be able to annotate the adapted object:
+        
+        >>> import zope.component
+        >>> import zope.annotation
+        >>> zope.component.provideAdapter(
+        ...     zope.annotation.attribute.AttributeAnnotations)
+        
+        Let's now make sure that all commentable objects can receive comments:
+        
+        >>> from zc.comment import comment
+        >>> zope.component.provideAdapter(comment.CommentsFactory)
+        
+        Now that we have everything setup, let's have a look at how it works. First we
+        need a simple content component:
+        
+        >>> class SimpleContent(object):
+        ...     interface.implements(
+        ...         zope.annotation.interfaces.IAttributeAnnotatable)
+        ...     def __init__(self, name):
+        ...         self.name = name
+        ...     def __repr__(self):
+        ...         return '<%s %r>' %(self.__class__.__name__, self.name)
+        >>> content = SimpleContent(u'content')
+        
+        In order to play with the comments, we now have to register a new
+        participation. In our case, Alice wants to create a comment:
+        
+        >>> zope.security.management.endInteraction()
+        >>> zope.security.management.newInteraction(Participation(alice))
+        
+        We can access the comments of an object by adapting to ``IComments``:
+        
+        >>> from zc.comment import interfaces
+        >>> comments = interfaces.IComments(content)
+        Traceback (most recent call last):
+        ...
+        TypeError: ('Could not adapt',
+        <SimpleContent u'content'>,
+        <InterfaceClass zc.comment.interfaces.IComments>)
+        
+        Initially, the component is not commentable, because it does not provide the
+        correct interface:
+        
+        >>> zope.interface.directlyProvides(content, interfaces.ICommentable)
+        
+        >>> comments = interfaces.IComments(content)
+        >>> comments
+        <Comments (0) for <SimpleContent u'content'>>
+        
+        Let's now add a comment:
+        
+        >>> import datetime, pytz
+        >>> before = datetime.datetime.now(pytz.utc)
+        
+        >>> comments.add(u"Foo!  Bar!")
+        
+        >>> after = datetime.datetime.now(pytz.utc)
+        
+        As you can see it was not necessary to create the comments object manually,
+        but simply pass in the text. Clearly a comment has been added:
+        
+        >>> len(comments)
+        1
+        
+        Let's now make sure that the data was set correctly:
+        
+        >>> comments[0].body
+        u'Foo!  Bar!'
+        >>> before <= comments[0].date <= after
+        True
+        >>> comments[0].principal_ids
+        ('alice',)
+        
+        Let's now log in as Betty:
+        
+        >>> zope.security.management.endInteraction()
+        >>> zope.security.management.newInteraction(Participation(betty))
+        
+        Betty can also add a comment:
+        
+        >>> comments = interfaces.IComments(content)
+        >>> before = datetime.datetime.now(pytz.utc)
+        >>> comments.add(u"Shazam")
+        >>> after = datetime.datetime.now(pytz.utc)
+        >>> len(comments)
+        2
+        
+        And her comment is also correctly stored:
+        
+        >>> comments[1].body
+        u'Shazam'
+        >>> before <= comments[1].date <= after
+        True
+        >>> comments[1].principal_ids
+        ('betty',)
+        
+        Let's now make sure that if multiple participants are in the interaction that
+        all of them get picked up:
+        
+        >>> zope.security.management.endInteraction()
+        >>> zope.security.management.newInteraction(
+        ...     Participation(alice), Participation(betty))
+        
+        >>> comments.add(u"Boom.")
+        >>> len(comments)
+        3
+        >>> comments[2].body
+        u'Boom.'
+        >>> comments[2].principal_ids
+        ('alice', 'betty')
+        
+        Finally, note that we can only add unicode text as a valid comment:
+        
+        >>> comments.add(42)
+        Traceback (most recent call last):
+        ...
+        WrongType: (42, <type 'unicode'>)
+        
+        If you like, you can always clear all comments:
+        
+        >>> comments.clear()
+        >>> len(comments)
+        0
+        
+        And of course some cleanup:
+        
+        >>> zope.security.management.endInteraction()
+        
+        
+        =============
+        Commenting UI
+        =============
+        
+        Create the browser object we'll be using.
+        
+        >>> from zope.testbrowser.testing import Browser
+        >>> browser = Browser()
+        >>> browser.addHeader('Accept-Language', 'test')
+        
+        To see how comments work, we'll create an instance of a simple content
+        object:
+        
+        >>> browser.open('http://localhost/@@contents.html')
+        >>> browser.getLink('[[zope][[top]]]').click()
+        >>> browser.getLink('[[zc.comment][Content]]').click()
+        >>> browser.getControl(name='new_value').value = 'number'
+        >>> browser.getControl('[[zope][container-apply-button (Apply)]]').click()
+        
+        Let's visit the object and click on the comments tab:
+        
+        >>> browser.handleErrors = False
+        >>> browser.getLink('number').click()
+        >>> browser.getLink('[[zc.comment][Comments]]').click()
+        
+        We see that no comments have been made yet:
+        
+        >>> '[[zc.intranet][No comments have been made.]]' in browser.contents
+        True
+        
+        Let's add a new multi-line comment:
+        
+        >>> browser.getControl('[[zc.comment][New Comment]]').value = '''\
+        ... I give my pledge, as an Earthling
+        ... to save, and faithfully defend from waste
+        ... the natural resources of my planet.
+        ... It's soils, minerals, forests, waters, and wildlife.
+        ... '''
+        
+        >>> browser.getControl('[[zc.comment][Add Comment]]').click()
+        
+        Now, we get a table that displays the comment with it's date, text,
+        and the user who made it:
+        
+        >>> print browser.contents
+        <...
+        <th>
+        ...[[zc.comment][comment_column-date (Date)]]...
+        </th>
+        <th>
+        ...[[zc.comment][comment_column-principals (Principals)]]...
+        </th>
+        <th>
+        [[zc.comment][comment_column-comment (Comment)]]
+        </th>
+        ...
+        <td>
+        2005 11 14  12:00:55 -500
+        </td>
+        <td>
+        Unauthenticated User
+        </td>
+        <td>
+        I give my pledge, as an Earthling<br />
+        to save, and faithfully defend from waste<br />
+        the natural resources of my planet.<br />
+        It's soils, minerals, forests, waters, and wildlife.<br />
+        ...
+        <label for="form.comment">
+        <span class="required">*</span><span>[[zc.comment][New Comment]]</span>
+        </label>
+        ...<textarea class="zc-comment-text"
+        style="width: 50ex; height: 6em;"
+        cols="60" id="form.comment"
+        name="form.comment" rows="15" ></textarea></div>
+        ...
+        <input type="submit"
+        id="form.actions.41646420436f6d6d656e74"
+        name="form.actions.41646420436f6d6d656e74"
+        value="[[zc.comment][Add Comment]]"
+        class="button" />
+        ...
+        
+        Now, we'll add another comment.
+        
+        >>> browser.getControl('[[zc.comment][New Comment]]'
+        ...     ).value = 'another comment'
+        >>> browser.getControl('[[zc.comment][Add Comment]]').click()
+        >>> print browser.contents
+        <...
+        <th>
+        ...[[zc.comment][comment_column-date (Date)]]...
+        </th>
+        <th>
+        ...[[zc.comment][comment_column-principals (Principals)]]...
+        </th>
+        <th>
+        [[zc.comment][comment_column-comment (Comment)]]
+        </th>
+        </tr>
+        ...
+        <td>
+        2005 11 14  12:10:18 -500
+        </td>
+        <td>
+        Unauthenticated User
+        </td>
+        <td>
+        I give my pledge, as an Earthling<br />
+        to save, and faithfully defend from waste<br />
+        the natural resources of my planet.<br />
+        It's soils, minerals, forests, waters, and wildlife.<br />
+        <BLANKLINE>
+        </td>
+        </tr>
+        ...
+        <td>
+        2005 11 14  12:10:18 -500
+        </td>
+        <td>
+        Unauthenticated User
+        </td>
+        <td>
+        another comment
+        </td>
+        </tr>
+        ...
+        <label for="form.comment">
+        <span class="required">*</span><span>[[zc.comment][New Comment]]</span>
+        </label>
+        ...
+        ...<textarea class="zc-comment-text"
+        style="width: 50ex; height: 6em;"
+        cols="60"
+        id="form.comment"
+        name="form.comment"
+        rows="15" ></textarea>...
+        <input type="submit"
+        id="form.actions.41646420436f6d6d656e74"
+        name="form.actions.41646420436f6d6d656e74"
+        value="[[zc.comment][Add Comment]]"
+        class="button" />
+        ...
+        
+        
+        =======
+        CHANGES
+        =======
+        
+        0.1.0 (2008-04-21)
+        ------------------
+        
+        - Initial Release
+        
+Keywords: zope3 comment
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Framework :: Zope3
