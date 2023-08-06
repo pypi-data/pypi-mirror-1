@@ -1,0 +1,104 @@
+Django-addons
+=============
+
+Django-addons is a bunch of code that makes writing addon/plugins for your
+Django project much easier. Add django-addons to your Django project and 
+you can drop all the addons to /MyDjangoProject/addons folder.
+
+Here is what you get:
+* automatic signal connecting
+* automatic URL discovery
+* template hooking system (inject code from addons to your main project)
+
+Dependencies:
+* django-staticfiles to serve site media from each addon
+
+Optional support:
+* django-notifications support (automatic registration of noticetypes)
+
+Addon structure
+===============
+Addon is basically a Django app living inside /MyDjangoProject/addons/:
+
+    /MyDjangoProject/addons/example/__init__.py
+    /MyDjangoProject/addons/example/models.py
+    ...
+ 
+Signals
+=======
+
+/MyDjangoProject/addons/example/handler.py:
+
+    from projects.signals import blah
+    def my_cool_handler():
+        do_blah
+
+    # NB! Django Addons is looking for this function:
+    def connect():
+        blah.connect(my_cool_handler)
+
+Django-notifications support
+============================
+/MyDjangoProject/addons/notifications.py:
+
+    # This is the suggested way of doing thing at the moment
+    # We'll probably move to signal based architecture once django-notification
+    # guys will add the features what we need to make it happen
+    from txcommon.notifications import NOTICE_TYPES
+    NOTICE_TYPES += [ blah ]
+
+Templates
+=========
+
+/MyDjangoProject/addons/example/templates/*.html:
+
+    Templates that **can** overload your Django project templates
+
+/MyDjangoProject/addons/example/templates/example/additional_buttons.html:
+
+    Addon specific templates that should **not** overload your Django project templates.
+    These can be included in your project code by: hook "additional_buttons.html"
+    This way every file from each addon named "additional_buttons.html" will be 
+    merged together in your project templates
+
+Dependencies
+============
+
+We suggest doing dependency checks in models.py:
+
+    try:
+	import Blah
+    except ImportError
+	raise AddonError("You need Blah to use this addon")
+
+Overriding default behaviour in addon
+=====================================
+
+We suggest using jQuery to achieve this, this requires that your project
+has properly defined 'id' attributes
+
+Site media
+==========
+
+We're using django-staticfiles to serve /media folder from each plugin root.
+
+Lets say you have image.png in /MyDjangoProject/addons/MyPlugin/media/image.png.
+
+In the templates you can do something like this (be careful with slashes!):
+
+<img src="{{ STATIC_URL }}myPlugin/image.png"/>
+
+In case you have DEBUG=True, the URLconf does it's magic and everything works without running 
+./manage.py build_static. For real-life deployment you should set DEBUG=False and run the command
+
+Issues
+======
+
+Signal execution order is not determined. Solution: Addons can emit their own signals and other addons 
+can catch them to determine the order of execution. Signal dependencies -> Addon dependencies. 
+The solution on the Tx side is to provide signals for each small step so the addon would register 
+themselves at the most logical point. With step-by-step signals there is no need to trap a part of 
+your Django project code in addon to control it's behaviour.
+
+Conclusion: ordering of addons is out of the scope of addon subsystem. If addon1 handler needs addon2 handler 
+to run first, then addon1 developer just includes it in their package and Tx doesn't care about this.
