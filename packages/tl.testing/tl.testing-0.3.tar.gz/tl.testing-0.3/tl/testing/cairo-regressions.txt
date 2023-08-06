@@ -1,0 +1,63 @@
+==============================
+Regressions of the cairo tests
+==============================
+
+Cairo ImageSurfaces using the cairo.FORMAT_RGB24 pixel format have undefined
+bits inside their buffers, which leads to false mismatches when comparing two
+such surfaces by their buffer contents. The test runner goes to some effort to
+canonicalise the buffer contents so that equal RGB24 images compare equal:
+
+>>> import cairo
+>>> def create_surface(x1, y1, x2, y2):
+...     surface = cairo.ImageSurface(cairo.FORMAT_RGB24, 100, 100)
+...     ctx = cairo.Context(surface)
+...     ctx.set_source_rgb(1, 1, 1)
+...     ctx.paint()
+...     ctx.rectangle(0, 0, 100, 100)
+...     ctx.move_to(x1, y1)
+...     ctx.line_to(x2, y2)
+...     ctx.set_source_rgb(0, 0, 0)
+...     ctx.stroke()
+...     return surface
+
+>>> sample_txt = write('sample.txt', """\
+...
+... .. figure:: rgb24.png
+...
+...     ``create_surface(25, 50, 75, 50)``
+...
+... """)
+
+>>> from tl.testing.cairo import DocFileSuite
+>>> run(DocFileSuite(sample_txt, globs={'create_surface': create_surface}))
+<SET UP>
+  Ran 1 tests with 0 failures and 0 errors in 0.024 seconds.
+<TEAR DOWN>
+
+On the other hand, canonicalisation must not be overzealous: different images
+still have to yield a mismatch:
+
+>>> def create_surface(x1, y1, x2, y2):
+...     surface = cairo.ImageSurface(cairo.FORMAT_RGB24, 100, 100)
+...     ctx = cairo.Context(surface)
+...     ctx.rectangle(0, 0, 100, 100)
+...     ctx.move_to(y1, x1)
+...     ctx.line_to(y2, x2)
+...     ctx.stroke()
+...     return surface
+
+>>> run(DocFileSuite(sample_txt, globs={'create_surface': create_surface}))
+<SET UP>
+Failure in test /tmp/tmpiyZVMs-test_dir/sample.txt
+----------------------------------------------------------------------
+File "/test_dir/sample.txt", line 1, in sample.txt:
+Failed example:
+    create_surface(25, 50, 75, 50)
+Image differs from expectation: rgb24.png
+  Ran 1 tests with 1 failures and 0 errors in 0.023 seconds.
+<TEAR DOWN>
+
+
+.. Local Variables:
+.. mode: rst
+.. End:
