@@ -1,0 +1,310 @@
+
+    >>> import os
+    >>> data_dir = os.path.join(test_dir, 'data')
+    >>> parts_dir = os.path.join(data_dir, 'parts')
+    >>> buildout = {'instance': {'location': test_dir},
+    ...             'buildout': {'directory': test_dir,
+    ...                          'parts-directory': test_dir}}
+    >>> name = 'apache_config'
+
+    >>> options = { 'mainconfig': '/usr/local/apache/config/httpd.conf',
+    ...             'bind' : 80,
+    ...             'backends' : 'plone.org:127.0.0.1:3128',
+    ...             'zope2_vhm_map' : 'plone.org:/plone',
+    ...             'log_format' : 'combined',
+    ...             'resources' : """
+    ...             docs:${buildout:directory}/plone/recipe/apache/doctests
+    ...             tests:${buildout:directory}/plone/recipe/apache/tests
+    ...             """,
+    ...             'resource-expires' : """ 
+    ...             \.(txt)$:"access plus 1 day"
+    ...             \.(py)$:"access plus 2 weeks"
+    ...             """,
+    ...             'resource-headers' : """ 
+    ...             \.(txt|py)$:Cache-Control:"max-age=3600, public, must-revalidate"
+    ...             """,
+    ...            }
+
+    >>> from plone.recipe.apache import ConfigureRecipe
+    >>> recipe = ConfigureRecipe(buildout, name, options)
+
+    >>> main_config = open(os.path.join(test_dir,'httpd.conf'),'w')
+    >>> main_config.write('## apache main  config\n')
+    >>> main_config.close()
+    >>> options['mainconfig'] = os.path.join(test_dir,'httpd.conf')
+    >>> recipe = ConfigureRecipe(buildout, name, options)
+
+
+Verify configuration of backends, zope2_vhm_map and resources::
+
+    >>> recipe.backends
+    [{'_vhm_path': None, 'host': 'plone.org', 'backend_port': '3128', 'backend_host': '127.0.0.1'}]
+
+    >>> recipe.zope2_vhm_maps
+    {'plone.org': ['plone']}
+
+    >>> for v in sorted(recipe.resources_map):
+    ...   print v
+    {'url': 'docs', 'path': '${buildout:directory}/plone/recipe/apache/doctests'}
+    {'url': 'tests', 'path': '${buildout:directory}/plone/recipe/apache/tests'}
+
+    >>> for k, v in sorted(recipe.filematch_map.items()):
+    ...   print k, v
+    \.(py)$ {'headers': [], 'expires': '"access plus 2 weeks"'}
+    \.(txt)$ {'headers': [], 'expires': '"access plus 1 day"'}
+    \.(txt|py)$ {'headers': [{'header': 'Cache-Control', 'value': '"max-age=3600, public, must-revalidate"'}], 'expires': ''}
+
+And now install::
+
+    >>> path = recipe.install()
+    ... tests/apache_config/conf.d'
+
+    >>> f = open(os.path.join(path,'virtual_plone.org.conf'))
+    >>> print f.read()
+    <VirtualHost *:80>
+        ServerName plone.org
+    <BLANKLINE>
+        RewriteEngine On
+        RewriteLog ...
+        RewriteLogLevel 0
+    <BLANKLINE>
+        CustomLog ...
+        ErrorLog ...
+    <BLANKLINE>
+        <Proxy http://127.0.0.1:3128>
+          Allow from all
+        </Proxy>
+    <BLANKLINE>
+    <BLANKLINE>
+        <IfModule mod_expires.c>
+          <FilesMatch "\.(py)$">
+             ExpiresActive on
+             ExpiresDefault "access plus 2 weeks"
+          </FilesMatch>
+    <BLANKLINE>
+          <FilesMatch "\.(txt)$">
+             ExpiresActive on
+             ExpiresDefault "access plus 1 day"
+          </FilesMatch>
+    <BLANKLINE>
+          <FilesMatch "\.(txt|py)$">
+             Header set Cache-Control "max-age=3600, public, must-revalidate"
+          </FilesMatch>
+    <BLANKLINE>
+        </IfModule>
+    <BLANKLINE>
+        Alias /docs ${buildout:directory}/plone/recipe/apache/doctests
+        <Directory ${buildout:directory}/plone/recipe/apache/doctests>
+           Order allow,deny
+           Allow from all
+        </Directory>
+    <BLANKLINE>
+        RewriteRule ^/docs - [L]
+    <BLANKLINE>
+        Alias /tests ${buildout:directory}/plone/recipe/apache/tests
+        <Directory ${buildout:directory}/plone/recipe/apache/tests>
+           Order allow,deny
+           Allow from all
+        </Directory>
+    <BLANKLINE>
+        RewriteRule ^/tests - [L]
+    <BLANKLINE>
+        RewriteRule ^(.*)$ - [E=BACKEND_LOCATION:127.0.0.1]
+        RewriteRule ^(.*)$ - [E=BACKEND_PORT:3128]
+        RewriteRule ^(.*)$ - [E=HOST:plone.org]
+        RewriteRule ^(.*)$ - [E=PORT:80]
+        RewriteRule ^(.*)$ - [E=PROTO:http]
+        RewriteRule ^(.*)$ - [E=ZOPEPATH:plone]
+        RewriteRule  ^/(.*)/$ http://%{ENV:BACKEND_LOCATION}:%{ENV:BACKEND_PORT}/VirtualHostBase/%{ENV:PROTO}/%{ENV:HOST}:%{ENV:PORT}/%{ENV:ZOPEPATH}/VirtualHostRoot/$1 [L,P]
+        RewriteRule  ^/(.*)$ http://%{ENV:BACKEND_LOCATION}:%{ENV:BACKEND_PORT}/VirtualHostBase/%{ENV:PROTO}/%{ENV:HOST}:%{ENV:PORT}/%{ENV:ZOPEPATH}/VirtualHostRoot/$1 [L,P]
+    <BLANKLINE>
+    <BLANKLINE>
+    </VirtualHost>
+    <BLANKLINE>
+    <BLANKLINE>
+
+Ok add an another::
+
+    >>> options['backends'] = """
+    ...               plone.org:127.0.0.1:3128
+    ...               plone2.org/plone:127.0.0.1:3128
+    ...                """
+    >>> recipe = ConfigureRecipe(buildout, name, options)
+    >>> path = recipe.install()
+    >>> f = open(os.path.join(path,'virtual_plone2.org.conf'))
+    >>> print f.read()
+    <VirtualHost *:80>
+        ServerName plone2.org
+    <BLANKLINE>
+        RewriteEngine On
+        RewriteLog ...var/log/rewrite_plone2.org.log
+        RewriteLogLevel 0
+    <BLANKLINE>
+        CustomLog ...var/log/access_plone2.org.log combined
+        ErrorLog ...var/log/error_plone2.org.log
+    <BLANKLINE>
+        <Proxy http://127.0.0.1:3128>
+          Allow from all
+        </Proxy>
+    <BLANKLINE>
+        <IfModule mod_expires.c>
+          <FilesMatch "\.(py)$">
+             ExpiresActive on
+             ExpiresDefault "access plus 2 weeks"
+          </FilesMatch>
+    <BLANKLINE>
+          <FilesMatch "\.(txt)$">
+             ExpiresActive on
+             ExpiresDefault "access plus 1 day"
+          </FilesMatch>
+    <BLANKLINE>
+          <FilesMatch "\.(txt|py)$">
+             Header set Cache-Control "max-age=3600, public, must-revalidate"
+          </FilesMatch>
+    <BLANKLINE>
+        </IfModule>
+    <BLANKLINE>
+        Alias /docs ${buildout:directory}/plone/recipe/apache/doctests
+        <Directory ${buildout:directory}/plone/recipe/apache/doctests>
+           Order allow,deny
+           Allow from all
+        </Directory>
+    <BLANKLINE>
+        RewriteRule ^/docs - [L]
+    <BLANKLINE>
+        Alias /tests ${buildout:directory}/plone/recipe/apache/tests
+        <Directory ${buildout:directory}/plone/recipe/apache/tests>
+           Order allow,deny
+           Allow from all
+        </Directory>
+    <BLANKLINE>
+        RewriteRule ^/tests - [L]
+    <BLANKLINE>
+        RewriteRule ^(.*)$ - [E=BACKEND_LOCATION:127.0.0.1]
+        RewriteRule ^(.*)$ - [E=BACKEND_PORT:3128]
+        RewriteRule ^(.*)$ - [E=HOST:plone2.org]
+        RewriteRule ^(.*)$ - [E=PORT:80]
+        RewriteRule ^(.*)$ - [E=PROTO:http]
+        RewriteRule  ^/(.*)/$ http://%{ENV:BACKEND_LOCATION}:%{ENV:BACKEND_PORT}/$1 [L,P]
+        RewriteRule  ^/(.*)$ http://%{ENV:BACKEND_LOCATION}:%{ENV:BACKEND_PORT}/$1 [L,P]
+    <BLANKLINE>
+    </VirtualHost>
+    <BLANKLINE>
+    <BLANKLINE>
+
+    >>> options['zope2_vhm_map'] = """
+    ...               plone.org:/plone
+    ...               plone2.org:/fake
+    ...                """
+
+    >>> options['etag'] = 'MTime Size'
+    >>> options['compression'] = 'on'
+
+    >>> recipe = ConfigureRecipe(buildout, name, options)
+    >>> recipe.zope2_vhm_maps
+    {'plone2.org': ['fake'], 'plone.org': ['plone']}
+
+
+    >>> path = recipe.install()
+    >>> f = open(os.path.join(path,'virtual_plone2.org.conf'))
+    >>> print f.read()
+    <VirtualHost *:80>
+    ServerName plone2.org
+    <BLANKLINE>
+        RewriteEngine On
+        RewriteLog .../var/log/rewrite_plone2.org.log
+        RewriteLogLevel 0
+    <BLANKLINE>
+        CustomLog .../var/log/access_plone2.org.log combined
+        ErrorLog .../var/log/error_plone2.org.log
+    <BLANKLINE>
+        <Proxy http://127.0.0.1:3128>
+          Allow from all
+        </Proxy>
+    <BLANKLINE>
+        FileETag MTime Size
+    <BLANKLINE>
+        <IfModule mod_expires.c>
+          <FilesMatch "\.(py)$">
+             ExpiresActive on
+             ExpiresDefault "access plus 2 weeks"
+          </FilesMatch>
+    <BLANKLINE>
+          <FilesMatch "\.(txt)$">
+             ExpiresActive on
+             ExpiresDefault "access plus 1 day"
+          </FilesMatch>
+    <BLANKLINE>
+          <FilesMatch "\.(txt|py)$">
+             Header set Cache-Control "max-age=3600, public, must-revalidate"
+          </FilesMatch>
+    <BLANKLINE>
+        </IfModule>
+    <BLANKLINE>
+        Alias /docs ${buildout:directory}/plone/recipe/apache/doctests
+        <Directory ${buildout:directory}/plone/recipe/apache/doctests>
+           Order allow,deny
+           Allow from all
+        </Directory>
+    <BLANKLINE>
+        RewriteRule ^/docs - [L]
+    <BLANKLINE>
+        Alias /tests ${buildout:directory}/plone/recipe/apache/tests
+        <Directory ${buildout:directory}/plone/recipe/apache/tests>
+           Order allow,deny
+           Allow from all
+        </Directory>
+    <BLANKLINE>
+        RewriteRule ^/tests - [L]
+    <BLANKLINE>
+        RewriteRule ^(.*)$ - [E=BACKEND_LOCATION:127.0.0.1]
+        RewriteRule ^(.*)$ - [E=BACKEND_PORT:3128]
+        RewriteRule ^(.*)$ - [E=HOST:plone2.org]
+        RewriteRule ^(.*)$ - [E=PORT:80]
+        RewriteRule ^(.*)$ - [E=PROTO:http]
+        RewriteRule ^(.*)$ - [E=ZOPEPATH:fake]
+        RewriteRule  ^/plone(.*)$ http://%{ENV:BACKEND_LOCATION}:%{ENV:BACKEND_PORT}/VirtualHostBase/%{ENV:PROTO}/%{ENV:HOST}:%{ENV:PORT}/%{ENV:ZOPEPATH}/VirtualHostRoot/_vh_plone$1 [L,P]
+        RewriteRule  ^/(.*)$ http://%{ENV:BACKEND_LOCATION}:%{ENV:BACKEND_PORT}/VirtualHostBase/%{ENV:PROTO}/%{ENV:HOST}:%{ENV:PORT}/%{ENV:ZOPEPATH}/VirtualHostRoot/_vh_plone/$1 [L,P]
+    <BLANKLINE>
+    <BLANKLINE>
+        # Enable Compression
+        <Location />
+           SetOutputFilter DEFLATE
+    <BLANKLINE>
+           # Netscape 4.x has some problems...
+           BrowserMatch ^Mozilla/4 gzip-only-text/html
+    <BLANKLINE>
+           # Netscape 4.06-4.08 have some more problems
+           BrowserMatch ^Mozilla/4\.0[678] no-gzip
+    <BLANKLINE>
+           # MSIE masquerades as Netscape, but it is fine
+           # BrowserMatch \bMSIE !no-gzip !gzip-only-text/html
+    <BLANKLINE>
+           # NOTE: Due to a bug in mod_setenvif up to Apache 2.0.48
+           # the above regex won't work. You can use the following
+           # workaround to get the desired effect:
+           BrowserMatch \bMSI[E] !no-gzip !gzip-only-text/html
+    <BLANKLINE>
+           # Don't compress images
+           SetEnvIfNoCase Request_URI \
+           \.(?:gif|jpe?g|png)$ no-gzip dont-vary
+    <BLANKLINE>
+           # Make sure proxies don't deliver the wrong content
+           Header append Vary User-Agent env=!dont-vary
+        </Location>
+    <BLANKLINE>
+    </VirtualHost>
+    <BLANKLINE>
+    <BLANKLINE>
+
+    >>> f = open(options['mainconfig'])
+    >>> print f.read()
+    ## apache main  config
+    Include .../apache_config/conf.d/*.conf
+    <BLANKLINE>
+
+
+
+
+
+
