@@ -1,0 +1,265 @@
+Metadata-Version: 1.0
+Name: mongokit-pylons
+Version: 0.2.0
+Summary: MongoDB interface for ORM-like object mapping (w/ Pylons support)
+Home-page: http://bitbucket.org/bwmcadams/mongokit-pylons/
+Author: Brendan W. McAdams
+Author-email: bwmcadams@gmail.com
+License: New BSD License
+Description: 
+        =========================
+        What is MongoDB/MongoKit?
+        =========================
+        MongoDB is a free & open source, schemaless document oriented
+        database (available at http://mongodb.org). The MongoKit
+        framework is an ORM-like layer which provides an enhanced
+        approach to managing your MongoDB data by providing an object
+        layer.  This layer allows you to define rough schema outlines
+        including default values and allowed & required fields.
+        While schemaless databases have power in their lack of schema,
+        it helps to control what fields are and aren't permitted
+        (even if you only use 3 of 10 most times) to ensure consistency.
+        
+        The original MongoKit is written by Namlook, and is available at http://bitbucket.org/namlook/mongokit/
+        
+        MongoKit-Pylons is a (hopefully temporary) fork which provides a
+        toolset for easily integrating MongoKit within the Pylons web
+        framework. It provides the ability to parse mongo configuration
+        from Pylons ini config files, and setup easily in
+        config/environment.py as an always-available, threadlocal
+        connection pool (similar to how SQLAlchemy is typically setup in Pylons).
+        
+        From my own usage of MongoKit following integrating
+        Pylons support into my production systems, I have added several
+        enhancements to the MongoKit-Pylons fork which I've found useful.
+        These features include property-like setter/getter proxying for
+        values (instead of pure dictionary access) and support for the
+        MongoDB driver's autoreferencing features.  Autoreferencing
+        allows you to embed MongoKit objects/instances inside another
+        MongoKit object.  With autoreferencing enabled, MongoKit and
+        the pymongo driver will translate the embedded MongoKit object
+        values into internal MongoDB DBRefs.  The (de)serialization is
+        handled automatically by the pymongo driver.
+        
+        It is my hope/intention to merge this fork back into the main
+        project.
+        
+        ===============
+        MongoKit-Pylons
+        ===============
+        [Note that if you used an earlier version of this fork, I have
+        recently changed the namespace to mongokit.pylons so as not to
+        conflict.  The latest release can be grabbed from pypi]
+        
+        .. _release: http://pypi.python.org/pypi/mongokit-pylons
+        .. _pypi: http://pypi.python.org/pypi/mongokit-pylons
+        
+        This is a fork (hopefully temporary, as I'd like to merge into
+        one codebase) of the fantastic MongoKit_ to add better support
+        for Pylons_.  Along the way I have added a few features such as
+        __setattr__ / __getattr__ to set / get values as properties
+        rather than talking to the dictionary.
+        
+        This fork also supports the autoreferencing feature from the
+        pymongo_. driver.
+        
+        MongoPylonsEnv is a helper class for using MongoKit_ inside of
+        Pylons_. - The recommended deployment is to add a call to
+        init_mongo() in config/environment.py for your pylons project.
+        Like with SQLAlchemy_, this will setup your connections
+        at Pylons boot; the MongoDB_ Pool code should ensure you have
+        enough connections.
+        
+        .. _MongoKit: http://bitbucket.org/namlook/mongokit/wiki/Home
+        .. _Pylons: http://pylonshq.com
+        .. _SQLAlchemy: http://sqlalchemy.org
+        .. _pymongo: http://github.com/mongodb/mongo-python-driver/
+        .. _autoref_sample: http://github.com/mongodb/mongo-python-driver/blob/cd47b2475c5fe567e98696e6bc5af3c402891d12/examples/auto_reference.py
+        
+        Add the import at the top::
+        
+        >>> from mongokit.pylons.pylons_env import MongoPylonsEnv
+        
+        And lower down, in load_environment()::
+        
+        >>> MongoPylonsEnv.init_mongo()
+        
+        Additionally, you'll need to add several items to your
+        configuration ini file::
+        
+        
+        >>> # Mongo Database settings
+        ... mongodb.host = localhost
+        ... mongodb.port = 27017
+        ... mongodb.db = your_db_name
+        ... mongodb.connection_timeout = 30
+        ... mongodb.pool.enable = True
+        ... mongodb.pool.size = 20
+        
+        To enable pylons support, your document class MUST specify::
+        
+        >>> _use_pylons = True
+        
+        as a class level attribute. MongoKit's document connection
+        management is class based, so if you need the same document to
+        work in and out of pylons, it is recommended you create a
+        "normal" MongoDocument subclass, and a subclass of THAT which
+        defines _use_pylons.
+        
+        Alternately, for the ultimate in lazy::
+        
+        >>> from mongokit.pylons.document import MongoPylonsDocument
+        
+        And then subclass from that (It's a proxy subclass of
+        MongoDocument which enables use_pylons).
+        
+        One further perk of this version is AutoReferences.
+        Autoreferences allow you to pass other MongoDocuments as values.
+        pymongo_.  (with help from MongoKit) automatically
+        translates these object values into DBRefs before persisting to
+        Mongo.  When fetching, it translates them back, so that you have
+        the data values for your referenced object.
+        See the autoref_sample_. for further details/internals  on this
+        driver-level functionality. As for enabling it in your own
+        MongoKit code, simply define the following class attribute
+        upon your Document subclass::
+        
+        >>> _enable_autoref = True
+        
+        With autoref enabled, MongoKit's connection management will
+        attach the appropriate BSON manipulators to your document's
+        connection handles.  We require you to explicitly enable autoref
+        for two reasons:
+        
+        - Using autoref and it's BSON manipulators (As well as DBRefs) come with a performance penalty, so we don't load them unless you opt-in at class-level.
+        - You may not wish to use auto-referencing in some cases where you're using DBRefs.
+        
+        Once you have autoref enabled, MongoKit will allow you to define
+        any valid subclass of MongoDocument as part of your document
+        structure.  **If your class does not define _enable_autoref as
+        True, MongoKit's structure validation code will REJECT your
+        structure. The rules are *autoref enabled*, *issubclass(<type>,
+        MongoDocument)*.**
+        
+        A detailed example::
+        
+        >>> class BlogEntry(MongoPylonsDocument):
+        ...     collection_name = 'blog'
+        ...     structure = {
+        ...         'author': AdminUser,
+        ...         'publish_date': datetime.datetime,
+        ...         'title': unicode,
+        ...         'entry': unicode,
+        ...     }
+        ...
+        ...     _enable_autoref = True
+        ...     required_fields = ['author', 'publish_date', 'entry', 'title']
+        ...     default_values = {'publish_date': datetime.datetime.now()}
+        
+        Additionally, with this codebase, MongoDocument supports property
+        style set/get.  Where in the original codebase you had to do::
+        
+        >>> user = TestUserDocument()
+        ... user['password'] = 'p455'
+        
+        With this code you can invoke it as::
+        
+        >>> user = TestUserDocument()
+        ... user.password = 'p455'
+        
+        For any questions related to this fork, especially the Pylons &
+        Autoref (and properties) support, please contact myself (Brendan
+        McAdams ) rather than namlook.  I can be reached at
+        NO*bwmcadams*SPAM@gmail.*OMGSPAM*.com, and sometimes lurk on
+        freenode #mongodb as bwmcadams.
+        
+        Docs for core MongoKit follow...
+        
+        ========
+        MongoKit
+        ========
+        
+        MongoDB_ is a great schema-less document oriented database. It have a lot of
+        driver for many langages (python, ruby, perl, java, php...).
+        
+        .. _MongoDB : http://www.mongodb.org/display/DOCS/Home
+        
+        MongoKit is a python module that brings structured schema and validation layer
+        on top of the great pymongo driver. It has be written to be simpler and lighter
+        as possible with the KISS and DRY principles in mind.
+        
+        Features
+        ========
+        
+        * schema validation (wich use simple python type for the declaration)
+        * nested and complex schema declaration
+        * required fields validation
+        * default values
+        * custom validators
+        * inheritance and polymorphisme support
+        * versionized document support (still in alpha stage)
+        * partial auth support (it brings a simple User model)
+        
+        A quick example
+        ===============
+        
+        MongoDocument are enhanced python dictionnary with a ``validate()`` method.
+        A MongoDocument declaration look like that::
+        
+        >>> from mongokit.pylons import MongoDocument
+        >>> import datetime
+        
+        >>> class BlogPost(MongoDocument):
+        ...     db_name = 'test'
+        ...     collection_name = 'tutorial'
+        ...     structure = {
+        ...             'title':unicode,
+        ...             'body':unicode,
+        ...             'author':unicode,
+        ...             'date_creation':datetime.datetime,
+        ...             'rank':int
+        ...     }
+        ...     required_fields = ['title','author', 'date_creation']
+        ...     default_values = {'rank':0, 'date_creation':datetime.datetime.utcnow}
+        ...
+        >>> blogpost = BlogPost()
+        >>> blogpost['title'] = u'my title'
+        >>> blogpost['body'] = u'a body'
+        >>> blogpost['author'] = u'me'
+        >>> blogpost.validate()
+        >>> blogpost # doctest: +ELLIPSIS, +NORMALIZE_WHITESPACE
+        {'body': u'a body', 'title': u'my title', 'date_creation': datetime.datetime(...), 'rank': 0, 'author': u'me'}
+        >>> blogpost.save()
+        
+        And you can use more complex structure::
+        
+        >>> class ComplexDoc(MongoDocument):
+        ...     db_name = 'test'
+        ...     collection_name = 'tutorial'
+        ...     structure = {
+        ...         "foo" : {"content":int},
+        ...         "bar" : {
+        ...             int:{unicode:int}
+        ...         }
+        ...     }
+        ...     required_fields = ['foo.content', 'bar.$int']
+        
+        Please, see the tutorial_ for more examples.
+        
+        .. _tutorial : http://bitbucket.org/namlook/mongokit/wiki/Home
+        
+        [ For any questions related to this fork, especially the Pylons & Autoref (and properties) support, rather than the core mongokit code, please contact myself (Brendan McAdams ) rather than namlook.  I can be reached at NO*bwmcadams*SPAM@gmail.*OMGSPAM*.com, and sometimes lurk on freenode #mongodb as bwmcadams.]
+        
+        
+Keywords: mongo mongodb mongokit pylons
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Other Environment
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Topic :: Database
+Classifier: Topic :: Utilities
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
