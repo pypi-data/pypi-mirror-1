@@ -1,0 +1,1 @@
+from plone.recipe.deliverance.recipe import Recipe
