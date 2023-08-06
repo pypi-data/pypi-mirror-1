@@ -1,0 +1,190 @@
+HTTPEncode
+++++++++++
+
+.. contents::
+
+Status
+------
+
+HTTPEncode is still an experiment of sorts.  It has gone through
+several refactorings, and may go through more in the future.  Though
+that it has gone through refactorings already may mean that it's in a
+good state now.  And yet I still do more refactorings despite that, so
+who knows.
+
+See `to do <todo.html>`_ to see some of what isn't figured out yet.
+Feedback is very much encouraged; discussion can take place on the
+`Paste mailing list </community/mailing-list.html>`_.
+
+Description
+-----------
+
+So what is HTTPEncode?
+
+Perhaps most importantly it's a way of doing requests.  These can be
+JSON-based requests, XML, HTML-form-style (urlencoded), or whatever.
+And then responses, which may be similarly encoded.
+
+First, HTTPEncode gives you an API for that.
+
+Now, lets say the requester and the responder live in the same process
+(maybe `microapp <http://microapps.org/>`_ style, or just general
+REST-based service style).  Here you are, encoding your objects as
+JSON, then decoding them from JSON, and doing HTTP requests, and using
+sockets, and why?  The client and server both live in the same
+process, they can share objects, all this serialization and
+deserialization is unnecessary.
+
+Now at this point you *could* start backend communications that avoid
+WSGI entirely.  But you'll have forked your service into an internal
+and external version.  You'll have to do various kinds of detections,
+and maybe have different bugs in the different implementations.
+
+HTTPEncode gives you a simple API for requests and responses that
+happens to know about potential opportunities for using WSGI to avoid
+HTTP while still respecting all your WSGI stack's dispatching and
+middleware.  When those opportunities don't work out -- because the
+service is remote, the client is connecting over HTTP, or just because
+one end of the communication doesn't use HTTPEncode, it'll fall back
+on the normal serialization/deserialization routine.
+
+How To Use This: The Client
+---------------------------
+
+First you have to create an instance of ``httpencode.HTTP`` -- this is
+an object that holds any application-specific policy.  Then you can do
+a request::
+
+    import httpencode
+    http = httpencode.HTTP()
+    response = http.GET('http://yahoo.com')
+
+This just returns the text of the page, since we haven't asked it to
+do anything else.  But maybe we want some Python structures back
+(we'll call that ``'python'``, meaning simple structures like dict,
+list etc)::
+
+    data = http.GET('http://del.icio.us/feeds/json/ianb?raw',
+                    output='python')
+
+This gets the page, and converts what it gets.  In this case it'll be
+served up as ``application/x-javascript`` and we have a format to
+convert that (the ``json`` format).  If you *knew* it was going to
+return JSON, but the Content-Type on the response was all wrong, you
+could do::
+
+    data = http.GET('http://del.icio.us/feeds/json/ianb?raw',
+                    output='name json')
+
+Which gets the JSON format (loading it by name) and parses the
+response, ignoring the Content-Type.  We could also get some XML and
+parse it::
+
+    data = http.GET('http://del.icio.us/rss/ianb', output='lxml')
+
+This loads the RSS file, parses it using `lxml
+<http://codespeak.net/lxml/>`_.
+
+You can also send encoded values, like perhaps POST something to an
+`APP store
+<http://www.ietf.org/internet-drafts/draft-ietf-atompub-protocol-12.txt>`_::
+
+    data = http.POST('http://localhost/APP_store', lxml_doc,
+                     input='lxml', output='lxml')
+
+This will automatically encode the body and POST that value to the
+store.  We also parse the output of the POST request.
+
+Internal request
+~~~~~~~~~~~~~~~~
+
+The other advantage of HTTPEncode is saving some time serializing and
+decoding.  You can do this when a request is initiated in a WSGI
+environment and you are making a call back to another component inside
+the WSGI environment.
+
+To take advantage of this you have to have `paste.recursive
+<http://pythonpaste.org/module-paste.recursive.html>`_ as middleware
+in your stack.  This low-impact middleware allows for subrequests.
+
+Then you have to pass your WSGI environment to any of the methods or
+functions (``GET``, ``POST``, etc) with the ``environ`` keyword.
+HTTPEncode will then try to do an internal request, but will do an
+external request if it has to.
+
+How To Use This: The Server
+---------------------------
+
+The server side is simpler.  There's also two sides: parsing the
+request body, and returning a response.  The request body is easy
+enough::
+
+    request = parse_request(environ, output_type='python')
+
+Tihs parses the request, looking at the Content-Type of the request
+and finding a format that will convert it to the ``'python'`` type.
+This might be a JSON converter, or the cgi HTML form processor.
+
+The response takes the form of a WSGI application::
+
+    simple_json_app = Responder({some json data}, 'python',
+                                default_format='json')
+
+Then ``simple_json_app`` is a WSGI application that will respond with
+that data.  This won't actually use JSON necessarily, if the client
+didn't give a JSON type in the Accept header (but if they give no
+Accept header the ``default_format`` of JSON will be used).  If they
+can accept a different type, then the ``Responder`` application will
+choose that different type.
+
+Of course, you can do this dynamically::
+
+    def my_app(environ, start_response):
+        response = calculate_response(environ)
+        json_app = Responder(response, 'python')
+        return json_app(environ, start_response)
+
+You can also pass a ``headers`` argument to ``.reponder()`` to add
+extra headers (only ``Content-Type`` is set by default).
+
+How Does It Work?
+-----------------
+
+WSGI has an object for the request body (``environ['wsgi.input']``)
+and an object for the response body (the app_iter).  Both of these can
+have extra attributes on them.  HTTPEncode adds an attribute
+``.decoded`` which contains ``(mimetype, python_type, data)``.  But if
+you use either wsgi.input or app_iter as you normally would with WSGI,
+it'll do the serialization on demand.
+
+It also has a registration process for finding something that supports
+the given mimetype, and produces the Python data structure you want.
+So an example might be ``text/xml to lxml.etree``, which will take
+something declared as ``text/xml`` and produce an `lxml
+<http://codespeak.net/lxml/>`_ object.
+
+Formats can be added without adding to HTTPEncode.  You must be using
+`setuptools <http://peak.telecommunity.com/DevCenter/setuptools>`_ for
+you package, and give an `entry point
+<http://peak.telecommunity.com/DevCenter/setuptools#extensible-applications-and-frameworks>`_
+like this::
+
+    [httpencode.format]
+    mimetype to python_type = entry_point
+
+Often more than one mimetype will map to the same format, like
+``text/xml`` and ``application/xml``.  In that case just register the
+same ``entry_point`` under multiple mappings.  For an example of all
+this, look at HTTPEncode's own ``setup.py`` file, since it provides
+several formats itself.
+
+``python_type`` is just a string.  For instance, HTTPEncode uses
+``'cgi.FieldStorage'`` for form submissions parsed with the standard
+`cgi <http://python.org/doc/current/lib/module-cgi.html>`_ module, and
+it uses ``'lxml.etree'`` for lxml, and just ``'etree'`` for
+`ElementTree <http://effbot.org/zone/element-index.htm>`_
+
+If you want to support a new format you need to start with a
+serialization and deserialization routine, consuming and producing a
+string.  (Right now just ``str`` strings, no unicode.)
+
