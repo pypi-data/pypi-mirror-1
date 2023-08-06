@@ -1,0 +1,340 @@
+Replace Reference
+
+    This document covers all the possible uses of a TwiddlerElement's
+    'replace' method. 
+   
+    We'll demonstrate this using an example similar to the one in
+    readme.txt:
+ 
+    >>> from twiddler import Twiddler
+    >>> t = Twiddler('''<html>
+    ...   <body>
+    ...   <div id="greeting">Hello world!</div>
+    ...   <div name="stuff">I'm in <i id="type">Italic</i>!</div>
+    ...   <div name="morestuff">I'm in <i>Italic</i>!</div>
+    ...   </body>
+    ... </html>''')
+
+    We've already seen examples of replacement, but you may be
+    wondering how to substitute an attribute value when the attribute
+    name is a reserved keyword in python. The common example of this
+    is when you want to set the 'class' attribute of an html element.
+
+    The answer is to take advantage of some slightly unusual python
+    syntax: 
+
+    >>> t['greeting'].replace('Hello user!',**{'class':'greeting'})
+
+    Of course, this doesn't help if you're trying to set an attribute
+    which has the same name as one of the replace method's parameters.
+    In this rare case, you can specify a dictionary containing the
+    attributes as follows:
+
+    >>> t['type'].replace(attributes={'tag':'foo'})
+
+    You may also be wondering what happens when you change the value
+    of an indexed attribute. The answer is that the new value becomes
+    indexed and the old value is no longer indexed:
+
+    >>> t['greeting'].replace(id='intro_greeting')
+    >>> t['intro_greeting'].replace(**{'xml:lang':'en'})
+    >>> t['greeting']
+    Traceback (most recent call last):
+    ...
+    KeyError:...
+
+    Now, lets see how the changes we've made have taken effect:
+
+    >>> print t.render()
+    <html>
+      <body>
+      <div class="greeting" id="intro_greeting" xml:lang="en">Hello user!</div>
+      <div name="stuff">I'm in <i id="type" tag="foo">Italic</i>!</div>
+      <div name="morestuff">I'm in <i>Italic</i>!</div>
+      </body>
+    </html>
+
+    When you call replace and specify a value, it replaces the whole
+    value of the tag, including any contained tags:
+
+    >>> t['stuff'].replace('My stuff')
+    >>> print t.render()
+    <html>
+      <body>
+      <div class="greeting" id="intro_greeting" xml:lang="en">Hello user!</div>
+      <div name="stuff">My stuff</div>
+      <div name="morestuff">I'm in <i>Italic</i>!</div>
+      </body>
+    </html>
+
+    You can use the 'tag' parameter to change the tag itself:
+
+    >>> t['stuff'].replace(tag='span')
+    >>> print t.render()
+    <html>
+      <body>
+      <div class="greeting" id="intro_greeting" xml:lang="en">Hello user!</div>
+      <span name="stuff">My stuff</span>
+      <div name="morestuff">I'm in <i>Italic</i>!</div>
+      </body>
+    </html>
+
+    If you pass True for any parameter to render, the current value is
+    left as it is:
+
+    >>> t['intro_greeting'].replace(True,tag=True,style=True)
+    >>> print t.render()
+    <html>
+      <body>
+      <div class="greeting" id="intro_greeting" xml:lang="en">Hello user!</div>
+      <span name="stuff">My stuff</span>
+      <div name="morestuff">I'm in <i>Italic</i>!</div>
+      </body>
+    </html>
+
+    If you pass False for an attribute value, the attribute is
+    removed:
+
+    >>> t['intro_greeting'].replace(**{'xml:lang':False})
+    >>> print t.render()
+    <html>
+      <body>
+      <div class="greeting" id="intro_greeting">Hello user!</div>
+      <span name="stuff">My stuff</span>
+      <div name="morestuff">I'm in <i>Italic</i>!</div>
+      </body>
+    </html>
+
+    If you pass False as the value for a call to 'replace', then the
+    contents of the tag, including any contained tags, is removed:
+
+    >>> t['morestuff'].replace(False)
+    >>> print t.render()
+    <html>
+      <body>
+      <div class="greeting" id="intro_greeting">Hello user!</div>
+      <span name="stuff">My stuff</span>
+      <div name="morestuff" />
+      </body>
+    </html>
+
+    If you pass False for the tag itself, the tag is hidden from
+    rendering calls:
+
+    >>> t['intro_greeting'].replace(tag=False)
+    >>> print t.render()
+    <html>
+      <body>
+      Hello user!
+      <span name="stuff">My stuff</span>
+      <div name="morestuff" />
+      </body>
+    </html>
+
+    However, this doesn't mean the tag no longer exists:
+
+    >>> t['intro_greeting'].replace("Still here!")
+    >>> print t.render()
+    <html>
+      <body>
+      Still here!
+      <span name="stuff">My stuff</span>
+      <div name="morestuff" />
+      </body>
+    </html>
+
+    If you really want to get rid of a tag and all its contents, use
+    the 'remove' method.
+    
+    Now, rendering output that combines a site template with content
+    for a specific page involves using the replace method of one
+    Twiddler where the value passed is an element from another
+    Twiddler. We saw an example of this in readme.txt, but there are
+    some examples that need further clarification.
+
+    Firstly, code blocks inside a twiddler are only executed when
+    either the render or execute methods are called. Comprehensive
+    examples of the different posibilities can be found in
+    templating.txt. For now, we'll just show a simple example of how
+    to use a site template with dynamic elements in conjunction with a
+    specific page, where both contain a code block.
+
+    So, here's the template:
+
+    >>> from twiddler.input.default import DefaultWithCodeBlock
+    >>> template = Twiddler('''<html>
+    ... <!--twiddler
+    ... def template_code(t,title):
+    ...   t['title'].replace(title)
+    ... -->
+    ...   <body>
+    ...   <h1 id="title">The Site Header</h1>
+    ...   <div id="content">Content goes here</div>
+    ...   </body>
+    ... </html>''',input=DefaultWithCodeBlock)
+    
+    And here's the specific page:
+
+    >>> page = Twiddler('''
+    ... <html>
+    ... <!--twiddler
+    ... def page_code(t,content):
+    ...   t['content'].replace(content)
+    ... -->
+    ...   <body>
+    ...   <div id="content">This is our page content!</div>
+    ...   </body>
+    ... </html>''',input=DefaultWithCodeBlock)
+    
+    Okay, so now lets define some data that we want to render with the
+    above page:
+
+    >>> data = {
+    ...    'title':'The document title',
+    ...    'content':'The document content',
+    ... }
+
+    Now here's the code that combines them using the replace method:
+
+    >>> page_output = page.clone()
+    >>> page_output.execute(data['content'])
+    <twiddler.Twiddler instance at ...>
+    >>> output = template.clone()
+    >>> output['content'].replace(page_output['content'])
+    >>> print output.render(data['title'])
+    <html>
+      <body>
+      <h1 id="title">The document title</h1>
+      <div id="content">The document content</div>
+      </body>
+    </html>
+
+    This relies on the ability to pass an element from another
+    Twiddler to the replace method. When this is done, the element
+    that is passed is copied and then used to replace the node on
+    which the replace method was called. As the following example will
+    show, this means that once this operation is complete, changes to
+    one Twiddler will not have an effect on the other.
+
+    So, our first Twiddler:
+
+    >>> t1 = Twiddler('''<html>
+    ...   <body>
+    ...   <div id="t1_content">This is t1's content!</div>
+    ...   </body>
+    ... </html>''')
+
+    Now our second Twiddler:
+
+    >>> t2 = Twiddler('''<html>
+    ...   <body>
+    ...   <div id="t2_content">This is t2's content!</div>
+    ...   </body>
+    ... </html>''')
+    
+    Now lets use a node from one in the other:
+
+    >>> t1['t1_content'].replace(t2['t2_content'])
+
+    Rendering the two now gives the following:
+
+    >>> print t1.render()
+    <html>
+      <body>
+      <div id="t2_content">This is t2's content!</div>
+      </body>
+    </html>
+    >>> print t2.render()
+    <html>
+      <body>
+      <div id="t2_content">This is t2's content!</div>
+      </body>
+    </html>
+
+    But, now we change both of them independently:
+
+    >>> t1['t2_content'].replace('The third change!',
+    ...                          id="t1_content")
+    >>> t2['t2_content'].replace('The fourth change!')
+    >>> print t1.render()
+    <html>
+      <body>
+      <div id="t1_content">The third change!</div>
+      </body>
+    </html>
+    >>> print t2.render()
+    <html>
+      <body>
+      <div id="t2_content">The fourth change!</div>
+      </body>
+    </html>
+
+    It should also be noted that when an element from another Twiddler
+    is passed to the replace method, all other parameters to the
+    replace method will be applied after the node has been copied and
+    inserted:
+
+    >>> t1['t1_content'].replace(
+    ...     t2['t2_content'],
+    ...     **{'tag':'span',
+    ...        'class':'fish'}
+    ... )
+    >>> print t1.render()
+    <html>
+      <body>
+      <span class="fish" id="t2_content">The fourth change!</span>
+      </body>
+    </html>
+
+    Unicode
+
+      All information substituted into a Twiddler using the replace
+      method must either be a unicode or must be decodable into a
+      unicode by the default python decoder. In other cases you will
+      get a unicode error:
+
+      >>> t['stuff'].replace(u'\x82'.encode('latin-1'))
+      Traceback (most recent call last):
+      ...
+      UnicodeDecodeError:...
+      >>> t['stuff'].replace(title=u'\x82'.encode('latin-1'))
+      Traceback (most recent call last):
+      ...
+      UnicodeDecodeError:...
+      
+    Python Booleans
+
+      As you've seen above, True and False have special meanings for
+      the parameters to Twiddler's replace method.
+
+      However, boolean expressions in python often don't return either
+      of these values:
+
+      >>> '' or 'X'
+      'X'
+      >>> 0 and 1
+      0
+
+      This can lead to unexpected results with Twiddler:
+
+      >>> t = Twiddler('<node id="test" str="string" int="integer"/>')
+      >>> t['test'].replace(str='' or 'X',int=0 and 1)
+      >>> print t.render()
+      <node id="test" int="0" str="X" />
+
+      The solution is to cast the expression to a boolean if you're
+      unsure:
+
+      >>> bool('' or 'X')
+      True
+      >>> bool(0 and 1)
+      False
+
+      Using this technique with replace calls means you always get
+      what you expect:
+
+      >>> t = Twiddler('<node id="test" str="string" int="integer"/>')
+      >>> t['test'].replace(str=bool('' or 'X'),
+      ...                   int=bool(0 and 1))
+      >>> print t.render()
+      <node id="test" str="string" />
