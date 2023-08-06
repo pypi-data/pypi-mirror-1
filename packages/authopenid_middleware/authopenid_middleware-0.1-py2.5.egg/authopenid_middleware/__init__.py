@@ -1,0 +1,1 @@
+from authopenid import middleware
