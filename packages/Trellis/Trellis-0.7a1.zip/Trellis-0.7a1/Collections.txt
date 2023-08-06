@@ -1,0 +1,307 @@
+=========================================
+Event-Driven Collections with the Trellis
+=========================================
+
+The ``peak.events.collections`` module includes some additional data structures
+for use with the Trellis::
+
+    >>> from peak.events import trellis, collections
+
+
+.. contents:: **Table of Contents**
+
+
+SortedSet
+---------
+
+``trellis.List`` objects have some inherent inefficiencies due to the wide
+variety of operations supported by Python lists.  While ``trellis.Set``
+and ``trellis.Dict`` objects update themselves in place by applying change
+logs, ``trellis.List`` has to use a copy-on-write strategy to manage updates,
+because there isn't any simple way to reduce operations like ``sort()``,
+``reverse()``, ``remove()``, etc. to a meaningful change log.  (That's why
+it only provides a simple ``changed`` flag.)
+
+So if you need to use large lists in an application, you may be better off
+using a different data structure design.  That way, if you only need a subset
+of the list interface, you can implement a changelog-based structure.  For
+example, the Trellis package includes a ``SortedSet`` type that maintains an
+index of items sorted by keys, with a cell that lists changed regions.
+
+A ``collections.SortedSet`` is a specialized component that lets you wrap a
+``trellis.Set`` (or anything similar to one, that offers iteration plus
+``added`` and ``removed`` cells) with a sort key, to get a list::
+
+    >>> myItems = trellis.Set([3,2,1])
+    >>> myIndex = collections.SortedSet(data=myItems)
+
+    >>> class Viewer(trellis.Component):
+    ...     model = trellis.attr(None)
+    ...
+    ...     @trellis.perform
+    ...     def view_it(self):
+    ...         if self.model is not None:
+    ...             print self.model
+
+    >>> view = Viewer(model=myIndex)
+    [1, 2, 3]
+
+You can change the ``sort_key`` attribute to re-sort the items::
+
+    >>> myIndex.sort_key = lambda x: -x
+    [3, 2, 1]
+
+
+``SortedSet`` objects also have a discrete rule attribute called ``changes``.
+It's normally empty, but during the recalculation triggered by a change to the
+underlying set, it will temporarily contain one or more ``(start, end, size)``
+tuples, representing the effective changes to the old list.  But as with all
+discrete or receiver attributes, you'll never see a value in it from non-rule
+code::
+
+    >>> myIndex.changes
+    []
+
+Only in rule code will you ever see it containing values, a moment before it
+becomes empty again::
+
+    >>> view.model = None   # quiet, please
+
+    >>> class Watcher(trellis.Component):
+    ...     @trellis.perform
+    ...     def dump(self):
+    ...         print myIndex.changes
+
+    >>> watcher=Watcher()
+    []
+
+    >>> myItems.remove(2)
+    [(1, 2, 0)]
+    []
+    >>> myIndex
+    [3, 1]
+
+The ``changed`` values describe the changes made to the index contents.  In
+this case, ``(1, 2, 0)`` means that the list slice ``1:2`` was reduced to
+length zero.  Compare with the effect of re-inserting 2::
+
+    >>> myItems.add(2)
+    [(1, 1, 1)]
+    []
+    >>> myIndex
+    [3, 2, 1]
+
+This value means the slice ``1:1`` was increased to length 1.  In a sense,
+you can view the provided changes as being "set slice" operators.  Note, too,
+that it's possible to have multiple slices if multiple items are added or
+deleted::
+
+    >>> @trellis.modifier
+    ... def add_some():
+    ...     myItems.add(0)
+    ...     myItems.add(4)
+
+    >>> add_some()
+    [(3, 3, 1), (0, 0, 1)]
+    []
+    >>> myIndex
+    [4, 3, 2, 1, 0]
+
+    >>> add_some()
+
+As you can see, 1 item was inserted at position 3 in the old list, followed
+by 1 item being inserted at position 0.  In other words, if you loop over the
+``changes`` attribute and apply the slice operations in that order, you can
+successfully update another sequence to match the changed sequence.
+
+Finally, note that adjacent operations may be merged into single slices::
+
+    >>> @trellis.modifier
+    ... def del_some():
+    ...     myItems.remove(2)
+    ...     myItems.remove(3)
+
+    >>> del_some()
+    [(1, 3, 0)]
+    []
+    >>> myIndex
+    [4, 1, 0]
+
+And that insertion+deletion at the same position can lead to change slices that
+don't result in a net change to the number of rows::
+
+    >>> @trellis.modifier
+    ... def add_and_del():
+    ...     myItems.remove(1)
+    ...     myItems.add(2)
+
+    >>> add_and_del()
+    [(1, 2, 1)]
+    []
+    >>> myIndex
+    [4, 2, 0]
+
+    >>> @trellis.modifier
+    ... def add_and_del():
+    ...     myItems.remove(2)
+    ...     myItems.add(1)
+
+    >>> add_and_del()
+    [(1, 2, 1)]
+    []
+    >>> myIndex
+    [4, 1, 0]
+
+And changing the sort key always results in a change slice for the entire
+index::
+
+    >>> myIndex.sort_key = lambda x:x
+    [(0, 3, 3)]
+    []
+    >>> myIndex
+    [0, 1, 4]
+
+As does setting or clearing the ``reverse`` flag (which reverses the effect of
+the sort key)::
+
+    >>> myIndex.reverse = True
+    [(0, 3, 3)]
+    []
+    >>> myIndex
+    [4, 1, 0]
+
+    >>> myItems.add(7)
+    [(0, 0, 1)]
+    []
+    >>> myIndex
+    [7, 4, 1, 0]
+
+    >>> myItems.add(2)
+    [(2, 2, 1)]
+    []
+    >>> myIndex
+    [7, 4, 2, 1, 0]
+
+    >>> myItems.remove(7)
+    [(0, 1, 0)]
+    []
+
+    >>> myItems.remove(2)
+    [(1, 2, 0)]
+    []
+
+    >>> myIndex
+    [4, 1, 0]
+
+    >>> myIndex.reverse = False
+    [(0, 3, 3)]
+    []
+
+    >>> myIndex
+    [0, 1, 4]
+
+
+TODO: test changes to ``.data``
+
+
+SubSet
+------
+
+The ``SubSet`` type lets you create a ``Set`` that is constrained to be a
+subset of another set.  If items are removed from the ``base`` set, the same
+items are removed from the ``SubSet``::
+
+    >>> s1 = trellis.Set([1,2,3])
+    >>> ss = collections.SubSet([2], base = s1)
+    >>> ss
+    SubSet([2])
+
+    >>> s1.remove(2)
+    >>> ss
+    SubSet([])
+
+Adding an item to the ``SubSet`` when the item is not in the ``base`` set has
+no effect::
+
+    >>> ss.add(4)
+    >>> ss
+    SubSet([])
+
+But you *can* add items that are currently in the base set::
+
+    >>> ss.add(3)
+    >>> ss
+    SubSet([3])
+
+    >>> s1.remove(3)
+    >>> ss
+    SubSet([])
+
+
+TODO: changes to ``base`` do not affect the current subset membership
+
+
+Observing
+---------
+
+The ``Observing`` type is designed to assist in sending change notifications
+to GUI components that need to be told when a portion of the display is out
+of date.  It works by taking a set of keys and a lookup function, and providing
+a ``changes`` attribute.  Usually the lookup function will be an accessor on
+some trellis-ized data structure::
+
+    >>> data = trellis.List([1,2,3,4,5])
+    >>> o = collections.Observing(lookup_func = data.__getitem__)
+
+    >>> def show():
+    ...     print "Changes:", o.changes
+    >>> c = trellis.Performer(show)
+    Changes: {}
+
+The ``changes`` attribute is a dictionary (a regular dictionary, not a
+``Dict``) that maps the observing instance's ``keys`` to ``(new, old)`` value
+tuples.  Whenever a change occurs to either the ``keys`` or their corresponding
+values, it becomes non-empty, and then reverts to being empty::
+
+    >>> o.keys.update([1,2,4])
+    Changes: {1: (2, 2), 2: (3, 3), 4: (5, 5)}
+    Changes: {}
+
+In the above example, the "new" and "old" values are the same, because the keys
+shown were all just added to the ``keys`` set.  However, if a value changes for
+a key that's already present in ``keys``, the "new" and "old" values will be
+different::
+
+    >>> data[1] = -2
+    Changes: {1: (-2, 2)}
+    Changes: {}
+
+    >>> o.keys.remove(2)    # removing key doesn't induce "changes"
+
+    >>> o.keys.add(3)       # but adding does
+    Changes: {3: (4, 4)}
+    Changes: {}
+
+    >>> data.reverse()      # and so does any change on the underlying data
+    Changes: {1: (4, -2), 3: (-2, 4), 4: (1, 5)}
+    Changes: {}
+
+The basic idea for using an ``Observing`` object is to update the ``keys`` to
+reflect the currently-visible row or column numbers (or other keys) of a data
+structure being displayed in a GUI.  Then, an ``@action`` rule that reads the
+``changes`` can notify the GUI of any changes that happen to the underlying
+data structure.
+
+You can, of course, do this without an ``Observing`` instance, but
+recalculations would be prohibitively expensive if the underlying data set is
+large, compared to the portion being displayed.  (E.g., when scrolling through
+an entire database.)
+
+So GUI applications that display grids or tables will typically use a
+``SortedSet`` to find out about rows or columns being inserted, deleted, or
+replaced, and an ``Observing`` instance to find out about changes *within* the
+rows or columns.
+
+TODO: ``changes`` doesn't update if you initialize ``keys`` with a populated
+set.
+
