@@ -1,0 +1,3 @@
+class DjalogError(Exception):
+    pass
+
