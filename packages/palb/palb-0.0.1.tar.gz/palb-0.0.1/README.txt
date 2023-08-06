@@ -1,0 +1,111 @@
+palb - Python Apache-Like Benchmark Tool
+========================================
+
+:Author: Oliver Tonnhofer <olt@bogosoft.com>
+
+Introduction
+~~~~~~~~~~~~
+
+``palb`` is a HTTP benchmark tool. The command line interface resembles the
+Apache benchmark tool ``ab``. It lacks the advanced features of ``ab``, but it
+supports multiple URLs (from arguments, files, stdin, and Python code).
+
+Installation
+~~~~~~~~~~~~
+
+This package can either be installed from a .egg file using setuptools,
+or from the tarball using the standard Python distutils.
+
+If you are installing from a tarball, run the following command as an
+administrative user::
+
+    python setup.py install
+
+If you are installing using setuptools, you don't even need to download
+anything as the latest version will be downloaded for you
+from the Python package index::
+
+    easy_install --upgrade palb
+
+If you already have the .egg file, you can use that too::
+
+    easy_install palb-0.0.1-py2.5.egg
+
+
+Example & Usage
+~~~~~~~~~~~~~~~
+
+Simple usage (1 request)::
+
+    % palb http://example.com/
+
+Muliple requests (2 concurrent, 10 total requests)::
+
+    % palb -c 2 -n 10 http://example.com/
+
+Alternate between multiple URLs::
+
+    % palb -c 2 -n 100 http://example.com/index.html\
+      http://example.com/foo.html http://example.com/bar.html
+
+
+Get URLs from file (use ``-`` as file name to read from stdin)::
+
+    % cat test.txt 
+    http://example.com/one.html
+    http://example.com/two.html
+    % palb -n 20 -f test.txt
+
+Get URLs from python code::
+
+    % cat test.py
+    def urls(args):
+        while True:
+            yield 'http://example.com/'
+    % palb -n 100 -u test:urls
+
+``args`` is a list with all remaining arguments. Use it to pass options
+to your own URL generators.
+
+Here is an example output::
+
+    % palb -c 4 -n 100 -u rndtest:random_urls 'http://localhost:5050/bar/'
+    This is palb, Version 0.0.1
+    Copyright (c) 2009 Oliver Tonnhofer <olt@bogosoft.com>
+    Licensed under MIT License
+
+    Benchmarking (be patient)..... done
+
+
+    Average Document Length: 21835 bytes
+
+    Concurrency Level:    4
+    Time taken for tests: 0.685 seconds
+    Complete requests:    100
+    Failed requests:      0
+    Total transferred:    2183463 bytes
+    Requests per second:  145.92 [#/sec] (mean)
+    Time per request:     27.065 [ms] (mean)
+    Time per request:     6.766 [ms] (mean, across all concurrent requests)
+    Transfer rate:        3111.37 [Kbytes/sec] received
+
+    Percentage of the requests served within a certain time (ms)
+      50%     12
+      66%     40
+      75%     47
+      80%     53
+      90%     74
+      95%     90
+      98%    111
+      99%    114
+     100%    114 (longest request)
+
+
+Performance Notes
+~~~~~~~~~~~~~~~~~
+
+``palb`` is able to handle dozens of concurrent requests and a few hundred 
+requests per second (depending on your hardware). If you are expecting lots
+of requests, check against ``ab`` if ``palb`` is not the bottleneck. But then
+you are maybe not testing dynamic content, don't need the python URL
+generator feature and can use ``ab`` directly.
