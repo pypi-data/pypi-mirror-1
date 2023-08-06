@@ -1,0 +1,31 @@
+#boduch - Simple Python tool library.
+#   Copyright (C) 2008  Adam Boduch
+#
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU Affero General Public License as
+#   published by the Free Software Foundation, either version 3 of the
+#   License, or (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU Affero General Public License for more details.
+#
+#   You should have received a copy of the GNU Affero General Public License
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+from zope.interface import Interface, Attribute
+
+class IPredicate(Interface):
+    lop=Attribute("""The left-hand operator.""")
+    rop=Attribute("""The right-hand operator.""")
+    result=Attribute("""The result of the comparison""")
+    
+    def __nonzero__(self):
+        """Return the result of the comparison."""
+        
+    def invoke_operators(self):
+        """Check if the operators of this predicate are callable
+        and if so, call'em."""
+        
+__all__=['IPredicate']
