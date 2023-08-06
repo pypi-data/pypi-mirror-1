@@ -1,0 +1,52 @@
+======
+vimpdb
+======
+
+CAUTION: work-in-progress
+
+PDB support for VIM.
+
+Prerequisites:
+- a python-enabled VIM (test: ":python import os" in VIM)
+- VIM servermode compiled in (on OS X this requires MacVIM_)
+
+.. _MacVim: http://code.google.com/p/macvim/
+
+usage
+-----
+
+Open a terminal and start a VIM with servername 'PDB'::
+
+    $ mvim --servername PDB
+
+Then, from the program to be debugged use it like **pdb**, 
+
+    >>> import vimpdb; vimpdb . set_trace()
+
+(the blanks above are needed due to some dumb SVN precommit hook)
+
+When this line is hit, PDB starts and your PDB-VIM should load
+the source code and highlight the current LOC.  Additionally you
+should get a "PDB" menu, where you can set/toggle breakpoints
+etc.
+
+how does (should) that work?
+----------------------------
+
+**vimpdb** is a subclass of **pdb.Pdb**, which hijacks the command loop
+and listens for UDP packets on port 6666 (blocking).  To inform the
+VIM process what's happening, it uses VIM's *remote commands*.
+
+On the VIM side there's basically just a VIM script which does the
+higlight, set up the menu, and defines a function to send UDP messages.
+
+That's all.
+
+bugs
+----
+
+- sometimes the vim script is not sourced correctly
+- there are no easy keyboard commands for using the debugger,
+  one needs to use the menu.
+- no security
+- network settings hard coded
