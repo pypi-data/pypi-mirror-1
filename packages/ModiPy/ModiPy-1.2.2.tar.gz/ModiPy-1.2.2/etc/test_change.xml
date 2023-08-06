@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+
+<!-- A demo configuration file for configuring a changeset -->
+<config xmlns:xi="http://www.w3.org/2001/XInclude">
+
+<!--
+  A global change namespace, used to define commonly used items.
+  You can use this to define variables that can be substituted in
+  common places below. This provides a mechanism for templating changes.
+
+  All values are strings. If you need to convert to a python number,
+  do this in the python code, via int(), float() etc.
+  
+-->
+<namespace>
+  <entry name='var1'>This is the variable value</entry>
+  <entry name='var2'>Another globally available value</entry>
+</namespace>
+
+<!-- <xi:include href="subchange.conf"/> -->
+
+<provisioner
+  name='prov1'
+  module='modipy.provisioner_command'
+  type='MultiConnectingProvisioner'>
+
+  <command>ssh -i /home/daedalus/.ssh/localconnect -o BatchMode=yes %(device.name)s "%(command.send)s"</command>
+
+  <!-- This is a provisioner specific namespace. It can be accessed by
+       all changes that use this provisioner.
+   -->
+  <namespace>
+    <entry name='var1'>This is the variable value</entry>
+    <entry name='var2'>Another globally available value</entry>
+  </namespace>
+
+</provisioner>
+
+<device name='localhost'>
+  <fqdn/>
+  <ipaddress>127.0.0.1</ipaddress>
+
+  <!-- This is a device specific namespace. It can be accessed by
+       all changes that use this device as a target.
+   -->
+  <namespace/>
+
+</device>
+
+<change name='change1'
+  type='CommandChange'
+  provisioner='prov1'>
+
+  <!-- This is a change specific namespace. -->
+  <namespace/>
+
+  <target>localhost</target>
+
+  <preimpl>
+    <command>
+      <send>echo hello</send>
+    </command>
+  </preimpl>
+
+  <impl>
+    <command>
+      <send>echo 'I am implementing a change'</send>
+    </command>
+    <command>
+      <send>sleep 1</send>
+    </command>
+    <command>
+      <send>echo 'It is done.'</send>
+    </command>
+  </impl>
+
+  <postimpl>
+    <!--
+	A condition is used to check the output of a set of commands and
+	determine if the commands were successfully implemented.
+	If multiple conditions exist, all of them must evaluate to True
+	for the commands to be deemed successful.
+	It is a python expression that will be evaluated against a namespace
+	containing the final exitcode for the command, as well as the results
+	of the commands as a string:
+	results.exitcode == The exitcode of the final command
+	results.cmdoutput == The complete output from STDOUT and STDERR from all commands.
+	
+	Also available in the namespace are some useful modules, such as 're' and 'time'.
+    -->
+    <condition>results.exitcode == 0</condition>
+    <command>
+      <send>echo 'testing postimplementation'</send>
+    </command>
+    <command>
+      <send>echo 'in two commands'</send>
+    </command>
+  </postimpl>
+
+  <backout>
+    <command>
+      <send>echo "I am backing out"</send>
+    </command>
+    <command>
+      <send>echo "the change in two commands"</send>
+    </command>
+
+  </backout>
+
+</change>
+
+<change name='change2'
+  type='CommandChange'
+  provisioner='prov1'
+  iterator='iter'>
+
+  <target>localhost</target>
+
+  <!--
+      optional 0 to n changes that must complete successfully before
+      attempting this change.
+  <prereq>change1</prereq>
+  -->
+
+  <preimpl>
+    <command>
+      <send>echo The iterator values are: %(device_id)s %(device_name)s %(device_ipaddr)s %(device_version)s %(device_timeout)s</send>
+    </command>
+  </preimpl>
+
+  <impl>
+    <command>
+      <send>echo "I am implementing change 2"</send>
+    </command>
+  </impl>
+
+</change>
+
+<prereq for="change2">change1</prereq>
+
+<iterator name="iterator_1">
+  <namespace>
+    <entry name="ns_1">val_1</entry>
+    <entry name="ns_2">val_2</entry>
+  </namespace>
+
+  <namespace>
+    <entry name="ns_1">val_3</entry>
+    <entry name="ns_2">val_4</entry>
+  </namespace>
+
+</iterator>
+
+<!--
+<iterator name='iter' type='csv' file='test_iterator.csv'/>
+-->
+
+<iterator name='iter' type='sql' api='psycopg2.psycopg1'
+	  details='host=localhost user=seafelt password=seafelt dbname=seafelt_default port=5432'>
+  <sql>SELECT * from devices;</sql>
+</iterator>
+</config>
