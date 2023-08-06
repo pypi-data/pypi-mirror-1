@@ -1,0 +1,82 @@
+==============================
+Apache webserver configuration
+==============================
+
+In this file I explain what did I have to do to configure Apache correctly with SSL support and configure it to pass SSL variables to Zope using `mod_mustap`_.
+
+Install mod_mustap
+==================
+
+You'll need apache2-dev, libapr1 and libapr1-dev packages (that's their name in my Ubuntu) installed before compiling anything.
+
+Download and compile `mod_mustap`_ following the commands and advices of Mustaph's how-to.
+
+Add the following line to load `mod_mustap`_ in your Apache::
+
+ LoadModule mustap_module /usr/lib/apache2/modules/mod_mustap.so
+
+Change '/usr/lib/apache2/modules' with the path to your mod_mustap.so file.
+
+Configure the VirtualHost
+=========================
+
+Change the VirtualHost for your instance with something like this::
+
+ <VirtualHost *:80>
+    ServerName myserver.com
+    MUSTAP_ENABLED On
+
+    RewriteEngine On
+    RewriteRule ^/(.*) http://ZOPE-SERVER-IP:ZOPE-PORT/VirtualHostBase/http/%{SERVER_NAME}:80/PLONE_SITE_NAME/VirtualHostRoot/$1 [L,P]
+	   
+ </VirtualHost>
+
+The important line there is **MUSTAP_ENABLED On**. With this line, `mod_mustap`_ removes all injected SSL headers, avoiding manually ?HTTP_SSL_CLIENT_VERIFY=SUCCESS parameters in URLs cause unwanted behaviour.
+
+Now, configure the HTTPS VirtualHost, with something like this::
+
+ <VirtualHost *:443>
+    ServerName myserver.com
+
+    # Enable mod_ssl
+    SSLEngine On
+    SSLOptions +StdEnvVars -ExportCertData
+
+    # Your website's certificate
+    SSLCertificateFile "/path/to/your/certificate.cer"
+
+    # The private key file of your certificate
+    # You can have password protected or unprotected key,
+    # if protected you'll be asked for its password each
+    # time you restart Apache
+    SSLCertificateKeyFile "/path/to/your/keyfile.priv"
+
+    # Path to the directory where you store simlinks to the certificates 
+    # you want the users be validated against
+    # The files in this directory must be simlinks to original PEM encoded
+    # certificates. The names of this simlinks must be <hashvalue>.0
+    # The hash value of a certificate can be obtained with the following 
+    # command:
+    # $ openssl x509 -hash -noout </path/to/the/certificate
+    SSLCACertificatePath "/path/to/verification/certificate/folder"
+
+    # Set verification and its depth
+    SSLVerifyClient optional
+    SSLVerifyDepth 10
+
+    # InternetExplorer fixes...
+    SetEnvIf User-Agent ".*MSIE.*" nokeepalive ssl-unclean-shutdown
+
+    MUSTAP_ENABLED On
+
+    RewriteEngine On
+    RewriteRule ^/(.*) http://ZOPE-SERVER-IP:ZOPE-PORT/VirtualHostBase/https/%{SERVER_NAME}:443/PLONE_SITE_NAME/VirtualHostRoot/$1 [L,P]
+
+ </VirtualHost>
+
+With this configuration, all the site will work both with HTTP and HTTPS. You can add a rewrite-rule to have just some URLs with HTTPS.
+
+
+.. _`mod_mustap`: http://www.mustap.com/pythonzone_post_232_accessing-the-cgi-environmen
+
+
