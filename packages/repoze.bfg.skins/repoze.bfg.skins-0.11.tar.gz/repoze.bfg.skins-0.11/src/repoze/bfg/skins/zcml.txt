@@ -1,0 +1,176 @@
+ZCML directives
+===============
+
+  >>> from zope.configuration.xmlconfig import xmlconfig, XMLConfig
+  >>> from StringIO import StringIO
+
+Load meta configuration.
+  
+  >>> import repoze.bfg.skins
+  >>> XMLConfig('meta.zcml', repoze.bfg.skins)()
+
+To keep the examples simple, we define a ZCML-template.
+  
+  >>> zcml_template = """\
+  ... <configure
+  ...     xmlns="http://namespaces.zope.org/zope"
+  ...     xmlns:bfg="http://namespaces.repoze.org/bfg">
+  ...   %s
+  ... </configure>"""
+
+Registering a template directory
+--------------------------------
+
+The most simple registration makes templates available for any context
+and any request type.
+
+  >>> xmlconfig(StringIO(zcml_template % ("""\
+  ...   <bfg:templates
+  ...     directory="%s/tests/templates"
+  ...   />""" % path)))
+
+Let's set up a context and test request.
+
+  >>> from repoze.bfg.interfaces import IRequest
+  >>> from webob import Request
+  >>> request = Request.blank("")
+  >>> interface.alsoProvides(request, IRequest)
+
+  >>> class Context(object):
+  ...     pass
+  >>> context = Context()
+
+The template directory contains two templates, "hello.pt" and
+"world.pt". We'll verify that template components have been registered
+with the component architecture.
+
+  >>> from repoze.bfg.skins.interfaces import ISkinTemplate
+  >>> print component.getMultiAdapter(
+  ...    (context, request), ISkinTemplate, name=u"hello")
+  200 OK
+  content-type: text/html; charset=UTF-8
+  Content-Length: ...
+  <BLANKLINE>
+  <html xmlns="http://www.w3.org/1999/xhtml">
+    <span>Hello,</span>
+    <span>world!</span>
+  </html>
+
+For convenience, a method is able to retrieve the skin template
+component object.
+  
+  >>> from repoze.bfg.skins import get_skin_template
+  >>> template = get_skin_template(
+  ...     context, IRequest, u"hello")
+
+  >>> template.path
+  u'.../tests/templates/hello.pt'
+  
+The template provides a ``render`` method.
+  
+  >>> print template.render(context, request)
+  <html xmlns="http://www.w3.org/1999/xhtml">
+    <span>Hello,</span>
+    <span>world!</span>
+  </html>
+
+View templates
+--------------
+
+If we provide the ``IView`` interface, 
+
+The most simple registration makes templates available for any context
+and any request type.
+
+  >>> xmlconfig(StringIO(zcml_template % ("""\
+  ...   <bfg:templates
+  ...     directory="%s/tests/templates"
+  ...     permission="some_permission"
+  ...     provides="repoze.bfg.interfaces.IView"
+  ...   />""" % path)))
+
+We may now render the template as a view.
+
+  >>> from repoze.bfg.view import render_view
+  >>> print render_view(context, request, u"hello")
+  <html xmlns="http://www.w3.org/1999/xhtml">
+    <span>Hello,</span>
+    <span>world!</span>
+  </html>
+
+A view permission will have been registered for the view.
+
+  >>> from repoze.bfg.interfaces import IViewPermission
+  >>> component.queryMultiAdapter(
+  ...     (context, request), IViewPermission, name=u"hello")
+  <Permission at ... named u'some_permission' for None>
+  
+Template Registry
+-----------------
+
+When the global configuration option ``auto_reload`` is set to "true",
+skin templates are found at run-time.
+
+Since this a test environment, we need to provide the global
+configuration registry manually.
+
+  >>> from repoze.bfg.interfaces import ISettings
+  
+  >>> class MockSettings(object):
+  ...     reload_templates = True
+  
+  >>> component.provideUtility(MockSettings(), ISettings)
+
+Create a template in the path we register above:
+
+  >>> new_template_path.endswith("new.pt")
+  True
+  
+  >>> file(new_template_path, "w").write("""\
+  ... <html xmlns="http://www.w3.org/1999/xhtml"
+  ...       xmlns:metal="http://xml.zope.org/namespaces/metal">
+  ...   <span>Hello,</span>
+  ...   <span metal:use-macro="template.get_macro('world')" />
+  ... </html>""")
+
+Now fire the ``INewRequest`` event.
+
+  >>> from zope.event import notify
+  >>> from repoze.bfg.events import NewRequest
+  >>> notify(NewRequest(None))
+
+The template should now be available:
+
+  >>> print component.getMultiAdapter(
+  ...    (context, request), ISkinTemplate, name=u"new")
+  200 OK
+  content-type: text/html; charset=UTF-8
+  Content-Length: ...
+  <html xmlns="http://www.w3.org/1999/xhtml">
+    <span>Hello,</span>
+    <span>world!</span>
+  </html>
+
+Skin API
+--------
+
+Libraries and applications can register APIs for use in templates.
+  
+  >>> from repoze.bfg.skins.template import SkinApi
+
+  >>> class MyApi(SkinApi):
+  ...     hello = u"world"
+  
+  >>> from repoze.bfg.skins.interfaces import ISkinTemplate
+  >>> component.provideAdapter(
+  ...     MyApi, name="test")
+
+  >>> print component.getMultiAdapter(
+  ...    (context, request), ISkinTemplate, name=u"api")
+  200 OK
+  content-type: text/html; charset=UTF-8
+  Content-Length: ...
+  <html xmlns="http://www.w3.org/1999/xhtml">
+    Hello, world!
+  </html>
+
