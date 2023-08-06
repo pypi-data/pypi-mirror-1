@@ -1,0 +1,602 @@
+======================================================
+tl.buildout_apache:root - Set up an Apache server root
+======================================================
+
+For an Apache server environment, you need the Apache server software, a
+configuration file, and a control script. The server root recipe concerns
+itself only with the configuration and the control script.
+
+However, it needs to find out which extension modules are compiled into the
+server executable in order not to configure it to load them again. To find out
+about the modules, the server executable itself is run, so we need to fake one
+to avoid compiling Apache for this test. Our fake server claims to have two
+modules compiled in, "dir" and "autoindex":
+
+>>> write("bin", "httpd",
+... """\
+... #!/bin/sh
+... echo mod_dir.c
+... echo mod_autoindex.c
+... """)
+>>> import os
+>>> os.chmod(join("bin", "httpd"), 0755)
+
+>>> import tl.buildout_apache.root
+>>> list(tl.buildout_apache.root.builtin_modules(join("bin", "httpd")))
+['dir', 'autoindex']
+
+Our buildout configurations will build upon a basic setting that features a
+hand-crafted httpd section in order to satisfy the root recipe's requirements
+of the httpd part without compiling the software. The root part will be called
+"root" and will be built by the root recipe:
+
+>>> write("base.cfg",
+... """
+... [buildout]
+... parts = root
+...
+... [httpd]
+... httpd-path = %s
+... envvars-path = %s
+... module-dir = %s
+...
+... [root]
+... recipe = tl.buildout_apache:root
+... """ % (join("bin", "httpd"), join("bin", "envvars"), join("modules")))
+
+>>> buildout_stub = """
+... [buildout]
+... extends = base.cfg
+... """
+>>> write("buildout.cfg", buildout_stub)
+>>> print system(buildout)
+Installing root.
+
+>>> ls("parts")
+d root
+
+(By default, the root recipe looks up a section named "httpd" to find out the
+path to the httpd executable. That section is expected to export some other
+paths as well.)
+
+The root part contains the server root configuration file:
+
+>>> httpd_conf = join("parts", "root", "conf", "httpd.conf")
+>>> cat(httpd_conf)
+# ...
+# This is the main Apache HTTP server configuration file.
+...
+
+
+Document and script locations
+=============================
+
+As long as no document or CGI script directories are specified by either the
+httpd or the root section, those settings default to directories named
+``htdocs`` and ``cgi-bin`` located in the buildout directory:
+
+>>> cat(httpd_conf)
+# ...
+DocumentRoot "/sample-buildout/htdocs"
+...
+ScriptAlias /cgi-bin/ "/sample-buildout/cgi-bin/"
+...
+
+If, however, the httpd section exports any of those directories (as the httpd
+recipe does), it will be used as the default value by the root part instead:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [httpd]
+... htdocs = ${buildout:parts-directory}/httpd/htdocs
+... cgi-bin = ${buildout:parts-directory}/httpd/cgi-bin
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+DocumentRoot "/sample-buildout/parts/httpd/htdocs"
+...
+ScriptAlias /cgi-bin/ "/sample-buildout/parts/httpd/cgi-bin/"
+...
+
+Paths specified by the root section itself take highest precedence and will be
+either absolute paths or relative to the buildout directory:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [httpd]
+... htdocs = ${buildout:parts-directory}/httpd/htdocs
+... cgi-bin = ${buildout:parts-directory}/httpd/cgi-bin
+...
+... [root]
+... htdocs = /path/to/documents
+... cgi-bin = scripts/cgi-bin
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+DocumentRoot "/path/to/documents"
+...
+ScriptAlias /cgi-bin/ "/sample-buildout/scripts/cgi-bin/"
+...
+
+
+Log files
+=========
+
+By default, Apache will be configured to write log files to a subdirectory of
+the server root's buildout part:
+
+>>> ls("parts", "root")
+d ...
+d log
+...
+
+This directory and its content will be removed and recreated along with the
+rest of the part directory whenever the root part is reinstalled:
+
+>>> write("parts", "root", "log", "foo", "bar")
+>>> ls("parts", "root", "log")
+- foo
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... dummy = cause a reinstall
+... """)
+>>> print system(buildout)
+Uninstalling root.
+Installing root.
+
+>>> ls("parts", "root", "log")
+
+In order to make Apache log to a place that is preserved across reinstalls we
+can set the log-dir option of the server root part to either an absolute
+file-system path or one relative to the server root part's path. The specified
+directory will be created and the server config file will point to it:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... log-dir = ${buildout:directory}/permanent-log
+... """)
+>>> _ = system(buildout)
+>>> print ".", ls(".")
+. ...
+d permanent-log
+...
+
+>>> cat("parts", "root", "conf", "httpd.conf")
+# ...
+ErrorLog /sample-buildout/permanent-log/error_log ...
+CustomLog /sample-buildout/permanent-log/access_log ...
+
+Since the path we specified is outside the root part, its content is
+left untouched when reinstalling the part:
+
+>>> write("permanent-log", "foo", "bar")
+>>> cat("permanent-log", "foo")
+bar
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... log-dir = ${buildout:directory}/permanent-log
+... dummy = cause a reinstall
+... """)
+>>> print system(buildout)
+Uninstalling root.
+Installing root.
+
+>>> cat("permanent-log", "foo")
+bar
+
+
+Modules
+=======
+
+By default, the Apache configuration loads one module, authz_host:
+
+>>> cat(httpd_conf)
+# ...
+LoadModule authz_host_module modules/mod_authz_host.so
+...
+
+We can now configure our server such that it uses different modules:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... modules = rewrite
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+LoadModule rewrite_module modules/mod_rewrite.so
+...
+
+It should be noted that the default authz_host module is no longer loaded now.
+It must be listed explicitly if the root section overrides the modules
+option:
+
+>>> "authz_host_module" in open(httpd_conf).read()
+False
+
+If we try to load a module that is compiled into the server executable, it is
+skipped:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... modules = rewrite autoindex
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+LoadModule rewrite_module modules/mod_rewrite.so
+...
+>>> "autoindex_module" in open(httpd_conf).read()
+False
+
+Also, modules that are listed multiple times will only be loaded once, in the
+order of their first occurrence:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... modules = rewrite cache rewrite
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+LoadModule rewrite_module modules/mod_rewrite.so
+LoadModule cache_module modules/mod_cache.so
+...
+>>> open(httpd_conf).read().count("rewrite_module")
+1
+
+If a module shall be loaded that is neither built into the httpd executable
+nor sits in its module directory, the path to the shared object may be
+specified explicitly:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... modules = foo=/path/to/foo.so bar
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+LoadModule foo_module /path/to/foo.so
+LoadModule bar_module modules/mod_bar.so
+...
+
+Modules with explicitly specified shared object paths may be listed multiple
+times as long as the paths equal:
+
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... modules = foo=/path/to/foo.so foo=/path/to/foo.so
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+LoadModule foo_module /path/to/foo.so
+...
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... modules = foo=/path/to/foo.so foo=to/foo.so
+... """)
+>>> print system(buildout)
+While:
+  Installing.
+  Getting section root.
+  Initializing part root.
+Error: Conflicting module paths for Apache module 'foo'.
+
+It is also an error to specify a shared object path for a module that is
+already built into the httpd executable:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... modules = dir=/path/to/foo.so
+... """)
+>>> print system(buildout)
+Uninstalling root.
+Installing root.
+While:
+  Installing root.
+Error: Shared object path specified for built-in Apache module 'dir'.
+
+
+Virtual hosts
+=============
+
+The Apache server root recipe offers the ``virtual-hosts`` option for
+configuring name-based virtual hosts. The option value is a
+whitespace-separated sequence of host entries of the form ``section=address``
+where the named section configures the virtual host in question and the
+address consists of an IP address and a port number. While Apache allows
+virtual hosts to be configured for a domain name or without an explicitly
+given port, the restriction to IP address and mandatory port allows the root
+recipe to generate ``Listen`` and ``NameVirtualHost`` directives:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... virtual-hosts = vhost1=127.0.0.1:80
+...                 vhost2=127.0.0.2:1080
+...
+... [vhost1]
+... servername = virtual1.example.org
+...
+... [vhost2]
+... servername = virtual2.example.org
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+Listen 127.0.0.1:80
+Listen 127.0.0.2:1080
+...
+NameVirtualHost 127.0.0.1:80
+NameVirtualHost 127.0.0.2:1080
+<BLANKLINE>
+<VirtualHost "127.0.0.1:80"> ...
+    ServerName virtual1.example.org ...
+</VirtualHost>
+<BLANKLINE>
+<VirtualHost "127.0.0.2:1080"> ...
+    ServerName virtual2.example.org ...
+</VirtualHost>
+
+In contrast to the main host, each virtual host needs a server name (as the
+recipe configures name-based virtual hosting):
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... virtual-hosts = vhost1=127.0.0.1:80
+...
+... [vhost1]
+... """)
+>>> print system(buildout)
+Uninstalling root.
+Installing root.
+While:
+  Installing root.
+Error: Missing option: vhost1:servername
+
+The locations of documents, scripts and log files can be configured for
+virtual hosts just as they are for the main host. All hosts are mutually
+independent:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [httpd]
+... htdocs = ${buildout:parts-directory}/httpd/htdocs
+... cgi-bin = ${buildout:parts-directory}/httpd/cgi-bin
+...
+... [root]
+... htdocs = /path/to/documents
+... cgi-bin = scripts/cgi-bin
+... log-dir = ${buildout:directory}/permanent-log
+... virtual-hosts = vhost1=127.0.0.1:80
+...                 vhost2=127.0.0.2:1080
+...
+... [vhost1]
+... htdocs = a/different/htdocs
+... cgi-bin = /other/scripts/cgi-bin
+... log-dir = ${buildout:directory}/vhost1-log
+... servername = virtual1.example.org
+...
+... [vhost2]
+... servername = virtual2.example.org
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+DocumentRoot "/path/to/documents" ...
+ErrorLog /sample-buildout/permanent-log/error_log ...
+CustomLog /sample-buildout/permanent-log/access_log ...
+ScriptAlias /cgi-bin/ "/sample-buildout/scripts/cgi-bin/" ...
+<VirtualHost "127.0.0.1:80"> ...
+    DocumentRoot "/sample-buildout/a/different/htdocs" ...
+    ErrorLog /sample-buildout/vhost1-log/error_log ...
+    CustomLog /sample-buildout/vhost1-log/access_log ...
+    ScriptAlias /cgi-bin/ "/other/scripts/cgi-bin/" ...
+</VirtualHost>
+<BLANKLINE>
+<VirtualHost "127.0.0.2:1080"> ...
+    DocumentRoot "/sample-buildout/parts/httpd/htdocs" ...
+    ErrorLog log/error_log ...
+    CustomLog log/access_log ...
+    ScriptAlias /cgi-bin/ "/sample-buildout/parts/httpd/cgi-bin/" ...
+</VirtualHost>
+
+Log directories of virtual hosts are also created as needed:
+>>> print ".", ls(".")
+. ...
+d permanent-log
+d vhost1-log
+...
+
+Modules required by virtual hosts are collected and directives for each unique
+module written:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... modules = cache rewrite
+... virtual-hosts = vhost1=127.0.0.1:80
+...                 vhost2=127.0.0.2:1080
+...
+... [vhost1]
+... servername = virtual1.example.org
+... modules = cache
+...
+... [vhost2]
+... servername = virtual2.example.org
+... modules = expires cache
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+LoadModule cache_module modules/mod_cache.so
+LoadModule rewrite_module modules/mod_rewrite.so
+LoadModule expires_module modules/mod_expires.so
+...
+>>> open(httpd_conf).read().count("cache_module")
+1
+
+
+
+Config parts
+============
+
+A server configuration may include information from multiple buildout
+sections. This is useful if other sections install third-party extensions, or
+just to get some structure into a lengthy configuration.
+
+A config part is an ordinary buildout section which may export some particular
+options which are read by the Apache server root recipe. Let's define and use
+sections that describe the needs of the www1.example.org and www2.example.org
+web sites:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... extra-config = Alias /root /root
+... config-parts = www1-example-org www2-example-org
+...
+... [www1-example-org]
+... extra-config = Alias /www1 /www1
+...
+... [www2-example-org]
+... extra-config = Alias /www2 /www2
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+Alias /root /root
+Alias /www1 /www1
+Alias /www2 /www2
+
+All the config snippets contributed by the config parts will be included. Note
+that the root section's own config snippet comes first, followed by those of
+the config sections in order.
+
+Config parts are collected recursively, depth-first. Suppose the
+www1.example.org part puts the configuration of the site's cgi scripts into
+its own section:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... extra-config = Alias /root /root
+... config-parts = www1-example-org www2-example-org
+...
+... [www1-example-org]
+... extra-config = Alias /www1 /www1
+... config-parts = example-org-cgi
+...
+... [example-org-cgi]
+... extra-config = ScriptAlias /cgi /cgi
+...
+... [www2-example-org]
+... extra-config = Alias /www2 /www2
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+Alias /root /root
+Alias /www1 /www1
+ScriptAlias /cgi /cgi
+Alias /www2 /www2
+
+If a config-part is included by more than one other config-parts, only its
+first occurrence will be considered:
+
+The previous example also shows that snippets listed by multiple config parts
+are loaded only once, in the order of their first occurrence. This even works
+as a protection against infinite recursion:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... extra-config = Alias /root /root
+... config-parts = www1-example-org www1-example-org www2-example-org
+...
+... [www1-example-org]
+... extra-config = Alias /www1 /www1
+... config-parts = example-org-cgi
+...
+... [example-org-cgi]
+... extra-config = ScriptAlias /cgi /cgi
+... config-parts = example-org-cgi
+...
+... [www2-example-org]
+... extra-config = Alias /www2 /www2
+... config-parts = example-org-cgi
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+Alias /root /root
+Alias /www1 /www1
+ScriptAlias /cgi /cgi
+Alias /www2 /www2
+
+>>> open(httpd_conf).read().count("ScriptAlias /cgi /cgi")
+1
+
+Note that if modules are required by config-parts, this doesn't count as
+overriding the root part's modules option. The authz_host module will still be
+loaded:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... config-parts = www-example-org
+...
+... [www-example-org]
+... modules = expires
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+LoadModule authz_host_module modules/mod_authz_host.so
+LoadModule expires_module modules/mod_expires.so
+...
+
+Finally, virtual hosts can also be configured using config parts:
+
+>>> write("buildout.cfg", buildout_stub +
+... """
+... [root]
+... virtual-hosts = vhost=127.0.0.1:80
+...
+... [vhost]
+... servername = virtual.example.org
+... config-parts = foo
+...
+... [foo]
+... extra-config = Alias /vhost /vhost
+... """)
+>>> _ = system(buildout)
+>>> cat(httpd_conf)
+# ...
+<VirtualHost "127.0.0.1:80"> ...
+    ServerName virtual.example.org ...
+    Alias /vhost /vhost
+</VirtualHost>
+
+
+.. Local Variables:
+.. mode: rst
+.. End:

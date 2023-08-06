@@ -1,0 +1,93 @@
+=================================================================
+tl.buildout_apache:httpd - Build the Apache httpd server software
+=================================================================
+
+The httpd recipe downloads the source code of the Apache httpd server software
+and builds it using a standard configure/make/make install process.
+
+To demonstrate the recipe, we create a minimalistic fake source archive that
+allows us to watch it being built, and determine its MD5 checksum:
+
+>>> src = tmpdir('src')
+>>> httpd_dir = join(src, 'httpd')
+>>> mkdir(httpd_dir)
+
+>>> write(httpd_dir, 'configure', """\
+... #!/bin/sh
+... echo configuring httpd: $@
+... cp Makefile.in Makefile
+... """)
+>>> import os
+>>> os.chmod(join(httpd_dir, 'configure'), 0754)
+
+>>> write(httpd_dir, 'Makefile.in', """\
+... all:
+... \t@echo building httpd
+... install:
+... \t@echo installing httpd
+... """)
+
+>>> mkdir('download')
+>>> _ = system('tar czf download/httpd.tar.gz -C %s httpd' % src)
+>>> rmdir(src)
+
+>>> import md5
+>>> checksum = md5.new()
+>>> checksum.update(open('download/httpd.tar.gz').read())
+>>> md5sum = checksum.hexdigest()
+
+Now we can configure a buildout that has a part which builds this fake httpd.
+Note that the httpd recipe enables building Apache modules as shared objects:
+
+>>> write('buildout.cfg', """\
+... [buildout]
+... parts = httpd
+...
+... [httpd]
+... recipe = tl.buildout_apache:httpd
+... url = file://${buildout:directory}/download/httpd.tar.gz
+... md5sum = %s
+... """ % md5sum)
+>>> print system(buildout)
+Installing httpd.
+configuring httpd: --prefix=/sample-buildout/parts/httpd --enable-so
+building httpd
+installing httpd
+
+The recipe will append extra configure options after ``--enable-so``:
+
+>>> cfg = open('buildout.cfg', 'a')
+>>> cfg.write('extra-options = --enable-expires=shared')
+>>> cfg.close()
+>>> print system(buildout)
+Uninstalling httpd.
+Installing httpd.
+configuring httpd: --prefix=/sample-buildout/parts/httpd
+                   --enable-so
+                   --enable-expires=shared
+building httpd
+installing httpd
+
+The httpd recipe exports a number of options in order to make the paths to
+certain parts of the httpd installation available to dependent buildout parts
+(such as that for configuring an Apache server root):
+
+>>> cat('.installed.cfg')
+[buildout]
+...
+[httpd]
+...
+apxs-path = /sample-buildout/parts/httpd/bin/apxs
+cgi-bin = /sample-buildout/parts/httpd/cgi-bin
+envvars-path = /sample-buildout/parts/httpd/bin/envvars
+...
+htdocs = /sample-buildout/parts/httpd/htdocs
+httpd-path = /sample-buildout/parts/httpd/bin/httpd
+...
+module-dir = /sample-buildout/parts/httpd/modules
+...
+
+
+.. Local Variables:
+.. mode: rst
+.. End:

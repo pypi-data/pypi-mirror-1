@@ -1,0 +1,130 @@
+=================================================================
+tl.buildout_apache:modpython - Build the mod_python Apache module
+=================================================================
+
+The modpython recipe builds the mod_python Apache module from source and takes
+care of the somewhat awkward way it is wired up with a Python installation.
+
+To demonstrate the recipe, we create a minimalistic fake source archive that
+allows us to watch it being built, and determine its MD5 checksum:
+
+>>> src = tmpdir('src')
+>>> modpython_dir = join(src, 'modpython')
+>>> mkdir(modpython_dir)
+
+>>> write(modpython_dir, 'configure', """\
+... #!/bin/sh
+... echo configuring modpython: $@
+... echo DESTDIR=$DESTDIR
+... cp Makefile.in Makefile
+... """)
+>>> import os
+>>> os.chmod(join(modpython_dir, 'configure'), 0754)
+
+>>> write(modpython_dir, 'Makefile.in', """\
+... all:
+... \t@echo building modpython
+... install:
+... \t@echo installing modpython
+... """)
+
+>>> mkdir('download')
+>>> _ = system('tar czf download/modpython.tar.gz -C %s modpython' % src)
+>>> rmdir(src)
+
+>>> import md5
+>>> checksum = md5.new()
+>>> checksum.update(open('download/modpython.tar.gz').read())
+>>> md5sum = checksum.hexdigest()
+
+Now we can configure a buildout that has a part which builds this fake
+mod_python. Configuring the package requires the path to Apache's ``apxs``
+utility which is taken from a buildout section that defines an httpd
+installation:
+
+>>> write('buildout.cfg', """\
+... [buildout]
+... parts = modpython
+...
+... [httpd]
+... apxs-path = ${buildout:parts-directory}/httpd/bin/apxs
+...
+... [modpython]
+... recipe = tl.buildout_apache:modpython
+... url = file://${buildout:directory}/download/modpython.tar.gz
+... md5sum = %s
+... httpd = httpd
+... """ % md5sum)
+>>> print system(buildout)
+Installing modpython.
+configuring modpython:
+    --prefix=/sample-buildout/parts/modpython
+    --with-apxs=/sample-buildout/parts/httpd/bin/apxs
+    --with-python=/sample-buildout/parts/modpython/python/bin/python
+DESTDIR=...buildout-install-modpython
+building modpython
+installing modpython
+
+The recipe has created a virtual Python installation since it must install the
+``mod_python`` Python module into a place where it is found before
+``sys.path`` can be modified for the first time. To achieve that, it puts a
+``.pth`` file in Python's ``site-packages`` directory which allows keeping the
+actual module files in the part's location even if sharing a writable Python.
+
+Let's make sure that the Python path actually points to an interpreter and the
+place where the mod_python's Python code is kept was correctly put on its
+module search path (faking that module directory for demonstration):
+
+>>> print system('parts/modpython/python/bin/python --version')
+Python ...
+>>> mkdir('parts/modpython/lib')
+>>> print system(
+...     'parts/modpython/python/bin/python -c "import sys; print sys.path"')
+[..., '/sample-buildout/parts/modpython/lib'...
+
+We can also configure the part to skip building its own virtual Python and
+share an existing writable Python installation:
+
+>>> write('buildout.cfg', """\
+... [buildout]
+... parts = modpython
+...
+... [httpd]
+... apxs-path = ${buildout:parts-directory}/httpd/bin/apxs
+...
+... [vpython]
+... recipe = tl.buildout_virtual_python
+... headers = true
+...
+... [modpython]
+... recipe = tl.buildout_apache:modpython
+... url = file://${buildout:directory}/download/modpython.tar.gz
+... md5sum = %s
+... httpd = httpd
+... python = vpython
+... virtualenv = false
+... """ % md5sum)
+>>> print system(buildout)
+Uninstalling modpython.
+Installing vpython.
+Installing modpython.
+configuring modpython:
+    --prefix=/sample-buildout/parts/modpython
+    --with-apxs=/sample-buildout/parts/httpd/bin/apxs
+    --with-python=/sample-buildout/parts/vpython/bin/python
+DESTDIR=...buildout-install-modpython
+building modpython
+installing modpython
+
+Let's make sure again that the Python module's location ends up on the shared
+Python's module search path:
+
+>>> mkdir('parts/modpython/lib')
+>>> print system(
+...     'parts/vpython/bin/python -c "import sys; print sys.path"')
+[..., '/sample-buildout/parts/modpython/lib'...
+
+
+.. Local Variables:
+.. mode: rst
+.. End:
