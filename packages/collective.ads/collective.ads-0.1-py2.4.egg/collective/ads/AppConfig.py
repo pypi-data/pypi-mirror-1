@@ -1,0 +1,4 @@
+# Product Dependencies
+DEPENDENCIES = [
+    'ATReferenceBrowserWidget'
+]
