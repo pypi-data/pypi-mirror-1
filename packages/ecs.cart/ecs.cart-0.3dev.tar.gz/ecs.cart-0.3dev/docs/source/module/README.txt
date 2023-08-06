@@ -1,0 +1,115 @@
+=======
+ecscart
+=======
+
+ecscart is a module who can manage the caddy of an user.
+This module save the product reference, price and quantity.
+
+The caddy has two states, valided or not valided.
+The caddy has the possibility to compute rules for the total amount,
+like reductions, taxes, delivery prices.
+
+The computed caddy can be published as many format, like xml, json.
+
+Finally the caddy will be persistant in database, to ensure data integrity
+during a crash.
+
+Launching the cart
+==================
+
+A few initialisation procedure is mandatory to instatiate the `Cart` class. :: 
+
+    >>> from ecs.cart import Cart
+    >>> user_id = 'Doriane'
+    >>> cart = Cart(user_id)
+
+Adding a product in the caddy
+=============================
+
+To add a product into the caddy we must use the `add_product` method.
+The first parameters is the reference of the product, the second the price,
+and the optional quantity parameters. ::
+
+    >>> cart.add_product('brosse a cheveux', 12.4)
+    >>> cart.add_product('lime a ongle', price=3.32, quantity=5)
+
+
+Set quantity of the product
+===========================
+
+You can eventualy change the quantity of a product in a cart by the
+`set_quantity` method. ::
+
+    >>> cart.get_product_property('brosse a cheveux', 'quantity')
+    1.0
+    >>> cart.set_quantity('brosse a cheveux', 2)
+    >>> cart.get_product_property('brosse a cheveux', 'quantity')
+    2.0
+
+
+Delete a product
+================
+
+You can delete a product by setting his quantity to 0, or most symply
+with the `del_product` method. ::
+
+    >>> cart.add_product('fond de teint', 19)
+    >>> cart.add_product('mascara', 12)
+    ...
+    >>> cart.set_quantity('fond de teint', 0)
+    >>> cart.del_product('mascara')
+    ...
+    >>> cart.get_product_property('fond de teint', 'price')
+    Traceback (most recent call last):
+    ...
+    ValueError: Invalid reference fond de teint
+    >>> cart.get_product_property('mascara', 'quantity')
+    Traceback (most recent call last):
+    ...
+    ValueError: Invalid reference mascara
+
+Getting the amount of the caddy
+===============================
+
+It's symply to have the amount of the caddy using the `get_cart_amount` ::
+
+    >>> amount = cart.get_cart_amount()
+    >>> round(amount)
+    41.0
+
+Add reductions
+==============
+
+You could add reduction on the cart. ::
+
+    >>> cart.add_reduction(5)
+    >>> amount = cart.get_cart_amount()
+    >>> round(amount)
+    36.0
+
+You could delete the reduction
+
+Confirm the caddy
+=================
+
+A flag is provided to manage is the caddy is valided. The `validation` method
+is also provided  `validation` can take a parameters wich will be the flag value::
+
+    >>> cart.validation_statut
+    False
+    >>> cart.validation()
+    >>> cart.validation_statut
+    True
+    >>> cart.validation('Not yet')
+    >>> cart.validation_statut
+    'Not yet'
+
+Removing a caddy for an user
+============================
+
+To delete the caddy from the persistence you must use the `remove` method ::
+
+    >>> cart.remove()
+    >>> cart.products
+    {}
+
