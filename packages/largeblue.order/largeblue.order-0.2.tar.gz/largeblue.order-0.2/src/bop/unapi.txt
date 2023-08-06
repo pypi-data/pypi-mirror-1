@@ -1,0 +1,62 @@
+=============
+unAPI Support
+=============
+
+The bop.unapi module contains useful abstractions and utility functions
+to support the emerging unAPI standard. unAPI is a tiny HTTP API for the few 
+basic operations necessary to copy discrete, identified content from any kind 
+of web application.
+
+    See http://unapi.info for details.
+
+Let's start with some content objects we want to make copyable:
+
+    >>> root = getRootFolder()
+    >>> import bop
+    >>> txt = bop.add(root, 'a.txt', bop.File('Some content', 'text/plain'))
+    >>> pdf = bop.add(root, 'b.pdf', bop.File('Some data', 'application/pdf'))
+
+According to the unAPI protocol the client first needs to know where
+additional information about the presented objects can be found. This link
+must be embedded somewhere in the page html:
+    
+    >>> from bop import unapi
+    >>> unapi.link(root, TestRequest())
+    '<link rel="unapi-server" type="application/xml" href=".../@@unapi" />'
+
+This link is used to ask for available "clipboard" formats:
+
+    >>> from zope.testbrowser.testing import Browser
+    >>> browser = Browser()
+    >>> browser.handleErrors = False
+    >>> browser.addHeader('Authorization', 'Basic mgr:mgrpw')
+    >>> browser.open('http://localhost/@@unapi')
+    >>> print browser.contents
+    <?xml version='1.0' encoding='UTF-8'?>
+    <formats>
+    <format name='pdf' type='application/pdf' />
+    <format name='txt' type='text/plain' />
+    </formats>
+
+The page should also container object references which will be used to
+ask for specific object formats:
+
+    >>> unapi.abbr(unapi.identifier(pdf, root))
+    '<abbr class="unapi-id" title="file2"></abbr>'
+
+The next unAPI call shows how the server should respond to the request
+for object formats:
+
+    >>> browser.open('http://localhost/@@unapi?id=file1')
+    >>> print browser.contents
+    <?xml version='1.0' encoding='UTF-8'?>
+    <formats id="file1">
+    <format name='txt' type='text/plain' />
+    </formats>
+
+With the id and the available formats at hand the unAPI client can finally
+retrieve the formatted object:
+
+    >>> browser.open('http://localhost/@@unapi?id=file1&format=txt')
+    >>> print browser.contents
+    Some content

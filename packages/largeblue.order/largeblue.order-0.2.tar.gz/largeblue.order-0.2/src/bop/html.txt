@@ -1,0 +1,528 @@
+﻿============
+HTML Support
+============
+
+The bop.html module contains useful abstractions and utility functions
+for common HTML processing tasks.  Let's define some basic examples:
+
+    >>> html1 = '''<html>
+    ... <meta content="text/html; charset=UTF-8 '/>
+    ... <body><p>Content</p></body></html>'''
+    
+    >>> html2 = '''<html>
+    ... <META content="text/html; charset=utf-8"/>
+    ... <body><p>Content</p></body></html>'''
+    
+    >>> html3 = '''<html>
+    ... <body><p>Content</p></body></html>'''
+    
+    >>> html4 = '''<html>
+    ... <body><p>\xc4</p></body></html>'''
+    
+    >>> html5 = '''<html><head>
+    ... <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+    ... </head><body><p>Content</p></body></html>'''
+
+
+
+
+HTML Document
+=============
+
+If we consider a file as a HTML document we often want to access specific
+parts in a uniform manner. The HTMLDocument adapter uses the bop.soup 
+parser as a fallback to provide this standardized access. If the
+the faster cElementTree is available it is used instead.
+
+    >>> file1 = bop.File(html1, contentType='text/html')
+    >>> doc = bop.HTMLDocument(file1)
+    >>> doc.encoding
+    'utf-8'
+    
+Note that the extracted fragments are returned as unicode strings:
+
+    >>> doc.body
+    u'<p>Content</p>'
+    >>> doc.links
+    []
+
+Note that the single quotes in the following html induce the Soup parser:
+
+    >>> html6 = '''<html>
+    ... <meta content="text/html; charset=UTF-8'/>
+    ... <body><p>Content</p>
+    ... <a href='link1'>Link 1</a>
+    ... <a href="./link2">Link 2</a>
+    ... <img src="src1"/>
+    ... <img src="../src2"/>
+    ... </body></html>'''
+
+    >>> file2 = bop.File(html6, contentType='text/html')
+    >>> doc = bop.HTMLDocument(file2)
+    
+The document API supports iteration over elements:
+
+    >>> for e in doc.all('a'): e
+    <a href='link1'>Link 1</a>
+    <a href="./link2">Link 2</a>
+
+    >>> for e in doc.all('img'): e
+    <img src="src1"/>
+    <img src="../src2"/>
+
+A lookup of the first element is also supported:
+
+    >>> doc.first('a')
+    <a href='link1'>Link 1</a>
+
+As usefull shortcuts we can list links and sources:
+
+    >>> doc.links
+    [u'link1', u'./link2']
+    
+    >>> doc.sources
+    [u'src1', u'../src2']
+
+Attributes of tags can be accessed:
+
+    >>> for e in doc.all('a'): doc.getattr(e, 'href')
+    u'link1'
+    u'./link2'
+
+
+Attributes of tags can be added or replaced:
+
+    >>> for e in doc.all('a'): doc.setattr(e, 'test', 'value')
+    >>> for e in doc.all('a'): e
+    <a test="value" href='link1'>Link 1</a>
+    <a test="value" href="./link2">Link 2</a>
+
+    >>> for e in doc.all('a'): doc.setattr(e, 'test', 'value2')
+    >>> for e in doc.all('a'): e
+    <a test="value2" href='link1'>Link 1</a>
+    <a test="value2" href="./link2">Link 2</a>
+
+Attributes can be deleted:
+    
+    >>> for e in doc.all('a'): doc.delattr(e, 'test')
+    >>> for e in doc.all('a'): e
+    <a  href='link1'>Link 1</a>
+    <a  href="./link2">Link 2</a>
+
+
+We can extract the links as relative or absolute URLs. Note that the return
+values are of type ``str``:
+
+    >>> environ = {'REQUEST_URI': u'http://localhost:8080/www',
+    ...             'HTTP_HOST': 'localhost:8080',
+    ...             'PATH_INFO': '/www'}
+    >>> request = TestRequest(environ=environ)
+    >>> doc.urls(request)
+    ['link1', './link2', 'src1', '../src2']
+
+    >>> pprint(doc.urls(request, absolute=True))
+    ['http://localhost:8080/www/link1',
+     'http://localhost:8080/www/link2',
+     'http://localhost:8080/www/src1',
+     'http://localhost:8080/src2']
+
+XHTML
+=====
+
+If the file contains XHTML the ElementTree parser is used as the fastest
+way to extract the wanted parts:
+
+    >>> from bop.testing import xhtml
+    >>> file3 = bop.File(xhtml, contentType='text/html')
+    >>> xdoc = bop.HTMLDocument(file3)
+    
+The existing etree proves that the parser succeeded:
+
+    >>> xdoc.etree
+    <...ElementTree instance at ...>
+
+    >>> xdoc.encoding
+    'iso-8859-1'
+
+    >>> xdoc.shorttitle
+    u'html title'
+    >>> xdoc.longtitle
+    u'long title'
+
+    >>> xdoc.body
+    u'<h2>long title</h2>\n        <a href="./relative/link">link</a>'
+    
+    >>> xdoc.text()
+    u'  html title  long title link'
+
+Redirectable Links
+==================
+
+Sometimes it can be useful to transform the links within a document. The
+transform function should be assigned to the document before you access
+the body:
+
+    >>> def transform(context, url, tag):
+    ...     return url + '/transformed-%s-tag' % tag
+
+    >>> xdoc.redirect = transform
+    >>> isinstance(xdoc.body, unicode)
+    True
+    
+    >>> print xdoc.body
+    <body>
+            <h2>long title</h2>
+            <a href="./relative/link/transformed-a-tag">link</a>
+        </body>
+
+Useful Functions
+=================
+
+Sometime it is more convenient to use the above functionality without an
+explicit adapter call. Therefore the html module contains numerous utility
+functions.
+
+bop.isHTML
+----------
+
+Parsing of an ill-formed HTML document may crash your application. So it's
+crucial to make a plausible guess whether a document is HTML document or not.
+
+    >>> bop.isHTML(html1)
+    True
+    
+Since fragments are also parseable we can check for standard use cases:
+
+    >>> bop.isHTML('<p>Test</p>')
+    True
+
+    >>> bop.isHTML('<p mso="Cruft">Test</p>')
+    True
+    
+
+    
+bop.isSuspectHTML
+-----------------
+
+Not every parseable HTML is suitable for a display within the content area
+of an application. The bop.isSuspectHTML function provides a
+way to check a content obj for overly complex or ill-formed structures.
+
+    >>> import os.path
+    >>> here = os.path.dirname(bop.__file__)
+    
+    >>> bop.isSuspectHTML('<p>Test</p>')
+    False
+    
+    >>> path = os.path.join(here, 'testdata', 'cruft.html')
+    >>> html = open(path).read()
+    >>> bop.isSuspectHTML(html)
+    u'Document too long'
+    
+    >>> path = os.path.join(here, 'testdata', 'manylinks.html')
+    >>> html = open(path).read()
+    >>> bop.isSuspectHTML(html)
+    u'Too many tags (235 a tags, 100 allowed)'
+    
+
+bop.guessEncoding
+-----------------
+
+This function tries to extract or guess the encoding of a HTML file.
+    
+    
+    >>> bop.guessEncoding(html1)
+    'utf-8'
+    >>> bop.guessEncoding(html2)
+    'utf-8'
+    >>> bop.guessEncoding(html3)
+    'ascii'
+    >>> bop.guessEncoding(html4)
+    'ISO-8859-2'
+    >>> bop.guessEncoding(html5)
+    'iso-8859-1'
+    
+The following real word example should also match without the help of 
+BeautifulSoup:
+
+    >>> t = """<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+    ... <html>
+    ... <head>
+    ... <title>e-teaching.org</title>
+    ... <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+    ... </head>
+    ... <body></body></html>"""
+    
+    >>> bop.guessEncoding(t, soup=False)
+    'iso-8859-1'
+    
+If we have xhtml the encoding my be provided in the XML declaration and
+not in the html part of the document.
+
+    >>> path = os.path.join(here, 'testdata', 'xhtml.html')
+    >>> xhtml = open(path).read()
+    
+    >>> bop.guessEncoding(xhtml, soup=False)
+    'iso-8859-1'
+
+    >>> bop.guessEncoding(xhtml, soup=True)
+    'iso-8859-1'
+
+bop.encodedHTML
+----------------
+
+Ensures a unicode representation of a document. If the document is already
+a HTML document the inner HTML body is returned as a unicode string:
+
+    >>> bop.encodedHTML(html1)
+    (u'<p>Content</p>', 'utf-8')
+
+    >>> bop.encodedHTML(html2)
+    (u'<p>Content</p>', 'utf-8')
+
+    >>> bop.encodedHTML(html3)
+    (u'<p>Content</p>', 'ascii')
+
+    >>> bop.encodedHTML(html4)
+    (u'<p>\xc4</p>', 'windows-1252')
+    
+Images are rendered as img tags:
+   
+    >>> path = os.path.join(here, 'testdata', 'test.tiff')
+    >>> tiff = bop.File(file(path).read(), contentType='image/tiff')
+    >>> root = getRootFolder()
+    >>> tiff = bop.add(root, u'test.tiff', tiff)
+
+    >>> bop.encodedHTML(tiff, request=TestRequest())
+    (u'<img src="http://127.0.0.1/test.tiff" title="test.tiff" ...', 'utf-8')
+
+Text files are rendered as preformatted HTML:
+
+    >>> path = os.path.join(here, 'testdata', 'test.txt')
+    >>> text = bop.File(file(path).read(), contentType='text/plain')
+    >>> root = getRootFolder()
+    >>> text = bop.add(root, u'test.txt', text)
+    >>> bop.encodedHTML(text, request=TestRequest())
+    (u'<pre>Test\n====\n\nSome text.</pre>', 'ascii')
+    
+Word files, PDF and unknown file types are rendered as downloadable files:
+
+    >>> path = os.path.join(here, 'testdata', 'test.pdf')
+    >>> pdf = bop.File(file(path).read(), contentType='application/pdf')
+    >>> root = getRootFolder()
+    >>> pdf = bop.add(root, u'test.pdf', pdf)
+    >>> bop.encodedHTML(pdf, request=TestRequest())
+    (u'<p>Download <a href="http://127.0.0.1/test.pdf">test.pdf</a>', 'utf-8')
+
+XHTML files are rendered as html:
+
+    >>> path = os.path.join(here, 'testdata', 'xhtml.html')
+    >>> xhtml = bop.File(file(path).read(), contentType='text/html')
+    >>> xhtml = bop.add(root, u'xhtml.html', xhtml)
+    >>> html, encoding = bop.encodedHTML(xhtml, request=TestRequest())
+    >>> encoding
+    'iso-8859-1'
+ 
+    
+bop.fullText
+------------
+
+For fulltext indices we can extract the text without html tags. For
+downloadable files and images we get an empty result:
+
+    >>> bop.setrequest(TestRequest())
+    >>> bop.fullText(file2)
+    u'Content\nLink 1\nLink 2'
+    
+    >>> bop.fullText(text)
+    u'Test\n====\n\nSome text.'
+    
+    >>> bop.fullText(tiff)
+    u''
+    
+    >>> bop.fullText(pdf)
+    u''
+    
+    >>> bop.setrequest(None)
+    
+bop.extractTitle
+----------------
+
+Returns the title as unicode string:
+
+    >>> html = '''<html>
+    ... <head>
+    ... <title>Person Template</title>
+    ... <meta name="description" content="A short description">
+    ... </head>
+    ... <body><p>Content</p></body></html>'''
+    
+    >>> bop.extractTitle(html)
+    u'Person Template'
+
+
+bop.extractDescription
+----------------------
+
+    >>> bop.extractDescription(html)
+    u'A short description'
+
+
+bop.extractBody
+---------------
+
+    >>> bop.extractBody(html)
+    '<p>Content</p>'
+
+
+bop.extractUnicodeBody
+----------------------
+
+    >>> bop.extractUnicodeBody(html)
+    u'<p>Content</p>'
+
+
+bop.fragment2html
+-----------------
+
+Parses the html fragment, and tries to extract a title in order to generate
+a complete HTML document:
+
+    >>> print bop.fragment2html(u'<p>Some Content</p>')
+    <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+        "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+    <html xmlns="http://www.w3.org/1999/xhtml">
+    <head>
+        <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+        <title>Some Content</title>
+    </head>
+    <body>
+        <p>Some Content</p>
+    </body>
+    </html>
+    <BLANKLINE>
+
+    >>> test = bop.fragment2html(u'<p>\xc4</p>', encoding='utf-8')
+    >>> print test
+    <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+        "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+    <html xmlns="http://www.w3.org/1999/xhtml">
+    <head>
+        <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+        <title>Ä</title>
+    </head>
+    <body>
+        <p>Ä</p>
+    </body>
+    </html>
+    <BLANKLINE>
+
+    
+    >>> bop.extractTitle(test)
+    u'\xc4'
+    
+    
+    >>> difficult = """<meta http-equiv="content-type" content="text/html; 
+    ... charset=utf-8"><title>
+    ...    Title in H3
+    ...   </title>
+    ... 
+    ... <div class="doccontent">
+    ... <h3>
+    ...    Title in H3
+    ...   </h3>
+    ... <p>
+    ...    Enter text...
+    ...   </p>
+    ... </div>
+    ... """
+    
+    >>> bop.extractTitle(difficult)
+    u'Title in H3'
+
+
+
+bop.extractPhrase
+-----------------
+
+Extracts a matching phrase from a dict of fulltexts:
+
+    >>> fulltexts = dict(
+    ...     title=u'This is a title.',
+    ...     body=u'This is a text that is much longer than the title.')
+    
+    >>> bop.extractPhrase(fulltexts, ['muc'], 3)
+    u'text that is much longer than ...'
+
+If the text is HTML the function strips all tags:
+
+    >>> fulltexts = dict(
+    ...     title=u'This <b>is a title.</b>',
+    ...     body=u'This is a text that is <a href="#">much longer</a>.')
+
+    >>> bop.extractPhrase(fulltexts, ['muc'], 3)
+    u'text that is much longer.'
+
+
+bop.relink
+----------
+
+Relative URLs can be replaced by absolute URLs:
+
+    >>> bop.setrequest(TestRequest())
+    >>> root = getRootFolder()
+    >>> folder = bop.add(root, u'example', bop.Folder())
+    >>> image = bop.add(folder, 'existing.jpg',
+    ...                     bop.File('Test', contentType='image/jpeg'))
+
+    >>> test = '<img src="existing.jpg">'
+    >>> bop.relink(test, image)
+    u'<img src="http://127.0.0.1/example/existing.jpg">'
+
+External links or invalid links are left untouched:
+
+    >>> test = '<img src="notexisting.jpg">'
+    >>> bop.relink(test, image)
+    u'<img src="notexisting.jpg">'
+
+    
+bop.tidyHTML
+------------
+
+Calls HTMLTidy on the given file and returns a string representation of
+tidy's output.
+
+    >>> from cStringIO import StringIO
+    >>> import os.path
+    >>> infile = os.path.join(os.path.dirname(bop.html.__file__), 'testdata', 'tidy.html')
+    >>> bop.tidyHTML(infile)
+    '<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"\n...
+
+If infile does not exist, IOError is raised
+
+    >>> infile = 'notfound.html'
+    >>> bop.tidyHTML(infile)
+    Traceback (most recent call last):
+    ...
+    IOError: [Errno 2] No such file or directory: 'notfound.html'
+
+
+bop.tidyTree
+------------
+
+Calls HTMLTidy on the given file and returns the elementtree representation
+of the file.
+
+    >>> from cStringIO import StringIO
+    >>> import os.path
+    >>> infile = os.path.join(os.path.dirname(bop.html.__file__), 'testdata', 'tidy.html')
+    >>> bop.tidyTree(infile)
+     <__builtin__.ElementTree instance at ...
+
+If infile does not exist, IOError is raised
+
+    >>> infile = 'notfound.html'
+    >>> bop.tidyTree(infile)
+    Traceback (most recent call last):
+    ...
+    IOError: [Errno 2] No such file or directory: 'notfound.html'

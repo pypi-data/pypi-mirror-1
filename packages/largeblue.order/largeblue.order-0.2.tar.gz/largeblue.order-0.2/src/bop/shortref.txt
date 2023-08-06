@@ -1,0 +1,136 @@
+Short References
+================
+
+If clients and server exchange serialized objects and events it is nearly always 
+necessary to refer to specific content objects in the database. Zope3 uses 
+absolute URLs or paths, unicode names, or int ids to handle such cases.
+
+Ids should be short, easy to read, pronouncable, easy to copy & paste, 
+conformant to external systems (like desktops, mailer, etc.)
+
+Paths are not an ideal solution, since many non-ascii URLs pose practical 
+problems, although they are supported by current standards. Germans, for 
+instance like umlauts, ampercents, and all those non-ascii letters as object
+names. Since Zope3 uses unicode names this is no problem as long as the objects 
+do not leave the system borders. As soon as people start to download 
+things this leads to nasty filenames with % and spaces on some platforms. Some 
+programs like Mailers have also problems with encoded URLs.
+
+One way to avoid these problems is to use unicode names internally and to use
+permanent ids without special characters. Integer Ids come to mind, since 
+they already provide this behavior. Unfortunately, these ids are too long, 
+difficult to remember and pronounce:
+
+    1275547548
+    1275547549
+    1275547550
+    1275547551
+    1275547552
+    1275547553
+    1275547554
+    1275547555
+    1275547556
+    1275547557
+    
+
+Proposal
+========
+
+The following proposal combines the advantages of short numeric ids with textual
+descriptive elements:
+
+    file1
+    file2
+    ...
+    file89206
+    
+    folder1
+    folder2
+    ...
+    folder204
+    
+    person1
+    ...
+    person120
+    
+The id resembles variable names and carries basic type information for the 
+programmer AND the user. Since the basic types do not contain umlauts etc. 
+all above mentioned problems are avoided.
+
+    >>> root = getRootFolder()
+    >>> from bop import interfaces
+    >>> shortrefs = bop.query(interfaces.IShortRefs, context=root)
+    
+Since perma ids are splitted in two parts, the utility provides a help method 
+to extract these parts:
+
+    >>> shortrefs.split('file1')
+    ('file', 1)
+    
+    >>> shortrefs.split('file123')
+    ('file', 123)
+
+    >>> shortrefs.split('file')
+    Traceback (most recent call last):
+    ...
+    InvalidShortRef: file
+
+                           
+Like int ids perma ids are created in response to add events:
+
+    >>> import zope.app.file
+    >>> for i in range(0, 3):
+    ...     obj = bop.add(root, u'file', zope.app.file.File())
+    ...     print shortrefs.getId(obj)
+    file1
+    file2
+    file3
+
+    >>> for i in range(0, 3):
+    ...     obj = bop.add(root, u'file', zope.app.folder.Folder())
+    ...     print shortrefs.getId(obj)
+    folder2
+    folder3
+    folder4
+
+We can look up objects by id:
+
+    >>> shortrefs.getObject('file1') == root[u'file']
+    True
+    
+The ref function provides a convenient way to access the object id:
+
+    >>> bop.shortref.ref(root[u'file'])
+    'file1'
+
+With the resolve function we can get the object back:
+
+    >>> bop.shortref.resolve('file1', root) == root[u'file']
+    True
+
+Permalinks
+==========
+
+These ids cannot be used directly in URLs for download purposes since the URLs 
+do not provide the filename and the file extension. Since the ordinary Zope3 
+absolute URL may contain the problematic chars a redirect to the absolute URL 
+seems also not feasible. A special traversal behavior solves these problems. 
+The traverser resolves the file before the downloadable filename is traversed:
+
+    >>> testcontent = '<html><body>Test</body></html>'
+    >>> testfile = zope.app.file.File(testcontent, contentType='text/html')
+    >>> obj = bop.add(root, u'\xe4tsch.html', testfile)
+    >>> permalink = bop.permalink.url(obj)
+    >>> permalink
+    '@@permalink/file4/aetsch.html'
+      
+Let's see whether a browser can resolve this link successfully:
+
+    >>> from zope.testbrowser.testing import Browser
+    >>> browser = Browser()
+    >>> browser.handleErrors = False
+    >>> browser.addHeader('Authorization', 'Basic mgr:mgrpw')
+    >>> browser.open('http://127.0.0.1/' + permalink)
+    >>> browser.contents
+    '<html><body>Test</body></html>'
+
