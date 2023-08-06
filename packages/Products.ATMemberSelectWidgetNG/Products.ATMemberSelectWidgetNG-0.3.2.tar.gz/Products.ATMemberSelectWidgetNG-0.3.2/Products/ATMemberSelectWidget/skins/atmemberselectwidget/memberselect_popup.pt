@@ -1,0 +1,254 @@
+<metal:block use-macro="here/global_defines/macros/defines" />
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"
+      xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:metal="http://xml.zope.org/namespaces/metal"
+      lang="en"
+      i18n:domain="atmemberselectwidget"
+      tal:define="doSearch request/Search | nothing;
+                  fieldId request/fieldId | string:'';
+                  fieldType request/fieldType | string:'id';
+                  close_window request/close_window | python: 1;
+                  multiVal request/multiVal | python: 1;
+		  showGroups request/showGroups | python:1;
+                  enableSearch request/enableSearch | python: 1;
+                  gtool nocall:context/portal_groups;">
+
+  <head>
+    <title tal:content="here/title_or_id">Title or Id</title>
+    <base href="" tal:attributes="href here/renderBase" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"
+          tal:define="charset here/portal_properties/site_properties/default_charset;
+                      dummy python:request.RESPONSE.setHeader('Content-Type', 'text/html;;charset=%s' % charset)"
+          tal:attributes="content string:text/html;;charset=${charset}" />
+    <tal:styles define="view context/@@plone|nothing"
+                replace="structure provider:plone.resourceregistries.styles" />
+
+    <tal:define define="language here/Language;
+                        lang language | default_language;
+                        charset site_properties/default_charset|string:utf-8">
+      <metal:cache use-macro="here/global_cache_settings/macros/cacheheaders">
+        Get the global cache headers located in global_cache_settings.
+      </metal:cache>
+    </tal:define>
+
+    <script language="javascript" tal:content="structure string:
+            function showMessage(message) {
+                 element = document.getElementById('message')
+                 element.style.display='block'
+                 inner = document.getElementById('messageTitle')
+                 inner.innerHTML = message
+            }
+
+            function addSelectedMembers(e) {
+                if (e){
+                    window.opener.memberselect_setMember('$fieldId', '$fieldType', e.id, e.value, $multiVal)
+                    showMessage(e.value)
+                } else {
+                  checkboxes = document.getElementsByName('ids')
+                  j = 0
+                  for (i = 0; i < checkboxes.length; i++) {
+                    e = checkboxes[i]
+                    if (e.checked == true){
+                        j ++
+                        window.opener.memberselect_setMember('$fieldId', '$fieldType', e.id, e.value, $multiVal)
+                        showMessage('[' + j + ']')
+                    }
+                  }
+                }
+
+                if (1==${close_window}) {
+                    window.close() 
+                }
+           }">
+    </script>
+
+  </head>
+
+<body>
+<div class="documentContent">
+
+    <div id="message" class="portalMessage" style="display:none;margin-top:0px;">
+         <span i18n:translate="added_users"
+               >Added user:</span>&nbsp;<span id="messageTitle"></span> </div>
+
+    <div style="text-align:right;">
+   	    <tal:block tal:condition="enableSearch">
+	         <a href="javascript:history.back()" i18n:translate="memberselect_back">back</a>
+	         |
+	     </tal:block>
+         <a href="javascript:window.close()" i18n:translate="memberselect_close">close window</a>
+    </div>
+
+    <tal:block tal:condition="doSearch">
+    <tal:block define="results python:here.portal_membership.searchForMembers(request.form.copy());
+                   Batch python:modules['Products.CMFPlone'].Batch;
+                   DateTime python:modules['DateTime'].DateTime;
+                   b_size python:40;b_start python:0;b_start request/b_start | b_start;">
+        <h2 i18n:translate="heading_search_results"
+            i18n:domain="plone">Search results</h2>
+
+        <div tal:condition="not: results" i18n:domain="plone">
+           <strong i18n:translate="description_no_results_found">No results were found.</strong>
+        </div>
+
+        <div tal:condition="results"
+          tal:define="batch python:Batch(results, b_size, int(b_start), orphan=1)">
+
+        <div><strong i18n:translate="batch_x_items_matching_your_criteria"
+                     i18n:domain="plone">
+             <span i18n:name="number" tal:content="python:len(results)">234</span> 
+             items matching your criteria.</strong></div>
+
+        <!-- Navigation -->
+        <div metal:use-macro="here/batch_macros/macros/navigation" />
+
+        <table class="listing"  id="sortable"
+               i18n:domain="plone"
+               tal:define="properties here/portal_memberdata/propertyIds;
+                           properties python:['fullname', 'email', ];
+                           prop_i18n python:{'fullname':'label_full_name', 'email':'label_email', 'login_time':'label_last_logged_in'}">
+          <thead>
+            <tr class="properties">
+              <th class="nosort">
+                  <input class="noborder"
+                         type="checkbox"
+                         src="select_all_icon.gif"
+                         name="selectButton"
+                         title="Select all items"
+                         checked="checked"
+                         onClick="toggleSelect(this, 'ids', true);"
+                         tal:condition="multiVal"
+                         tal:attributes="src string:$portal_url/select_all_icon.gif"/></th>
+              <th i18n:translate="label_name">id</th>
+              <th tal:repeat="property properties"
+                  i18n:domain="atmemberselectwidget"
+                  tal:content="python:prop_i18n[property]" i18n:translate=""> email</th>
+            </tr>
+          </thead>
+          <tbody>
+              <tr tal:repeat="result batch"
+                  style="white-space: nowrap"
+                  tal:attributes="class python:test(repeat['result'].odd(), 'even', 'odd')">
+               <td>
+                 <input type="checkbox" name="ids" class="noborder" id="#" 
+                        tal:define="username result/getUserName;
+                                    email python:result.getProperty('email', '') or '';
+                                    fullname python:result.getProperty('fullname',username);
+                                    javascript string:addSelectedMembers(this);"
+                        tal:attributes="value string:$email $fullname;
+                                        id username;
+                                        type python:multiVal and 'checkbox' or 'radio';
+                                        checked multiVal;
+                                        onclick python:multiVal and ' ' or javascript">
+                </td>
+                <td tal:content="result/getUserName">member name </td>
+                <td tal:repeat="property properties"
+                   tal:content="python:result.getProperty(property, None)"> runyaga@slack.com
+                </td>
+             </tr>
+        </tbody>
+      </table>
+
+      <div metal:use-macro="here/batch_macros/macros/navigation" />
+
+      <input class="context" type="button" 
+             i18n:attributes="value add_selected_users" 
+             value="add selected users"
+             tal:condition="multiVal"
+             onclick="addSelectedMembers(0)"/>
+             
+    </div>
+
+    <br />
+
+    </tal:block>
+    </tal:block>
+
+
+    <tal:block tal:condition="enableSearch">
+    <h2 i18n:translate="heading_user_search">Search for users</h2>
+        <form action="membersearch_pop"
+          method="post"
+          name="search"
+          tal:attributes="action string:${context/absolute_url}/${template/id}"
+          tal:define="DateTime python:modules['DateTime'].DateTime">
+
+        <fieldset>
+            <legend i18n:translate="legend_user_search_criteria">User Search Criteria</legend>
+
+            <p i18n:translate="description_user_search">
+               This search form enables you to find members by specifying one or more
+               search criteria.
+            </p>
+
+            <tal:groups tal:condition="showGroups">
+            <div class="field" style="white-space: nowrap"
+                 tal:define="grouplist python:hasattr(gtool, 'listContextGroups') and gtool.listContextGroups(here) or gtool.listGroups()"
+                 tal:condition="python:grouplist">
+                 <label i18n:translate="label_group_criteria">In Group</label>
+                 <select name="groupname"
+                         tal:define="groupname request/groupname | nothing">
+                     <option value="" i18n:translate="search_any_group"> Any Group </option>
+                     <option tal:repeat="group grouplist"
+                             tal:attributes="value group/getGroupName;
+                                             selected python:group.getGroupName() == groupname"
+                             tal:content="python:group.title or group.getProperty('title', None) or group.getGroupName()">group name</option>
+                 </select>
+            </div>
+			</tal:groups>
+    
+            <div class="field" style="white-space: nowrap">
+                 <label i18n:translate="label_username_criteria">User name or full name</label>
+                 <input type="text"
+                       name="name"
+                       size="8"
+                       tabindex=""
+                       tal:attributes="tabindex tabindex/next;
+                                       value request/name | nothing"
+                       />
+            </div>
+    
+            <div class="field" style="white-space: nowrap"
+                  tal:condition="nothing">
+                <label i18n:translate="label_email">E-mail</label>
+                <input type="text"
+                       name="email"
+                       size="8"
+                       tabindex=""
+                       tal:attributes="tabindex tabindex/next;
+                                       value request/email | nothing; "
+                       />
+            </div>
+
+            <input type="hidden" name="Search" value="1" />
+            <input type="hidden" name="fieldId" tal:attributes="value fieldId" />
+            <input type="hidden" name="fieldType"  tal:attributes="value fieldType"/>
+            <input type="hidden" name="multiVal:int" tal:attributes="value multiVal"/>
+            <input type="hidden" name="close_window:int" tal:attributes="value close_window"/>
+            <input type="hidden" name="showGroups:int" tal:attributes="value showGroups"/>
+
+            <div class="formControls">
+                <input class="context"
+                       tabindex=""
+                       type="submit"
+                       name="submit"
+                       value="Search"
+                       i18n:attributes="value label_search_users"
+                       tal:attributes="tabindex tabindex/next;"
+                       />
+            </div>
+        </fieldset>
+    </form>
+    </tal:block>
+    <div style="text-align:right;">
+  	    <tal:block tal:condition="enableSearch">
+	         <a href="javascript:history.back()" i18n:translate="memberselect_back">back</a>
+	        |
+	     </tal:block>
+         <a href="javascript:window.close()" i18n:translate="memberselect_close">close window</a>
+    </div>
+
+</div>
+
+</body>
+</html>
