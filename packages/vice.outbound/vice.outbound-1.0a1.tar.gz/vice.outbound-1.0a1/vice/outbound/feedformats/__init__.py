@@ -1,0 +1,1 @@
+from feedformats import feedFormatVocabulary
