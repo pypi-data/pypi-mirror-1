@@ -1,0 +1,102 @@
+I am currently developing my first project based on Plone3
+(3.1.4). After having read Martin Aspeli's book, I began to develop a
+new product with two content types, sales agent, and sales area. Both
+work fine as long as they are independent.
+
+Now I want to be able to create a couple of sales agents, then create
+a sales area and assign one or more of the sales agents to that sales
+area using a multi-selection widget containing the available sales
+agents. The name of that sales agent should then appear in the view of
+the sales area as a link to the sales agent view. I decided to work
+along the lines of the highlighted_films feature of the optilux code,
+and added the code attached below. Then I started the Zope instance in
+debug-mode and re-installed my new product. Everything seemed to be
+o.k., and I also could view older instances of the content type "sales
+area". However, as soon as I try to add a new sales area, I get the
+following traceback:
+
+2008-08-11 11:39:25 ERROR Zope.SiteErrorLog http://spruce:8080/salestest/portal_factory/SalesArea/salesarea.2008-08-11.5645851124/atct_edit
+Traceback (innermost last):
+  Module ZPublisher.Publish, line 119, in publish
+  Module ZPublisher.mapply, line 88, in mapply
+  Module ZPublisher.Publish, line 42, in call_object
+  Module Products.CMFPlone.FactoryTool, line 368, in __call__
+  Module Products.CMFPlone.FactoryTool, line 152, in __getitem__
+  Module Products.CMFPlone.PloneFolder, line 348, in invokeFactory
+  Module Products.CMFCore.TypesTool, line 716, in constructContent
+  Module Products.CMFCore.TypesTool, line 278, in constructInstance
+  Module Products.CMFCore.TypesTool, line 290, in _finishConstruction
+  Module Products.CMFCore.CMFCatalogAware, line 148, in notifyWorkflowCreated
+  Module Products.CMFCore.WorkflowTool, line 291, in notifyCreated
+  Module Products.DCWorkflow.DCWorkflow, line 346, in notifyCreated
+  Module Products.DCWorkflow.DCWorkflow, line 430, in _changeStateOf
+  Module Products.DCWorkflow.DCWorkflow, line 529, in _executeTransition
+  Module Products.DCWorkflow.DCWorkflow, line 389, in updateRoleMappingsFor
+  Module Products.DCWorkflow.utils, line 64, in modifyRolesForPermission
+  Module AccessControl.Permission, line 93, in setRoles
+AttributeError: responsible_salesagent
+
+I found a very similar traceback, accompanied by an explanation, here:
+
+http://plone.org/documentation/error/attributeerror-reference_catalog
+
+But firstly, I still couldn't find the relevant difference between the
+optilux code and mine that makes my code fail (the optilux code works,
+I tried that out), and secondly, due to my lack of programming skills,
+the explanation doesn't help me much, especially as I have never heard
+about programming "bridges" before.
+
+This is what I added to my working code:
+
+- in interfaces.py:
+  
+class ISalesArea(Interface):
+    """Data sheet of sales area"""
+
+    ...working interface declaration...
+    
+    responsible_salesagent = schema.List(title=_(u"Sales Agent"),
+                                         description=_(u"Agents responible for that area"),
+                                         value_type=schema.Object(title=_(u"SalesAgent"),
+                                                                 schema=ISalesAgent),
+                                         unique=True,
+
+- in salesarea.py:
+
+SalesAreaSchema = folder.ATFolderSchema.copy() + atapi.Schema((
+
+... working schema declaration...
+
+    atapi.ReferenceField('responsible_salesagent',
+        relationship='isResponsibleForArea',
+        multiValued=True,
+        storage=atapi.AnnotationStorage(),
+        vocabulary_factory=u"on.sales.SalesAgents",
+        vocabulary_display_path_bound=-1, # Avoid silly Archetypes object title magic
+        enforceVocabulary=True,
+	required=False,
+        widget=atapi.ReferenceWidget(label=_(u"Sales Agents"),
+                                     description=_(u""))
+        ),
+
+...
+
+... Adjusting content type title and description along the lines of
+optilux which works fine, and then:
+
+finalizeATCTSchema(SalesAreaSchema, folderish=True, moveDiscussion=False)
+
+class SalesArea(folder.ATFolder):
+    implements(ISalesArea)
+    
+    portal_type = "SalesArea"
+    _at_rename_after_creation = True
+    schema = SalesAreaSchema
+
+    ...working fields...
+    responsibleagent = atapi.ATReferenceFieldProperty('responsible_salesagent')
+
+atapi.registerType(SalesArea, PROJECTNAME)
+
+I tried several things to at least get an idea what is going on there,
+but whatever I tried didn't even change the above traceback. 
