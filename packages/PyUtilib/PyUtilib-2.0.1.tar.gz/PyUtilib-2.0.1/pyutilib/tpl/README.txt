@@ -1,0 +1,3 @@
+This package contains third-party Python libraries that are used
+by PyUtilib.  Well, some of them are used anyway, and the others look like they
+could be useful...
