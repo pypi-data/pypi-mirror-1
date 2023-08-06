@@ -1,0 +1,49 @@
+#! /usr/bin/env python
+# Command-line runner script for ReST in Peace
+
+import sys
+import codecs
+import locale
+
+import argparse
+
+from rip.directives import exported_directives
+
+def main(argv) :
+    parser = argparse.ArgumentParser(
+        description = 'Command-line interface to ReST in Peace'
+    )
+
+    parser.add_argument(
+        'file', nargs = "?", type = argparse.FileType('r'), default = '-',
+        help = 'The input file to be rendered.',
+    )
+
+    interfaces = [__import__('rip', fromlist = ['interface']).interface]
+    for directive_name in exported_directives :
+        try :
+            interfaces.append(
+                __import__('rip.directives.' + directive_name, fromlist = ['interface']).interface
+            )
+        except ImportError :
+            pass
+
+    for interface in interfaces :
+        parser = interface.initialize_arguments(parser)
+
+    namespace = parser.parse_args(argv)
+
+    for interface in interfaces :
+        interface.namespace_callback(namespace)
+
+    render = __import__('rip.core', fromlist = ['render']).render
+
+    sys.stdout = codecs.getwriter(locale.getpreferredencoding())(sys.stdout)
+    sys.stdout.write(render(namespace.file.read()))
+
+    return 0
+
+if __name__ == '__main__' :
+    status = main(sys.argv[1:])
+
+    sys.exit(status)
