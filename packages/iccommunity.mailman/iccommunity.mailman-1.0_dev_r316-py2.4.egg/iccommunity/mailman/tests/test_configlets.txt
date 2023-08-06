@@ -1,0 +1,140 @@
+====================
+A functional doctest
+====================
+
+This is a full-blown functional test. The emphasis here is on testing what
+the user may input and see, and the system is largely tested as a black box.
+We use PloneTestCase to set up this test as well, so we have a full Plone site
+to play with. We *can* inspect the state of the portal, e.g. using
+self.portal and self.folder, but it is often frowned upon since you are not
+treating the system as a black box. Also, if you, for example, log in or set
+roles using calls like self.setRoles(), these are not reflected in the test
+browser, which runs as a separate session.
+
+Being a doctest, we can tell a story here.
+
+First, we must perform some setup. We use the testbrowser that is shipped
+with Five, as this provides proper Zope 2 integration. Most of the
+documentation, though, is in the underlying zope.testbrower package.
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+
+The following is useful when writing and debugging testbrowser tests. It lets
+us see all error messages in the error_log.
+
+    >>> self.portal.error_log._ignored_exceptions = ()
+
+With that in place, we can go to the portal front page and log in. We will
+do this using the default user from PloneTestCase:
+
+    >>> from Products.PloneTestCase.setup import portal_owner, default_password
+
+    >>> browser.open(portal_url)
+
+We have the login portlet, so let's use that.
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+
+Here, we set the value of the fields on the login form and then simulate a
+submit click.
+
+And we ensure that we get the friendly logged-in message:
+
+    >>> "You are now logged in" in browser.contents
+    True
+
+    >>> browser.getLink('Site Setup').click()
+    >>> browser.getLink('icCommunity').click()
+
+We are at Platecom config main page, lets test it...
+
+Tenemos un link para el configlet...
+
+    >>> browser.getLink('Mailman')
+    <Link text='Mailman' url='http://nohost/plone/@@manage-iccommunity-mailman'>
+
+Ahora las configs de usuario...
+
+    >>> browser.open(portal_url)
+    >>> usr_pref_name = 'dashboard'
+
+    >>> browser.getLink(url=usr_pref_name).click()
+    >>> browser.getLink('icCommunity').click()
+    >>> browser.getLink('Mailman')
+    <Link text='Mailman' url='http://nohost/plone/@@manage-iccommunity-mailman-user-lists'>
+
+Probemos los configlets...
+
+    >>> browser.open(portal_url)
+	>>> browser.getLink('Site Setup').click()
+	>>> browser.getLink('icCommunity').click()
+
+We are at Platecom config main page, lets test it...
+
+	>>> browser.getLink('Mailman').click()
+	>>> configlet_url = browser.url
+    >>> configlet_debug_url = browser.url + '?debug=1'
+
+	>>> browser.open(configlet_debug_url)
+
+Soportamos instalaciones locales...
+
+    >>> import os
+    >>> fake_mailman = 'file://' + os.path.join(os.path.dirname(__file__),
+    ...                                         'samples',
+    ...                                         'mailman')
+	>>> browser.getControl('URI').value = fake_mailman
+	>>> browser.getControl('Available Lists').value = []
+    >>> browser.getControl("Apply").click()
+    >>> 'Protocolo no soportado' in browser.contents
+    False
+
+    >>> browser.open(configlet_debug_url)
+    >>> browser.getControl('URI').value == fake_mailman
+    True
+    >>> browser.getControl('Available Lists').options # no quiero testear esto ahora...
+    [...]
+
+Soportamos conexiones por ldap...
+
+    >>> browser.open(configlet_debug_url)
+
+    >>> browser.getControl('URI').value = 'ldap://directory.example.com:389/dc=example,dc=com?cn,givenName,sn?sub?(uid=john.doe)'
+    >>> browser.getControl('Available Lists').value = []
+    >>> browser.getControl("Apply").click()
+    >>> 'Protocolo no soportado' in browser.contents
+    False
+
+    >>> browser.open(configlet_debug_url)
+    >>> browser.getControl('URI').value
+    'ldap://directory.example.com:389/dc=example,dc=com?cn,givenName,sn?sub?(uid=john.doe)'
+    >>> browser.getControl('Available Lists').options
+    []
+
+Soportamos un protocolo especial para pruebas...
+
+    >>> browser.open(configlet_debug_url)
+
+    >>> browser.getControl('URI').value = 'test:///'
+    >>> browser.getControl('Available Lists').value = []
+    >>> browser.getControl("Apply").click()
+    >>> 'Protocolo no soportado' in browser.contents
+    False
+
+    >>> browser.open(configlet_debug_url)
+    >>> browser.getControl('URI').value
+    'test:///'
+    >>> browser.getControl('Available Lists').options
+    ['fake list', 'black hole list']
+
+    >>> browser.open(configlet_debug_url)
+
+    >>> browser.getControl('URI').value = 'invalidprotocol:///usr/lib/mailman'
+    >>> browser.getControl('Available Lists').value = []
+    >>> browser.getControl("Apply").click()
+    >>> "Protocolo 'invalidprotocol' no soportado" in browser.contents
+    True
