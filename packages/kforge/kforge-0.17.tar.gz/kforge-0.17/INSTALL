@@ -1,0 +1,761 @@
+#  The KForge Install Guide
+
+Welcome to the KForge Install Guide. This guide has five sections:
+
+1. **Quick instructions** for people who don't like instructions. :-)
+
+2. **Overview** of the procedure for installing KForge. 
+
+3. **Automated install options** for installing KForge.
+
+4. **Detailed step-by-step instructions** for installing KForge.
+
+5. **Additional notes** (on file permissions and on reloading Apache).
+
+Thank you for using KForge. If you have any questions or require assistance,
+please don't hesitate to ask on the [KForge User mailing list] [1].
+
+[1]: <http://lists.okfn.org/mailman/listinfo/kforge-user>
+
+##  Quick Instructions
+
+Quick instructions (for people who don't like reading instructions):
+
+1.  Run these commands as the Apache user in directory owned by that user:
+
+        $ wget http://appropriatesoftware.net/provide/docs/kforge-virtualenv
+        $ chmod +x kforge-virtualenv
+        $ ./kforge-virtualenv PATH
+
+2.  Include the KForge Apache configuration file in a dedicated Apache virtual
+    host, restart Apache and visit KForge at the virtual host server name.
+
+##  Overview 
+
+1.  Prepare the operating system platform.
+    *   Web server (Apache)
+    *   Database server (PostgreSQL or MySQL)
+    *   Python (and a few common packages)
+
+2.  Prepare the database management system.
+    *   Database user
+    *   Database user permissions
+    *   Database instance
+
+3.  Install the KForge software.
+    *   In virtual Python environment (or global site packages).
+
+4.  Create a KForge instance.
+    *   Create a KForge configuration file.
+    *   Edit the KForge configuration file.
+    *   Create the KForge template and media files.
+    *   Create a KForge database.
+    *   Create a KForge Apache configuration file.
+
+5.  Configure Apache for the KForge instance.
+    *   Include the KForge Apache configuration file.
+    *   Change ownership of KForge instance files.
+    *   Configure reloading of Apache configuration.
+
+6.  Test the KForge service.
+    *   Restart the Apache service.
+    *   Load the KForge service in your browser.
+
+7. Troubleshoot.
+
+##  Automated Install Options
+
+There are two options for an automated installation. Either you can use
+the KForge virtualenv script, or you can use the Provide system.
+
+However, you will still need to prepare the platform and the database
+management system before installation, and to configure Apache after.
+
+### 1. Deploy KForge using the KForge virtualenv script.
+
+The KForge virtualenv script is an application of virtualenv. It will
+create a new virtual Python environment, install KForge into it, and
+then create a KForge instance. It will neither configure nor restart
+your Apache. If you don't provide database options, then you will have
+to finish off the installation by setting the database options in the
+KForge configuration file, and then create and include the KForge Apache
+configuration file (details below).
+
+1.  Download and run the KForge virtualenv script:
+
+        $ wget http://appropriatesoftware.net/provide/docs/kforge-virtualenv
+        $ chmod +x kforge-virtualenv
+
+    For information about options, read the usage message:
+
+        $ ./kforge-virtualenv --help
+        Usage: kforge-virtualenv [OPTIONS] KFORGE_DIR
+        
+        Options:
+        ...
+
+    1.  The only required argument is KFORGE_DIR, a folder for the new KForge
+        virtualenv installation:
+
+            $ ./kforge-virtualenv /path/to/kforge
+
+    2.  However, you will probably want at least to set your own service name:
+
+            $ ./kforge-virtualenv --service-name MyForge /path/to/kforge
+
+    3.  If you will upgrade KForge in future, you may wish to place the project
+        data folder in a separate place now. It will contain e.g. Subversion
+        repositories and Trac environments, which in general can't be moved
+        once created, and so will continue to be used by new versions after
+        upgrading.
+    
+            $ ./kforge-virtualenv --project-data-dir /path/to/kforge/data   \
+             --service-name MyForge /path/to/kforge/version
+
+    4.  The installer will attempt to create and initialise the database. If
+        the database user, the database password, and database name are set
+        (with the --db-user, --db-pass, and --db-name options), they will be
+        used to create a PostgreSQL database.
+
+            $ ./kforge-virtualenv --db-user DBUSER --db-pass DBPASS         \
+            --db-name DBNAME --project-data-dir /path/to/kforgedata         \
+            --service-name MyForge /path/to/kforge
+
+        If you want to use MySQL, set the database type to 'mysql' (with
+        the --db-type option).
+
+            $ ./kforge-virtualenv --db-type mysql --db-user DBUSER          \
+            --db-pass DBPASS --db-name DBNAME --project-data-dir            \
+            /path/to/kforgedata --service-name MyForge /path/to/kforge
+
+        If no --db- options are provided, an SQLite database will be created
+        and initialised, as if the following --db- options has been set:
+
+            --db-name /path/to/kforge/var/sqlite.db --db-type sqlite
+
+        If the database can't be created by the installer, you will need to
+        create and initialise the database using the installed 'kforge-admin'
+        command. Make sure your database software and credentials are okay.
+        In this case, you will also need to generate the KForge Apache
+        configuration file. Refer to the detailed step-by-step instructions.
+
+    5.  If you are upgrading from an existing service, prepare by creating a
+        migration dump file from the existing service.
+            
+            $ source /path/to/existing/kforge/bin/activate
+            (kforge)$ kforge-admin db dump DUMPPATH
+
+        Then, set the prepared domain data file (with the --dump-file option).
+        Set the *same* service name, db user, db pass, and project data folder
+        as the existing service. Set a *different* database name from that
+        used by the existing service, and a *different* KFORGE_DIR from that
+        used by the existing service.
+
+            $ ./kforge-virtualenv --dump-file DUMPPATH --db-user DBUSER     \
+            --db-pass DBPASS --db-name NEWDBNAME --project-data-dir         \
+            /path/to/kforgedata --service-name MyForge NEWKFORGE_DIR
+
+        Warning: If you are upgrading from 0.16, and you have used the Trac
+        plugin to create Trac services, then you need to tweak that domainmodel
+        code. Find dm/migrate.py, and add the following lines:
+
+            # Load plugin model classes into domain class register.
+            self.pluginController = RequiredFeature("PluginController")
+            self.pluginController.getPlugins()
+
+        So that the domain model dumper class starts like this:
+
+            class DomainModelDumper(object):
+
+                def __init__(self):
+                    self.registry = RequiredFeature("DomainRegistry")
+                    self.dictionary = RequiredFeature("SystemDictionary")
+                    self.jsonDataDump = ''
+                    self.dataDump = None
+                    # Load plugin model classes into domain class register.
+                    self.pluginController = RequiredFeature("PluginController")
+                    self.pluginController.getPlugins()
+
+                def dumpData(self):
+        
+        Then, use 'kforge-admin migratedump' instead of 'kforge-admin db dump'.
+
+    6.  If you want to boost the performance of the access controller, then
+        enable memoization (with the '--enable-memoization' option):
+
+            $ ./kforge-virtualenv --enable-memoization --db-user DBUSER     \
+            --db-pass DBPASS --db-name DBNAME --project-data-dir            \
+            /path/to/kforgedata --service-name MyForge /path/to/kforge
+
+
+2.  After running the installer, try activating the new KForge virtualenv.
+
+        $ source /path/to/kforge/bin/activate
+        (kforge)$ 
+
+    Please note, the environment variable KFORGE_SETTINGS now has the path
+    to the new KForge configuration file.
+        
+        (kforge)$ echo $KFORGE_SETTINGS
+        /path/to/kforge/etc/kforge.conf
+
+    Please note, you may undo the activatation of the virtualenv with 'deactivate'.
+
+        (kforge)$ deactivate
+        $
+
+    But don't do that now. :-)
+
+    Compare the new KForge configuration file with the existing service,
+    and carry any preferences for log levels, memoization, secret key,
+    email address, and so on over to the new KForge configuration file.
+
+        (kforge)$ vim $KFORGE_SETTINGS
+
+3.  After activation, check the 'kforge-admin' script is available:
+ 
+        (kforge)$ which kforge-admin
+        /path/to/kforge/bin/kforge-admin
+        (kforge)$ kforge-admin --version
+
+4.  If you are upgrading from an existing service, any plugins that were
+    enabled in the existing service will already be enabled in the new,
+    but you may need again to add the plugin configuration section again
+    to the KForge configuration file.
+    
+    Otherwise, if you are creating a new service, you must enable plugins
+    before project administrators will be able to create project services.
+
+    Discover all available plugins with the 'kforge-admin plugin choices'
+    command.
+
+        (kforge)$ kforge-admin plugin choices
+        dav
+        joomla
+        mailman
+        mercurial
+        moin
+        notify
+        svn
+        trac
+        wordpress
+        www
+
+    List the enabled plugins with the 'kforge-admin plugin list' command.
+
+        (kforge)$ kforge-admin plugin list
+        dav
+        www
+
+    For each plugin you would to use, read the 'plugin doc', then 'plugin enable'
+    the plugin, and then 'plugin show' its status. You won't be able to enable
+    a plugin if its dependencies aren't available on your system.
+
+    [Example] Enable the Trac, Subversion, and Mercurial plugins.
+
+        (kforge)$ kforge-admin plugin enable trac
+        The 'trac' plugin is now enabled (see 'doc' and 'status').
+        (kforge)$ kforge-admin plugin enable svn
+        The 'svn' plugin is now enabled (see 'doc' and 'status').
+        (kforge)$ kforge-admin plugin enable mercurial
+        The 'mercurial' plugin is now enabled (see 'doc' and 'status').
+        (kforge)$ kforge-admin plugin list
+        dav
+        mercurial
+        svn
+        trac
+        www
+
+    [Example] Read the documentation for the Subversion plugin.
+
+        (kforge)$ kforge-admin plugin doc mercurial
+        ...
+
+    [Example] Read the status of the Subversion plugin.
+
+        (kforge)$ kforge-admin plugin status mercurial
+        ...
+
+    Please refer the the KForge User Guide for more information.
+
+
+5.  Configure Apache. Configure Apache reloading. Restart and load in browser.
+
+    See below for details.
+
+
+### 2. Deploy KForge using the Provide system (experimental).
+
+Like KForge, the Provide system is an application of DomainModel. It will
+create a new virtual Python environment, install KForge into it, and
+then create several KForge instances.
+ 
+It will optionally configure and restart Apache. It will test the 
+software before production deployment, and it will allow data migrations to
+be verified before cutting users over to new versions.
+
+1.  Read about Provide, learn about the working process it supports.
+
+    <http://appropriatesoftware.net/provide/>
+
+2.  Download and deploy Provide.
+
+    <http://kforge.appropriatesoftware.net/provide/trac/wiki#DeployingProvide>
+
+3.  Deploy KForge inside Provide.
+
+    Provide a new KForge version x.xx service with these commands:
+
+        $ provide scripts kforge x.xx
+        $ provide-kforge-init
+        $ provide-kforge-x.xx-init
+        $ provide-kforge-x.xx-accept
+        $ provide-kforge-x.xx-production
+
+    Migrate from an existing KForge version y.yy service with:
+
+        $ provide scripts kforge x.xx
+        $ provide-kforge-x.xx-init
+        $ provide-kforge-x.xx-accept-from-y.yy
+        $ provide-kforge-x.xx-production-from-y.yy
+
+    Later, migrate to a future KForge version z.zz with:
+
+        $ provide scripts kforge z.zz
+        $ provide-kforge-z.zz-init
+        $ provide-kforge-z.zz-accept-from-x.xx
+        $ provide-kforge-z.zz-production-from-x.xx
+
+Todo: More information about using KForge with Provide.
+
+
+##  Detailed Step-by-Step Install Instructions
+
+### 1. Prepare Platform
+
+Please ensure you have available on your system the following:
+
+* Python >= v2.3
+* Apache >= v2.0
+    * Modpython (libapache2-mod-python on Debian)
+    * [optional] ssl (libapache2-mod-ssl on Debian)
+* PostgreSQL, MySQL, or SQLite (postgresql on Debian)
+* relevant Python bindings (python-psycopg on Debian)
+* Setuptools >= v0.6c (python-setuptools on Debian)
+* Python Imaging Library (PIL) (python-imaging on Debian)
+
+
+### 2. Prepare Database Management System
+
+If necessary, please consult the instructions for your database system. 
+
+1.  Decide a database type for KForge to use. You can use PostgreSQL, MySQL,
+    SQLite, and possibly others system supported by SQLObject.
+
+2.  Decide a database instance name for KForge to use. If you are using
+    SQLite, the database name will be a filesystem path.
+
+2.  If necessary, create a database user for KForge to use and set a password
+    for the user. If necessary, configure the database management system to allow
+    this user to access the KForge database instance via TCP/IP sockets. If you
+    are using PostgreSQL, then edit the pg_hba.conf file. If you are using SQLite
+    there is no need to create any database user, or set any password.
+
+3.  [optional] Create the database instance. You can also create the database
+    instance after the KForge configuration file has been created by using
+    the 'kforge-admin db create' command (see below), but then the KForge
+    database user must have been given permission to create databases. If you
+    don't want the KForge database user to be able to create databases, create
+    the database instance now. If you are using sqlite, there is no need to do
+    anything here.
+
+4.  Remember the database instance name, the database user name, the database
+    password for that user. And the database host name if it is different from
+    'localhost'. You will need to write these values into the KForge
+    configuration file (generated below).
+
+Todo: Link to PostgreSQL manual.
+Todo: Link to MySQL manual.
+Todo: Link to SQLite manual.
+
+
+### 3. Install KForge Software
+
+Decide how KForge will be installed. It is recommended that you establish an
+isolated installation inside a virtual Python environment (virtualenv). It is
+also possible, of course, to install KForge to your global Python packages.
+
+EITHER - Install KForge into a virtual Python environment.
+
+1.  Create and activate a new virtual Python environment.
+
+        $ virtualenv /path/to/kforge
+
+2.  Activate the new virtual Python environment.
+
+        $ source /path/to/kforge/bin/activate
+        (kforge)$
+
+3.  Install the KForge Python package using virtual easy_install:
+
+        (kforge)$ which easy_install
+        /path/to/kforge/bin/easy_install
+        (kforge)$ easy_install kforge
+
+4.  After installation, check the KForge scripts are available:
+
+        (kforge)$ which kforge-makeconfig
+        /path/to/kforge/bin/kforge-makeconfig
+        (kforge)$ which kforge-admin
+        /path/to/kforge/bin/kforge-admin
+
+5.  After creating the configuration file, make sure to set the 
+    virtualenv bin_dir value /path/to/kforge/bin. Then copy the 
+    .../kforge/handlers/kforgevirtualenvhandlers.py file from the KForge
+    Python library into that virtualenv bin. This ensures Apache can access
+    the code from the virtual environment.
+
+OR - Install the KForge Python package into global Python packages.
+
+1.  EITHER - Install using easy_install (provided by setuptools):
+
+        $ sudo easy_install kforge
+
+    OR - Download the stable tarball, extract it, change into the distribution
+    root directory (folder containing the KForge setup.py file), and run:
+
+        $ python setup.py install
+
+    Please note, if you experience trouble downloading the 'markdown' Python
+    package, then you'll have to try again - regular testing has shown that
+    its download service is relatively unreliable.
+
+2.  After installation, check the KForge scripts are available:
+
+        $ which kforge-makeconfig
+        /usr/bin/kforge-makeconfig
+        $ which kforge-admin
+        /usr/bin/kforge-admin
+
+
+### 4. Create KForge Instance
+
+1.  Create a KForge configuration file:
+
+        $ kforge-makeconfig /path/to/kforge/etc/kforge.conf
+    
+    [optional]: You may wish to set the environment variable KFORGE_SETTINGS
+    to point to your KForge configuration file. It will save you having to
+    use the --config option with kforge-admin. Set the environment by:
+
+        $ export KFORGE_SETTINGS=/path/to/kforge/etc/kforge.conf
+
+2.  Edit the configuration file with your favorite editor.
+
+    Please note, you can adjust a prefix for all config paths with the 
+    'master_path' variable. It is used only to expand other path variables in 
+    the example configuration file. But it is equally possible to set the
+    other path variables independently, and remove this variable from the
+    KForge configuration file entirely.
+
+    1.  The name of your KForge service:
+
+        Enter a name for your KForge service ('service_name'). This name can be
+        any unicode string. It will be used instead of 'KForge'.
+
+    2.  The folder for your KForge project service data:
+
+        KForge will need to write to a folder where data from KForge project 
+        services will be stored. If it doesn't exist, KForge will attempt to
+        create this folder (and parent folders that don't exist).
+
+        Enter a filesystem path for KForge project data ('project\_data\_dir').
+
+    3.  [optional] The path to the virtual environment bin folder:
+
+        If you installed KForge into a virtual environment, uncomment and 
+        enter the absolute filesystem path to the bin folder ('bin_dir').
+
+    4.  The timezone of your KForge service:
+
+        KForge will show time local to the timezone of the service. This affects
+        logging messages, and other time sensitive features.
+
+        Enter your timezone ('timezone').
+
+    5.  The KForge log file:
+
+        KForge will attempt to write log messages to file.
+
+        Enter a filesystem path for the KForge log file ('log_file').
+
+        NB: KForge will attempt to create this file (and any parent folders
+        that don't exist).
+
+        Todo: More documentation about log levels.
+
+    6.  The KForge database:
+
+        KForge will need to access a database. You will need to enter the 
+        database values you remembered above.
+
+        Enter the database type ('type') as 'postgres', 'mysql', or 'sqlite'.
+
+        Enter a database username and password, and name for the KForge database
+        instance ('user', 'pass', 'name'). If you are using SQLite, use the
+        database name ('name') to set a filesystem path to a new file.
+
+        Your database tables and initial records will be generated later with
+        the "kforge-admin db init" command. If you didn't already create the
+        database instance, you will also use "kforge-admin db create".
+
+    7.  The KForge HTML templates:
+
+        KForge will read a folder of templates files (Django templates used to
+        generate HTML pages in response to KForge client requests).
+
+        Enter a filesystem path for the KForge templates folder ('templates_dir').
+
+        NB: Your KForge template folder will be generated below (with the
+        "kforge-admin fs create" command). KForge will attempt to 
+        create this folder (and any parent folders that do not exist). An error
+        will occur if this folder already exists.
+
+    8.  The KForge media files:
+
+        KForge will configure Apache to serve a folder of media files (images,
+        CSS, and Javascript files) that will be used by KForge clients to
+        complete the HTML pages they receive.
+
+        Enter a filesystem path for a KForge media folder ('media_dir').
+
+        NB: Your KForge media folder will be generated below (with the
+        "kforge-admin fs create" command). KForge will attempt to create
+        this folder (and any parent folders that do not exist). An error will
+        occur if this folder already exists.
+
+    9.  The KForge Apache configuration file: 
+
+        KForge will update a fragment of Apache configuration, to reflect changes
+        to KForge project services as they happen.
+
+        Enter an Apache configuration file ('apache\_config\_file').
+
+        NB: The Apache configuration file will be generated below (with the
+        "kforge-admin apacheconfig create" command). If it doesn't exist, 
+        KForge will attempt to create this file (and parent folders that do
+        not exist). Any existing file will be overwritten.
+
+    10. Configuration of the KForge plugins.
+
+        Please check the configuration values for any plugins you wish to use.
+
+        Any problems, just ask for help on the mailing list.
+        
+        Todo: More documentation about plugin configuration.
+
+ 
+2.  Create KForge template and media files.
+
+    Generate your KForge templates and media folders: 
+ 
+        $ kforge-admin [--config KFORGE_SETTINGS] fs create
+
+3.  [optional] Create database (only if you didn't do this above):
+
+        $ kforge-admin [--config KFORGE_SETTINGS] db create
+
+    This will use KForge's understanding of your database system. If it
+    doesn't work out, just create a database instance by hand, using the
+    database instance name you decided above.
+
+4.  Initialise the database (creates the tables and initial records):
+
+    EITHER: If you are creating a new service, initialise with defaults:
+
+        $ kforge-admin [--config KFORGE_SETTINGS] db init
+
+    OR: If you are upgrading from an existing service, load migrated data
+
+        $ kforge-admin [--config KFORGE_SETTINGS] db init DUMPPATH
+
+    Please note, you can dump data from the existing service by running *its*:
+
+        $ kforge-admin [--config KFORGE_SETTINGS] db dump DUMPPATH
+
+5. Generate KForge Apache configuration file (requires the database):
+
+        $ kforge-admin [--config KFORGE_SETTINGS] apacheconfig create 
+
+
+### 5. Configure Apache for KForge Instance
+
+1.  Include the generated KForge Apache configuration file (location is
+    specified in the KForge configuration file) in your main apache config,
+    for example within the VirtualHost for the domain on which you will
+    run KForge. Using the Apache Include directive is recommended:
+
+        <VirtualHost * >
+            ServerName mykforge.mydomain.com
+            Include /path/to/kforge/var/httpd-autogenerated.conf
+        </VirtualHost>
+ 
+    As it will be regenerated as project services change. It is important to
+    include the generated file, rather than copy its contents elsewhere.
+
+2.  Give the Apache user (the user under which the web server runs) control
+    of the project and log folders, and the auto-generated Apache
+    configuration file:
+       
+        $ chown -R {www-user}:{www-user} {filesystem-path}
+
+    There is further information on setting file permissions in the Extra
+    Notes section below.
+
+3.  Auto-reloading of Apache configuration (KForge modifies the Apache
+    configuration file when project services are created, updated, and deleted).
+
+    There is further information in the Extra Notes section below.
+
+    1.  EITHER: Set KForge to auto reload apache by setting the 'reload_apache'
+        config variable. Note that for this to work you will need to ensure 
+        appropriate permissions are granted to the user under which the KForge
+        system runs (more details below).
+
+        OR: Automatically reload the apache configuration using some external
+        means. For example, create a cron-job that automatically reloads apache
+        configuration at regular intervals (example below) or a monitoring
+        service of some kind (such as monit) to reload apache each time the
+        apache config file is rebuilt (example below).
+
+
+### 6. Test KForge Service
+
+1.  Reload Apache with the normal command line command (perhaps something
+like '/etc/init.d/apache2ctl restart'). 
+
+2.  Now try loading the service in your browser. Does it load?
+
+
+### 7. Troubleshoot
+
+If you need to troubleshoot the KForge installation, try setting the
+KForge configuration variable 'system_mode = development' in the [DEFAULT]
+section of the KForge configuration file. Errors will be sent to the browser.
+
+Any problems, please join the mailing list and ask for help.
+
+
+##  Additional Notes
+
+### 1. Setting File Permissions
+
+Please note, some files need to be writable by the Apache user. By default,
+these files are all contained within the /path/to/kforge/var folder:
+ 
+* KForge auto-generated Apache configuration file
+* Kforge log file
+* KForge project data folder
+
+The remaining files need only to be readable by the Apache user:
+
+* KForge configuration file
+* KForge template folder (and files)
+* KForge media folder (and files)
+
+For web access to work for KForge you must allow Apache to access the KForge
+files. There are (at least) two options:
+
+1.  Have the Apache user own all KForge files.  This may cause problems if
+    you then wish to run command line utilities to administer KForge, since 
+    you may not have permission to write to files and directories. You can
+    also run the commands as the Apache user.
+
+2.  Allow for dual access by the KForge user and the Apache user.
+
+    A suitable umask value UMASK to allow group access is 002 or 007.
+
+    1.  Set umask for <kforge-user> so that group also has write permissions. Add
+        the following line to the your environment setup (e.g. ~/.bashrc)
+
+            $ umask UMASK
+
+    2.  Giving Apache user access to KForge instance by adding Apache to
+        KForge group:
+  
+            $ usermod -GKFORGEGROUP APACHEUSER
+  
+    3.  Set umask for Apache to allow group access:
+
+        Add the following to Apache startup script (usually /usr/sbin/apachectl
+        or /usr/sbin/apache2ctl -- you can find it referenced in
+        /etc/init.d/apache<version>):
+
+            umask UMASK
+      
+    4.  Give group access to existing files and make sure new files and
+        directories remain in the KForge group by setting sgid:
+
+            $ chmod g+rX -R /path/to/kforge
+            $ chmod g+wX -R /path/to/kforge/var
+
+
+### 2. Reloading the Apache configuration file
+
+When project services change, it is necessary for the KForge system to
+regenerate the KForge Apache configuration file. For these changes to take
+effect it is then necessary for Apache to reload its configuration.
+
+There are three options for reloading the Apache configuration file:
+
+1.  Event-driven reloading with KForge
+
+    In the [www] section of the KForge configuration file, set 'reload_apache' to
+    the command which will reload the apache configuration on your system.
+
+    NB: In order for this to work the user which owns the Apache process must be
+    able to reload the configuration.  Specifically it must be able to run the
+    'reload_apache' command specified in the [www] section of the configuration.
+    You can normally achieve this by adding something to your /etc/sudoers file:
+
+        Cmnd_Alias APACHE = <insert-apache-reload-command>
+        [....]
+        <www-user-name> ALL =NOPASSWD: APACHE
+
+2.  Regular time-interval reloading with external tool
+
+    Reload the Apache config on a regular basis using some external tool. For
+    example the following uses cron to reload Apache config every half an hour:
+
+        # Reload Apache config every half an hour.
+        # The apache reload command is for apache2 on Debian
+        # and might need to be modified for other systems.
+        30 * * * *   /etc/init.d/apache2 reload
+
+3.  Event-driven reloading with external tool
+
+    Alternatively you could use some form of monitoring service to only reload when
+    KForge rebuils its Apache configuration file. For example, the following uses
+    monit:
+
+        check file ${file-name} with path ${path-to-kforge-generated-apache-config}
+          if changed timestamp
+            then exec "/etc/init.d/apache2 reload"
+
+### 3. Cronjobs
+
+1.  Hotcopy KForge model data and project service data.
+
+        # Hotcopy KForge service data every night.
+        0 4 * * * /path/to/kforge/bin/activate; kforge-admin backup PATH
+
+    On an external machine, rsync *both* the installation *and* the hotcopy
+    folders. It is recommended also to dump the SQL raw, along with all your
+    other databases.
+
+2.  Update the project feeds.
+
+        # Update KForge feed every half an hour.
+        0,30 * * * * /path/to/kforge/bin/activate; kforge-admin updatefeed
+
+    If you never run this command, the 'recent changes' feed will not show.
