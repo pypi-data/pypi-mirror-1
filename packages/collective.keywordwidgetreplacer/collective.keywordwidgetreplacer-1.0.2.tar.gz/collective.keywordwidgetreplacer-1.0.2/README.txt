@@ -1,0 +1,1 @@
+See ./collective/keywordwidgetreplacer/README.txt
