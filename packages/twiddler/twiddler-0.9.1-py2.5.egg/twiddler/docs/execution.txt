@@ -1,0 +1,468 @@
+Code Execution
+
+  There are several ways to get code to execute during rendering of a
+  Twiddler. The simplest example of this is to include a code block in
+  your Twiddler's source and use the appropriate parser.
+
+  It's important to note, however, that only the first code block
+  found will be executed. All other code blocks will be removed
+  without being executed.  All other comments will be ignored and left
+  in place. This can all be seen in the example below:
+
+    >>> from twiddler import Twiddler
+    >>> from twiddler.input.default import DefaultWithCodeBlock
+    >>> t = Twiddler('''<html>
+    ... <!--twiddler 
+    ... def manipulate(t):
+    ...   t['number'].replace('One',name=False)
+    ... -->
+    ...   <body>
+    ...   <!-- The above code will process the following: -->
+    ...   <div name="row">This is row <i name="number">1</i></div>
+    ... <!--twiddler 
+    ... def nope(t):
+    ...   t['number2'].replace('Two',name=False)
+    ... -->
+    ...   <div name="row2">This is row <i name="number2">1</i></div>
+    ...   <!-- However, the above code will note get executed -->
+    ...   </body>
+    ... </html>''',input=DefaultWithCodeBlock)
+    >>> print t.render()
+    <html>
+      <body>
+      <!-- The above code will process the following: -->
+      <div name="row">This is row <i>One</i></div>
+      <div name="row2">This is row <i name="number2">1</i></div>
+      <!-- However, the above code will note get executed -->
+      </body>
+    </html>
+
+  You can also pass in another source of code execution by way of the
+  'executor' parameter to the Twiddler constructor. This must be a
+  callable object:
+
+  >>> def do_stuff(t):
+  ...     t['stuff'].replace('Stuff done!')
+
+  >>> t = Twiddler('<node id="stuff"/>',executor=do_stuff)
+  >>> print t.render()
+  <node id="stuff">Stuff done!</node>
+
+  However, executors must all be pickleable. This can be tricky if
+  your executable comes from a piece of text, such as in the
+  DefaultWithCodeBlock example above.
+
+  If this is the case, you can use the Source executor. This takes a
+  piece of text containing the definition of a function as its
+  source. This function will be used as the executor. Here's a simple
+  example: 
+
+  >>> source = '''
+  ... def do_stuff(t):
+  ...   t['stuff'].replace('Stuff done from source!')
+  ... '''
+
+  >>> from twiddler.executor.source import Source
+  >>> t = Twiddler('<node id="stuff"/>',executor=Source(source))
+  >>> print t.render()
+  <node id="stuff">Stuff done from source!</node>
+
+  In the examples so far, the code called during execution hasn't
+  returned any value. If a value is returned, it must be a Twiddler,
+  and it is the output renderer of the returned Twiddler that is used
+  to render the resulting output that is returned from the render
+  method. 
+
+  To demonstrate this, lets first create a generic Twiddler used for
+  rendering emails in a particular application:
+
+  >>> from twiddler.input.plaintext import PlainText
+  >>> from twiddler.output.emailer import Email,DummySMTP
+  >>> template = Twiddler('''Dear Customer,
+  ... $body''',input=PlainText,output=Email(smtp_host=DummySMTP,
+  ...                                       mfrom='webmaster@example.com',
+  ...                                       subject='Some Email!',
+  ...                                       mto='user@example.com'))
+
+  Now, lets create a Twiddler used for displaying orders. You'll
+  notice that this Twiddler uses the default output:
+
+  >>> order = Twiddler('''<order>
+  ... <item>$description $price</item>
+  ... </order>''',input=PlainText)
+
+  Now we need an executor to render the order and turn it into an
+  email: 
+ 
+  >>> def email_order(ot,order):
+  ...     ti = ot['item'].repeater()
+  ...     for item in order:
+  ...         i = ti.repeat()
+  ...         i['description'].replace(item['description'])
+  ...         i['price'].replace(item['price'])
+  ...     t = template.clone()
+  ...     t['body'].replace(ot['order'])
+  ...     return t
+
+  The important point to note about this executor is that the Twiddler
+  returned is a modified version of the template, rather than the
+  Twiddler that is passed in.
+
+  To use the executor, we assign it to our order Twiddler:
+
+  >>> order.executor = email_order
+
+  Now, rendering an order with some data will result in an email being
+  sent by way of the template's Email output:
+
+  >>> order.render((
+  ... {'description':'Item X','price':20.01},
+  ... {'description':'Item Y','price':19.40},
+  ... ))
+  Dummy SMTP send from 'webmaster@example.com' to 'user@example.com'
+  Content-Type: text/plain; charset="utf-8"
+  MIME-Version: 1.0
+  Content-Transfer-Encoding: quoted-printable
+  Date: ...
+  From: webmaster@example.com
+  Message-ID: ...
+  Subject: Some Email!
+  To: user@example.com
+  <BLANKLINE>
+  Dear Customer,
+  <BLANKLINE>
+  Item X 20.01
+  Item Y 19.4
+  <BLANKLINE>
+
+  You may have noticed that parameters passed to the render method are
+  passed through to the executor. In effect, the function signature
+  for the render method will match that of any executor, except that
+  the executor will additionally have the Twiddler being rendered
+  passed as the first positional parameter.
+
+  Here's an example to demonstrate this, by rendering some simple
+  contact details:
+
+    >>> person = {
+    ...     'name':'Chris',
+    ...     'address':'7 Wysteria Lane',
+    ...     'phone':'1-800-CALLME',
+    ... }
+
+  Our Twiddler this time has a code block and uses the
+  DefaultWithCodeblock input:
+
+    >>> t = Twiddler('''<html>
+    ... <!--twiddler
+    ... def substitute(t,person,colour='red'):
+    ...   t['name'].replace(person['name'],style="color:"+colour)
+    ...   t['address'].replace(person['address'])
+    ...   t['phone'].replace(person['phone'])
+    ... -->
+    ...   <body>
+    ...   <table>
+    ...     <tr>
+    ...       <th>Name</th>
+    ...       <td id="name"></td>
+    ...     </tr>
+    ...     <tr>
+    ...       <th>Address</th>
+    ...       <td id="address"></td>
+    ...     </tr>
+    ...     <tr>
+    ...       <th>Telephone Number</th>
+    ...       <td id="phone"></td>
+    ...     </tr>
+    ...   </table>
+    ...   </body>
+    ... </html>''',input=DefaultWithCodeBlock)
+
+    We now take a copy of it and render it, which results in the code
+    block being executed and passed the parameters we pass to the
+    render method:
+
+    >>> t2 = t.clone()
+    >>> print t2.render(person)
+    <html>
+      <body>
+      <table>
+        <tr>
+          <th>Name</th>
+          <td id="name" style="color:red">Chris</td>
+        </tr>
+        <tr>
+          <th>Address</th>
+          <td id="address">7 Wysteria Lane</td>
+        </tr>
+        <tr>
+          <th>Telephone Number</th>
+          <td id="phone">1-800-CALLME</td>
+        </tr>
+      </table>
+      </body>
+    </html>
+
+  One final thing to note is that any executor will only be used
+  once. To show this, lets have a simpler counter class and an
+  instance of that class:
+  
+  >>> class Counter:
+  ...   count = 0
+  >>> counter = Counter()
+
+  Now a simple executor that uses it:
+
+  >>> def do_stuff(t,counter):
+  ...     counter.count += 1
+  ...     t['item'].replace(counter.count)
+
+  Now we can see it in action:
+
+  >>> tx = Twiddler('<node id="item"/>',executor=do_stuff)
+  >>> print tx.render(counter)
+  <node id="item">1</node>
+
+  We can see that the executor is only used once by rendering the
+  Twiddler again and noting that the number has not been incremented:
+
+  >>> print tx.render(counter)
+  <node id="item">1</node>
+
+  If we re-instate the executor, the number will be incremented:
+
+  >>> tx.executor = do_stuff
+  >>> print tx.render(counter)
+  <node id="item">2</node>
+
+  This may at first seem counter-intuitive, but it's important to
+  remember that most executors will alter the Twiddler in such a way
+  that they will fail to run successfully a second time:
+
+  >>> def ebad(t): t['test'].replace('hello!',tag=False,id=False)
+  >>> tbad = Twiddler('<node id="test"/>',executor=ebad)
+  >>> print tbad.render()
+  hello!
+  >>> tbad.executor = ebad
+  >>> print tbad.render()
+  Traceback (most recent call last):
+  ...
+  KeyError:...
+
+  For this reason, always clone a Twiddler with an executor prior to
+  rendering it:
+  
+  >>> counter.count = 0
+  >>> src = '''
+  ... def do_stuff(t,counter):
+  ...     global count
+  ...     counter.count += 1
+  ...     t['item'].replace(counter.count,id=False)
+  ... '''
+  >>> tx = Twiddler('<node id="item"/>',executor=Source(src,name='do_stuff'))
+  >>> print tx.clone().render(counter)
+  <node>1</node>
+  >>> print tx.clone().render(counter)
+  <node>2</node>
+  >>> print tx.clone().render(counter)
+  <node>3</node>
+
+  Execute Method
+
+    In addition to the render method, Twiddlers also have an execute
+    method. This invokes any executor that is present without actually
+    rendering the Twiddler. The parameters to the execute method are
+    passed through to the executor in exactly the same way as for the
+    render method.
+
+    Here's an example using a copy of Twiddler from the contact
+    details example above:
+
+    >>> t3 = t.clone()
+    >>> t3.execute(person,'blue')
+    <twiddler.Twiddler instance at ...>
+
+    As you can see, a Twiddler instance is returned. This is either
+    the return value of the executor or, if there is no executor or
+    the executor does not return anything, it will be the Twiddler
+    instance on which execute was called.
+
+    We can now call the render method and we don't have to pass any
+    parameters as the code block has already been executed:
+
+    >>> print t3.render()
+    <html>
+      <body>
+      <table>
+        <tr>
+          <th>Name</th>
+          <td id="name" style="color:blue">Chris</td>
+        </tr>
+        <tr>
+          <th>Address</th>
+          <td id="address">7 Wysteria Lane</td>
+        </tr>
+        <tr>
+          <th>Telephone Number</th>
+          <td id="phone">1-800-CALLME</td>
+        </tr>
+      </table>
+      </body>
+    </html>
+
+    We can also call the execute method again and nothing will happen
+    this time, because the code block in the template has already been
+    executed:
+    
+    >>> t = t3.execute()
+    >>> print t.render()
+    <html>
+      <body>
+      <table>
+        <tr>
+          <th>Name</th>
+          <td id="name" style="color:blue">Chris</td>
+        </tr>
+        <tr>
+          <th>Address</th>
+          <td id="address">7 Wysteria Lane</td>
+        </tr>
+        <tr>
+          <th>Telephone Number</th>
+          <td id="phone">1-800-CALLME</td>
+        </tr>
+      </table>
+      </body>
+    </html>
+
+    The execute method is particular useful when rendering output from
+    a combination of a site template and an specific Twiddler.
+
+    For example, say we have a site template with a code block:
+
+    >>> template = Twiddler('''<html>
+    ... <!--twiddler
+    ... def substitute(t,title):
+    ...   t['title'].replace(title,id=False)
+    ...   r = t['menu_item'].repeater()
+    ...   r.repeat('item 1',name=False)
+    ...   r.repeat('item 2',name=False)
+    ...   r.repeat('item 3',name=False)
+    ... -->
+    ... <head><title id="title" /></head>
+    ... <body>
+    ... <div id="navigation">
+    ...   <ul>
+    ...     <li name="menu_item" />
+    ...   </ul>
+    ... </div>
+    ... <div id="body">
+    ... </div>
+    ... </body>
+    ... </html>''',input=DefaultWithCodeBlock)
+    
+    And now we have a particular page that renders itself:
+
+    >>> page = Twiddler('''<html>
+    ... <!--twiddler
+    ... def render(p,template):
+    ...   t = template.clone()
+    ...   t.execute(title='something')
+    ...   t['body'].replace(p['body'])
+    ...   return t
+    ... -->
+    ... <body>
+    ... <div id="body">
+    ... Our Body!
+    ... </div>
+    ... </body>
+    ... </html>''',input=DefaultWithCodeBlock)
+    
+    When the page is rendered, its executor is called, which in turn
+    clones and calls the execute method of the template, giving us the
+    following output:
+
+    >>> print page.render(template)
+    <html>
+    <head><title>something</title></head>
+    <body>
+    <div id="navigation">
+      <ul>
+        <li>item 1</li>
+      <li>item 2</li>
+      <li>item 3</li>
+      </ul>
+    </div>
+    <div id="body">
+    Our Body!
+    </div>
+    </body>
+    </html>
+
+  The setSource Method
+
+    Python frameworks which have persistent object stores, such as
+    Zope, often want to modify the source of an existing Twiddler. For
+    this reason, Twiddlers have a setSource method that parses the
+    supplied source with the Twiddler's input parser.
+
+    However, it's important to note that input parsers may return an
+    executor. If they do, the executor returned from parsing the new
+    source will replace any existing executor. If the input parser
+    does not return an executor, then any existing executor will be
+    left in place.
+
+    Here's an example, starting with a Twiddler that uses a code block:
+
+    >>> t = Twiddler('''<root><node id="test"/>
+    ... <!--twiddler
+    ... def substitute(t,text):
+    ...   t['test'].replace(text)
+    ... -->
+    ... </root>''',input=DefaultWithCodeBlock)
+
+    We can see the output if we render a copy:
+
+    >>> print t.clone().render('Some text')
+    <root><node id="test">Some text</node>
+    </root>
+   
+    We can also see the original has an executor:
+
+    >>> print t.executor
+    <twiddler.executor.source.Source instance at ...>
+
+    If we now change the input to be one which returns no executor and
+    then use the setSource method, we can see that the old executor
+    stays in place:
+
+    >>> from twiddler.input.plaintext import PlainText
+    >>> t.input = PlainText
+    >>> t.setSource('root:$test')
+    
+    Now, when we can render on a new copy, the old executor will
+    still get used:
+
+    >>> print t.clone().render('Some text')
+    root:Some text
+
+    However, inputs which can return an executor, like the default
+    code block input, will most likely make sure there is no executor
+    to avoid a change in source resulting in an old executor getting
+    used with new source in ways that result in errors.
+
+    We can see this by switching back to the default code block input
+    parser and then using the setSource method:
+
+    >>> t.input = DefaultWithCodeBlock
+    >>> t.setSource('<node id="test"/>')
+
+    There's now no executor:
+
+    >>> print t.executor
+    None
+
+    We can also render the Twiddler without passing in any parameters:
+
+    >>> print t.render()
+    <node id="test" />

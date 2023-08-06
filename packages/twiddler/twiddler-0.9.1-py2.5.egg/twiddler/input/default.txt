@@ -1,0 +1,313 @@
+The Default Input Parsers
+
+  This document describes the details of the two default input
+  parsers. You shouldn't need to read this document unless you run
+  into edge cases such as having to care about xml declarations and
+  document types.
+
+  For the examples, we will explicitly specify the input parser so
+  that we can be sure it's clear which parser is being used:
+
+  >>> from twiddler import Twiddler
+  >>> from twiddler.input.default import Default,DefaultWithCodeBlock
+
+  Unicode
+
+    The default parser parses source as XML. As such, source should
+    either include an XML declaration which specifies the character type:
+
+    >>> t = Twiddler("""<?xml version='1.0' encoding='latin-1'?>
+    ... <node>\x82</node>""",input=Default)
+    >>> t.render()
+    u"<?xml version='1.0' encoding='latin-1'?>\n<node>\x82</node>"
+
+    or it should be encoded in utf-8:
+
+    >>> t = Twiddler('<node>\xc2\x82</node>',input=Default)
+    >>> t.render()
+    u'<node>\x82</node>'
+
+    In other cases, such as encoding in latin-1 and not providing an
+    XML declaration, you will get a parser error:
+
+    >>> t = Twiddler("<node>\x82</node>",input=Default)
+    Traceback (most recent call last):
+    ...
+    ExpatError:...
+
+    You may also create a Twiddler from a unicode string, in which
+    case, no XML declaration is needed:
+
+    >>> t = Twiddler(u'<node>\x82</node>',input=Default)
+    >>> t.render()
+    u'<node>\x82</node>'
+
+  XML Namespaces
+
+    The default parsers are agnostic to XML namespaces and treats
+    namespaced tags and attributes the same way as any other tag or
+    attribute: 
+
+    >>> t = Twiddler('''<root xmlns:myns="http://www.example.com/myns">
+    ...   <myns:element myns:mytag="whatever"/>
+    ... </root>''',input=Default)
+    >>> print t.render()
+    <root xmlns:myns="http://www.example.com/myns">
+      <myns:element myns:mytag="whatever" />
+    </root>
+   
+    Of course, this means that if you don't define a namespace, you
+    may end up producing XML which causes problems down the line:
+
+    >>> t = Twiddler('''
+    ... <root>
+    ...   <element myns:mytag="whatever"/>
+    ... </root>
+    ... ''')
+    >>> from xml.parsers import expat
+    >>> parser = expat.ParserCreate(None,'}')
+    >>> parser.Parse(t.render())
+    Traceback (most recent call last):
+    ...
+    ExpatError:...
+
+  XML Entities
+
+    The default parser leaves undefined entities in place:
+
+    >>> t = Twiddler('<node>&nbsp;</node>')
+    >>> print t.render()
+    <node>&nbsp;</node>
+
+  Validity of XML
+
+    The default parser can handle empty text:
+
+    >>> t = Twiddler(' ')
+    >>> t.render()
+    u' '
+
+    But supplied text must be valid XML, rather than just valid HTML::
+
+    >>> t = Twiddler('<html><body><p>something</body></html>')
+    Traceback (most recent call last):
+    ...
+    ExpatError:...
+
+  Outside the Root Element
+
+    The default parser keeps content outside the root element:
+
+    >>> t = Twiddler('  <root />  ')
+    >>> t.render()
+    u'  <root />  '
+
+    But, because it uses an XML parser, you may get errors if your
+    source isn't valid XML:
+
+    >>> t = Twiddler('X  <root />  Y')
+    Traceback (most recent call last):
+    ...
+    ExpatError:...
+
+  XML Declarations and Document Types
+
+    The optional xml declaration and doctype are handled by the
+    default parser and are turned into special elements:
+
+    >>> t = Twiddler('''<?xml version='1.0' encoding='utf-8'?>
+    ... <!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Strict//EN' 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd'>
+    ... <html>
+    ...   <head />
+    ...   <body />
+    ... </html>''')
+    >>> print t.render()
+    <?xml version='1.0' encoding='utf-8'?>
+    <!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Strict//EN' 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd'>
+    <html>
+      <head />
+      <body />
+    </html>
+
+    If you wish to set the xml declaration or doctype to something
+    else, you may do so as follows:
+
+    >>> t['_etp_xmldecl'].replace('Something')
+    >>> t['_etp_doctype'].replace('Something Else')
+    >>> print t.render()
+    Something
+    Something Else
+    <html>
+      <head />
+      <body />
+    </html>
+
+    You can even remove them completely:
+
+    >>> t['_etp_xmldecl'].remove()
+    >>> t['_etp_doctype'].remove()
+    >>> print t.render()
+    <html>
+      <head />
+      <body />
+    </html>
+
+  Code Blocks with the Default Parsers
+
+    The default parser will treat a code block exactly as any other
+    comment:
+
+    >>> t = Twiddler('''<html>
+    ... <!--twiddler 
+    ... def myfunc(t):
+    ...   e = t['row'].repeater()
+    ...   for i in range(3):
+    ...     c = e.repeat()
+    ...     c['number'].replace(str(i),name=False)
+    ... -->
+    ...   <body>
+    ...   <div name="row">This is row <i name="number">1</i></div>
+    ...   </body>
+    ... </html>''',input=Default)
+    >>> t = t.execute()
+    >>> print t.render()
+    <html>
+    <!--twiddler 
+    def myfunc(t):
+      e = t['row'].repeater()
+      for i in range(3):
+        c = e.repeat()
+        c['number'].replace(str(i),name=False)
+    -->
+      <body>
+      <div name="row">This is row <i name="number">1</i></div>
+      </body>
+    </html>
+
+    This is so that, by default, executable code which may have come
+    from an untrusted source will not be executed. If you have made
+    sure the source code has been sanitised, then a variant of the
+    default parser can be used:
+
+    >>> t = Twiddler('''
+    ... <!--twiddler 
+    ... def myfunc(t):
+    ...   e = t['row'].repeater()
+    ...   for i in range(3):
+    ...     c = e.repeat()
+    ...     c['number'].replace(str(i),name=False)
+    ... -->
+    ... <html>
+    ...   <body>
+    ...   <div name="row">This is row <i name="number">1</i></div>
+    ...   </body>
+    ... </html>''',input=DefaultWithCodeBlock)
+    >>> print t.render()
+    <BLANKLINE>
+    <html>
+      <body>
+      <div name="row">This is row <i>0</i></div>
+      <div name="row">This is row <i>1</i></div>
+      <div name="row">This is row <i>2</i></div>
+      </body>
+    </html>
+
+    It should be noted that if more than one function is defined in a
+    code block, you will get errors:
+
+    >>> t = Twiddler('''
+    ... <!--twiddler 
+    ... 
+    ... def myfunc(t):
+    ...   e = t['row'].repeater()
+    ...   for i in range(3):
+    ...     c = e.repeat()
+    ...     c['number'].replace(str(i),name=False)
+    ... 
+    ... def anotherfunc(t):
+    ...   t['row'].remove()
+    ... 
+    ... -->
+    ... <html>
+    ...   <body>
+    ...   <div name="row">This is row <i name="number">1</i></div>
+    ...   </body>
+    ... </html>
+    ... ''',input=DefaultWithCodeBlock)
+    Traceback (most recent call last):
+    ...
+    SyntaxError:...
+
+    Also, no variable should be defined outside the function, or you
+    may get errors:
+
+    >>> t = Twiddler('''
+    ... <!--twiddler 
+    ... text = 'mytext'
+    ... def myfunc(t):
+    ...   e = t['row'].repeater()
+    ...   for i in range(3):
+    ...     c = e.repeat()
+    ...     c['number'].replace(text,name=False)
+    ... -->
+    ... <html>
+    ...   <body>
+    ...   <div name="row">This is row <i name="number">1</i></div>
+    ...   </body>
+    ... </html>
+    ... ''',input=DefaultWithCodeBlock)
+    Traceback (most recent call last):
+    ...
+    SyntaxError:...
+
+    It should be noted that the default code block parser will
+    explicity replace any existing executor on the twiddler. If the
+    default code block parser is used but no code block is present in
+    the source, any existing executor will be removed. This is to
+    avoid a mismatch between the source of the Twiddler and the
+    Twiddler's executor which would likely result in errors during
+    output rendering.
+
+    This example should make this clear:
+    
+    >>> t = Twiddler('''
+    ... <!--twiddler 
+    ... def myfunc(t):
+    ...   t['body'].replace('testing')
+    ... -->
+    ... <html><body id="body"></body></html>''',
+    ...              input=DefaultWithCodeBlock)
+
+    >>> print t.executor
+    <twiddler.executor.source.Source instance at ...>
+
+    >>> t.setSource('<html><body id="body"></body></html>')
+    >>> print t.executor
+    None
+
+  Whitespace and Repeating
+
+    The default parser will create nodes such that when repeating an
+    element, whitespace including newlines that follows the end of the
+    element will also be repeated. We've seen this already but the
+    following will demonsrate this better:
+
+    >>> t = Twiddler('''<html>
+    ...   <body>
+    ...    <div name="row">A row</div>
+    ...    Some text after the rows.
+    ...   </body>
+    ... </html>''')
+    >>> n = t['row'].repeater()
+    >>> r1 = n.repeat('Row 1')
+    >>> r2 = n.repeat('Row 2')
+    >>> r3 = n.repeat('Row 3')
+    >>> print t.render()
+    <html>
+      <body>
+       <div name="row">Row 1</div>
+       <div name="row">Row 2</div>
+       <div name="row">Row 3</div>
+       Some text after the rows.
+      </body>
+    </html>
