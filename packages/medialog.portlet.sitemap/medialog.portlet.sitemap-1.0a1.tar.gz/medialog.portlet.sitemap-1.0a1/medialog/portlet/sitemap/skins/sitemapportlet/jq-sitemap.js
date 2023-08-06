@@ -1,0 +1,1 @@
+jq(document).ready(function(){jq('.sitemap').accordion({     event: 'click',     animated: 'slide',    autoHeight: false });});
