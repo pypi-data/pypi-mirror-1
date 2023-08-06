@@ -1,0 +1,170 @@
+
+\chapter{Introducing Pyomo}
+
+\section{Pyomo Overview}
+\label{sec:pyomo}
+
+Pyomo can be used to define abstract problems, create concrete problem
+instances, and solve these instances with standard solvers.  Pyomo can
+generate problem instances and apply optimization solvers with a fully
+expressive programming language.  Python's clean syntax allows Pyomo
+to express mathematical concepts with a reasonably intuitive syntax.
+Further, Pyomo can be used within an interactive Python shell, thereby
+allowing a user to interactively interrogate Pyomo-based models.  Thus,
+Pyomo has many of the advantages of both AML interfaces and modeling
+libraries.
+
+\subsection{A Simple Example}
+\label{sec:example}
+
+In this section we illustrate Pyomo's syntax and capabilities by
+demonstrating how a simple AMPL example can be replicated with Pyomo Python
+code.  Consider the AMPL model, {\tt prod.mod}:
+\begin{lstlisting}
+set P;
+
+param a {j in P};
+param b;
+param c {j in P};
+param u {j in P};
+
+var X {j in P};
+
+maximize Total_Profit: sum {j in P} c[j] * X[j];
+
+subject to Time: sum {j in P} (1/a[j]) * X[j] <= b;
+
+subject to Limit {j in P}: 0 <= X[j] <= u[j];
+\end{lstlisting}
+
+To translate this into Pyomo, the user must first import the Pyomo
+module and create a Pyomo {\bf Model} object:
+\begin{lstlisting}
+# Imports
+from coopr.pyomo import *
+
+# Create the model object
+model = Model()
+\end{lstlisting}
+This import assumes that Pyomo is available on the users's Python path (see Python documentation for further details about the PYTHONPATH environment variable).  Next, we create the sets and parameters that correspond to the data used in the AMPL model.  This can be done very intuitively using the {\bf Set} and {\bf Param} classes.
+\begin{lstlisting}
+# Sets
+model.P = Set()
+
+# Parameters
+model.a = Param(model.P)
+model.b = Param()
+model.c = Param(model.P)
+model.u = Param(model.P)
+\end{lstlisting}
+Note that parameter $b$ is a scalar, while parameters $a$, $c$ and $u$ are arrays indexed by the set $P$.
+
+Next, we define the decision variables in this model.
+\begin{lstlisting}
+# Variables
+model.X = Var(model.P)
+\end{lstlisting}
+Decision variables and model parameters are used to define the objectives and constraints in the model.  Parameters define constants and the variables are the values that are optimized.  Parameter values are typically defined by a data file that is processed by Pyomo.
+
+Objectives and constraints are explicitly defined expressions in Pyomo.  The {\bf Objective} and {\bf Constraint} classes require a {\bf rule} option that specifies how these expressions are constructed.  This is a function that takes one or more arguments:  the first arguments are indices into a set that defines the set of objectives or constraints that are being defined, and the last argument is the model that is used to define the expression.
+\begin{lstlisting}
+# Objective
+def Objective_rule(model):
+    return sum([model.c[j]*model.X[j] for j in model.P])
+model.Total_Profit = Objective(rule=Objective_rule, sense=maximize)
+
+# Time Constraint
+def Time_rule(model):
+    return summation(model.X, denom=model.a) < model.b
+model.Time = Constraint(rule=Time_rule)
+
+# Limit Constraint
+def Limit_rule(j, model):
+    return (0, model.X[j], model.u[j])
+model.Limit = Constraint(model.P, rule=Limit_rule)
+\end{lstlisting}
+The rules used to construct these objects use standard Python functions. The {\bf Objective\_rule} function returns an algebraic expression that defines the objective;  this expression is generated using Python's list comprehension syntax, which is used to create a list of terms that are added together with the {\bf sum()} function.  The {\bf Time\_rule} function returns a $<$ expression that  defines an upper bound on the constraint body.  The constraint body is created with Python's {\bf summation()} function; in this example the summation is $\sum_i X_i/a_i$.  The {\bf Limit\_rule} function illustrates another convention that is supported by Pyomo; a rule can return a tuple that defines the lower bound, body and upper bound for a constraint.  The value 'None' can be returned for one of the limit values if a bound is not enforced.
+
+Once an abstract model has been created, it can be printed as follows:
+\begin{lstlisting}
+model.pprint()
+\end{lstlisting}
+This summarize the information in the Pyomo model, but it does not print out explicit expressions.  This is due to the fact that an abstract model needs to be instanted with data to generate the model objectives and constraints:
+\begin{lstlisting}
+instance = model.create("prod.dat")
+instance.pprint()
+\end{lstlisting}
+
+Once a model instance has been constructed, an optimizer can be applied to it to find an optimal solution.  For example, the PICO integer programming solver can be used within Pyomo as follows:
+\begin{lstlisting}
+opt = solvers.SolverFactory("pico")
+opt.keepFiles=True
+results = opt.solve(instance)
+\end{lstlisting}
+This creates an optimizer object for the PICO executable, and it indicates that temporary files should be kept.  The Pyomo model instance is optimized, and the optimizer returns an object that contains the solutions generated during optimization.
+
+
+\subsection{Putting It All Together}
+
+\newpage
+\section{A Complete Pyomo Example}
+\label{sec:simple}
+
+\begin{lstlisting}
+# Imports
+from coopr.pyomo import *
+
+# Create the model object
+model = Model()
+
+# Sets
+model.P = Set()
+
+# Parameters
+model.a = Param(model.P)
+model.b = Param()
+model.c = Param(model.P)
+model.u = Param(model.P)
+
+# Variables
+model.X = Var(model.P)
+
+# Objective
+def Objective_rule(model):
+    return sum([model.c[j]*model.X[j] for j in model.P])
+model.Total_Profit = Objective(rule=Objective_rule, sense=maximize)
+
+# Time Constraint
+def Time_rule(model):
+    return summation(model.X, denom=model.a) < model.b
+model.Time = Constraint(rule=Time_rule)
+
+# Limit Constraint
+def Limit_rule(j, model):
+    return (0, model.X[j], model.u[j])
+model.Limit = Constraint(model.P, rule=Limit_rule)
+\end{lstlisting}
+
+
+
+\subsection{Pyomo Commandline Script}
+\label{sec:script}
+
+Appendix~\ref{sec:simple} provides a complete Python script for the model described in the previous section.  Although this Python script can be executed directly, Coopr includes a {\tt pyomo} script that can construct this model, apply an optimizer and summarize the results.  For example, the following
+command line executes Pyomo using a data file in a format consistent with AMPL:
+\begin{lstlisting}
+  pyomo prod.py prod.dat
+\end{lstlisting}
+This script executes the following steps:
+\begin{itemize}
+\item create abstract model
+\item read data
+\item generate instance
+\item presolve
+\item apply solver
+\item load results into instance
+\end{itemize}
+The {\tt pyomo} script has a variety of command line options to provide information about the optimization process.  Options can control how debugging information is printed, including logging information generated by the optimizer and a summary of the model generated by Pyomo.  Further, Pyomo can be configured to keep all intermediate files used during optimization, which can support debugging of the model construction process.
+
+
+
