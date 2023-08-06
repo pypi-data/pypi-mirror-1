@@ -1,0 +1,1 @@
+Code repository: http://svn.plone.org/svn/collective/PASPlugins/collective.salesforce.authplugin/
