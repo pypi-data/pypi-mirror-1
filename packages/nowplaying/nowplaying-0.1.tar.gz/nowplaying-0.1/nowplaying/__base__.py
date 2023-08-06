@@ -1,0 +1,61 @@
+#	
+#	Copyright 2009 Amr Hassan <amr.hassan@gmail.com>
+#	
+#	This program is free software; you can redistribute it and/or modify
+#	it under the terms of the GNU General Public License as published by
+#	the Free Software Foundation; either version 2 of the License, or
+#	(at your option) any later version.
+#	
+#	This program is distributed in the hope that it will be useful,
+#	but WITHOUT ANY WARRANTY; without even the implied warranty of
+#	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#	GNU General Public License for more details.
+#	
+#	You should have received a copy of the GNU General Public License
+#	along with this program; if not, write to the Free Software
+#	Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+#	MA 02110-1301, USA.
+
+import dbus
+
+class PlayerBase(object):
+	"""A base for player objects"""
+	
+	def __init__(self, name, dbus_name):
+		self.name = name
+		self.dbus_name = dbus_name
+		
+		self.bus = dbus.SessionBus()
+	
+	def _get_dbus_object(self, path):
+		return self.bus.get_object(self.dbus_name, path)
+		
+	def __repr__(self):
+		return self.get_name()
+	
+	def get_track(self):
+		return NotImplemented
+	
+	def get_name(self):
+		return self.name
+	
+	def is_running(self):
+		return self.dbus_name in self.bus.list_activatable_names()
+	
+	def is_playing(self):
+		return NotImplemented
+	
+	def play_payse(self):
+		pass
+	
+	def next(self):
+		pass
+	
+	def previous(self):
+		pass
+	
+	def get_volume(self):
+		return NotImplemented
+	
+	def set_volume(self, value):
+		pass
