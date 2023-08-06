@@ -1,0 +1,194 @@
+#!python
+
+"""Produce an X-Y plot from a text file of numbers in columns.
+You can plot multiple curves in the same graph.
+Curves can share a common x-axis, or each can have its own x-axis.
+Each X or Y can be any column from a file.
+Usage: g_multiplot [flags]
+Examples:
+g_multiplot -f datafile -xyw 0 1 2
+	To plot column 1 against column 0, with widths taken from column 2.
+
+Note that a dash ("-") can be used for one filename to read data from
+the standard input.
+Note: GNU purists may use --xc and --yc interchangeably with -x and -y,
+similarly for all other multicharacter flags.
+Note: specifying "-1", "t", or "i" for either the x or y column gives
+you the sequence of integers, 0, 1, 2, ... .  That way you can plot
+against time.
+
+Other flags:
+-xl label     set the x-label
+-yl label     set the y-label
+-t title   or  -title title    set the graph title
+-xr min max     set the range of the x-axis.
+-yr min max     set the range of the y-axis.
+-c name or -color name    set the color of the current dataset.
+	You can specify a color as a comma-separated triple of integers:
+	"45,11,255" (in the range [0,256) ), or color names,
+	or just *anything*, which will be hashed and converted to a random
+	color.  Takes effect on the next -y or -yc command.
+-l  Draw with a line.  Takes effect on the next -y or -yc command.
+-L description
+    Draw with a dashed line.  Takes effect on the next -y or -yc command.
+    "description" can be "period,onfrac", where "period" is
+    the periodicity of the line, and  "onfrac" is a percentage
+    of the line that is drawn.   -L 0.1,0.1 is dotted.
+    -L 0.1,0.5 is a normal dash.   -L 0.1,0.7 is a long dash.
+    -L solid -L dashed -L broken -L dotted also work.
+    Any other argument leads to a random choice of period,onfrac.
+-w  Set linewidth (and also size of symbols).
+-p  Draw with isolated points (default).
+	Takes effect on the next -y or -yc command.
+-P name  Draw with a named symbol.
+	Legal names are "circle", "square", "triangle", "utriangle".
+	Takes effect on the next -y or -yc command.
+Note: you may intersperse -l, -L, -p and -P among the
+-x, -xc, -f, -y, -yc commands to make some graphs lines
+and others points, and yet others different colors.
+
+-fmt set the output plot format (PS, PDF, SVG)
+	and maybe (TK, WX) to display on the screen.
+-o file   to set the output file (or window name).
+"""
+
+import sys
+import graphite
+from graphite import *
+from graphite.forbin import *
+from graphite import die
+try:
+	import TableIO
+except ImportError:
+	TableIO = None
+
+from graphite import Num
+
+
+def _SymbolStyleFactory(index, styleinfo, widthdata):
+	color = styleinfo['color']
+	return SymbolStyle(size=widthdata[index]*4*styleinfo.get('widthfac', 1.0),
+				fillColor=color,
+				edgeColor=color)
+
+def _LineStyleFactory((i0,i1), styleinfo, widthdata):
+	color = styleinfo['color']
+	kind = styleinfo.get('linekind', SOLID)
+	w = math.sqrt(widthdata[i0]*widthdata[i1])*styleinfo.get('widthfac', 1.0)
+	ls = LineStyle(width=w, kind=kind, color = color)
+	if kind == DASHED:
+		ls.period = styleinfo.get('period', 5)
+		ls.onfrac = styleinfo.get('onfrac', 0.5)
+	return ls
+
+
+
+def _fmt(styleinfo, widthdata):
+	if styleinfo['useline']:
+		ls = DeferredProperty(_LineStyleFactory, LineStyle,
+					styleinfo.copy(), widthdata)
+	else:
+		ls = None
+	if styleinfo['usepoint']:
+		ss = DeferredProperty(_SymbolStyleFactory, SymbolStyle,
+					styleinfo.copy(), widthdata)
+		sym = Symbol.G(styleinfo.get('symbol', 'circle'))
+	else:
+		ss = None
+		sym = None
+	return PointPlot(lineStyle = ls, symbolStyle = ss, symbol = sym)
+
+
+
+
+if __name__ == '__main__':
+	try:
+		import psyco
+		psyco.full()
+	except ImportError:
+		pass
+
+	arglist = sys.argv[1:]
+	data = []
+	formats = []
+	media = 'PS'
+	d = None
+	canvas = 'plot'
+	styleinfo = {'color': graphite.getcolor("green"),
+			'linekind': SOLID,
+			'size': 1,
+			'usepoint': 1,
+			'useline': 0
+			}
+	g = Graph()
+	g.axes[X].tickMarks[0].labels = AUTO
+	g.axes[Y].tickMarks[0].labels = AUTO
+	while len(arglist)>0 and len(arglist[0])>0 and arglist[0][0]=='-':
+		arg = arglist.pop(0)
+		if arg == '-f':
+			d = read(arglist.pop(0))
+		elif arg == '-xyw':
+			xc = arglist.pop(0)
+			yc = arglist.pop(0)
+			wc = arglist.pop(0)
+			data.append( (d.column(xc), d.column(yc)) )
+			formats.append(_fmt(styleinfo, d.column(wc)))
+		elif arg == '-c' or arg=='-color' or arg=='--color':
+			styleinfo['color'] = getcolor(arglist.pop(0))
+		elif arg == '-o':
+			canvas = arglist.pop(0)
+		elif arg == '-title' or arg=='-t' or arg=='--title':
+			g.title.text = arglist.pop(0)
+		elif arg == '-xl' or arg=='--xl':
+			g.axes[X].label.text = arglist.pop(0)
+		elif arg == '-yl' or arg=='--yl':
+			g.axes[Y].label.text = arglist.pop(0)
+		elif arg == '-yr' or arg=='--yr':
+			a = float(arglist.pop(0))
+			b = float(arglist.pop(0))
+			g.axes[Y].range = (a, b)
+		elif arg == '-xr' or arg=='--yr':
+			a = float(arglist.pop(0))
+			b = float(arglist.pop(0))
+			g.axes[X].range = (a, b)
+		elif arg == '-p':
+			styleinfo['usepoint'] = 1
+			styleinfo['useline'] = 0
+		elif arg == '-P':
+			styleinfo['usepoint'] = 1
+			styleinfo['useline'] = 0
+			styleinfo['symbol'] = arglist.pop(0)
+		elif arg == '-fmt' or arg=='--fmt':
+			media = arglist.pop(0)
+		elif arg == '-l':
+			styleinfo['usepoint'] = 0
+			styleinfo['linekind'] = SOLID
+			styleinfo['useline'] = 1
+		elif arg == '-L':
+			styleinfo['usepoint'] = 0
+			styleinfo['useline'] = 1
+			styleinfo['linekind'] = DASHED
+			styleinfo.update( getline(arglist.pop(0)) )
+		elif arg == '-w':
+			styleinfo['widthfac'] = float(arglist.pop(0))
+		elif arg == '--':
+			break
+		else:
+			print "ERR: %s: Unrecognized flag: %s." % (sys.argv[0], arg)
+			sys.exit(1)
+	if len(arglist) != 0:
+		print "ERR: %s: unused arguments starting with '%s'" % (sys.argv[0], arglist[0])
+		print __doc__
+		sys.exit(1)
+
+	if len(data) == 0:
+		print "ERR: %s: No data." % sys.argv[0]
+		print __doc__
+		sys.exit(1)
+
+
+	g.datasets = [ Dataset(Num.transpose(d)) for d in data ]
+	assert len(formats) == len(data)
+	g.formats = formats
+
+	genOutput(g, media, canvasname=canvas)
