@@ -1,0 +1,142 @@
+YABT (Yet another braille translator)
+---------------------------------------
+
+This is the documents showing how YABT can be used. This document will give examples, which can also be run as doctests. 
+As this has been written so that it can be used as doctests, sometimes there is extra code which can be run to confirm 
+that things have been successful, obviously this code to check things isn't needed in applications.
+
+The first thing to do is import YABT
+
+>>> import YABT
+
+Once YABT is imported you can start creating braille translators. This is done by creating instances of Translator.
+
+>>> brl = YABT.Translator()
+
+This can be confirmed by the following.
+
+>>> brl.__class__.__name__
+'Translator'
+
+Now we have a translator object, we will need to load a config file. For this we use the loadConfigFile method. This 
+method takes one argument, a valid file name.
+
+>>> brl.loadConfigFile('tests/test_data/britishtobrl.xml')
+
+If things have been successful then we should have some groups. 
+
+>>> brl.getNumOfGroups() > 0
+True
+
+If we pass in a unknown file, we will get a IOError raised.
+
+>>> YABT.Translator().loadConfigFile('invalidTransTable')
+Traceback (most recent call last):
+...
+IOError: [Errno 2] No such file or directory: 'invalidTransTable'
+
+If a file name of a file which is not a valid YABT XML translation table is passed in, then a 
+InvalidTranslationTableException is raised.
+
+>>> YABT.Translator().loadConfigFile('tests/test_data/nonxml.trans')
+Traceback (most recent call last):
+...
+InvalidTranslationTableException: 'The file does not seem to be valid XML'
+
+Once a translation table is loaded, you may now start translating. This is done using the translateText method. In its 
+simplest form, all you need to do is call it passing in the text you wish to translate and the state which is an 
+integer. For the britishtobrl.xml table we loaded earlier, state 2 is grade2.
+
+>>> brl.translateText('hello world', 2)
+u'HELLO _W'
+
+To protect you against sending in invalid state values, there is a getStates method which returns a list of the states.
+
+>>> brl.getStates()
+[1, 2, 3, 4, 5, 6]
+
+Even if you don't make use of that information and pass in an invalid state value still, then the translateText method 
+will raise an InvalidStateException.
+
+>>> brl.translateText('hello world', -1)
+Traceback (most recent call last):
+...
+InvalidStateException: 'State not defined'
+
+Another way that the translateText method can be called is to specify the context of the text you are translating. This 
+can be useful as some rules depend on the context. The context parameters are the next ones to be defined, and are in 
+the order of before context first and after context second. You typically will use this by specifying both, so you would 
+not need to give the parameter names.
+
+>>> brl.translateText("behave", 2, " ", " ")
+u'2HAVE'
+>>> brl.translateText('behave', 2, 'j', 'k')
+u'BEHAVE'
+
+It should be possible to give any of those string parameters as unicode, as YABT can cope with unicode.
+
+>>> brl.translateText(u'behave', 2, u' ', u' ')
+u'2HAVE'
+
+The remaining parameters are to do with if YABT should break the text into smaller chunks for translation. The use of 
+this feature may improve performance on long pieces of text, but must be done correctly if YABT's translation is to be 
+correct. The fifth parameter is a boolean indicating whether this feature should be used, and the sixth is to do with 
+character should be used to define the splits in the text. Set the fifth parameter to True to use it, or False to not 
+use it. The default value for the sixth parameter is the form feed character, but you may wish to change this but if you 
+do then you should choose this wisely. The reason for having to be careful when selecting the character for where YABT 
+splits the text is that it will not be able to make any contraction span this join. An example of this problem is:
+
+>>> brl.translateText("of the", 2, " ", " ", True, " ")
+u'( !'
+
+Whereas if we don't use the feature:
+
+>>> brl.translateText("of the", 2, " ", " ", False, ' ')
+u'(!'
+
+Also seen in that last example, the value of the sixth parameter does not matter when the fifth is set to False.
+
+Depending on the table being used, it may be possible to insert commands to switch states. The britishtobrl.xml file 
+does support this, and we can switch from grade2 and 1 by using the $g1 command. NOTE: there is currently no standard 
+for this as states may mean different things for different tables eg. YABT could be used for making speech suitable 
+output and in that case there wouldn't be a grade2, but there may be states for no punctuation, abbreviations, etc.
+
+>>> brl.translateText("The following is grade1 $g1some grade 1 text", 2)
+u'! FOLL[+ IS GRADE#A SOME GRADE #A TEXT'
+
+We could test that the grade changed if we weren't convinced by the translation by looking at the state.
+
+>>> brl.state
+1
+
+In cases where the translation table doesn't know about a character, the default is for YABT to just insert the 
+character.
+
+>>> brl.translateText(u'hello world \u2233', 2)
+u'HELLO _W \u2233'
+
+For those who wish to customise this can do so by overriding the noGroupHandler method. NOTE: this would normally be 
+recommended to be done by subclassing, but we won't here.
+
+>>> brl.noGroupHandler = lambda t, p: u' '
+>>> brl.translateText(u'hello world \u2233', 2)
+u'HELLO _W  '
+
+There is a similar system for the situation in which the table defines rules for a character but a situation where the 
+character appears and no rule can apply. The default is to insert the character.
+
+>>> brl.translateText('$hello', 5)
+u'$HELLO'
+
+We customise the behaviour by overriding the noRuleHandler method.
+
+>>> brl.noRuleHandler = lambda t, p: u' '
+>>> brl.translateText(u'$hello', 5)
+u' HELLO'
+
+The form that both the noGroupHandler and noRuleHandler take is two parameters, translateString (the string being 
+translated) and position (integer showing where in the translateString translation is). The return type must be unicode.
+
+This covers the main features and the expected usage of YABT, there may be additional information for specific cases, in 
+which case it may be found in documents in tests/bugs/ when it came from a bug report, or other documents in tests/docs/ 
+if it was originally in the design but felt to be too internal and specific to include in the main documentation.
