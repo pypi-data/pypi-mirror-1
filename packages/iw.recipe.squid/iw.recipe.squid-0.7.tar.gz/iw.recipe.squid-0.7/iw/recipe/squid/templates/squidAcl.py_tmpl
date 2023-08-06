@@ -1,0 +1,125 @@
+#!%(executable)s -Ou
+"""
+**********************************************************************/
+ squidAcl.py -- a script for squid external acls
+ (a long-running process that uses unbuffered io; hence the -u flag in python)
+
+in squid.conf add:
+
+external_acl_type is_cacheable_type %%{Cookie:__ac} %%{Cookie:;__ac} %%{Authorization} %%{If-None-Match} $(squid_config_dir)s/squidAcl.py
+acl is_cacheable external is_cacheable_type
+no_cache allow is_cacheable
+no_cache deny all
+
+# for debugging, set the ttl and negative_ttl to very small values (0 or 1 second)
+external_acl_type is_non_cacheable_type -ttl=0 -negative_ttl=0 %%{Cookie:__ac} %%{Cookie:;__ac} %%{Authorization} %%{If-None-Match} $(squid_config_dir)s/squidAcl.py
+
+"""
+import sys, traceback
+
+# set to 1 to enable logging
+debug = %(debug_squid_acl)s
+
+# the logfile for the redirector log (only used when debug is 1)
+logfile = "%(squid_log_dir)s/squid_acl.log"
+
+# Globally bound for speedier lookup. Run timing.py to see why.
+stdin_readline = sys.stdin.readline
+stdout_write = sys.stdout.write
+stdout_flush = sys.stdout.flush
+
+class SquidAcl:
+    """ SquidAcl main base class.
+    """
+
+    def __init__(self):
+        pass
+
+    def check_acl(self,line):
+        # run single threaded
+        check_acl(line)
+
+    def run(self):
+        # wait for stdin input
+        line = stdin_readline()[:-1]
+        try:
+            while line:
+                # launch acl function
+                self.check_acl(line)
+                # read new line
+                line = stdin_readline()[:-1]
+        except:
+            exc = sys.exc_info()
+            log(str(traceback.format_exception(exc[0],exc[1],exc[2])))
+            del exc
+            # NOTE: raising the exception aborts this external_acl process
+            #       when no external_acl is left squid exits as well
+            raise
+
+def log(s):
+    """ Logging facility.
+    """
+    try:
+        f = open(logfile, "a")
+    except IOError:
+        print sys.stderr, s
+        return
+    f.write("%%s\n" %% s)
+    f.flush()
+    f.close()
+
+def check_acl(line):
+    """ Check to see if the line from squid matches our acl
+    """
+
+    if debug:
+        log("acl info : " + line)
+
+    # We should not cache items if (a) the user is authenticated, or
+    # (b) the user is doing a conditional GET with an If-None-Match.
+    # With stock Plone, authentication means either that the
+    # Authentication header is set (login using HTTP BASIC
+    # authentication in the ZMI) or that there is a value for the __ac
+    # cookie in the Cookie header.  A conditional GET is done with the
+    # If-None-Match header.  If any of these 3 things happen, do not
+    # cache in squid.
+    #
+    #
+    # In squid.conf we configure an external acl (is_cacheable_type)
+    # to pass us 4 items:
+    #
+    # 1) %%{Cookie:__ac}: the value of the __ac cookie (assumes the
+    # cookie header is delimited with ,
+    #
+    # 2) %%{Cookie:;__ac}: the value of the __ac cookie (assumes the
+    # cookie header is delimited with ;
+    #
+    # 3) %%{Authentication}: the value of the Authentication header
+    #
+    # 4) %%{If-None-Match}: the value of the If-None-Match header
+    #
+    # Each of these items will either be "-" if the header/cookie is
+    # not set or the value of the cookie / header if set.
+    #
+    # A request belongs to the is_cacheable acl if all 4 of the above
+    # values are -.
+
+    if line == '- - - -':
+        response = 'OK'  # OK to cache
+    else:
+        response = 'ERR' # do not cache
+
+    # write it back to squid
+    stdout_write('%%s\n' %% response)
+    stdout_flush()
+
+    if debug:
+        log("response: " + response)
+
+if __name__ == "__main__":
+    sr = SquidAcl()
+    if debug:
+        log('Starting SquidAcl')
+    sr.run()
+    if debug:
+        log('Stopped SquidAcl')
