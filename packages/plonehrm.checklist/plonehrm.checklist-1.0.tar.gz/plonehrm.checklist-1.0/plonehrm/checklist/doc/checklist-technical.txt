@@ -1,0 +1,334 @@
+Technical Details for Checklist
+===============================
+
+plonehrm.checklist expects to be run as a Zope2 add-on product with
+a corresponding product initalize function.  But before we can confirm
+this is working, we need some mock objects.
+
+    >>> class MockContext(object):
+    ...     classes = []
+    ...     def registerClass(self, *args, **kwargs):
+    ...         self.classes.append((args, kwargs))
+
+    >>> from plonehrm import checklist
+    >>> appcontext = MockContext()
+    >>> checklist.initialize(appcontext)
+    >>> len(appcontext.classes)
+    1
+    >>> appcontext.classes[0][1]['meta_type']
+    'plonehrm.checklist Content'
+
+Content
+=======
+
+Checklist Tool
+--------------
+
+We start out by instantiating a tool.
+
+    >>> from plonehrm.checklist.content import tool
+    >>> checklisttool = tool.ChecklistTool()
+
+The tool should never show up so at_post_edit_script should remove it
+from the catalog.
+
+    >>> checklisttool.at_post_edit_script()
+
+The real responsibility for this tool is for adding items.  But before
+this will work we need to immitate AQ retrieval of a catalog.
+
+    >>> another = tool.ChecklistTool()
+    >>> another.getObject = lambda: another
+    >>> def query(*args, **kwargs):
+    ...     return [another]
+    >>> checklisttool.portal_catalog = query
+
+Adding manager items is straight forward.
+
+    >>> checklisttool.addManagerItem('testtoolitem1', True)
+    >>> checklisttool.getDefaultItems()
+    ()
+    >>> checklisttool.getDefaultManagerItems()
+    ('testtoolitem1',)
+
+Of course adding the same item again won't duplicate things.
+
+    >>> checklisttool.addManagerItem('testtoolitem1', True)
+    >>> checklisttool.getDefaultItems()
+    ()
+    >>> checklisttool.getDefaultManagerItems()
+    ('testtoolitem1',)
+
+And the same for adding regular items.
+
+    >>> checklisttool.addItem('testtoolitem2', True)
+    >>> checklisttool.getDefaultItems()
+    ('testtoolitem2',)
+    >>> checklisttool.getDefaultManagerItems()
+    ('testtoolitem1',)
+
+Checklist
+---------
+
+And then there's the checklist content type.  It's expected
+in an Archetypes environment that initializeArchetype() will be called.
+Of course initializeArchetype expects that there has been a tool
+initialized.
+
+    >>> from plonehrm.checklist.content.checklist import Checklist
+    >>> obj = Checklist('no_id')
+    >>> obj.portal_checklist = tool.ChecklistTool()
+    >>> obj.initializeArchetype()
+
+Of course at first it will have no remaining items.
+
+    >>> obj.remainingItems()
+    ()
+    >>> obj.remainingManagerItems()
+    ()
+
+So we start by adding a new item.
+
+    >>> obj.addItem('testitem1')
+    >>> obj.getAllItems()
+    ('testitem1',)
+
+Of course adding the same item won't enter duplicates.
+
+    >>> obj.addItem('testitem1')
+    >>> obj.getAllItems()
+    ('testitem1',)
+
+And then we add manager items.
+
+    >>> obj.addManagerItem('testmanageritem1')
+    >>> obj.getAllManagerItems()
+    ('testmanageritem1',)
+
+And once more we see we don't get duplicates.
+
+    >>> obj.addManagerItem('testmanageritem1')
+    >>> obj.getAllManagerItems()
+    ('testmanageritem1',)
+
+Browser Views
+=============
+
+There are various views for accessing the content functionality.
+
+Checklist Tool View
+-------------------
+
+We start by ensuring our form_action produces an accurate url.  But before
+we can do that we need to setup a mock context that knows about absolute_url().
+
+    >>> from plonehrm.checklist.browser import checklist
+    >>> plone_utils = self.portal.plone_utils
+    >>> from Products.CMFCore.utils import getToolByName
+    >>> mtool = getToolByName(self.portal, 'portal_membership')
+    >>> class Mock(object):
+    ...     def __init__(self, **kwargs):
+    ...         for key, value in kwargs.items(): setattr(self, key, value)
+    ...         # And some default attributes that we need.
+    ...         self.plone_utils = plone_utils
+    ...         self.checkPermission = mtool.checkPermission
+    >>> context = Mock(absolute_url=lambda: 'http://nohost.com/someobj')
+    >>> class MockDict(Mock, dict): pass
+    >>> redirects = []
+    >>> def redirect(url):
+    ...     redirects.append(url)
+    >>> request = MockDict(response=Mock(redirect=redirect))
+
+    >>> toolview = checklist.ChecklistToolView(context, request)
+
+And now for the action confirmation.
+
+    >>> toolview.form_action()
+    'http://nohost.com/someobj/@@checklisttool_view/form_handle'
+
+And the employeeUrl.
+
+    >>> toolview.employeeUrl()
+    'http://nohost.com/someobj'
+
+We also have the _uniqueTuple utility method that will return a unique
+tuple from a list of items.
+
+    >>> toolview._uniqueTuple([1,2,3,4,3,2])
+    (1, 2, 3, 4)
+
+And then there is the actual form processing.  This is handled by the
+form_handle() method.  But before we can do that we have to give our
+context a checklist tool.
+
+    >>> context.portal_checklist = tool.ChecklistTool()
+    >>> toolview.form_handle()
+
+At this point the request doesn't have the submitted attribute so we get
+a simple redirect.
+
+    >>> redirects
+    ['http://nohost.com/someobj']
+
+So we go ahead and set the submitted attribute and try again.
+
+    >>> request['checklistform.submitted'] = 1
+    >>> toolview.form_handle()
+
+Nothing really happens at that point (not even another redirect) due
+to the fact that neither config_normal or config_manager have been set.
+
+    >>> redirects
+    ['http://nohost.com/someobj']
+
+So we first make sure handling config_normal works.
+
+    >>> request['checklistform.config_normal'] = 1
+    >>> context.portal_checklist.absolute_url = lambda: 'http://toolurl.com/tool'
+    >>> redirects[:] = []
+    >>> toolview.form_handle()
+    >>> redirects
+    ['http://toolurl.com/tool']
+
+Still no items have been added yet (as expected).
+
+    >>> context.portal_checklist.getDefaultItems()
+    ()
+
+Now finally setting an item_add var to the value to get added will work.
+
+    >>> request['item_add'] = 'someitem'
+    >>> redirects[:] = []
+    >>> toolview.form_handle()
+    >>> redirects
+    ['http://toolurl.com/tool']
+
+    >>> context.portal_checklist.getDefaultItems()
+    ('someitem',)
+
+A simple thing happens when trying to add manager items.  At first nothing
+gets added and then with the manager_item_add var set, a value is added.
+
+    >>> context.portal_checklist.getDefaultManagerItems()
+    ()
+    >>> del request['checklistform.config_normal']
+    >>> request['checklistform.config_manager'] = 1
+    >>> toolview.form_handle()
+    >>> redirects[:] = []
+    >>> request['manager_item_add'] = 'somemanageritem'
+    >>> toolview.form_handle()
+    >>> redirects
+    ['http://toolurl.com/tool']
+    >>> context.portal_checklist.getDefaultManagerItems()
+    ('somemanageritem',)
+
+Update Checklist View
+---------------------
+
+Once all of the work for the update checklist view is complete it will
+also process redirects so we reset the request, response, and
+redirects info.
+
+    >>> redirects[:] = []
+    >>> context = Mock(absolute_url=lambda: 'http://nohost.com/updatetest')
+    >>> context.portal_checklist = tool.ChecklistTool()
+    >>> context.checklist = Checklist('someobj')
+
+And the rest of the request and view.
+
+    >>> request = MockDict(response=Mock(redirect=redirect))
+    >>> updateview = checklist.UpdateChecklist(context, request)
+
+The main process for updateview is contained within the ``__call__`` method.
+At first no checkeditems will get set because the request doesn't have
+any appropriate data.
+
+    >>> updateview()
+    >>> redirects
+    ['http://nohost.com/updatetest']
+    >>> context.checklist.getCheckedItems()
+    ()
+    >>> context.checklist.getCheckedManagerItems()
+    ()
+
+Setting appropriate data is as simple as setting up request vars that
+start with either *hrm* or *hrmmgr*.
+
+    >>> request['hrmfirst'] = 'foo'
+    >>> request['hrmmgrsecond'] = 'bar'
+    >>> redirects[:] = []
+    >>> updateview()
+
+    >>> context.checklist.getCheckedItems()
+    ('first',)
+    >>> context.checklist.getCheckedManagerItems()
+    ('second',)
+
+Checklist View
+--------------
+
+The checklist view is a convenience view for pulling out data from the given
+checklist.
+
+    >>> redirects[:] = []
+    >>> request = MockDict(response=Mock(redirect=redirect))
+    >>> context = Mock(checklist=Checklist('someobj'))
+    >>> context.portal_membership = Mock()
+    >>> checklistview = checklist.ChecklistView(context, request)
+
+The update method just sets up convenience vars.
+
+    >>> hasattr(checklistview, 'checklist')
+    False
+    >>> checklistview.update()
+    >>> hasattr(checklistview, 'checklist')
+    True
+
+At present the canXXX methods don't really do much.  Only half implemented
+by the looks of it.
+
+    >>> bool(checklistview.canEditItems())
+    False
+    >>> bool(checklistview.canEditManagerItems())
+    False
+
+The rest just check to see if items are left.
+
+    >>> checklistview.items_left()
+    False
+    >>> checklistview.manager_items_left()
+    False
+    >>> checklistview.any_items_left()
+    False
+
+Notifications
+=============
+
+The ``handlers`` module in the ``notifications`` package is for setting
+up event subscribers.  First need to setup mock event and context.
+
+    >>> from plonehrm.checklist.notifications import handlers
+    >>> context = Mock(checklist=Checklist('someobj'))
+
+Executing the handler will first have the item added to non-manager
+items.
+
+    >>> context.checklist.getAllItems()
+    ()
+    >>> context.checklist.getAllManagerItems()
+    ()
+    >>> evt = Mock(for_manager=False, message='non-manager-item')
+    >>> handlers.handleHRMModuleEventForEmployee(context, evt)
+    >>> context.checklist.getAllItems()
+    ('non-manager-item',)
+    >>> context.checklist.getAllManagerItems()
+    ()
+
+And then we try adding a manager item.
+
+    >>> evt = Mock(for_manager=True, message='manager-item')
+    >>> handlers.handleHRMModuleEventForEmployee(context, evt)
+    >>> context.checklist.getAllItems()
+    ('non-manager-item',)
+    >>> context.checklist.getAllManagerItems()
+    ('manager-item',)
