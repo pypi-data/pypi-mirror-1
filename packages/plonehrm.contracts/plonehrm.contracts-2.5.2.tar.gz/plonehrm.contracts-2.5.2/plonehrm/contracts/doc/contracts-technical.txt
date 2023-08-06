@@ -1,0 +1,156 @@
+Technical Details for Contracts
+===============================
+
+First we add some content.
+
+    >>> self.loginAsPortalOwner()
+    >>> portal.invokeFactory('WorkLocation', 'wl')
+    'wl'
+    >>> portal.wl.invokeFactory('Employee', 'emp')
+    'emp'
+    >>> employee = portal.wl.emp
+
+
+Contract
+--------
+
+The Contract content type is the focus of all logic.  It uses ``_templates``
+to retrieve a vocabulary of templates made available by the contracts
+tool.
+
+
+    >>> employee.invokeFactory('Contract', 'contract')
+    'contract'
+    >>> contract = employee.contract
+    >>> from DateTime import DateTime
+    >>> contract.setStartdate(DateTime())
+    >>> contract.setDuration(12)
+    >>> len(contract._templates())
+    0
+    >>> tool = portal.portal_contracts
+    >>> tool.invokeFactory('Template', 'template1',
+    ...                    title='Template 1 title',
+    ...                    type='contract')
+    'template1'
+    >>> tool.template1.setText("Template 1 text")
+    >>> len(contract._templates())
+    1
+
+At first the template won't be defined.
+
+    >>> contract.getTemplate()
+    ''
+
+We add a job performance templates, which should not appear in
+contract._templates()
+
+    >>> tool.invokeFactory('Template', 'template2',
+    ...                    title='Template 1 title',
+    ...                    type='jobperformance')
+    'template2'
+
+We setup a mock view for subsitution.
+
+    >>> from plonehrm.contracts.content.contract import Contract
+    >>> from zope.interface import Interface
+    >>> from zope.component import provideAdapter
+    >>> class MockSubstituter(object):
+    ...     def __init__(self, context, request):
+    ...         self.context = context
+    ...         self.request = request
+    ...     def substitute(self, v):
+    ...         return v
+    >>> provideAdapter(MockSubstituter,
+    ...                adapts=(Contract, object),
+    ...                name=u'substituter',
+    ...                provides=Interface)
+
+When we set the template to a template made available by the tool, all
+is well.  We manually call the event handler that is fired after
+initializing the contract.  And we need a request that is a bit
+better.
+
+    >>> contract.setTemplate('template1')
+    >>> contract.getTemplate()
+    'template1'
+    >>> from plonehrm.contracts.events import apply_template
+    >>> from zope.publisher.browser import TestRequest
+    >>> contract.REQUEST = TestRequest()
+    >>> apply_template(contract, None, rename=False)
+    >>> contract.getText()
+    '<p>Template 1 text</p>'
+
+This will of course allow template_chosen to return True.
+
+    >>> contract.template_chosen()
+    True
+
+There are several other vocabularies that are used.  The first is
+``_available_functions``.
+
+    >>> len(contract._available_functions())
+    0
+    >>> tool.setFunctions(('css specialist', 'programmer'))
+    >>> contract._available_functions()
+    ('css specialist', 'programmer')
+
+The next vocab is ``_available_employment_types``.
+
+    >>> len(contract._available_employment_types())
+    0
+    >>> tool.setEmploymentTypes(('fulltime', 'parttime'))
+    >>> contract._available_employment_types()
+    ('fulltime', 'parttime')
+
+
+Letter
+------
+
+The Letter content type is used for change of contract.  At first the
+methods will be pretty useless because no parent contract has been defined.
+
+    >>> from plonehrm.contracts.content.letter import Letter
+    >>> employee.invokeFactory('Letter', 'letter')
+    'letter'
+    >>> letter = employee.letter
+    >>> letter.base_contract()
+    <Contract at /plone/wl/emp/contract>
+    >>> letter.default_wage()
+    '0.00'
+    >>> letter.default_function()
+    ''
+
+We set a few more values on the contract and see how that influences
+the default values for the letter.
+
+    >>> contract.setFunction('programmer')
+    >>> letter.default_function()
+    'programmer'
+    >>> contract.setWage('42.00')
+    >>> letter.default_wage()
+    '42.00'
+
+
+The wage is returned with a dot in most cases.  But when the default
+language is Dutch, German or French (list can be expanded) we return
+it with a comma.  To test this, we mock the portal_languages tool.
+
+
+    >>> portal_languages = portal.portal_languages
+    >>> letter.default_wage()
+    '42.00'
+    >>> portal_languages.setDefaultLanguage('nl')
+    >>> letter.default_wage()
+    '42,00'
+
+Let's set the wage on the letter.
+
+    >>> letter.setWage('42,25')
+    >>> letter.getWage()
+    '42,25'
+    >>> portal_languages.setDefaultLanguage('de')
+    >>> letter.getWage()
+    '42,25'
+    >>> portal_languages.setDefaultLanguage('en')
+    >>> letter.getWage()
+    '42.25'
