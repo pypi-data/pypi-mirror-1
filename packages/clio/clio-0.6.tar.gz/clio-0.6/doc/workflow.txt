@@ -1,0 +1,119 @@
+Workflow
+========
+
+Now that we know how to set up our tables and classes, we can explain
+how to transition objects through a workflow.
+
+Creation
+--------
+
+Creating an object is not different from plain SQLAlchemy::
+
+  somejar = Jar(12, u"A big jar")
+  session.add(somejar)
+
+You need to create the ORM-mapped object and add it to a session. Note
+we have supplied it with a code, ``12``.
+
+At this point, the ``status`` of the version will be :const:`clio.NEW` and
+the ``code`` will be ``12``.
+
+Publication
+-----------
+
+We can publish a version of an object by calling its ``publish``
+method::
+
+  somejar.publish()
+
+The workflow status of the version will now be :const:`clio.PUBLISHED`.
+
+The code will still be ``12`` and will remain so for each version of
+this object.
+
+Editing
+-------
+
+Once an object is published we shouldn't change it again directly. Instead,
+we should create an editable version for it::
+
+  editable_jar = somejar.edit()
+
+``somejar`` still refers to the original published
+version. ``editable_jar`` refers to a new version with the same value
+for code and the status :const:`clio.EDITABLE`.
+
+You can now edit attributes on the editable object::
+
+  editable_jar.name = u"A big cookie jar"
+
+If the object has one-to-many relations and thus other objects
+associated with it, these objects will be automatically copied as well
+when an editable version of the object is created. Upon publication, these
+associated objects are also published.
+
+Updating
+--------
+
+Updating is very similar to editing, but will not copy any versions
+associated with a one-to-many relation. This is to support the
+scenario where doing so would create the copying of a tremendous
+amount of objects in the database. The updatable version behaves as if
+its relations are those of the published version instead.
+
+Otherwise, the behavior is the same as for editing. When publishing an
+updatable versions, the objects associated with the previously
+published version will now become associated with the newly published
+version.
+
+The status of an updatable version is :const:`clio.UPDATABLE`.
+
+Archiving
+---------
+
+You can re-publish an edited or updated version::
+
+  newly_published_jar = editable_jar.publish()
+
+The previously published version (``somejar``) will be put into an
+archived state automatically. You can verify this by calling the
+``is_archived`` method on it::
+
+  somejar.is_archived()
+
+The version referred to by ``newly_published_jar`` is now the published
+version (and in fact ``editable_jar`` still refers to it too).
+
+After a version is archived, it should not be changed anymore - it
+merely exists as a record.
+
+There is no single archived status, as multiple archived versions of
+an object can exist in parallel to each other. The status of an
+archived version is greater than or equal to :const:`clio.ARCHIVED`.
+
+Deletion
+--------
+
+An published version can be submitted for deletion. The version
+remains published, but when ``publish`` is called on it, it will be
+automatically archived (along with everything associated with it in a
+one-to-many relation)::
+
+  deleted_jar = somejar.delete()
+
+``deleted_jar`` still refers to the same version as ``somejar``
+does.
+
+Reverting
+---------
+
+It is possible to revert an editing, update or delete operation back to its
+published version. This can be done by calling ``revert``::
+
+  jar = editable_jar.revert()
+
+A deleted version will be removed. An editable or updatable version
+will be replaced by a version based on the currently published
+version. A deleted editable/updatable version will be turned back into
+a plain editable/updatable version.
+
