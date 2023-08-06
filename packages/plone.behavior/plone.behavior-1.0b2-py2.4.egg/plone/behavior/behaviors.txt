@@ -1,0 +1,191 @@
+=========================
+plone.behavior: Behaviors
+=========================
+
+Please see README.txt at the root of this egg for more details on what
+behaviors are and how to use them.
+
+See directives.txt in this directory for details on how to register new
+types of behaviors using ZCML.
+
+Usage
+-----
+
+To use this package, you must first:
+
+ - Provide a suitable IBehaviorAssignable adapter. There is a default
+   implementation in plone.behavior.assignable.ContentTypeBehaviorAssignable
+   that can be used if you want to manage behaviors relative to an object's
+   IContentType. It is not registered by default, however.
+ 
+ - The ContentTypeBehaviorAssignable adapter assumes that you have registered
+   a utility providing IBehaviorRegistry. There is a persistent implementation
+   in plone.behavior.registry.PersistentBehaviorRegistry that can be installed
+   as a local utility to keep track of behaviors registered by interface.
+
+Then, for each behavior:
+
+ - Write an interface describing the behavior.
+ 
+ - Write a factory (much like an adapter factory) that contains the logic of
+   the behavior.
+   
+ - Register the behavior. This consists of a utility providing IBehavior and
+   an adapter factory based on IBehaviorAdapterFactory. The <plone:behavior />
+   ZCML directive makes this easy. See directives.txt. An example might be:
+   
+        <plone:behavior
+            name="my.locking"
+            title="Locking"
+            description="Support object-level locking"
+            interface=".interfaces.ILocking"
+            factory=".locking.LockingBehaviorFactory"
+            />
+
+Once the behavior has been registered, you can use standard adaptation idioms
+to attempt to use it, e.g.:
+
+        locking = ILocking(context, None)
+        if locking is not None:
+            locoking.lock()
+      
+Here, ILocking is a registered behavior interface. The adaptation will only
+succeed if the context support behaviors (i.e. it can be adapted to
+IBehaviorAssignable), and if the ILocking behavior is currently enabled for
+this type of context.
+
+Example
+-------
+
+As an example, let's create a basic behavior that's described by the
+interface ILockingSupport:
+
+    >>> from zope.interface import implements
+    >>> from zope.interface import Interface
+
+    >>> class ILockingSupport(Interface):
+    ...     def lock():
+    ...         "Lock the context"
+    ...     
+    ...     def unlock():
+    ...         "Unlock the context"
+
+    >>> class LockingSupport(object):
+    ...     implements(ILockingSupport)
+    ...     def __init__(self, context):
+    ...         self.context = context
+    ...         
+    ...     def lock(self):
+    ...         print 'Locked', repr(self.context)
+    ...     
+    ...     def unlock(self):
+    ...         print 'Unlocked', repr(self.context)
+
+The availability of this new behavior is indicated by registering a named
+utility providing IBehavior. There is a default implementation of this
+interface that makes this easy:
+
+    >>> from plone.behavior.registration import BehaviorRegistration
+    >>> registration = BehaviorRegistration(
+    ...     title=u"Locking support", 
+    ...     description=u"Provides content-level locking",
+    ...     interface=ILockingSupport,
+    ...     factory=LockingSupport)
+
+    >>> from zope.component import provideUtility
+    >>> provideUtility(registration, name=u"example.mybehavior")
+
+We also need to register an adapter factory that can create an instance of
+an ILockingSupport for any context. This is a bit different to a standard
+adapter factory (which is normally just a class with a constructor that
+takes the context as an argument), because we want this factory to be
+able to adapt almost anything, but which will return None if the behavior
+isn't actually enabled.
+
+To get these semantics, we can use the BehaviorAdapterFactory helper
+class.
+
+    >>> from plone.behavior.factory import BehaviorAdapterFactory
+    >>> factory = BehaviorAdapterFactory(registration)
+
+    >>> from zope.interface import implements
+    >>> from zope.component import provideAdapter
+    >>> provideAdapter(factory=factory, adapts=(Interface,), provides=ILockingSupport)
+
+One this is registered, it will be possible to adapt any context to 
+ILockingSupport, if:
+
+  - The context can be adapted to IBehaviorAssignable. This is an 
+    interface that is used to determine if a particular object supports
+    a particular behavior.
+    
+  - The behavior is enabled, i.e. the IBehaviorAssignable implementation 
+    says it is.
+
+Right now, neither of those things are true, so we'll get a TypeError when
+trying to adapt:
+
+    >>> from zope.interface import directlyProvides
+    >>> from zope.app.content.interfaces import IContentType
+    >>> class IContextType(Interface): pass
+    >>> directlyProvides(IContextType, IContentType)
+
+    >>> class SomeContext(object):
+    ...     implements(IContextType)
+    ...     def __repr__(self):
+    ...         return "<sample context>"
+
+    >>> context = SomeContext()
+    >>> behavior = ILockingSupport(context) # doctest: +ELLIPSIS
+    Traceback (most recent call last):
+    ...
+    TypeError: ('Could not adapt', ...)
+
+Of course, we are more likely to want to code defensively:
+
+    >>> behavior = ILockingSupport(context, None)
+    >>> behavior is None
+    True
+
+For the behavior  to work, we need to define the IBehaviorAssignable adapter.
+There is a default implementation which looks up the "IContentType" 
+interface of an object, using queryType(), and then defers to an 
+IBehaviorRegistry utility to determine what behaviors are registered for that
+interface. This is not registered automatically, since the choice of what
+objects support behaviors is deemed and application-level decision. However,
+the default implementation should suffice for many use cases.
+
+First, let's set up the registry utility. If you need persistence, this can
+be registered as a local utility, but it works as a global utility too.
+
+    >>> from plone.behavior.registry import PersistentBehaviorRegistry
+    >>> from plone.behavior.interfaces import IBehaviorRegistry
+    >>> registry = PersistentBehaviorRegistry()
+    >>> provideUtility(component=registry, provides=IBehaviorRegistry)
+
+Then, let's register the IBehaviorAssignable adapter. To keep things simple,
+we'll simply register it for "Interface".
+
+    >>> from plone.behavior.assignable import ContentTypeBehaviorAssignable
+    >>> provideAdapter(adapts=(Interface,), factory=ContentTypeBehaviorAssignable)
+
+At this point, we know that the context support behavior assignment (since
+there is an adapter for it), but it's not yet enabled, so we still can't 
+adapt.
+
+    >>> behavior = ILockingSupport(context, None)
+    >>> behavior is None
+    True
+
+However, if we enable the behavior for this type...
+
+    >>> registry.register(IContextType, ILockingSupport)
+
+...then we can adapt and use the behavior adapter:
+
+    >>> behavior = ILockingSupport(context, None)
+    >>> behavior is None
+    False
+    
+    >>> behavior.lock()
+    Locked <sample context>
