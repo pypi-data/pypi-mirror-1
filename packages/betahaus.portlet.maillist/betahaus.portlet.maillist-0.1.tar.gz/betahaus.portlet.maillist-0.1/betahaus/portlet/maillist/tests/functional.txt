@@ -1,0 +1,107 @@
+Mail related functional tests
+=============================
+
+Some initial setup:
+
+  >>> from Products.Five.testbrowser import Browser
+  >>> from Products.PloneTestCase.setup import portal_owner, default_password
+  >>> browser = Browser()
+  >>> browser.handleErrors = False
+  >>> portal_url = self.portal.absolute_url()
+
+Let's go to the main site, login and ad the portlet to the right column:
+
+  >>> browser.open(portal_url)
+  >>> browser.getLink('Log in').click()
+  >>> form = browser.getForm(id='login_form')
+  >>> form.getControl('Login Name').value = portal_owner
+  >>> form.getControl('Password').value =  default_password
+  >>> form.getControl('Log in').click()
+
+  >>> browser.open(portal_url + '/++contextportlets++plone.rightcolumn/+/betahaus.portlet.maillist.MailListPortlet')
+  
+Configure the portlet:
+
+  >>> browser.getControl('Portlet header').value = 'The Maillist Portlet'
+  >>> mail_to_list = 'maillist@betahaus.test'
+  >>> browser.getControl('Subscription address').value = mail_to_list 
+  >>> browser.getControl('Save').click()
+  
+  >>> browser.open(portal_url)
+
+Check that the portlet is there:
+  >>> right_portlet_start = browser.contents.find('portal-column-two')
+  >>> footer_start = browser.contents.find('clear-space-before-footer')
+  >>> right_portlet_column = browser.contents[right_portlet_start:footer_start]
+  >>> 'portlet portletMailList' in right_portlet_column
+  True
+  
+Since we haven't configured a mail setup the portlet should show but not the form for subscribing.
+  
+  >>> 'maillistform' in right_portlet_column
+  False
+
+We need to fake a valid mail setup:
+  
+  >>> portal.email_from_address = "mail@betahaus.test"
+  >>> mailhost = self.portal.MailHost
+  
+
+Refresh the page and check that the form is there.
+
+  >>> browser.open(portal_url)
+  >>> right_portlet_start = browser.contents.find('portal-column-two')
+  >>> footer_start = browser.contents.find('clear-space-before-footer')
+  >>> right_portlet_column = browser.contents[right_portlet_start:footer_start]
+  >>> 'maillistform' in right_portlet_column
+  True
+  
+Fill in the form and submit.
+  
+  >>> mail_from_user = 'testuser@domain.test'
+  >>> browser.getControl('Email Address').value = mail_from_user 
+  >>> browser.getControl(name='maillist').value = ['subscribe']
+  >>> browser.getControl(name='maillist.submitted').value = '1'
+  >>> browser.getControl('Send').click()
+
+  >>> len(mailhost.messages)
+  1
+  >>> msg = mailhost.messages[0]
+    
+Now that we have the message we can check the to, from and subject::
+
+  >>> msg['mto']
+  'maillist@betahaus.test'
+  
+  >>> msg['mfrom']
+  'testuser@domain.test'
+  
+  >>> msg['subject']
+  'subscribe'
+
+The subscribing works, now check the unsubscribe::
+
+  >>> mailhost.reset()
+  >>> browser.open(portal_url)
+  >>> mail_from_user = 'testuser@domain.test'
+  >>> browser.getControl('Email Address').value = mail_from_user 
+  >>> browser.getControl(name='maillist').value = ['unsubscribe']
+  >>> browser.getControl(name='maillist.submitted').value = '1'
+  >>> browser.getControl('Send').click()
+  
+  >>> len(mailhost.messages)
+  1
+  >>> msg = mailhost.messages[0]
+    
+Now that we have the message we can check the to, from and subject::
+
+  >>> msg['mto']
+  'maillist@betahaus.test'
+  
+  >>> msg['mfrom']
+  'testuser@domain.test'
+  
+  >>> msg['subject']
+  'unsubscribe'
+
+Yay, it works
