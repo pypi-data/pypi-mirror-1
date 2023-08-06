@@ -1,0 +1,269 @@
+Metadata-Version: 1.0
+Name: collective.recipe.i18noverrides
+Version: 0.1
+Summary: Override translations by putting some .po files in the i18n directory of the zope 2 instance
+Home-page: http://pypi.python.org/pypi/collective.recipe.i18noverrides
+Author: Maurits van Rees
+Author-email: m.van.rees@zestsoftware.nl
+License: GPL
+Description: .. contents::
+        
+        collective.recipe.i18noverrides
+        ===============================
+        
+        This is a buildout recipe.  It creates an i18n directory within one or
+        more zope 2 instances in your buildout.  It copies some .po files to
+        those directories.  The translations in those .po files will override
+        any other translations.
+        
+        
+        Use case
+        --------
+        
+        An example use case is:
+        
+        - In the Dutch Plone translations the msgid 'Manager' is translated as
+        'Beheerder'.
+        
+        - A customer wanted it to be translated as 'Site admin' instead.
+        
+        - Just putting this translation within the i18n directory of the
+        customer product is not guaranteed to work as it depends on the
+        order in which the i18n folders get read on Zope startup: is
+        CMFPlone/i18n or Customer/i18n read first.
+        
+        - When you create an i18n directory within the zope 2 instance and add
+        a po file with that msgid there, this is guaranteed to get used.
+        
+        Note that this should work for overriding translations within i18n
+        directories.  Overriding translations in locales directories is not a
+        use case of this recipe.
+        
+        
+        Contents of .po file
+        --------------------
+        
+        What should be in the .po file?  You need all the headers that are
+        normally in .po files.  So copy the headers of the current .po file
+        that has the translation that you want to override.  Then just add the
+        msgid and a new msgstr.  The name of the file does not really matter.
+        It should be meaningful to you and end with '.po'.  In the mentioned
+        use case it makes sense to call it ``plone-nl.po`` as that is the name
+        of the original file from the plone translations.  The contents would
+        be something like this (non-interesting header lines skipped for
+        clarity)::
+        
+        
+        msgid ""
+        msgstr ""
+        ...
+        "Language-Code: nl\n"
+        "Language-Name: Nederlands\n"
+        "Domain: plone\n"
+        
+        msgid "Manager"
+        msgstr "Site admin"
+        
+        
+        Detailed Documentation
+        ======================
+        
+        Supported options
+        =================
+        
+        The recipe supports the following options:
+        
+        source
+        Source directory that contains the .po files that the recipe will
+        copy.  All ``*.po`` files will be copied.  This option is mandatory.
+        
+        destinations
+        Target directory or directories.  This should point to the
+        directory of the zope 2 instance.  The recipe will create an i18n
+        directory in each of the destinations and copy all ``*.po`` files
+        from the source directory to these i18n directories.  This option
+        is mandatory.
+        
+        
+        Example usage
+        =============
+        
+        We'll start by creating a buildout that uses the recipe.  Here is a
+        template where we only have to fill in the source and destinations::
+        
+        >>> buildout_config_template = """
+        ... [buildout]
+        ... index = http://pypi.python.org/simple
+        ... parts = i18noverrides
+        ...
+        ... [i18noverrides]
+        ... recipe = collective.recipe.i18noverrides
+        ... source = %(source)s
+        ... destinations = %(dest)s
+        ... """
+        
+        We will start with specifying some non existing source and destination
+        directories::
+        
+        >>> write('buildout.cfg', buildout_config_template % {
+        ... 'source': '${buildout:directory}/translations',
+        ... 'dest': '${buildout:directory}/instance'})
+        
+        Running the buildout gives us::
+        
+        >>> print system(buildout)
+        Installing i18noverrides.
+        collective.recipe.i18noverrides: path '/sample-buildout/translations' does not exist.
+        <BLANKLINE>
+        
+        The source must be a directory::
+        
+        >>> write('translations', 'This is a file.')
+        >>> print system(buildout)
+        Installing i18noverrides.
+        collective.recipe.i18noverrides: path '/sample-buildout/translations' must be a directory.
+        <BLANKLINE>
+        
+        Now we remove this file and try with a proper directory::
+        
+        >>> remove('translations')
+        >>> mkdir('translations')
+        >>> print system(buildout)
+        Installing i18noverrides.
+        collective.recipe.i18noverrides: path '/sample-buildout/instance' does not exist.
+        <BLANKLINE>
+        
+        So we set a destination too and first try with a file as well before
+        creating a directory::
+        
+        >>> write('instance', 'This is a file.')
+        >>> print system(buildout)
+        Installing i18noverrides.
+        collective.recipe.i18noverrides: path '/sample-buildout/instance' must be a directory.
+        <BLANKLINE>
+        >>> remove('instance')
+        >>> mkdir('instance')
+        >>> print system(buildout)
+        Installing i18noverrides.
+        collective.recipe.i18noverrides: source '/sample-buildout/translations' contains no .po files.
+        <BLANKLINE>
+        
+        Now the source and destination have been setup correctly, but we get a
+        warning as the source directory has no translation files.  We first
+        add a file that does not end with ``.po``.  Since the previous
+        buildout run only had a warning and finished successfully, the recipe
+        now runs in update mode, which does the same as the install mode::
+        
+        >>> write('translations', 'not-a-po-file', 'I am not a po file')
+        >>> print system(buildout)
+        Updating i18noverrides.
+        collective.recipe.i18noverrides: source '/sample-buildout/translations' contains no .po files.
+        <BLANKLINE>
+        >>> write('translations', 'plone-nl.po', 'I am a Dutch plone po file')
+        >>> write('translations', 'plone-de.po', 'I am a German plone po file')
+        >>> print system(buildout)
+        Updating i18noverrides.
+        collective.recipe.i18noverrides: Creating directory /sample-buildout/instance/i18n
+        collective.recipe.i18noverrides: Copied 2 po files.
+        <BLANKLINE>
+        
+        No warnings, no errors, so let's see what the end result is::
+        
+        >>> ls('translations')
+        -  not-a-po-file
+        -  plone-de.po
+        -  plone-nl.po
+        >>> ls('instance')
+        d  i18n
+        
+        A i18n directory has been created in the instance.  Inside that
+        directory we find our two po files::
+        
+        >>> ls('instance', 'i18n')
+        -  plone-de.po
+        -  plone-nl.po
+        >>> cat('instance', 'i18n', 'plone-de.po')
+        I am a German plone po file
+        >>> cat('instance', 'i18n', 'plone-nl.po')
+        I am a Dutch plone po file
+        
+        If the destination directory for some strange reason already contains
+        a i18n file instead of a directory, we fail::
+        
+        >>> remove('instance', 'i18n')
+        >>> write('instance', 'i18n', 'I am a file')
+        >>> print system(buildout)
+        Updating i18noverrides.
+        collective.recipe.i18noverrides: '/sample-buildout/instance/i18n' is not a directory.
+        <BLANKLINE>
+        >>> remove('instance', 'i18n')
+        
+        It should also be possible to have multiple destinations::
+        
+        >>> write('buildout.cfg', buildout_config_template % {
+        ... 'source': '${buildout:directory}/translations',
+        ... 'dest': """
+        ...     ${buildout:directory}/instance
+        ...     ${buildout:directory}/instance2"""})
+        >>> print system(buildout)
+        Installing i18noverrides.
+        collective.recipe.i18noverrides: path '/sample-buildout/instance2' does not exist.
+        <BLANKLINE>
+        
+        Right, right, we will create that directory too::
+        
+        >>> mkdir('instance2')
+        >>> print system(buildout)
+        Installing i18noverrides.
+        collective.recipe.i18noverrides: Creating directory /sample-buildout/instance/i18n
+        collective.recipe.i18noverrides: Creating directory /sample-buildout/instance2/i18n
+        collective.recipe.i18noverrides: Copied 2 po files.
+        <BLANKLINE>
+        
+        Let's check the result::
+        
+        >>> ls('instance')
+        d  i18n
+        >>> ls('instance', 'i18n')
+        -  plone-de.po
+        -  plone-nl.po
+        >>> ls('instance2')
+        d  i18n
+        >>> ls('instance2', 'i18n')
+        -  plone-de.po
+        -  plone-nl.po
+        >>> cat('instance2', 'i18n', 'plone-de.po')
+        I am a German plone po file
+        >>> cat('instance2', 'i18n', 'plone-nl.po')
+        I am a Dutch plone po file
+        
+        Contributors
+        ============
+        
+        Maurits van Rees, Author
+        
+        
+        Change history
+        ==============
+        
+        History of collective.recipe.i18noverrides
+        ==========================================
+        
+        0.1 (2009-06-05)
+        ----------------
+        
+        - Initial implementation moved over from a one-off script.  [maurits]
+        
+        - Created recipe with ZopeSkel
+        [Maurits van Rees]
+        
+        Download
+        ========
+        
+Keywords: i18n
+Platform: UNKNOWN
+Classifier: Framework :: Buildout
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Software Development :: Build Tools
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: License :: OSI Approved :: GNU General Public License (GPL)
