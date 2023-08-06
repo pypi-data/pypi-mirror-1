@@ -1,0 +1,170 @@
+import sys
+import amara
+from amara.lib.xmlstring import *
+from amara.lib.iri import DEFAULT_RESOLVER
+import httplib2
+import cookielib, urllib, urllib2
+
+class feedconverter(object):
+    base = "http://www.google.com/reader/atom/feed/"
+    def __init__(self, user, passwd):
+        '''
+        user - Google e-mail including the "@gmail.com"
+        passwd - password
+        '''
+        #See:
+        # * http://code.google.com/p/pyrfeed/wiki/GoogleReaderAPI
+        cookiejar = cookielib.LWPCookieJar()
+        self.opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cookiejar))
+        #urllib2.install_opener(opener)
+
+        # get an AuthToken from Google accounts
+        # http://code.google.com/apis/accounts/docs/AuthForInstalledApps.html#Parameters
+        auth_uri = 'https://www.google.com/accounts/ClientLogin'
+        authreq_data = urllib.urlencode({ "Email": user,
+                                          "Passwd":  passwd,
+                                          "service": "reader",
+                                          "source":  "Amara demo",
+                                          "accountType": "GOOGLE",
+                                          #"continue": "http://www.google.com/",
+                                          })
+        auth_req = urllib2.Request(auth_uri, data=authreq_data)
+        auth_resp = urllib2.urlopen(auth_req)
+        auth_resp_body = auth_resp.read()
+        # auth response includes several fields - we're interested in
+        #  the bit after Auth=
+        auth_resp_dict = dict(x.split("=")
+                              for x in auth_resp_body.split("\n") if x)
+        self.auth = auth_resp_dict["Auth"].strip()
+        self.sid = auth_resp_dict["SID"].strip()
+        self.h = httplib2.Http()
+        self.h.follow_all_redirects = True
+        self._update_token()
+        return
+
+    def _update_token(self):
+        reader_prep_uri = "http://www.google.com/reader/api/0/token"
+        headers = {'Cookie': 'SID='+self.sid}
+        response, content = h.request(reader_prep_uri, 'GET', body=None, headers=headers)
+        #print response, content
+        self.token = response
+        return
+        
+    def atomize(self, feed):
+        headers = {'Cookie': 'SID=%s; T=%s'%(self.sid, self.token)}
+        response, content = self.h.request(self.base + self.feed, 'GET', body=None, headers=headers)
+        return response
+
+
+def gclientlogin(user, passwd):
+    #See:
+    # * http://code.google.com/p/pyrfeed/wiki/GoogleReaderAPI
+    # * http://dalelane.co.uk/blog/?p=303
+    # -d Email=just_your_username_here_without_at_gmail_dot_com -d Passwd=your_password_here -d source=Google-cURL-Example -d service=reader
+
+    #  by registering a cookie handler here, this will automatically store the
+    #  cookie returned when we use urllib2 to open the reader token request
+    #cookiejar = cookielib.CookieJar()
+    cookiejar = cookielib.LWPCookieJar()
+    opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cookiejar))
+    urllib2.install_opener(opener)
+
+    print sid
+    print authtoken
+    
+
+    print response, content
+    return
+    
+    #"http://www.google.com/reader/atom/feed/http://www.thenervousbreakdown.com/uogbuji/feed/"
+    #feed = "http://www.ibm.com/developerworks/views/xml/rss/libraryview.jsp"
+    req_data = urllib.urlencode({ "Authorization": 'GoogleLogin auth='+authtoken, })
+
+    serv_uri = "https://www.google.com"
+    serv_args = {}
+    serv_args['continue'] = base + feed
+    serv_args['auth'] = authtoken
+    req_data = urllib.urlencode(serv_args)
+    serv_login_uri = "https://www.google.com/accounts/Login?%s" % (urllib.urlencode(serv_args))
+    serv_req = urllib2.Request(serv_login_uri)
+    #serv_resp = urllib2.urlopen(serv_login_uri, data=req_data)
+    serv_resp = urllib2.urlopen(serv_login_uri)
+    print req_data
+    serv_resp = urllib2.urlopen(base + feed, data=req_data)
+    print serv_resp.read()
+    return
+
+    
+
+    #req_data = urllib.urlencode({ "SID": authtoken })
+    serv_req = urllib2.Request("http://www.google.com/reader/atom/feed/" + feed)
+    #serv_req = urllib2.Request("http://www.google.com/reader/atom/feed/" + feed, data=req_data)
+    #req_data = urllib.urlencode({ "Authorization": u'GoogleLogin auth='+authtoken, })
+    serv_resp = urllib2.urlopen(serv_req, data=req_data)
+    #serv_resp = urllib2.urlopen(serv_req)
+    print serv_resp.read()
+    return
+
+    #
+    # get a cookie
+    #
+    #  the call to request a cookie will also automatically redirect us to the page
+    #   that we want to go to
+    #  the cookie jar will automatically provide the cookie when we reach the
+    #   redirected location
+
+    # this is where I actually want to go to
+    serv_uri = "http://www.google.com/reader"
+
+    serv_args = {}
+    #serv_args['continue'] = serv_uri
+    #serv_args['auth']     = authtoken
+    #serv_args['Authorization'] = u'GoogleLogin auth='+authtoken
+
+    #full_serv_uri = "http://www.google.com/reader/api/0/token?%s" % (urllib.urlencode(serv_args))
+    full_serv_uri = "http://www.google.com/reader/api/0/token"
+
+    serv_req = urllib2.Request(full_serv_uri)
+    req_data = urllib.urlencode({ "Authorization": u'GoogleLogin auth='+authtoken, })
+    serv_resp = urllib2.urlopen(serv_req, data=req_data)
+    serv_resp_body = serv_resp.read()
+
+    token = serv_resp_body
+    print
+    print token
+    return token
+
+
+def atomize(feed_url, count=30):
+    '''
+    Takes a feed URL and returns a file-like object with the equivalent Atom feed
+    '''
+    (scheme, authority, path, query, fragment) = Uri.SplitUriRef(feed_url)
+    feed_arg = Uri.UnsplitUriRef((scheme, authority, path, None, None))
+    if query:
+        feed_arg += Uri.PercentEncode('?' + query)
+    greader_url = "http://www.google.com/reader/atom/feed/%s?r=n&n=%i"%(feed_arg, count)
+    print "Google Atom archive feed: ", google_url
+    return Uri.BASIC_RESOLVER.resolve(google_url)
+
+
+#doc = amara.parse(atomize("http://www.ibm.com/developerworks/views/xml/rss/libraryview.jsp"))
+#print unicode(doc.feed.entry[0].title)
+
+feed = "http://www.thenervousbreakdown.com/uogbuji/feed/"
+
+user = sys.argv[1]
+passwd = sys.argv[2]
+fc = feedconverter(user, passwd)
+print fc.atomize(feed)
+
+'''
+SID = `curl https://www.google.com/accounts/ClientLogin -d Email=$1 -d Passwd=$2 -d source=Google-cURL-Example -d service=reader | grep SID`
+curl -s -X GET http://www.google.co
+m/reader/atom/feed/http://www.thenervousbreakdown.com/uogbuji/feed/ --header "C
+ookie: SID=DQAAAH0AAABGPJHHa-vtotItRcLbwxFqR7PtsvhwVnWg91bNvYuL1Jqnt7fBZIufrn1W
+IMGkVmZJ0pPxh1rmMQrGMHeuKMxMR9F1SfF1_yw-4ZGKgAs16iee1YDTbSI-n0KCg8RnSct92PgaIB3
+i6bvCYts1MG3o0iP991njvd_pryYwV7n7Fw; T=7fd1Ux0BAAA.Zlb4pdPO_s8TNHTLgV3sIQ.x42mu
+vkVKY8Q-ss28rLhSA"
+
+'''
