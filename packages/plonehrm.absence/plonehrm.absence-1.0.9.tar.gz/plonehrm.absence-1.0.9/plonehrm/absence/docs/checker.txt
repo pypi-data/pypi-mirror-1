@@ -1,0 +1,131 @@
+Absence period checker
+===================
+
+The absence period checker is event driven code that reports on sick employees, and
+creates 'to-do' actions at predefined periods - a checkup call is recommended
+after an employee has been sick for one week, for instance, and an absence
+report is flagged as required to be sent to the UWV at six weeks.
+
+First we add some content.
+
+    >>> from plonehrm.absence.tests import event_tracker
+    >>> from zope.component import provideHandler
+    >>> provideHandler(event_tracker)
+    >>> from datetime import date, timedelta
+    >>> self.loginAsPortalOwner()
+    >>> portal.invokeFactory('WorkLocation', 'wl')
+    'wl'
+    >>> portal.wl.invokeFactory('Employee', 'emp')
+    'emp'
+    >>> employee = portal.wl.emp
+    >>> from zope.event import notify
+    >>> from Products.Archetypes.event import ObjectInitializedEvent
+    >>> notify(ObjectInitializedEvent(employee))
+    >>> from plonehrm.absence.tests import MockMailer
+
+Next we can create an absent employee:
+
+    >>> from datetime import date, timedelta
+    >>> from plonehrm.absence.notifications import checkers
+
+    >>> from plonehrm.absence.interfaces import IAbsenceAdapter
+    >>> absentemployee = IAbsenceAdapter(employee)
+    >>> absentemployee.add_absence("Broke leg", start_date=date(1979, 1, 29))
+    <Absence: Broke leg, ...>
+    >>> absentemployee.is_absent()
+    True
+
+Then we mock out the emailing and current date logic. We need to
+RESTORE this at the end of the test!!
+
+    >>> old_email_address_of_local_managers = checkers.email_adresses_of_local_managers
+    >>> checkers.email_adresses_of_local_managers = lambda x: dict(worklocation_managers='fred@there', hrm_managers='simon@here')
+    >>> old_HRMEmailer = checkers.HRMEmailer
+    >>> checkers.HRMEmailer = MockMailer
+    >>> old_current_date = checkers.current_date
+    >>> checkers.current_date = lambda: date(1979, 1, 29)
+    >>> from plonehrm.absence.notifications import events
+    >>> events.localize = lambda x,y: y
+
+
+Now, lets make a shortcut to the checker function and try running it:
+
+    >>> spc = checkers.absent_period_checker
+    >>> spc(portal, None)
+
+Initially we have no notifications to send, as our employee only got sick today.
+If we move their absence back a week, though, we should be able to trigger a
+notification (we can also see our mock emailer reporting the details of the
+email it was asked to send):
+
+    >>> absentemployee.current_absence().start_date = date(1979, 1, 29) - timedelta(7)
+    >>> spc(portal, None)
+    absenceweek1email <Employee at emp> Employee absent - 1 week
+    <plonehrm.absence.notifications.events.AbsenceWeek1Event object at ...>
+
+To prevent duplicate notifications each notification is recorded on the employee -
+so an identical call shouldn't generate another notification:
+
+    >>> spc(portal, None)
+
+Another notification should occur at 5 weeks:
+
+    >>> absentemployee.current_absence().start_date = date(1979, 1, 29) - timedelta(5*7)
+    >>> spc(portal, None)
+    absenceweek6email <Employee at emp> Problem analysis - 6 weeks
+    <plonehrm.absence.notifications.events.AbsenceWeek6Event object at ...>
+
+...and it shouldn't duplicate:
+
+    >>> spc(portal, None)
+
+...and another notification at 7 weeks:
+
+    >>> absentemployee.current_absence().start_date = date(1979, 1, 29) - timedelta(7*7)
+    >>> spc(portal, None)
+    absenceweek8email <Employee at emp> Plan of action - 8 weeks
+    <plonehrm.absence.notifications.events.AbsenceWeek8Event object at ...>
+
+...and it shouldn't duplicate (seeing a pattern?):
+
+    >>> spc(portal, None)
+
+Finally the 6 weekly periodic reports should occur from week 14 onwards (we'll
+also verify the duplicate supression). Note that the translation
+mechanism doesn't have a change to touch the string, so the week
+number is also not included in the result:
+
+    >>> absentemployee.current_absence().start_date = date(1979, 1, 29) - timedelta(14*7)
+    >>> spc(portal, None)
+    absence6weekrepeatemail <Employee at emp> Update reintegration file. Week: ${week}
+    <plonehrm.absence.notifications.events.Absence6WeekRepeatEvent object at ...>
+    >>> spc(portal, None) # Duplicate suppression test
+    >>> absentemployee.current_absence().start_date = date(1979, 1, 29) - timedelta(20*7)
+    >>> spc(portal, None)
+    absence6weekrepeatemail <Employee at emp> Update reintegration file. Week: ${week}
+    <plonehrm.absence.notifications.events.Absence6WeekRepeatEvent object at ...>
+    >>> spc(portal, None) # Duplicate suppression test
+
+
+When we close our absence, we can create a new one.
+
+    >>> absentemployee.close_absence(date(1979, 1, 30))
+    <Absence: Broke leg...>
+    >>> checkers.current_date = lambda: date.today()
+    >>> absentemployee.add_absence('Sick again')
+    <Absence: Sick again...>
+
+Since our notification duplicate suppression flags have been removed
+when we closed the previous absence, new notifications will be sent again.
+
+    >>> checkers.current_date = lambda: date.today() + timedelta(7)
+    >>> spc(portal, None)
+    absenceweek1email <Employee at emp> Employee absent - 1 week
+    <plonehrm.absence.notifications.events.AbsenceWeek1Event object at ...>
+
+
+Restore the mocked out objects to not mess up other tests:
+
+    >>> checkers.email_adresses_of_local_managers = old_email_address_of_local_managers
+    >>> checkers.HRMEmailer = old_HRMEmailer
+    >>> checkers.current_date = old_current_date
