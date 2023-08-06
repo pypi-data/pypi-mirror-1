@@ -1,0 +1,22 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+from setuptools import setup
+import perlinpinpin
+ 
+setup(name='perlinpinpin',
+      version=perlinpinpin.__version__,
+      description='Convert french fuzzy date to a python date object.',
+      long_description="Convert from french fuzzy dates like 'hier', 'il y a 1 semaine et 1 jour', 'mardi prochain', '4 Janvier', etc., to a date object.",
+      py_modules = ['perlinpinpin'],
+      license = 'BSD License',
+      url='http://wiki.github.com/cyberdelia/perlinpinpin',
+      keywords = "convert fuzzy date time french",
+      classifiers = [ "Development Status :: 4 - Beta",
+                      "License :: OSI Approved :: BSD License",
+                      "Operating System :: OS Independent",
+                      "Programming Language :: Python",
+                      "Topic :: Software Development :: Libraries :: Python Modules" ],
+      author='Timothee Peignier',
+      author_email='tim@tryphon.org',
+      test_suite='tests'
+)
