@@ -1,0 +1,100 @@
+"""Recipe for setting up ejabberd."""
+
+import logging
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib
+import zc.recipe.egg
+
+logger = logging.getLogger(__name__)
+
+
+class Recipe(zc.recipe.egg.Eggs):
+    """Buildout recipe for installing ejabberd."""
+
+    def __init__(self, buildout, name, opts):
+        """Standard constructor for zc.buildout recipes."""
+
+        super(Recipe, self).__init__(buildout, name, opts)
+
+    def install_ejabberd(self):
+        """Downloads and installs ejabberd."""
+
+        arch_filename = self.options['url'].split(os.sep)[-1]
+        downloads_dir = os.path.join(os.getcwd(), 'downloads')
+        if not os.path.isdir(downloads_dir):
+            os.mkdir(downloads_dir)
+        src = os.path.join(downloads_dir, arch_filename)
+        if not os.path.isfile(src):
+            logger.info("downloading ejabberd distribution...")
+            urllib.urlretrieve(self.options['url'], src)
+        else:
+            logger.info("ejabberd distribution already downloaded.")
+
+        extract_dir = tempfile.mkdtemp("buildout-" + self.name)
+        remove_after_install = [extract_dir]
+        is_ext = arch_filename.endswith
+        is_archive = True
+        if is_ext('.tar.gz') or is_ext('.tgz'):
+            call = ['tar', 'xzf', src, '-C', extract_dir]
+        elif is_ext('.zip'):
+            call = ['unzip', src, '-d', extract_dir]
+        else:
+            is_archive = False
+
+        if is_archive:
+            retcode = subprocess.call(call)
+            if retcode != 0:
+                raise Exception("extraction of file %r failed (tempdir: %r)" %
+                                (arch_filename, extract_dir))
+        else:
+            shutil.copy(arch_filename, extract_dir)
+
+        erlang_path = self.options.get('erlang-path',
+                                       '/usr/local/lib/erlang/bin')
+
+        part_dir = self.buildout['buildout']['parts-directory']
+        dst = os.path.join(part_dir, self.name)
+
+        if not os.path.isdir(dst):
+            os.mkdir(dst)
+
+        old_cwd = os.getcwd()
+        os.chdir(os.path.join(extract_dir, os.listdir(extract_dir)[0], 'src'))
+        retcode = subprocess.call([
+            './configure',
+            '--with-erlang=%s' % erlang_path,
+            '--prefix=%s' % dst,
+        ])
+        if retcode != 0:
+            raise Exception("building ejabberd failed")
+
+        if subprocess.call(['make', 'install']) != 0:
+            raise Exception("building ejabberd failed")
+
+        os.chdir(old_cwd)
+
+        bindir = self.buildout['buildout']['bin-directory']
+        ejdctl = os.path.join(bindir, 'ejabberdctl')
+        if not os.path.isfile(ejdctl):
+            shutil.copy(os.path.join(dst, 'sbin', 'ejabberdctl'), ejdctl)
+        
+        for path in remove_after_install:
+            shutil.rmtree(path)
+
+        return (dst,)
+
+    def install(self):
+        """Creates the part."""
+
+        return self.install_ejabberd()
+
+    def update(self):
+        """Updates the part."""
+
+        dst = os.path.join(self.buildout['buildout']['parts-directory'],
+                           self.name)
+        return (dst,)
