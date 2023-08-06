@@ -1,0 +1,318 @@
+zgeo.wfs.webfeatureservice Readme
+=========================
+
+Overview
+--------
+WebFeatureService is an adapter to provide a IWebFeatureService
+
+
+Your tests here
+---------------
+
+IWebFeatureServiceable is a marker interface for WFS providers (objects that will offer
+ the WFS services), a WFS is supposed to be an ATFolder (or a derived class)
+
+	>>> from zope.interface import implements
+    >>> from Products.ATContentTypes.content.folder import ATFolder
+    >>> from zgeo.wfs.interfaces import IWebFeatureServiceable
+    >>> class MyGeoFolder(ATFolder):
+    ...    implements(IWebFeatureServiceable)
+    
+    
+IWebFeatureServiceable objects can be adapted as a WebFeatureService
+    >>> from zgeo.wfs.interfaces import IWebFeatureService
+    >>> f=MyGeoFolder('f')
+    >>> wfs=IWebFeatureService(f)
+    >>> type(wfs)
+    <class 'zgeo.wfs.webfeatureservice.WebFeatureService'>
+
+WebFeatureService object has a srs property which returns EPSG:4326 by default, unless the targeted class
+offers a getSrs() method
+    >>> wfs.srs
+    'EPSG:4326'
+    >>> class OtherGeoFolder(ATFolder):
+    ...    implements(IWebFeatureServiceable)
+    ...    def getSrs(self):
+    ...       return 'EPSG:42304'
+    >>> IWebFeatureService(OtherGeoFolder('other')).srs
+    'EPSG:42304'
+
+WebFeatureService object manage a dictionary describing its feature types.
+By default a 'default' feature type is declared with one element 'Title'
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}}
+
+Feature types list and elements can be modified
+    >>> wfs.addFeatureType('Cities')
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Cities': {'boundingbox': None, 'elements': {'Title': 'string'}}}
+    >>> wfs.addFeatureType('Rivers')
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Cities': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Rivers': {'boundingbox': None, 'elements': {'Title': 'string'}}}
+    >>> wfs.addElementToFeatureType('Cities', 'mayor', 'string')
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Cities': {'boundingbox': None, 'elements': {'mayor': 'string', 'Title': 'string'}}, 'Rivers': {'boundingbox': None, 'elements': {'Title': 'string'}}}
+    >>> wfs.addElementToFeatureType('Cities', 'population', 'integer')
+    >>> wfs.removeElementsFromFeatureType('Cities', ['mayor'])
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Cities': {'boundingbox': None, 'elements': {'population': 'integer', 'Title': 'string'}}, 'Rivers': {'boundingbox': None, 'elements': {'Title': 'string'}}}
+    >>> wfs.addElementToFeatureType('Cities', 'mayor', 'string')
+    >>> wfs.addElementToFeatureType('Rivers', 'length', 'float')
+    
+All the declared elements are added as indexes and columns in the GeoCatalog.
+The GeoItem featureType is also indexed, and their geometry is part of the columns.
+    >>> wfs.getGeoCatalog().indexes()
+    ['featureType', 'name', 'geometry', 'id', 'length', 'mayor', 'population']
+    >>> wfs.getGeoCatalog().schema()
+    ['geometryAsWKT', 'name', 'Title', 'getGML', 'length', 'mayor', 'population']
+    >>> wfs.addElementToFeatureType('Cities', 'area', 'integer')
+    >>> wfs.getGeoCatalog().indexes()
+    ['featureType', 'name', 'area', 'geometry', 'id', 'length', 'mayor', 'population']    
+    >>> wfs.addElementToFeatureType('Cities', 'populationActive', 'integer')
+    
+Each element is supposed to be an attribute (or equivalent accessor) of the Georeferenceable objects.
+    >>> from zope import event
+    >>> from Products.Archetypes.event import ObjectEditedEvent
+    >>> from Products.ATContentTypes.content.document import ATDocument
+    >>> from zgeo.geographer.interfaces import IGeoreferenceable
+    >>> from zgeo.wfs.interfaces import IWFSGeoItem
+    >>> class MyCityGeoObject(ATDocument):
+    ...    implements(IGeoreferenceable)
+    ...    area=0
+    ...    population=0
+    ...    populationActive=0
+    ...    @property
+    ...    def featureType(self):
+    ...       return 'Cities'
+    ...    @property
+    ...    def mayor(self):
+    ...       return 'Me'
+    ...    def getPopulation(self):
+    ...       return self.population
+    ...    def setPopulation(self,v):
+    ...       self.population=v
+    ...    def getPopulationActive(self):
+    ...       return self.populationActive
+    ...    def setPopulationActive(self,v):
+    ...       self.populationActive=v
+    ...    def getArea(self):
+    ...       return self.area
+    ...    def setArea(self,v):
+    ...       self.area=v
+
+Each element is supposed to be an attribute (or equivalent accessor) of the Georeferenceable objects.
+    >>> class MyRiverGeoObject(ATDocument):
+    ...    implements(IGeoreferenceable)
+    ...    length=0
+    ...    @property
+    ...    def featureType(self):
+    ...       return 'Rivers'
+    ...    def getLength(self):
+    ...       return self.length
+    ...    def setLength(self,v):
+    ...       self.length=v
+
+    >>> f.city1=MyCityGeoObject('city1')
+    >>> f.city1.setTitle('Bamako')
+    >>> f.city1.setPopulation(100)
+    >>> f.city1.getPopulation()
+    100
+    >>> IWFSGeoItem(f.city1).setGeoInterface('Point', (10, 10))
+    >>> [o.__class__ for o in wfs.getFeatureTypeItems('Cities')[0]]
+    [<class 'Products.ZCatalog.Catalog.mybrains'>]
+    >>> [(o.Title, o.mayor, o.population) for o in wfs.getFeatureTypeItems('Cities')[0]]
+    [('Bamako', 'Me', 100)]
+    >>> [o.geometryAsWKT for o in wfs.getFeatureTypeItems('Cities')[0]]
+    ['POINT (10.0000000000000000 10.0000000000000000)']
+          
+WebFeatureService object can compute the bounding box of a given feature type
+    >>> from zgeo.wfs.geoitem import bboxAsTuple, bboxFromTuple
+    >>> bboxAsTuple(wfs.getFeatureTypeBoundingBox('Cities'))
+    (10.0, 10.0, 10.0, 10.0)
+    >>> f.city2=MyCityGeoObject('city2')
+    >>> f.city2.setTitle('Tegucigalpa')
+    >>> f.city2.setPopulation(500)
+    >>> f.city2.getPopulation()
+    500
+    >>> f.city2.setPopulationActive(100)
+    >>> IWFSGeoItem(f.city2).setGeoInterface('Linestring', ((20, 20), (30, 60), (100, 80), (20, 20)))
+    >>> bboxAsTuple(wfs.getFeatureTypeBoundingBox('Cities'))
+    (10.0, 10.0, 100.0, 80.0)
+
+WebFeatureService object can filter the feature type members by indicating a bounding box
+    >>> [o.Title for o in wfs.getFeatureTypeItems('Cities')[0]]
+    ['Bamako', 'Tegucigalpa']
+    >>> [o.Title for o in wfs.getFeatureTypeItems('Cities', (0,0,15,15))[0]]
+    ['Bamako']
+    >>> f.city2.setArea(10.0)
+    >>> f.city2.getArea()
+    10.0
+    >>> event.notify(ObjectEditedEvent(f.city2))
+    >>> [(o.Title, o.mayor, o.population, o.area) for o in wfs.getFeatureTypeItems('Cities')[0]]
+    [('Bamako', 'Me', 100, 0), ('Tegucigalpa', 'Me', 500, 10.0)]
+    
+    	>>> f.city3=MyCityGeoObject('city3')
+    >>> f.city3.setTitle('Toulouse')
+    >>> f.city3.setPopulation(300)
+    >>> f.city3.setPopulationActive(250)
+    >>> IWFSGeoItem(f.city3).setGeoInterface('Point', (15, 15))
+    >>> [o.Title for o in wfs.getFeatureTypeItems('Cities')[0]]
+    ['Bamako', 'Tegucigalpa', 'Toulouse']
+    
+    >>> f.city4=MyCityGeoObject('city4')
+    >>> f.city4.setTitle('Paris')
+    >>> f.city4.setPopulation(6000)
+    >>> f.city4.setPopulationActive(3000)
+    >>> IWFSGeoItem(f.city4).setGeoInterface('Point', (17, 30))
+ 
+         
+WebFeatureService object can filter the feature type members by indicating a xml filter
+	>>> from xml.dom import minidom
+	
+	# Retrieval of Cities with population=500
+	>>> filter='<Filter><PropertyIsEqualTo><PropertyName>population</PropertyName><Literal>500</Literal></PropertyIsEqualTo></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter') 
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities'],None,n)[0]]
+	['Tegucigalpa']
+	
+	# Retrieval of Cities with population<300
+	>>> filter='<Filter><PropertyIsLessThan><PropertyName>population</PropertyName><Literal>300</Literal></PropertyIsLessThan></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter') 
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities'],None,n)[0]]
+	['Bamako']
+	
+	#Retrieval of Cities with area>=5 and population<600
+	>>> filter='<Filter><AND><PropertyIsGreaterThanOrEqualTo><PropertyName>area</PropertyName><Literal>5</Literal></PropertyIsGreaterThanOrEqualTo><PropertyIsLessThan><PropertyName>population</PropertyName><Literal>600</Literal></PropertyIsLessThan></AND></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter') 
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities'],None,n)[0]]
+	['Tegucigalpa']
+
+ 	>>> f.river1=MyRiverGeoObject('river1')
+    >>> f.river1.setTitle('Adour')
+    >>> f.river1.setLength(150)
+    >>> f.river1.getLength()
+    150
+    >>> IWFSGeoItem(f.river1).setGeoInterface('Linestring', ((5, 5), (10, 10)))
+    
+	>>> f.river2=MyRiverGeoObject('river2')
+    >>> f.river2.setTitle('Garonne')
+    >>> f.river2.setLength(400)
+    >>> IWFSGeoItem(f.river2).setGeoInterface('Linestring', ((7, 7), (4, 12)))
+    >>> [o.Title for o in wfs.getFeatureTypeItems('Rivers')[0]]
+    ['Adour', 'Garonne']
+    
+    # Retrieval of features with different feature types
+    >>> [o.Title for o in wfs.getFeatureTypeItems(['Cities','Rivers'])[0]]
+    ['Bamako', 'Tegucigalpa', 'Toulouse', 'Paris', 'Adour', 'Garonne']
+    
+    # Retrieval of features with different feature types and a filter on every feature type
+    # --------------------- with (featureType=Cities,Rivers and) population=100 OR length=150
+    >>> filter='<Filter><OR><PropertyIsEqualTo><PropertyName>population</PropertyName><Literal>100</Literal></PropertyIsEqualTo><PropertyIsEqualTo><PropertyName>length</PropertyName><Literal>150</Literal></PropertyIsEqualTo></OR></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter') 
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities','Rivers'],None,n)[0]]
+	['Bamako', 'Adour']
+	
+	# Retrieval of features with (featureType=Cities and) population!=500
+	>>> filter='<Filter><PropertyIsNotEqualTo><PropertyName>population</PropertyName><Literal>500</Literal></PropertyIsNotEqualTo></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter') 
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities'],None,n)[0]]
+	['Bamako', 'Toulouse', 'Paris']
+
+	# Retrieval of features with (featureType=Cities and) 500=<population<=5000
+	>>> filter='<Filter><PropertyIsBetween><PropertyName>population</PropertyName><LowerBoundary>500</LowerBoundary><UpperBoundary>5000</UpperBoundary></PropertyIsBetween></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter') 
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities'],None,n)[0]]
+	['Tegucigalpa']
+
+
+getFeature operation allows to limit the number of requested features
+	>>> [o.Title for o in wfs.getFeatureTypeItems('Cities',None,None,2)[0]]
+	['Bamako', 'Tegucigalpa']
+	
+	# if the maxFeatures number is greater than the number of existing features then getFeature operation will return all the features
+    >>> [o.Title for o in wfs.getFeatureTypeItems('Cities',None,None,50)[0]]
+	['Bamako', 'Tegucigalpa', 'Toulouse', 'Paris']
+    
+	# Retrieval of features with filter and bounding box
+	>>> filter='<Filter><OR><PropertyIsLessThan><PropertyName>population</PropertyName><Literal>800</Literal></PropertyIsLessThan><PropertyIsEqualTo><PropertyName>length</PropertyName><Literal>150</Literal></PropertyIsEqualTo></OR></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter') 
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities','Rivers'],(0,0,20,20),n)[0]]
+	['Bamako', 'Toulouse', 'Adour']
+	
+	>>> [(o.Title, o.population, o.populationActive) for o in wfs.getFeatureTypeItems('Cities')[0]]
+	[('Bamako', 100, 0), ('Tegucigalpa', 500, 100), ('Toulouse', 300, 250), ('Paris', 6000, 3000)]
+	
+	# Retrieval of features with (featureType=Cities and) population = populationActive + 50
+	>>> filter='<Filter><PropertyIsEqualTo><PropertyName>population</PropertyName><Add><PropertyName>populationActive</PropertyName><Literal>50</Literal></Add></PropertyIsEqualTo></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter')
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities'],None,n)[0]]
+	['Toulouse']
+	
+	# Retrieval of features with (featureType=Cities and) populationActive = population / 5
+	>>> filter='<Filter><PropertyIsEqualTo><PropertyName>populationActive</PropertyName><Div><PropertyName>population</PropertyName><Literal>5</Literal></Div></PropertyIsEqualTo></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter')
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities'],None,n)[0]]
+	['Tegucigalpa']
+	
+getFeature operation allows to use several logical operators
+	# Retrieval of features with (featureType=Cities and)(populationActive=100 OR populationActive=200) AND population>400
+	>>> filter='<Filter><AND><OR><PropertyIsEqualTo><PropertyName>populationActive</PropertyName><Literal>100</Literal></PropertyIsEqualTo><PropertyIsEqualTo><PropertyName>populationActive</PropertyName><Literal>200</Literal></PropertyIsEqualTo></OR><PropertyIsGreaterThan><PropertyName>population</PropertyName><Literal>60</Literal></PropertyIsGreaterThan></AND></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter')
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities'],None,n)[0]]
+	['Tegucigalpa']
+
+	# Retrieval of features with (featureType=Cities and)(populationActive=100 OR populationActive=3000) AND (area!=0 AND area!=5) AND population>1000
+	>>> filter='<Filter><AND><OR><PropertyIsEqualTo><PropertyName>populationActive</PropertyName><Literal>100</Literal></PropertyIsEqualTo><PropertyIsEqualTo><PropertyName>populationActive</PropertyName><Literal>3000</Literal></PropertyIsEqualTo></OR><OR><PropertyIsNotEqualTo><PropertyName>area</PropertyName><Literal>0</Literal></PropertyIsNotEqualTo><PropertyIsNotEqualTo><PropertyName>area</PropertyName><Literal>5</Literal></PropertyIsNotEqualTo></OR><PropertyIsGreaterThan><PropertyName>population</PropertyName><Literal>1000</Literal></PropertyIsGreaterThan></AND></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter')
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities','Rivers'],None,n)[0]]
+	['Paris']
+	
+	>>> f.city1.setPopulationActive(100)
+	
+	# Retrieval of features with (featureType=Cities,Rivers and)(populationActive=100 AND population>200) OR length>=400
+	>>> filter='<Filter><OR><AND><PropertyIsEqualTo><PropertyName>populationActive</PropertyName><Literal>100</Literal></PropertyIsEqualTo><PropertyIsGreaterThan><PropertyName>population</PropertyName><Literal>200</Literal></PropertyIsGreaterThan></AND><PropertyIsGreaterThanOrEqualTo><PropertyName>length</PropertyName><Literal>400</Literal></PropertyIsGreaterThanOrEqualTo></OR></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter')
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities','Rivers'],None,n)[0]]
+	['Tegucigalpa', 'Garonne']
+	
+	# Retrieval of features with (featureType=Cities and) NOT (populationActive>=500 OR population<=200) AND NOT (area=Null)
+	>>> filter='<Filter><NOT><OR><PropertyIsGreaterThanOrEqualTo><PropertyName>populationActive</PropertyName><Literal>500</Literal></PropertyIsGreaterThanOrEqualTo><PropertyIsLessThanOrEqualTo><PropertyName>population</PropertyName><Literal>200</Literal></PropertyIsLessThanOrEqualTo></OR><PropertyIsNull><PropertyName>area</PropertyName></PropertyIsNull></NOT></Filter>'
+	>>> n=minidom.parseString(filter).getElementsByTagName('Filter')
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities'],None,n)[0]]
+	['Tegucigalpa', 'Toulouse']
+	
+	
+TEST SPATIAL OPERATORS
+	>>> from zgeo.wfs.geoitem import bboxAsTuple, bboxFromTuple
+	>>> l=wfs.getGeoCatalog().search({'geometry':{'query':bboxFromTuple((0,0,30,30)),'geometry_operator':'within'}})
+	>>> [(o.Title, o.geometryAsWKT) for o in l]
+	[('Bamako', 'POINT (10.0000000000000000 10.0000000000000000)'), ('Toulouse', 'POINT (15.0000000000000000 15.0000000000000000)'), ('Adour', 'LINESTRING (5.0000000000000000 5.0000000000000000, 10.0000000000000000 10.0000000000000000)'), ('Garonne', 'LINESTRING (7.0000000000000000 7.0000000000000000, 4.0000000000000000 12.0000000000000000)')]
+	>>> l=wfs.getGeoCatalog().search({'geometry':{'query':bboxFromTuple((0,0,30,30)),'geometry_operator':'intersects'}})
+	>>> [(o.Title, o.geometryAsWKT) for o in l]
+	[('Bamako', 'POINT (10.0000000000000000 10.0000000000000000)'), ('Tegucigalpa', 'LINESTRING (20.0000000000000000 20.0000000000000000, 30.0000000000000000 60.0000000000000000, 100.0000000000000000 80.0000000000000000, 20.0000000000000000 20.0000000000000000)'), ('Toulouse', 'POINT (15.0000000000000000 15.0000000000000000)'), ('Paris', 'POINT (17.0000000000000000 30.0000000000000000)'), ('Adour', 'LINESTRING (5.0000000000000000 5.0000000000000000, 10.0000000000000000 10.0000000000000000)'), ('Garonne', 'LINESTRING (7.0000000000000000 7.0000000000000000, 4.0000000000000000 12.0000000000000000)')]
+	>>> l=wfs.getGeoCatalog().search({'geometry':{'query':bboxFromTuple((0,0,30,30)),'geometry_operator':'contains'}})
+	>>> [(o.Title, o.geometryAsWKT) for o in l]
+	[]
+	
+getFeature operation can sort the results
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities','Rivers'],None,None,None,['name'])[0]]
+	['Adour', 'Bamako', 'Garonne', 'Paris', 'Tegucigalpa', 'Toulouse']
+	>>> [o.Title for o in wfs.getFeatureTypeItems(['Cities'],None,None,None,['population D'])[0]]
+	['Paris', 'Tegucigalpa', 'Toulouse', 'Bamako']
+	
+Tear down
+
+  >>> wfs.getGeoCatalog()._catalog.getIndex('geometry').destroy_spatialindex()
+	
+
+
+
+
+
+
+
+
+
+
+
+ 

@@ -1,0 +1,102 @@
+debug
+=========================
+
+    >>> self.setRoles(['Manager'])
+    >>> from zope.interface import implements
+    >>> from Products.ATContentTypes.content.folder import ATFolder
+    >>> from Products.zgeo.wfs.interfaces import IWebFeatureServiceable
+    >>> from Products.zgeo.wfs.geoitem import bboxAsTuple
+    >>> class MyGeoFolder(ATFolder):
+    ...    implements(IWebFeatureServiceable)
+    
+    >>> from Products.zgeo.wfs.interfaces import IWebFeatureService
+    >>> self.portal.f=MyGeoFolder('f')
+    >>> wfs=IWebFeatureService(self.portal.f)
+    >>> type(wfs)
+    <class 'Products.zgeo.wfs.webfeatureservice.WebFeatureService'>
+    >>> class OtherGeoFolder(ATFolder):
+    ...    implements(IWebFeatureServiceable)
+    ...    def getSrs(self):
+    ...       return 'EPSG:42304'
+
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}}
+
+    >>> wfs.addFeatureType('Cities')
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Cities': {'boundingbox': None, 'elements': {'Title': 'string'}}}
+    >>> wfs.addElementToFeatureType('Cities', 'mayor', 'string')
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Cities': {'boundingbox': None, 'elements': {'mayor': 'string', 'Title': 'string'}}}
+    >>> wfs.addElementToFeatureType('Cities', 'population', 'string')
+    >>> wfs.removeElementsFromFeatureType('Cities', ['mayor'])
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Cities': {'boundingbox': None, 'elements': {'population': 'string', 'Title': 'string'}}}
+    >>> wfs.addElementToFeatureType('Cities', 'mayor', 'string')
+    >>> wfs.addElementToFeatureType('Cities', 'area', 'integer')
+    
+    >>> wfs.getGeoCatalog().indexes()
+    ['featureType', 'name', 'area', 'geometry', 'id', 'mayor', 'population']
+    >>> wfs.getGeoCatalog().schema()
+    ['name', 'Title', 'geometry', 'area', 'getGML', 'mayor', 'population']
+    
+    >>> from Products.ATContentTypes.content.document import ATDocument
+    >>> from Products.zgeo.geographer.interfaces import IGeoItem, IGeoreferenceable
+    >>> class MyCityGeoObject(ATDocument):
+    ...    implements(IGeoreferenceable)
+    ...    area=0
+    ...    @property
+    ...    def featureType(self):
+    ...       return 'Cities'
+    ...    @property
+    ...    def mayor(self):
+    ...       return 'Me'
+    ...    def getPopulation(self):
+    ...       return '1.000.000 inhabitants'
+    ...    def getArea(self):
+    ...       return self.area
+    ...    def setArea(self,v):
+    ...       self.area=v
+    
+    >>> self.portal.f.city1=MyCityGeoObject('city1')
+    >>> self.portal.f.city1.setTitle('Bamako')
+    >>> self.portal.f.city1.setArea(10)
+    >>> self.portal.f.city1.getArea()
+    10
+    >>> IGeoItem(self.portal.f.city1).storeGeometryFromWKT('POINT (10 10)')
+    >>> [o.__class__ for o in wfs.getFeatureTypeItems('Cities')[0]]
+    [<class 'Products.ZCatalog.Catalog.mybrains'>]
+    >>> [(o.Title, o.area) for o in wfs.getFeatureTypeItems('Cities')[0]]
+    [('Bamako', 10)]
+    >>> [o.geometry.wkt for o in wfs.getFeatureTypeItems('Cities')[0]]
+    ['POINT (10.0000000000000000 10.0000000000000000)']
+       
+    >>> bboxAsTuple(wfs.getFeatureTypeBoundingBox('Cities'))
+    (10.0, 10.0, 10.0, 10.0)
+    >>> self.portal.f.city2=MyCityGeoObject('city2')
+    >>> self.portal.f.city2.setTitle('Tegucigalpa')
+    >>> self.portal.f.city2.setArea(20)
+    >>> IGeoItem(self.portal.f.city2).storeGeometryFromWKT('LINESTRING (20 20, 30 60, 100 80, 20 20)')
+    >>> bboxAsTuple(wfs.getFeatureTypeBoundingBox('Cities'))
+    (10.0, 10.0, 100.0, 80.0)
+
+    >>> [o.Title for o in wfs.getFeatureTypeItems('Cities')[0]]
+    ['Bamako', 'Tegucigalpa']
+    >>> [o.Title for o in wfs.getFeatureTypeItems('Cities', (0,0,15,15))[0]]
+    ['Bamako']
+    
+    >>> [(o.Title, o.area) for o in wfs.getGeoCatalog().search({'area':{'query': 15,'range': 'min'}})]
+    [('Tegucigalpa', 20)]
+    >>> [(o.Title, o.area) for o in wfs.getGeoCatalog().search({'area':{'query': 15,'range': 'max'}})]
+    [('Bamako', 10)]
+    >>> [(o.Title, o.area) for o in wfs.getGeoCatalog().search({'area':{'query': [9,12],'range': 'min:max'}})]
+    [('Bamako', 10)]
+    >>> wfs.addElementToFeatureType('Cities', 'density', 'integer')
+    
+
+    
+    
+
+
+
+ 
