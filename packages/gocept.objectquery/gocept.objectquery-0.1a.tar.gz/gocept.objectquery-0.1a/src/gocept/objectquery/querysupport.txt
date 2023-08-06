@@ -1,0 +1,288 @@
+==================
+Using QuerySupport
+==================
+
+ObjectParser
+============
+
+Initialization
+--------------
+
+ObjectParser looks inside objects for attributes and following objects. First
+we create such an object:
+
+    >>> class Child1(object):
+    ...     pass
+    >>> class Child2(object):
+    ...     pass
+    >>> class Child3(object):
+    ...     pass
+    >>> class Child4(object):
+    ...     misc = Child1()
+
+    >>> class ToParse(object):
+    ...     some_var = ["some tupel", (Child2(), Child3())]
+    ...     other_var = {"foo": "bar"}
+    ...     _private_var = 10
+    ...     desc = Child4()
+    ...
+    ...     def some_method(self):
+    ...         pass
+
+    >>> obj = ToParse()
+
+You get an ObjectParser like this:
+
+    >>> from gocept.objectquery.querysupport import ObjectParser
+    >>> op = ObjectParser()
+    >>> op
+    <gocept.objectquery.querysupport.ObjectParser object at 0x...>
+
+
+To get all found attributes, use the get_attributes() method:
+
+    >>> attributes = op.get_attributes(obj)
+    >>> attributes
+    <generator object at 0x...>
+    >>> sorted(list(attributes))
+    ['desc', 'other_var', 'some_var']
+
+To get all descendants, use the appropriate method. Note, that Child1 is not
+part of the results because its a descendant of Child4:
+
+    >>> descendants = op.get_descendants(obj)
+    >>> descendants
+    <generator object at 0x...>
+    >>> r = list(descendants)
+    >>> sorted(r)
+    [<Child2 object at 0x...>, <Child3 object at 0x...>, <Child4 object at 0x...>]
+    >>> len(r)
+    3
+
+
+EEJoin
+======
+
+Initialization
+--------------
+
+Import and create a ZODB to store the indexes:
+
+    >>> from ZODB import MappingStorage, DB
+    >>> import transaction
+    >>> from gocept.objectquery.testobjects import Obj
+    >>> storage = MappingStorage.MappingStorage()
+    >>> db = DB(storage)
+    >>> conn = db.open()
+    >>> dbroot = conn.root()
+
+    >>> def create_obj():
+    ...     o = Obj()
+    ...     conn.add(o)
+    ...     return o
+
+    >>> o1 = create_obj()
+    >>> o2 = create_obj()
+    >>> o3 = create_obj()
+    >>> o4 = create_obj()
+    >>> o5 = create_obj()
+
+    >>> dbroot['1'] = o1
+    >>> o1.child1 = o2
+    >>> o1.child2 = o3
+    >>> o3.child1 = o2
+    >>> o2.child1 = o4
+    >>> o1.child3 = o5
+    >>> o5.child1 = o4
+
+    >>> _ = transaction.savepoint()
+
+    >>> o1._p_oid
+    '\x00\x00\x00\x00\x00\x00\x00\x01'
+    >>> o2._p_oid
+    '\x00\x00\x00\x00\x00\x00\x00\x02'
+    >>> o3._p_oid
+    '\x00\x00\x00\x00\x00\x00\x00\x03'
+    >>> o4._p_oid
+    '\x00\x00\x00\x00\x00\x00\x00\x04'
+    >>> o5._p_oid
+    '\x00\x00\x00\x00\x00\x00\x00\x05'
+
+
+EEJoin (Element-Element-Join) joins two lists with the help of the
+StructureIndex. First we need a StructureIndex and the EEJoin:
+
+    >>> from gocept.objectquery.indexsupport import StructureIndex
+    >>> from gocept.objectquery.querysupport import EEJoin
+    >>> si = StructureIndex(o1)
+    >>> eejoin = EEJoin(si)
+
+    >>> si.index(o1)
+    []
+
+A simple query. Which out of 2, 3 and 4 is reachable by 5:
+
+    >>> eejoin([o5._p_oid], [o2._p_oid, o3._p_oid, o4._p_oid])
+    [('\x00\x00\x00\x00\x00\x00\x00\x05', '\x00\x00\x00\x00\x00\x00\x00\x04')]
+
+Some related queries:
+
+    >>> eejoin([o1._p_oid], [o1._p_oid])
+    []
+    >>> eejoin([o5._p_oid], [o1._p_oid])
+    []
+    >>> eejoin([o1._p_oid], [o1._p_oid, o2._p_oid, (o3._p_oid, o4._p_oid), o5._p_oid])
+    [('\x00\x00\x00\x00\x00\x00\x00\x01', '\x00\x00\x00\x00\x00\x00\x00\x02'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x01', '\x00\x00\x00\x00\x00\x00\x00\x04'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x01', '\x00\x00\x00\x00\x00\x00\x00\x05')]
+
+EAJoin
+======
+
+The EAJoin joins two lists of objects. The first list holds all objects which
+match the element condition in a PathExpression query. The second list holds
+all objects which match the attribute and value condition (predicate)
+evaluated by the ObjectCollection.
+
+First instantiate some data:
+
+    >>> class A(object):
+    ...     value = 1
+    >>> class B(object):
+    ...     value = 4
+    >>> class C(object):
+    ...     offset = '9'
+    ...     string = 'something'
+
+    >>> a = A(); b = B(); c = C()
+
+Here some example use-cases:
+
+    >>> from gocept.objectquery.querysupport import EAJoin
+    >>> ea = EAJoin()
+    >>> r = ea([(a, a), (b, b), (c, c)], 'value', 1)
+    >>> len(r) == 1 and r[0] == (a, a)
+    True
+
+    >>> r = ea([(a, a), (a, b), (a, c)], 'value', 5, "<")
+    >>> len(r) == 2 and r[0] == (a, a) and r[1] == (a, b)
+    True
+
+    >>> r = ea([(a, a), (b, b), (a, c)], 'offset', '10', "!=")
+    >>> len(r) == 1 and r[0] == (a, c)
+    True
+
+    >>> r = ea([(a, b), (a, c)], 'value')
+    >>> len(r) == 1 and r[0] == (a, b)
+    True
+
+Duplicate results are well ignored:
+
+    >>> r = ea([(a, a), (a, a)], 'value', 1)
+    >>> len(r) == 1 and r[0] == (a, a)
+    True
+
+You may compare strings with integers as well. The python comparison logic is
+used:
+
+    >>> r = ea([(a, b), (a, c)], 'offset', 5, '>')
+    >>> len(r) == 1 and r[0] == (a, c)
+    True
+
+    >>> r = ea([(a, b), (a, c)], 'string', 5, '>')
+    >>> len(r) == 1 and r[0] == (a, c)
+    True
+
+KCJoin
+======
+
+KCJoin builts for a list of elements those paths with a maximal length and the
+returns a list of the last element of those paths. If you specify the "?"
+occurence operator, it only returns those elements with paths of len == 1.
+
+First init the KCJoin:
+
+    >>> storage = MappingStorage.MappingStorage()
+    >>> db = DB(storage)
+    >>> conn = db.open()
+    >>> dbroot = conn.root()
+
+    >>> o1 = create_obj()
+    >>> o2 = create_obj()
+    >>> o3 = create_obj()
+    >>> o4 = create_obj()
+    >>> o5 = create_obj()
+    >>> o6 = create_obj()
+    >>> o7 = create_obj()
+
+    >>> _ = transaction.savepoint()
+
+    >>> o1._p_oid
+    '\x00\x00\x00\x00\x00\x00\x00\x01'
+    >>> o2._p_oid
+    '\x00\x00\x00\x00\x00\x00\x00\x02'
+    >>> o3._p_oid
+    '\x00\x00\x00\x00\x00\x00\x00\x03'
+    >>> o4._p_oid
+    '\x00\x00\x00\x00\x00\x00\x00\x04'
+    >>> o5._p_oid
+    '\x00\x00\x00\x00\x00\x00\x00\x05'
+
+Insert some values. Two trees: (1, 2, 3, 4, 5) and (1, 6, 7):
+
+    >>> dbroot['1'] = o1
+    >>> o1.child1 = o2
+    >>> o2.child1 = o3
+    >>> o3.child1 = o4
+    >>> o4.child1 = o5
+    >>> o1.child2 = o6
+    >>> o6.child1 = o7
+
+    >>> si = StructureIndex(o1)
+    >>> si.index(o1)
+    []
+
+    >>> from gocept.objectquery.querysupport import KCJoin
+    >>> kc = KCJoin(si)
+
+Get a Kleene Closure over 4, 3, 6, 2, 5 and 7:
+
+    >>> r = kc([o4._p_oid, o3._p_oid, o6._p_oid, o2._p_oid, o5._p_oid, o7._p_oid], "*")
+    >>> sorted(r)
+    [(None, None),
+     ('\x00\x00\x00\x00\x00\x00\x00\x02', '\x00\x00\x00\x00\x00\x00\x00\x02'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x02', '\x00\x00\x00\x00\x00\x00\x00\x03'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x02', '\x00\x00\x00\x00\x00\x00\x00\x04'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x02', '\x00\x00\x00\x00\x00\x00\x00\x05'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x03', '\x00\x00\x00\x00\x00\x00\x00\x03'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x03', '\x00\x00\x00\x00\x00\x00\x00\x04'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x03', '\x00\x00\x00\x00\x00\x00\x00\x05'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x04', '\x00\x00\x00\x00\x00\x00\x00\x04'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x04', '\x00\x00\x00\x00\x00\x00\x00\x05'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x05', '\x00\x00\x00\x00\x00\x00\x00\x05'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x06', '\x00\x00\x00\x00\x00\x00\x00\x06'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x06', '\x00\x00\x00\x00\x00\x00\x00\x07'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x07', '\x00\x00\x00\x00\x00\x00\x00\x07')]
+    >>> r = kc([o2._p_oid, o3._p_oid, o4._p_oid, o5._p_oid], "*")
+    >>> sorted(r)
+    [(None, None),
+     ('\x00\x00\x00\x00\x00\x00\x00\x02', '\x00\x00\x00\x00\x00\x00\x00\x02'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x02', '\x00\x00\x00\x00\x00\x00\x00\x03'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x02', '\x00\x00\x00\x00\x00\x00\x00\x04'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x02', '\x00\x00\x00\x00\x00\x00\x00\x05'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x03', '\x00\x00\x00\x00\x00\x00\x00\x03'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x03', '\x00\x00\x00\x00\x00\x00\x00\x04'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x03', '\x00\x00\x00\x00\x00\x00\x00\x05'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x04', '\x00\x00\x00\x00\x00\x00\x00\x04'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x04', '\x00\x00\x00\x00\x00\x00\x00\x05'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x05', '\x00\x00\x00\x00\x00\x00\x00\x05')]
+
+Get all paths with a length of zero or one within the elements 2, 3, 4, 5:
+
+    >>> sorted(kc([o2._p_oid, o3._p_oid, o4._p_oid, o5._p_oid], "?"))
+    [(None, None),
+     ('\x00\x00\x00\x00\x00\x00\x00\x02', '\x00\x00\x00\x00\x00\x00\x00\x02'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x03', '\x00\x00\x00\x00\x00\x00\x00\x03'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x04', '\x00\x00\x00\x00\x00\x00\x00\x04'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x05', '\x00\x00\x00\x00\x00\x00\x00\x05')]
+

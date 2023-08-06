@@ -1,0 +1,182 @@
+==================
+Using IndexSupport
+==================
+
+Initialization
+==============
+
+Import and create a ZODB to store the indexes:
+
+    >>> from ZODB import MappingStorage, DB
+    >>> from persistent import Persistent
+    >>> import transaction
+    >>> storage = MappingStorage.MappingStorage()
+    >>> db = DB(storage)
+    >>> conn = db.open()
+    >>> dbroot = conn.root()
+
+
+Class index
+===========
+
+The class index is responsible to index the class of object instances.
+
+    >>> from gocept.objectquery.indexsupport import ClassIndex
+    >>> ci = ClassIndex()
+
+We can index everything persistent:
+
+    >>> from gocept.objectquery.testobjects import Library, Person, Book
+    >>> dbroot['1'] = library = Library('Halle')
+    >>> dbroot['2'] = person = Person('Peter')
+    >>> _ = transaction.savepoint()
+    >>> dbroot['1']._p_oid
+    '\x00\x00\x00\x00\x00\x00\x00\x01'
+
+    >>> ci.index(library)
+    >>> ci.index(person)
+
+And we can retrieve it back, by asking for all objects of a given class:
+
+    >>> ci.query(Library)
+    <generator object at 0x...>
+    >>> list(ci.query(Library))
+    ['\x00\x00\x00\x00\x00\x00\x00\x01']
+    >>> list(ci.query(Person))
+    ['\x00\x00\x00\x00\x00\x00\x00\x02']
+
+#   XXX class relationships need to be supported
+#   >>> list(ci.query(object))
+#   ['\x00\x00\x00\x00\x00\x00\x00\x01', '\x00\x00\x00\x00\x00\x00\x00\x02']
+
+Unindexing removes an object from the index:
+
+    >>> ci.unindex(person)
+    >>> list(ci.query(Library))
+    ['\x00\x00\x00\x00\x00\x00\x00\x01']
+    >>> list(ci.query(Person))
+    []
+
+
+Attribute index
+===============
+
+    >>> from gocept.objectquery.indexsupport import AttributeIndex
+    >>> ai = AttributeIndex()
+
+    >>> ai.index(library)
+    >>> ai.query('location')
+    <generator object at 0x...>
+    >>> list(ai.query('location'))
+    ['\x00\x00\x00\x00\x00\x00\x00\x01']
+    >>> list(ai.query('foobar'))
+    []
+
+
+Structure index
+===============
+
+    >>> from gocept.objectquery.indexsupport import StructureIndex
+    >>> si = StructureIndex(library)
+
+The root is inserted immediately und thus has a path:
+
+    >>> list(si.get_paths(library))
+    [('\x00\x00\x00\x00\x00\x00\x00\x01',)]
+
+Lets add some more objects to the root and index it:
+
+    >>> book = Book('Author', 'Title', 'Written', 'ISBN')
+    >>> library.add_book(book)
+    >>> _ = transaction.savepoint()
+    >>> si.index(library)
+    []
+
+The newly added object has a path now, too:
+
+    >>> list(si.get_paths(book))
+    [('\x00\x00\x00\x00\x00\x00\x00\x01', '\x00\x00\x00\x00\x00\x00\x00\x03')]
+
+Direct parent/child relationships can be queried:
+
+    >>> si.is_child(book._p_oid, library._p_oid)
+    True
+    >>> si.is_child(library._p_oid, book._p_oid)
+    False
+    >>> si.is_child(library._p_oid, library._p_oid)
+    False
+
+And transitive parent/child relationships too:
+
+    >>> si.is_successor(book._p_oid, library._p_oid)
+    True
+    >>> si.is_successor(library._p_oid, book._p_oid)
+    False
+
+    >>> book.author = person
+    >>> _ = transaction.savepoint()
+    >>> si.index(dbroot['1'].books[0])
+    []
+
+    >>> si.is_successor(person._p_oid, library._p_oid)
+    True
+    >>> si.is_successor(person._p_oid, book._p_oid)
+    True
+    >>> si.is_successor(library._p_oid, person._p_oid)
+    False
+
+Successors with one or more "hops" are not childs:
+
+    >>> si.is_child(person._p_oid, library._p_oid)
+    False
+
+Adding a circular reference to the index:
+
+    >>> person.main_library = library
+    >>> si.index(person)
+    []
+
+We now have the loop Library -> Book -> Author -> Library.  Therefore,
+all the objects are successors and predecessors of each other and
+themselves:
+
+    >>> list(si.get_paths(library))
+    [('\x00\x00\x00\x00\x00\x00\x00\x01',),
+     ('\x00\x00\x00\x00\x00\x00\x00\x01',
+      '\x00\x00\x00\x00\x00\x00\x00\x03',
+      '\x00\x00\x00\x00\x00\x00\x00\x02',
+      '\x00\x00\x00\x00\x00\x00\x00\x01')]
+
+    >>> list(si.get_paths(book))
+    [('\x00\x00\x00\x00\x00\x00\x00\x01',
+      '\x00\x00\x00\x00\x00\x00\x00\x03'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x01',
+      '\x00\x00\x00\x00\x00\x00\x00\x03',
+      '\x00\x00\x00\x00\x00\x00\x00\x02',
+      '\x00\x00\x00\x00\x00\x00\x00\x01',
+      '\x00\x00\x00\x00\x00\x00\x00\x03')]
+
+    >>> list(si.get_paths(person))
+    [('\x00\x00\x00\x00\x00\x00\x00\x01',
+      '\x00\x00\x00\x00\x00\x00\x00\x03',
+      '\x00\x00\x00\x00\x00\x00\x00\x02'),
+     ('\x00\x00\x00\x00\x00\x00\x00\x01',
+      '\x00\x00\x00\x00\x00\x00\x00\x03',
+      '\x00\x00\x00\x00\x00\x00\x00\x02',
+      '\x00\x00\x00\x00\x00\x00\x00\x01',
+      '\x00\x00\x00\x00\x00\x00\x00\x03',
+      '\x00\x00\x00\x00\x00\x00\x00\x02')]
+
+    >>> si.is_child(library._p_oid, library._p_oid)
+    False
+    >>> si.is_child(person._p_oid, person._p_oid)
+    False
+    >>> si.is_child(book._p_oid, book._p_oid)
+    False
+
+    >>> si.is_successor(library._p_oid, library._p_oid)
+    True
+    >>> si.is_successor(person._p_oid, person._p_oid)
+    True
+    >>> si.is_successor(book._p_oid, book._p_oid)
+    True
