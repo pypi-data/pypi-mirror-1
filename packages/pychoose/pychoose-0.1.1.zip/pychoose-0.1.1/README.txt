@@ -1,0 +1,87 @@
+Description
+-----------
+
+.. line-block::
+
+    PyPI package page: http://pypi.python.org/pypi/pychoose
+    Subversion repository: http://code.google.com/p/pychoose/
+
+From the command-line, run::
+
+    > pychoose.py XY
+
+This will make Python version X.Y active, if it is installed, for subsequent
+commands from the same prompt. The change is local to this shell.
+
+The prompt is modified to indicate the modified environment.
+
+To revert to the previously used version of Python, type 'exit'
+
+This works by starting a new Cmd shell with a modified PATH, by prepending
+C:\\PythonXY and its subdirectories, and importantly by removing any other
+C:\\PythonZZ directories and subdirectories.
+
+Multiple invocations of pychoose can be nested.
+
+
+Dependencies
+------------
+
+No dependencies other than Python itself. Only tested on 2.4, 2.5, 2.6.
+
+
+Installing
+----------
+
+Windows users may download and double-click a graphical installer from
+http://pypi.python.org/pypi/pychoose.
+
+Command-line jockeys with setuptools installed may use:
+
+    ``easy_install pychoose``
+
+or, if pip is installed:
+
+    ``pip install pychoose``
+
+or download a zip of the source from http://pypi.python.org/pypi/pychoose and use:
+
+    ``python setup.py install``
+
+Alternatively, to check out the latest unstable source from subversion,
+including tests, see:
+
+    http://code.google.com/p/pychoose/source/checkout.
+
+
+Known Problems
+--------------
+
+Should get install dirs of various Python version from the registry, insted of
+assuming they are all variations on C:\\PythonXX.
+
+When it operates, it changes the path to put itself out of reach! So, like
+any other Python package, it requires installing separately for each Python
+version you have installed, which is a bit irksome. It would be better if it
+installed to some location that was always on the path, even when specific Python
+versions are removed from the path. Or perhaps it should copy itself into the
+Python version being activated? Hmmm...
+
+Doesn't affect Windows .py filetype associations. Perhaps this could be tackled by
+inserting an environment variable into the registry keys, set the env var in the
+registry (to persist its default value) and then change that value temporarily
+and locally in this script.
+
+Doesn't modify PYTHONPATH. Should it ever?
+
+Should be cross-platform, but isn't yet. As I understand it, on other platforms
+we wouldn't even have to start a new shell to work.
+
+Currently adds all subdirectories of PythonXX to the PATH. This is probably
+overkill. Can we filter out desired subdirectories with any reliability?
+
+
+License
+-------
+
+Pychoose is distributed under the BSD license. Live long and prosper.
