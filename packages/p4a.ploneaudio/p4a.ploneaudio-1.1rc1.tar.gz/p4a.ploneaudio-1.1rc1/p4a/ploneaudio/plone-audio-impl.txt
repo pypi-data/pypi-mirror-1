@@ -1,0 +1,68 @@
+Plone Audio (data format specific)
+==================================
+
+The following doctest suite is meant to be run against each available
+audio implementation to ensure all features are accounted for.  In
+anticipation of this, ``self.samplefile`` needs to point to a valid
+sample audio file of the given type.  Also, ``self.required_mimetype``
+should be the mime type that audio implementation is meant to handle.
+
+We begin this process by creating a new instance of a file content
+type.
+
+  >>> id = self.folder.invokeFactory(self.file_content_type, 'samplefile')
+  >>> samplefile = self.folder[id]
+
+Keeping the sample audio files small it should be no problem loading
+them into memory for testing purposes.  So we proceed to give the
+previous file instance the sample file binary data.
+
+  >>> f = open(self.samplefile, 'rb')
+  >>> data = f.read()
+  >>> f.close()
+  >>> samplefile.getRawFile().update_data(data, self.required_mimetype, len(data))
+
+This is all fine and dandy but since we went a little lowlevel to update
+the file, this means IAudio hasn't had a chance to update the audio
+metadata and related logic.  So we need to fire IObjectModifiedEvent to
+kick IAudio.
+
+  >>> from zope import event
+  >>> from zope.app.event import objectevent
+  >>> event.notify(objectevent.ObjectModifiedEvent(samplefile))
+
+Make sure ``samplefile`` has the appropriate mime type.
+
+  >>> samplefile.content_type == self.required_mimetype
+  True
+
+Now lets look up IAudio and get the data we expect from importing the
+audio file.
+
+  >>> from p4a.audio.interfaces import IAudio
+  >>> audiofile = IAudio(samplefile)
+
+  >>> audiofile.title == self.fields['title']
+  True
+  >>> audiofile.album == self.fields['album']
+  True
+  >>> audiofile.artist == self.fields['artist']
+  True
+
+Do a little CMF testing.
+
+  >>> samplefile.Title() == self.fields['title']
+  True
+
+Make sure storing and loading of audio metadata works.
+
+  >>> audiofile._save_audio_metadata()
+  >>> audiofile._load_audio_metadata()
+
+Now lets test out the downloading capability of the file.
+
+  >>> download = samplefile.unrestrictedTraverse('@@downloadfile')
+  >>> download.request.form['field'] = 'p4a.audio.interfaces:IAudio:file'
+  >>> download() is not None
+  True
+
