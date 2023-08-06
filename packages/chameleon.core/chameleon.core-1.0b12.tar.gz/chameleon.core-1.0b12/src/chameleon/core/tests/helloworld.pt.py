@@ -1,0 +1,20 @@
+def bind():
+	from cPickle import loads as _loads
+	_init_stream = _loads('cchameleon.core.generation\ninitialize_stream\np1\n.')
+	_init_scope = _loads('cchameleon.core.utils\necontext\np1\n.')
+	_init_tal = _loads('cchameleon.core.generation\ninitialize_tal\np1\n.')
+	def render(xincludes, target_language = None):
+		# _init_stream()
+		_out, _write = _init_stream()
+		# _init_scope()
+		econtext = _init_scope()
+		# _init_tal()
+		_attributes, repeat = _init_tal()
+		# None
+		_domain = None
+		_write('<div>\n  Hello World!\n')
+		_write('</div>')
+		_write('\n')
+		
+		return _out.getvalue()
+	return render
