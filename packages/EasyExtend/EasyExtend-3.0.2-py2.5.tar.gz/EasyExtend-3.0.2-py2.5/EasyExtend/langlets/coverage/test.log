@@ -1,0 +1,1810 @@
+     _____
+    /  __ \ 
+    | /  \/ _____   _____ _ __ __ _  __ _  ___
+    | |    / _ \ \ / / _ \ '__/ _` |/ _` |/ _ \ 
+    | \__/\ (_) \ V /  __/ | | (_| | (_| |  __/
+     \____/\___/ \_/ \___|_|  \__,_|\__, |\___|
+                                     __/ |
+                                    |___/
+
+-------------------------------------------------------.
+ Coverage : C:\lang\Python25\lib\test\test_builtin.py  |
+-------------------------------------------------------'
+0000
+0001            # Python test set -- built-in functions
+0002            
+0003            import test.test_support, unittest
+0004            from test.test_support import fcmp, have_unicode, TESTFN, unlink, \
+0005                                          run_unittest, run_with_locale
+0006            from operator import neg
+0007            
+0008            import sys, warnings, cStringIO, random, UserDict
+0009            warnings.filterwarnings("ignore", "hex../oct.. of negative int",
+0010                                    FutureWarning, __name__)
+0011            warnings.filterwarnings("ignore", "integer argument expected",
+0012                                    DeprecationWarning, "unittest")
+0013            
+0014            # count the number of test runs.
+0015            # used to skip running test_execfile() multiple times
+0016            numruns = 0
+0017            
+0018 >          class Squares:
+0019            
+0020 >              def __init__(self, max):
+0021                    self.max = max
+0022                    self.sofar = []
+0023            
+0024                def __len__(self): return len(self.sofar)
+0025            
+0026 >              def __getitem__(self, i):
+0027                    if not 0 <= i < self.max: raise IndexError
+0028                    n = len(self.sofar)
+0029 >                  while n <= i:
+0030                        self.sofar.append(n*n)
+0031                        n += 1
+0032                    return self.sofar[i]
+0033            
+0034 >          class StrSquares:
+0035            
+0036 >  !           def __init__(self, max):
+0037                    self.max = max
+0038                    self.sofar = []
+0039            
+0040 >  !           def __len__(self):
+0041                    return len(self.sofar)
+0042            
+0043 >  !           def __getitem__(self, i):
+0044 >  !               if not 0 <= i < self.max:
+0045                        raise IndexError
+0046                    n = len(self.sofar)
+0047 >  !               while n <= i:
+0048                        self.sofar.append(str(n*n))
+0049                        n += 1
+0050                    return self.sofar[i]
+0051            
+0052 >          class BitBucket:
+0053 >              def write(self, line):
+0054                    pass
+0055            
+0056            L = [
+0057                    ('0', 0),
+0058                    ('1', 1),
+0059                    ('9', 9),
+0060                    ('10', 10),
+0061                    ('99', 99),
+0062                    ('100', 100),
+0063                    ('314', 314),
+0064                    (' 314', 314),
+0065                    ('314 ', 314),
+0066                    ('  \t\t  314  \t\t  ', 314),
+0067                    (repr(sys.maxint), sys.maxint),
+0068                    ('  1x', ValueError),
+0069                    ('  1  ', 1),
+0070                    ('  1\02  ', ValueError),
+0071                    ('', ValueError),
+0072                    (' ', ValueError),
+0073                    ('  \t\t  ', ValueError)
+0074            ]
+0075 >          if have_unicode:
+0076                L += [
+0077                    (unicode('0'), 0),
+0078                    (unicode('1'), 1),
+0079                    (unicode('9'), 9),
+0080                    (unicode('10'), 10),
+0081                    (unicode('99'), 99),
+0082                    (unicode('100'), 100),
+0083                    (unicode('314'), 314),
+0084                    (unicode(' 314'), 314),
+0085                    (unicode('\u0663\u0661\u0664 ','raw-unicode-escape'), 314),
+0086                    (unicode('  \t\t  314  \t\t  '), 314),
+0087                    (unicode('  1x'), ValueError),
+0088                    (unicode('  1  '), 1),
+0089                    (unicode('  1\02  '), ValueError),
+0090                    (unicode(''), ValueError),
+0091                    (unicode(' '), ValueError),
+0092                    (unicode('  \t\t  '), ValueError),
+0093                    (unichr(0x200), ValueError),
+0094            ]
+0095            
+0096 >          class TestFailingBool:
+0097 >              def __nonzero__(self):
+0098                    raise RuntimeError
+0099            
+0100 >          class TestFailingIter:
+0101 >              def __iter__(self):
+0102                    raise RuntimeError
+0103            
+0104 >          class BuiltinTest(unittest.TestCase):
+0105            
+0106 >              def test_import(self):
+0107                    __import__('sys')
+0108                    __import__('time')
+0109                    __import__('string')
+0110                    self.assertRaises(ImportError, __import__, 'spamspam')
+0111                    self.assertRaises(TypeError, __import__, 1, 2, 3, 4)
+0112                    self.assertRaises(ValueError, __import__, '')
+0113            
+0114 >              def test_abs(self):
+0115                    # int
+0116                    self.assertEqual(abs(0), 0)
+0117                    self.assertEqual(abs(1234), 1234)
+0118                    self.assertEqual(abs(-1234), 1234)
+0119                    self.assertTrue(abs(-sys.maxint-1) > 0)
+0120                    # float
+0121                    self.assertEqual(abs(0.0), 0.0)
+0122                    self.assertEqual(abs(3.14), 3.14)
+0123                    self.assertEqual(abs(-3.14), 3.14)
+0124                    # long
+0125                    self.assertEqual(abs(0L), 0L)
+0126                    self.assertEqual(abs(1234L), 1234L)
+0127                    self.assertEqual(abs(-1234L), 1234L)
+0128                    # str
+0129                    self.assertRaises(TypeError, abs, 'a')
+0130            
+0131 >              def test_all(self):
+0132                    self.assertEqual(all([2, 4, 6]), True)
+0133                    self.assertEqual(all([2, None, 6]), False)
+0134                    self.assertRaises(RuntimeError, all, [2, TestFailingBool(), 6])
+0135                    self.assertRaises(RuntimeError, all, TestFailingIter())
+0136                    self.assertRaises(TypeError, all, 10)               # Non-iterable
+0137                    self.assertRaises(TypeError, all)                   # No args
+0138                    self.assertRaises(TypeError, all, [2, 4, 6], [])    # Too many args
+0139                    self.assertEqual(all([]), True)                     # Empty iterator
+0140                    S = [50, 60]
+0141                    self.assertEqual(all(x > 42 for x in S), True)
+0142                    S = [50, 40, 60]
+0143                    self.assertEqual(all(x > 42 for x in S), False)
+0144            
+0145 >              def test_any(self):
+0146                    self.assertEqual(any([None, None, None]), False)
+0147                    self.assertEqual(any([None, 4, None]), True)
+0148                    self.assertRaises(RuntimeError, any, [None, TestFailingBool(), 6])
+0149                    self.assertRaises(RuntimeError, all, TestFailingIter())
+0150                    self.assertRaises(TypeError, any, 10)               # Non-iterable
+0151                    self.assertRaises(TypeError, any)                   # No args
+0152                    self.assertRaises(TypeError, any, [2, 4, 6], [])    # Too many args
+0153                    self.assertEqual(any([]), False)                    # Empty iterator
+0154                    S = [40, 60, 30]
+0155                    self.assertEqual(any(x > 42 for x in S), True)
+0156                    S = [10, 20, 30]
+0157                    self.assertEqual(any(x > 42 for x in S), False)
+0158            
+0159 >              def test_neg(self):
+0160                    x = -sys.maxint-1
+0161                    self.assert_(isinstance(x, int))
+0162                    self.assertEqual(-x, sys.maxint+1)
+0163            
+0164 >              def test_apply(self):
+0165 >                  def f0(*args):
+0166                        self.assertEqual(args, ())
+0167 >                  def f1(a1):
+0168                        self.assertEqual(a1, 1)
+0169 >                  def f2(a1, a2):
+0170                        self.assertEqual(a1, 1)
+0171                        self.assertEqual(a2, 2)
+0172 >                  def f3(a1, a2, a3):
+0173                        self.assertEqual(a1, 1)
+0174                        self.assertEqual(a2, 2)
+0175                        self.assertEqual(a3, 3)
+0176                    apply(f0, ())
+0177                    apply(f1, (1,))
+0178                    apply(f2, (1, 2))
+0179                    apply(f3, (1, 2, 3))
+0180            
+0181                    # A PyCFunction that takes only positional parameters should allow an
+0182                    # empty keyword dictionary to pass without a complaint, but raise a
+0183                    # TypeError if the dictionary is non-empty.
+0184                    apply(id, (1,), {})
+0185                    self.assertRaises(TypeError, apply, id, (1,), {"foo": 1})
+0186                    self.assertRaises(TypeError, apply)
+0187                    self.assertRaises(TypeError, apply, id, 42)
+0188                    self.assertRaises(TypeError, apply, id, (42,), 42)
+0189            
+0190 >              def test_callable(self):
+0191                    self.assert_(callable(len))
+0192                    def f(): pass
+0193                    self.assert_(callable(f))
+0194 >                  class C:
+0195                        def meth(self): pass
+0196                    self.assert_(callable(C))
+0197                    x = C()
+0198                    self.assert_(callable(x.meth))
+0199                    self.assert_(not callable(x))
+0200 >                  class D(C):
+0201                        def __call__(self): pass
+0202                    y = D()
+0203                    self.assert_(callable(y))
+0204                    y()
+0205            
+0206 >              def test_chr(self):
+0207                    self.assertEqual(chr(32), ' ')
+0208                    self.assertEqual(chr(65), 'A')
+0209                    self.assertEqual(chr(97), 'a')
+0210                    self.assertEqual(chr(0xff), '\xff')
+0211                    self.assertRaises(ValueError, chr, 256)
+0212                    self.assertRaises(TypeError, chr)
+0213            
+0214 >              def test_cmp(self):
+0215                    self.assertEqual(cmp(-1, 1), -1)
+0216                    self.assertEqual(cmp(1, -1), 1)
+0217                    self.assertEqual(cmp(1, 1), 0)
+0218                    # verify that circular objects are not handled
+0219                    a = []; a.append(a)
+0220                    b = []; b.append(b)
+0221                    from UserList import UserList
+0222                    c = UserList(); c.append(c)
+0223                    self.assertRaises(RuntimeError, cmp, a, b)
+0224                    self.assertRaises(RuntimeError, cmp, b, c)
+0225                    self.assertRaises(RuntimeError, cmp, c, a)
+0226                    self.assertRaises(RuntimeError, cmp, a, c)
+0227                   # okay, now break the cycles
+0228                    a.pop(); b.pop(); c.pop()
+0229                    self.assertRaises(TypeError, cmp)
+0230            
+0231 >              def test_coerce(self):
+0232                    self.assert_(not fcmp(coerce(1, 1.1), (1.0, 1.1)))
+0233                    self.assertEqual(coerce(1, 1L), (1L, 1L))
+0234                    self.assert_(not fcmp(coerce(1L, 1.1), (1.0, 1.1)))
+0235                    self.assertRaises(TypeError, coerce)
+0236 >                  class BadNumber:
+0237 >                      def __coerce__(self, other):
+0238                            raise ValueError
+0239                    self.assertRaises(ValueError, coerce, 42, BadNumber())
+0240                    self.assertRaises(OverflowError, coerce, 0.5, int("12345" * 1000))
+0241            
+0242 >              def test_compile(self):
+0243                    compile('print 1\n', '', 'exec')
+0244                    bom = '\xef\xbb\xbf'
+0245                    compile(bom + 'print 1\n', '', 'exec')
+0246                    self.assertRaises(TypeError, compile)
+0247                    self.assertRaises(ValueError, compile, 'print 42\n', '<string>', 'badmode')
+0248                    self.assertRaises(ValueError, compile, 'print 42\n', '<string>', 'single', 0xff)
+0249                    self.assertRaises(TypeError, compile, chr(0), 'f', 'exec')
+0250 >                  if have_unicode:
+0251                        compile(unicode('print u"\xc3\xa5"\n', 'utf8'), '', 'exec')
+0252                        self.assertRaises(TypeError, compile, unichr(0), 'f', 'exec')
+0253                        self.assertRaises(ValueError, compile, unicode('a = 1'), 'f', 'bad')
+0254            
+0255 >              def test_delattr(self):
+0256                    import sys
+0257                    sys.spam = 1
+0258                    delattr(sys, 'spam')
+0259                    self.assertRaises(TypeError, delattr)
+0260            
+0261 >              def test_dir(self):
+0262                    x = 1
+0263                    self.assert_('x' in dir())
+0264                    import sys
+0265                    self.assert_('modules' in dir(sys))
+0266                    self.assertRaises(TypeError, dir, 42, 42)
+0267            
+0268 >              def test_divmod(self):
+0269                    self.assertEqual(divmod(12, 7), (1, 5))
+0270                    self.assertEqual(divmod(-12, 7), (-2, 2))
+0271                    self.assertEqual(divmod(12, -7), (-2, -2))
+0272                    self.assertEqual(divmod(-12, -7), (1, -5))
+0273            
+0274                    self.assertEqual(divmod(12L, 7L), (1L, 5L))
+0275                    self.assertEqual(divmod(-12L, 7L), (-2L, 2L))
+0276                    self.assertEqual(divmod(12L, -7L), (-2L, -2L))
+0277                    self.assertEqual(divmod(-12L, -7L), (1L, -5L))
+0278            
+0279                    self.assertEqual(divmod(12, 7L), (1, 5L))
+0280                    self.assertEqual(divmod(-12, 7L), (-2, 2L))
+0281                    self.assertEqual(divmod(12L, -7), (-2L, -2))
+0282                    self.assertEqual(divmod(-12L, -7), (1L, -5))
+0283            
+0284                    self.assertEqual(divmod(-sys.maxint-1, -1),
+0285                                     (sys.maxint+1, 0))
+0286            
+0287                    self.assert_(not fcmp(divmod(3.25, 1.0), (3.0, 0.25)))
+0288                    self.assert_(not fcmp(divmod(-3.25, 1.0), (-4.0, 0.75)))
+0289                    self.assert_(not fcmp(divmod(3.25, -1.0), (-4.0, -0.75)))
+0290                    self.assert_(not fcmp(divmod(-3.25, -1.0), (3.0, -0.25)))
+0291            
+0292                    self.assertRaises(TypeError, divmod)
+0293            
+0294 >              def test_eval(self):
+0295                    self.assertEqual(eval('1+1'), 2)
+0296                    self.assertEqual(eval(' 1+1\n'), 2)
+0297                    globals = {'a': 1, 'b': 2}
+0298                    locals = {'b': 200, 'c': 300}
+0299                    self.assertEqual(eval('a', globals) , 1)
+0300                    self.assertEqual(eval('a', globals, locals), 1)
+0301                    self.assertEqual(eval('b', globals, locals), 200)
+0302                    self.assertEqual(eval('c', globals, locals), 300)
+0303 >                  if have_unicode:
+0304                        self.assertEqual(eval(unicode('1+1')), 2)
+0305                        self.assertEqual(eval(unicode(' 1+1\n')), 2)
+0306                    globals = {'a': 1, 'b': 2}
+0307                    locals = {'b': 200, 'c': 300}
+0308 >                  if have_unicode:
+0309                        self.assertEqual(eval(unicode('a'), globals), 1)
+0310                        self.assertEqual(eval(unicode('a'), globals, locals), 1)
+0311                        self.assertEqual(eval(unicode('b'), globals, locals), 200)
+0312                        self.assertEqual(eval(unicode('c'), globals, locals), 300)
+0313                        bom = '\xef\xbb\xbf'
+0314                        self.assertEqual(eval(bom + 'a', globals, locals), 1)
+0315                        self.assertEqual(eval(unicode('u"\xc3\xa5"', 'utf8'), globals),
+0316                                         unicode('\xc3\xa5', 'utf8'))
+0317                    self.assertRaises(TypeError, eval)
+0318                    self.assertRaises(TypeError, eval, ())
+0319            
+0320 >              def test_general_eval(self):
+0321                    # Tests that general mappings can be used for the locals argument
+0322            
+0323 >                  class M:
+0324                        "Test mapping interface versus possible calls from eval()."
+0325 >                      def __getitem__(self, key):
+0326 >                          if key == 'a':
+0327                                return 12
+0328                            raise KeyError
+0329 >                      def keys(self):
+0330                            return list('xyz')
+0331            
+0332                    m = M()
+0333                    g = globals()
+0334                    self.assertEqual(eval('a', g, m), 12)
+0335                    self.assertRaises(NameError, eval, 'b', g, m)
+0336                    self.assertEqual(eval('dir()', g, m), list('xyz'))
+0337                    self.assertEqual(eval('globals()', g, m), g)
+0338                    self.assertEqual(eval('locals()', g, m), m)
+0339                    self.assertRaises(TypeError, eval, 'a', m)
+0340 >                  class A:
+0341                        "Non-mapping"
+0342                        pass
+0343                    m = A()
+0344                    self.assertRaises(TypeError, eval, 'a', g, m)
+0345            
+0346                    # Verify that dict subclasses work as well
+0347 >                  class D(dict):
+0348 >                      def __getitem__(self, key):
+0349 >                          if key == 'a':
+0350                                return 12
+0351                            return dict.__getitem__(self, key)
+0352 >                      def keys(self):
+0353                            return list('xyz')
+0354            
+0355                    d = D()
+0356                    self.assertEqual(eval('a', g, d), 12)
+0357                    self.assertRaises(NameError, eval, 'b', g, d)
+0358                    self.assertEqual(eval('dir()', g, d), list('xyz'))
+0359                    self.assertEqual(eval('globals()', g, d), g)
+0360                    self.assertEqual(eval('locals()', g, d), d)
+0361            
+0362                    # Verify locals stores (used by list comps)
+0363                    eval('[locals() for i in (2,3)]', g, d)
+0364                    eval('[locals() for i in (2,3)]', g, UserDict.UserDict())
+0365            
+0366 >                  class SpreadSheet:
+0367                        "Sample application showing nested, calculated lookups."
+0368                        _cells = {}
+0369 >                      def __setitem__(self, key, formula):
+0370                            self._cells[key] = formula
+0371 >                      def __getitem__(self, key):
+0372                            return eval(self._cells[key], globals(), self)
+0373            
+0374                    ss = SpreadSheet()
+0375                    ss['a1'] = '5'
+0376                    ss['a2'] = 'a1*6'
+0377                    ss['a3'] = 'a2*7'
+0378                    self.assertEqual(ss['a3'], 210)
+0379            
+0380                    # Verify that dir() catches a non-list returned by eval
+0381                    # SF bug #1004669
+0382 >                  class C:
+0383 >                      def __getitem__(self, item):
+0384                            raise KeyError(item)
+0385 >                      def keys(self):
+0386                            return 'a'
+0387                    self.assertRaises(TypeError, eval, 'dir()', globals(), C())
+0388            
+0389                # Done outside of the method test_z to get the correct scope
+0390                z = 0
+0391                f = open(TESTFN, 'w')
+0392                f.write('z = z+1\n')
+0393                f.write('z = z*2\n')
+0394                f.close()
+0395                execfile(TESTFN)
+0396            
+0397 >              def test_execfile(self):
+0398                    global numruns
+0399 >  !               if numruns:
+0400                        return
+0401                    numruns += 1
+0402            
+0403                    globals = {'a': 1, 'b': 2}
+0404                    locals = {'b': 200, 'c': 300}
+0405            
+0406                    self.assertEqual(self.__class__.z, 2)
+0407                    globals['z'] = 0
+0408                    execfile(TESTFN, globals)
+0409                    self.assertEqual(globals['z'], 2)
+0410                    locals['z'] = 0
+0411                    execfile(TESTFN, globals, locals)
+0412                    self.assertEqual(locals['z'], 2)
+0413            
+0414 >                  class M:
+0415                        "Test mapping interface versus possible calls from execfile()."
+0416 >                      def __init__(self):
+0417                            self.z = 10
+0418 >                      def __getitem__(self, key):
+0419 >                          if key == 'z':
+0420                                return self.z
+0421 >  !                       raise KeyError
+0422 >                      def __setitem__(self, key, value):
+0423 >                          if key == 'z':
+0424                                self.z = value
+0425                                return
+0426 >  !                       raise KeyError
+0427            
+0428                    locals = M()
+0429                    locals['z'] = 0
+0430                    execfile(TESTFN, globals, locals)
+0431                    self.assertEqual(locals['z'], 2)
+0432            
+0433                    unlink(TESTFN)
+0434                    self.assertRaises(TypeError, execfile)
+0435                    self.assertRaises(TypeError, execfile, TESTFN, {}, ())
+0436                    import os
+0437                    self.assertRaises(IOError, execfile, os.curdir)
+0438                    self.assertRaises(IOError, execfile, "I_dont_exist")
+0439            
+0440 >              def test_filter(self):
+0441                    self.assertEqual(filter(lambda c: 'a' <= c <= 'z', 'Hello World'), 'elloorld')
+0442                    self.assertEqual(filter(None, [1, 'hello', [], [3], '', None, 9, 0]), [1, 'hello', [3], 9])
+0443                    self.assertEqual(filter(lambda x: x > 0, [1, -3, 9, 0, 2]), [1, 9, 2])
+0444                    self.assertEqual(filter(None, Squares(10)), [1, 4, 9, 16, 25, 36, 49, 64, 81])
+0445                    self.assertEqual(filter(lambda x: x%2, Squares(10)), [1, 9, 25, 49, 81])
+0446 >                  def identity(item):
+0447                        return 1
+0448                    filter(identity, Squares(5))
+0449                    self.assertRaises(TypeError, filter)
+0450 >                  class BadSeq(object):
+0451 >                      def __getitem__(self, index):
+0452 >                          if index<4:
+0453                                return 42
+0454                            raise ValueError
+0455                    self.assertRaises(ValueError, filter, lambda x: x, BadSeq())
+0456 >  !               def badfunc():
+0457                        pass
+0458                    self.assertRaises(TypeError, filter, badfunc, range(5))
+0459            
+0460                    # test bltinmodule.c::filtertuple()
+0461                    self.assertEqual(filter(None, (1, 2)), (1, 2))
+0462                    self.assertEqual(filter(lambda x: x>=3, (1, 2, 3, 4)), (3, 4))
+0463                    self.assertRaises(TypeError, filter, 42, (1, 2))
+0464            
+0465                    # test bltinmodule.c::filterstring()
+0466                    self.assertEqual(filter(None, "12"), "12")
+0467                    self.assertEqual(filter(lambda x: x>="3", "1234"), "34")
+0468                    self.assertRaises(TypeError, filter, 42, "12")
+0469 >                  class badstr(str):
+0470 >                      def __getitem__(self, index):
+0471                            raise ValueError
+0472                    self.assertRaises(ValueError, filter, lambda x: x >="3", badstr("1234"))
+0473            
+0474 >                  class badstr2(str):
+0475 >                      def __getitem__(self, index):
+0476                            return 42
+0477                    self.assertRaises(TypeError, filter, lambda x: x >=42, badstr2("1234"))
+0478            
+0479 >                  class weirdstr(str):
+0480 >                      def __getitem__(self, index):
+0481                            return weirdstr(2*str.__getitem__(self, index))
+0482                    self.assertEqual(filter(lambda x: x>="33", weirdstr("1234")), "3344")
+0483            
+0484 >                  class shiftstr(str):
+0485 >                      def __getitem__(self, index):
+0486                            return chr(ord(str.__getitem__(self, index))+1)
+0487                    self.assertEqual(filter(lambda x: x>="3", shiftstr("1234")), "345")
+0488            
+0489 >                  if have_unicode:
+0490                        # test bltinmodule.c::filterunicode()
+0491                        self.assertEqual(filter(None, unicode("12")), unicode("12"))
+0492                        self.assertEqual(filter(lambda x: x>="3", unicode("1234")), unicode("34"))
+0493                        self.assertRaises(TypeError, filter, 42, unicode("12"))
+0494                        self.assertRaises(ValueError, filter, lambda x: x >="3", badstr(unicode("1234")))
+0495            
+0496 >                      class badunicode(unicode):
+0497 >                          def __getitem__(self, index):
+0498                                return 42
+0499                        self.assertRaises(TypeError, filter, lambda x: x >=42, badunicode("1234"))
+0500            
+0501 >                      class weirdunicode(unicode):
+0502 >                          def __getitem__(self, index):
+0503                                return weirdunicode(2*unicode.__getitem__(self, index))
+0504                        self.assertEqual(
+0505                            filter(lambda x: x>=unicode("33"), weirdunicode("1234")), unicode("3344"))
+0506            
+0507 >                      class shiftunicode(unicode):
+0508 >                          def __getitem__(self, index):
+0509                                return unichr(ord(unicode.__getitem__(self, index))+1)
+0510                        self.assertEqual(
+0511                            filter(lambda x: x>=unicode("3"), shiftunicode("1234")),
+0512                            unicode("345")
+0513                        )
+0514            
+0515 >              def test_filter_subclasses(self):
+0516                    # test that filter() never returns tuple, str or unicode subclasses
+0517                    # and that the result always goes through __getitem__
+0518                    funcs = (None, bool, lambda x: True)
+0519 >                  class tuple2(tuple):
+0520 >                      def __getitem__(self, index):
+0521                            return 2*tuple.__getitem__(self, index)
+0522 >                  class str2(str):
+0523 >                      def __getitem__(self, index):
+0524                            return 2*str.__getitem__(self, index)
+0525                    inputs = {
+0526                        tuple2: {(): (), (1, 2, 3): (2, 4, 6)},
+0527                        str2:   {"": "", "123": "112233"}
+0528                    }
+0529 >                  if have_unicode:
+0530 >                      class unicode2(unicode):
+0531 >                          def __getitem__(self, index):
+0532                                return 2*unicode.__getitem__(self, index)
+0533                        inputs[unicode2] = {
+0534                            unicode(): unicode(),
+0535                            unicode("123"): unicode("112233")
+0536                        }
+0537            
+0538 >                  for (cls, inps) in inputs.iteritems():
+0539 >                      for (inp, exp) in inps.iteritems():
+0540                            # make sure the output goes through __getitem__
+0541                            # even if func is None
+0542                            self.assertEqual(
+0543                                filter(funcs[0], cls(inp)),
+0544                                filter(funcs[1], cls(inp))
+0545                            )
+0546 >                          for func in funcs:
+0547                                outp = filter(func, cls(inp))
+0548                                self.assertEqual(outp, exp)
+0549                                self.assert_(not isinstance(outp, cls))
+0550            
+0551 >              def test_float(self):
+0552                    self.assertEqual(float(3.14), 3.14)
+0553                    self.assertEqual(float(314), 314.0)
+0554                    self.assertEqual(float(314L), 314.0)
+0555                    self.assertEqual(float("  3.14  "), 3.14)
+0556                    self.assertRaises(ValueError, float, "  0x3.1  ")
+0557                    self.assertRaises(ValueError, float, "  -0x3.p-1  ")
+0558 >                  if have_unicode:
+0559                        self.assertEqual(float(unicode("  3.14  ")), 3.14)
+0560                        self.assertEqual(float(unicode("  \u0663.\u0661\u0664  ",'raw-unicode-escape')), 3.14)
+0561                        # Implementation limitation in PyFloat_FromString()
+0562                        self.assertRaises(ValueError, float, unicode("1"*10000))
+0563            
+0564                @run_with_locale('LC_NUMERIC', 'fr_FR', 'de_DE')
+0565 >              def test_float_with_comma(self):
+0566                    # set locale to something that doesn't use '.' for the decimal point
+0567                    # float must not accept the locale specific decimal point but
+0568                    # it still has to accept the normal python syntac
+0569                    import locale
+0570 >                  if not locale.localeconv()['decimal_point'] == ',':
+0571                        return
+0572            
+0573                    self.assertEqual(float("  3.14  "), 3.14)
+0574                    self.assertEqual(float("+3.14  "), 3.14)
+0575                    self.assertEqual(float("-3.14  "), -3.14)
+0576                    self.assertEqual(float(".14  "), .14)
+0577                    self.assertEqual(float("3.  "), 3.0)
+0578                    self.assertEqual(float("3.e3  "), 3000.0)
+0579                    self.assertEqual(float("3.2e3  "), 3200.0)
+0580                    self.assertEqual(float("2.5e-1  "), 0.25)
+0581                    self.assertEqual(float("5e-1"), 0.5)
+0582                    self.assertRaises(ValueError, float, "  3,14  ")
+0583                    self.assertRaises(ValueError, float, "  +3,14  ")
+0584                    self.assertRaises(ValueError, float, "  -3,14  ")
+0585                    self.assertRaises(ValueError, float, "  0x3.1  ")
+0586                    self.assertRaises(ValueError, float, "  -0x3.p-1  ")
+0587                    self.assertEqual(float("  25.e-1  "), 2.5)
+0588 >  !               self.assertEqual(fcmp(float("  .25e-1  "), .025), 0)
+0589            
+0590 >              def test_floatconversion(self):
+0591                    # Make sure that calls to __float__() work properly
+0592 >                  class Foo0:
+0593 >                      def __float__(self):
+0594                            return 42.
+0595            
+0596 >                  class Foo1(object):
+0597 >                      def __float__(self):
+0598                            return 42.
+0599            
+0600 >                  class Foo2(float):
+0601 >                      def __float__(self):
+0602                            return 42.
+0603            
+0604 >                  class Foo3(float):
+0605 >                      def __new__(cls, value=0.):
+0606                            return float.__new__(cls, 2*value)
+0607            
+0608 >                      def __float__(self):
+0609                            return self
+0610            
+0611 >                  class Foo4(float):
+0612 >                      def __float__(self):
+0613                            return 42
+0614            
+0615                    self.assertAlmostEqual(float(Foo0()), 42.)
+0616                    self.assertAlmostEqual(float(Foo1()), 42.)
+0617                    self.assertAlmostEqual(float(Foo2()), 42.)
+0618                    self.assertAlmostEqual(float(Foo3(21)), 42.)
+0619                    self.assertRaises(TypeError, float, Foo4(42))
+0620            
+0621 >              def test_getattr(self):
+0622                    import sys
+0623                    self.assert_(getattr(sys, 'stdout') is sys.stdout)
+0624                    self.assertRaises(TypeError, getattr, sys, 1)
+0625                    self.assertRaises(TypeError, getattr, sys, 1, "foo")
+0626                    self.assertRaises(TypeError, getattr)
+0627 >                  if have_unicode:
+0628                        self.assertRaises(UnicodeError, getattr, sys, unichr(sys.maxunicode))
+0629            
+0630 >              def test_hasattr(self):
+0631                    import sys
+0632                    self.assert_(hasattr(sys, 'stdout'))
+0633                    self.assertRaises(TypeError, hasattr, sys, 1)
+0634                    self.assertRaises(TypeError, hasattr)
+0635 >                  if have_unicode:
+0636                        self.assertRaises(UnicodeError, hasattr, sys, unichr(sys.maxunicode))
+0637            
+0638 >              def test_hash(self):
+0639                    hash(None)
+0640                    self.assertEqual(hash(1), hash(1L))
+0641                    self.assertEqual(hash(1), hash(1.0))
+0642                    hash('spam')
+0643 >                  if have_unicode:
+0644                        self.assertEqual(hash('spam'), hash(unicode('spam')))
+0645                    hash((0,1,2,3))
+0646                    def f(): pass
+0647                    self.assertRaises(TypeError, hash, [])
+0648                    self.assertRaises(TypeError, hash, {})
+0649                    # Bug 1536021: Allow hash to return long objects
+0650 >                  class X:
+0651 >                      def __hash__(self):
+0652                            return 2**100
+0653                    self.assertEquals(type(hash(X())), int)
+0654 >                  class Y(object):
+0655 >                      def __hash__(self):
+0656                            return 2**100
+0657                    self.assertEquals(type(hash(Y())), int)
+0658 >                  class Z(long):
+0659 >                      def __hash__(self):
+0660                            return self
+0661                    self.assertEquals(hash(Z(42)), hash(42L))
+0662            
+0663 >              def test_hex(self):
+0664                    self.assertEqual(hex(16), '0x10')
+0665                    self.assertEqual(hex(16L), '0x10L')
+0666                    self.assertEqual(hex(-16), '-0x10')
+0667                    self.assertEqual(hex(-16L), '-0x10L')
+0668                    self.assertRaises(TypeError, hex, {})
+0669            
+0670 >              def test_id(self):
+0671                    id(None)
+0672                    id(1)
+0673                    id(1L)
+0674                    id(1.0)
+0675                    id('spam')
+0676                    id((0,1,2,3))
+0677                    id([0,1,2,3])
+0678                    id({'spam': 1, 'eggs': 2, 'ham': 3})
+0679            
+0680                # Test input() later, together with raw_input
+0681            
+0682 >              def test_int(self):
+0683                    self.assertEqual(int(314), 314)
+0684                    self.assertEqual(int(3.14), 3)
+0685                    self.assertEqual(int(314L), 314)
+0686                    # Check that conversion from float truncates towards zero
+0687                    self.assertEqual(int(-3.14), -3)
+0688                    self.assertEqual(int(3.9), 3)
+0689                    self.assertEqual(int(-3.9), -3)
+0690                    self.assertEqual(int(3.5), 3)
+0691                    self.assertEqual(int(-3.5), -3)
+0692                    # Different base:
+0693                    self.assertEqual(int("10",16), 16L)
+0694 >                  if have_unicode:
+0695                        self.assertEqual(int(unicode("10"),16), 16L)
+0696                    # Test conversion from strings and various anomalies
+0697 >                  for s, v in L:
+0698 >                      for sign in "", "+", "-":
+0699 >                          for prefix in "", " ", "\t", "  \t\t  ":
+0700                                ss = prefix + sign + s
+0701                                vv = v
+0702 >                              if sign == "-" and v is not ValueError:
+0703                                    vv = -v
+0704 >                              try:
+0705                                    self.assertEqual(int(ss), vv)
+0706 >                              except v:
+0707                                    pass
+0708            
+0709                    s = repr(-1-sys.maxint)
+0710                    x = int(s)
+0711                    self.assertEqual(x+1, -sys.maxint)
+0712                    self.assert_(isinstance(x, int))
+0713                    # should return long
+0714                    self.assertEqual(int(s[1:]), sys.maxint+1)
+0715            
+0716                    # should return long
+0717                    x = int(1e100)
+0718                    self.assert_(isinstance(x, long))
+0719                    x = int(-1e100)
+0720                    self.assert_(isinstance(x, long))
+0721            
+0722            
+0723                    # SF bug 434186:  0x80000000/2 != 0x80000000>>1.
+0724                    # Worked by accident in Windows release build, but failed in debug build.
+0725                    # Failed in all Linux builds.
+0726                    x = -1-sys.maxint
+0727                    self.assertEqual(x >> 1, x//2)
+0728            
+0729                    self.assertRaises(ValueError, int, '123\0')
+0730                    self.assertRaises(ValueError, int, '53', 40)
+0731            
+0732                    # SF bug 1545497: embedded NULs were not detected with
+0733                    # explicit base
+0734                    self.assertRaises(ValueError, int, '123\0', 10)
+0735                    self.assertRaises(ValueError, int, '123\x00 245', 20)
+0736            
+0737                    x = int('1' * 600)
+0738                    self.assert_(isinstance(x, long))
+0739            
+0740 >                  if have_unicode:
+0741                        x = int(unichr(0x661) * 600)
+0742                        self.assert_(isinstance(x, long))
+0743            
+0744                    self.assertRaises(TypeError, int, 1, 12)
+0745            
+0746                    self.assertEqual(int('0123', 0), 83)
+0747                    self.assertEqual(int('0x123', 16), 291)
+0748            
+0749                    # SF bug 1334662: int(string, base) wrong answers
+0750                    # Various representations of 2**32 evaluated to 0
+0751                    # rather than 2**32 in previous versions
+0752            
+0753                    self.assertEqual(int('100000000000000000000000000000000', 2), 4294967296L)
+0754                    self.assertEqual(int('102002022201221111211', 3), 4294967296L)
+0755                    self.assertEqual(int('10000000000000000', 4), 4294967296L)
+0756                    self.assertEqual(int('32244002423141', 5), 4294967296L)
+0757                    self.assertEqual(int('1550104015504', 6), 4294967296L)
+0758                    self.assertEqual(int('211301422354', 7), 4294967296L)
+0759                    self.assertEqual(int('40000000000', 8), 4294967296L)
+0760                    self.assertEqual(int('12068657454', 9), 4294967296L)
+0761                    self.assertEqual(int('4294967296', 10), 4294967296L)
+0762                    self.assertEqual(int('1904440554', 11), 4294967296L)
+0763                    self.assertEqual(int('9ba461594', 12), 4294967296L)
+0764                    self.assertEqual(int('535a79889', 13), 4294967296L)
+0765                    self.assertEqual(int('2ca5b7464', 14), 4294967296L)
+0766                    self.assertEqual(int('1a20dcd81', 15), 4294967296L)
+0767                    self.assertEqual(int('100000000', 16), 4294967296L)
+0768                    self.assertEqual(int('a7ffda91', 17), 4294967296L)
+0769                    self.assertEqual(int('704he7g4', 18), 4294967296L)
+0770                    self.assertEqual(int('4f5aff66', 19), 4294967296L)
+0771                    self.assertEqual(int('3723ai4g', 20), 4294967296L)
+0772                    self.assertEqual(int('281d55i4', 21), 4294967296L)
+0773                    self.assertEqual(int('1fj8b184', 22), 4294967296L)
+0774                    self.assertEqual(int('1606k7ic', 23), 4294967296L)
+0775                    self.assertEqual(int('mb994ag', 24), 4294967296L)
+0776                    self.assertEqual(int('hek2mgl', 25), 4294967296L)
+0777                    self.assertEqual(int('dnchbnm', 26), 4294967296L)
+0778                    self.assertEqual(int('b28jpdm', 27), 4294967296L)
+0779                    self.assertEqual(int('8pfgih4', 28), 4294967296L)
+0780                    self.assertEqual(int('76beigg', 29), 4294967296L)
+0781                    self.assertEqual(int('5qmcpqg', 30), 4294967296L)
+0782                    self.assertEqual(int('4q0jto4', 31), 4294967296L)
+0783                    self.assertEqual(int('4000000', 32), 4294967296L)
+0784                    self.assertEqual(int('3aokq94', 33), 4294967296L)
+0785                    self.assertEqual(int('2qhxjli', 34), 4294967296L)
+0786                    self.assertEqual(int('2br45qb', 35), 4294967296L)
+0787                    self.assertEqual(int('1z141z4', 36), 4294967296L)
+0788            
+0789                    # SF bug 1334662: int(string, base) wrong answers
+0790                    # Checks for proper evaluation of 2**32 + 1
+0791                    self.assertEqual(int('100000000000000000000000000000001', 2), 4294967297L)
+0792                    self.assertEqual(int('102002022201221111212', 3), 4294967297L)
+0793                    self.assertEqual(int('10000000000000001', 4), 4294967297L)
+0794                    self.assertEqual(int('32244002423142', 5), 4294967297L)
+0795                    self.assertEqual(int('1550104015505', 6), 4294967297L)
+0796                    self.assertEqual(int('211301422355', 7), 4294967297L)
+0797                    self.assertEqual(int('40000000001', 8), 4294967297L)
+0798                    self.assertEqual(int('12068657455', 9), 4294967297L)
+0799                    self.assertEqual(int('4294967297', 10), 4294967297L)
+0800                    self.assertEqual(int('1904440555', 11), 4294967297L)
+0801                    self.assertEqual(int('9ba461595', 12), 4294967297L)
+0802                    self.assertEqual(int('535a7988a', 13), 4294967297L)
+0803                    self.assertEqual(int('2ca5b7465', 14), 4294967297L)
+0804                    self.assertEqual(int('1a20dcd82', 15), 4294967297L)
+0805                    self.assertEqual(int('100000001', 16), 4294967297L)
+0806                    self.assertEqual(int('a7ffda92', 17), 4294967297L)
+0807                    self.assertEqual(int('704he7g5', 18), 4294967297L)
+0808                    self.assertEqual(int('4f5aff67', 19), 4294967297L)
+0809                    self.assertEqual(int('3723ai4h', 20), 4294967297L)
+0810                    self.assertEqual(int('281d55i5', 21), 4294967297L)
+0811                    self.assertEqual(int('1fj8b185', 22), 4294967297L)
+0812                    self.assertEqual(int('1606k7id', 23), 4294967297L)
+0813                    self.assertEqual(int('mb994ah', 24), 4294967297L)
+0814                    self.assertEqual(int('hek2mgm', 25), 4294967297L)
+0815                    self.assertEqual(int('dnchbnn', 26), 4294967297L)
+0816                    self.assertEqual(int('b28jpdn', 27), 4294967297L)
+0817                    self.assertEqual(int('8pfgih5', 28), 4294967297L)
+0818                    self.assertEqual(int('76beigh', 29), 4294967297L)
+0819                    self.assertEqual(int('5qmcpqh', 30), 4294967297L)
+0820                    self.assertEqual(int('4q0jto5', 31), 4294967297L)
+0821                    self.assertEqual(int('4000001', 32), 4294967297L)
+0822                    self.assertEqual(int('3aokq95', 33), 4294967297L)
+0823                    self.assertEqual(int('2qhxjlj', 34), 4294967297L)
+0824                    self.assertEqual(int('2br45qc', 35), 4294967297L)
+0825                    self.assertEqual(int('1z141z5', 36), 4294967297L)
+0826            
+0827 >              def test_intconversion(self):
+0828                    # Test __int__()
+0829 >                  class Foo0:
+0830 >                      def __int__(self):
+0831                            return 42
+0832            
+0833 >                  class Foo1(object):
+0834 >                      def __int__(self):
+0835                            return 42
+0836            
+0837 >                  class Foo2(int):
+0838 >                      def __int__(self):
+0839                            return 42
+0840            
+0841 >                  class Foo3(int):
+0842 >                      def __int__(self):
+0843                            return self
+0844            
+0845 >                  class Foo4(int):
+0846 >                      def __int__(self):
+0847                            return 42L
+0848            
+0849 >                  class Foo5(int):
+0850 >                      def __int__(self):
+0851                            return 42.
+0852            
+0853                    self.assertEqual(int(Foo0()), 42)
+0854                    self.assertEqual(int(Foo1()), 42)
+0855                    self.assertEqual(int(Foo2()), 42)
+0856                    self.assertEqual(int(Foo3()), 0)
+0857                    self.assertEqual(int(Foo4()), 42L)
+0858                    self.assertRaises(TypeError, int, Foo5())
+0859            
+0860 >              def test_intern(self):
+0861                    self.assertRaises(TypeError, intern)
+0862                    s = "never interned before"
+0863                    self.assert_(intern(s) is s)
+0864                    s2 = s.swapcase().swapcase()
+0865                    self.assert_(intern(s2) is s)
+0866            
+0867                    # Subclasses of string can't be interned, because they
+0868                    # provide too much opportunity for insane things to happen.
+0869                    # We don't want them in the interned dict and if they aren't
+0870                    # actually interned, we don't want to create the appearance
+0871                    # that they are by allowing intern() to succeeed.
+0872 >                  class S(str):
+0873 >                      def __hash__(self):
+0874                            return 123
+0875            
+0876                    self.assertRaises(TypeError, intern, S("abc"))
+0877            
+0878                    # It's still safe to pass these strings to routines that
+0879                    # call intern internally, e.g. PyObject_SetAttr().
+0880                    s = S("abc")
+0881                    setattr(s, s, s)
+0882                    self.assertEqual(getattr(s, s), s)
+0883            
+0884 >              def test_iter(self):
+0885                    self.assertRaises(TypeError, iter)
+0886                    self.assertRaises(TypeError, iter, 42, 42)
+0887                    lists = [("1", "2"), ["1", "2"], "12"]
+0888 >                  if have_unicode:
+0889                        lists.append(unicode("12"))
+0890 >                  for l in lists:
+0891                        i = iter(l)
+0892                        self.assertEqual(i.next(), '1')
+0893                        self.assertEqual(i.next(), '2')
+0894                        self.assertRaises(StopIteration, i.next)
+0895            
+0896 >              def test_isinstance(self):
+0897 >                  class C:
+0898                        pass
+0899 >                  class D(C):
+0900                        pass
+0901 >                  class E:
+0902                        pass
+0903                    c = C()
+0904                    d = D()
+0905                    e = E()
+0906                    self.assert_(isinstance(c, C))
+0907                    self.assert_(isinstance(d, C))
+0908                    self.assert_(not isinstance(e, C))
+0909                    self.assert_(not isinstance(c, D))
+0910                    self.assert_(not isinstance('foo', E))
+0911                    self.assertRaises(TypeError, isinstance, E, 'foo')
+0912                    self.assertRaises(TypeError, isinstance)
+0913            
+0914 >              def test_issubclass(self):
+0915 >                  class C:
+0916                        pass
+0917 >                  class D(C):
+0918                        pass
+0919 >                  class E:
+0920                        pass
+0921                    c = C()
+0922                    d = D()
+0923                    e = E()
+0924                    self.assert_(issubclass(D, C))
+0925                    self.assert_(issubclass(C, C))
+0926                    self.assert_(not issubclass(C, D))
+0927                    self.assertRaises(TypeError, issubclass, 'foo', E)
+0928                    self.assertRaises(TypeError, issubclass, E, 'foo')
+0929                    self.assertRaises(TypeError, issubclass)
+0930            
+0931 >              def test_len(self):
+0932                    self.assertEqual(len('123'), 3)
+0933                    self.assertEqual(len(()), 0)
+0934                    self.assertEqual(len((1, 2, 3, 4)), 4)
+0935                    self.assertEqual(len([1, 2, 3, 4]), 4)
+0936                    self.assertEqual(len({}), 0)
+0937                    self.assertEqual(len({'a':1, 'b': 2}), 2)
+0938 >                  class BadSeq:
+0939 >                      def __len__(self):
+0940                            raise ValueError
+0941                    self.assertRaises(ValueError, len, BadSeq())
+0942            
+0943 >              def test_list(self):
+0944                    self.assertEqual(list([]), [])
+0945                    l0_3 = [0, 1, 2, 3]
+0946                    l0_3_bis = list(l0_3)
+0947                    self.assertEqual(l0_3, l0_3_bis)
+0948                    self.assert_(l0_3 is not l0_3_bis)
+0949                    self.assertEqual(list(()), [])
+0950                    self.assertEqual(list((0, 1, 2, 3)), [0, 1, 2, 3])
+0951                    self.assertEqual(list(''), [])
+0952                    self.assertEqual(list('spam'), ['s', 'p', 'a', 'm'])
+0953            
+0954 >                  if sys.maxint == 0x7fffffff:
+0955                        # This test can currently only work on 32-bit machines.
+0956                        # XXX If/when PySequence_Length() returns a ssize_t, it should be
+0957                        # XXX re-enabled.
+0958                        # Verify clearing of bug #556025.
+0959                        # This assumes that the max data size (sys.maxint) == max
+0960                        # address size this also assumes that the address size is at
+0961                        # least 4 bytes with 8 byte addresses, the bug is not well
+0962                        # tested
+0963                        #
+0964                        # Note: This test is expected to SEGV under Cygwin 1.3.12 or
+0965                        # earlier due to a newlib bug.  See the following mailing list
+0966                        # thread for the details:
+0967            
+0968                        #     http://sources.redhat.com/ml/newlib/2002/msg00369.html
+0969                        self.assertRaises(MemoryError, list, xrange(sys.maxint // 2))
+0970            
+0971                    # This code used to segfault in Py2.4a3
+0972                    x = []
+0973                    x.extend(-y for y in x)
+0974                    self.assertEqual(x, [])
+0975            
+0976 >              def test_long(self):
+0977                    self.assertEqual(long(314), 314L)
+0978                    self.assertEqual(long(3.14), 3L)
+0979                    self.assertEqual(long(314L), 314L)
+0980                    # Check that conversion from float truncates towards zero
+0981                    self.assertEqual(long(-3.14), -3L)
+0982                    self.assertEqual(long(3.9), 3L)
+0983                    self.assertEqual(long(-3.9), -3L)
+0984                    self.assertEqual(long(3.5), 3L)
+0985                    self.assertEqual(long(-3.5), -3L)
+0986                    self.assertEqual(long("-3"), -3L)
+0987 >                  if have_unicode:
+0988                        self.assertEqual(long(unicode("-3")), -3L)
+0989                    # Different base:
+0990                    self.assertEqual(long("10",16), 16L)
+0991 >                  if have_unicode:
+0992                        self.assertEqual(long(unicode("10"),16), 16L)
+0993                    # Check conversions from string (same test set as for int(), and then some)
+0994                    LL = [
+0995                            ('1' + '0'*20, 10L**20),
+0996                            ('1' + '0'*100, 10L**100)
+0997                    ]
+0998                    L2 = L[:]
+0999 >                  if have_unicode:
+1000                        L2 += [
+1001                            (unicode('1') + unicode('0')*20, 10L**20),
+1002                            (unicode('1') + unicode('0')*100, 10L**100),
+1003                    ]
+1004 >                  for s, v in L2 + LL:
+1005 >                      for sign in "", "+", "-":
+1006 >                          for prefix in "", " ", "\t", "  \t\t  ":
+1007                                ss = prefix + sign + s
+1008                                vv = v
+1009 >                              if sign == "-" and v is not ValueError:
+1010                                    vv = -v
+1011 >                              try:
+1012                                    self.assertEqual(long(ss), long(vv))
+1013 >                              except v:
+1014                                    pass
+1015            
+1016                    self.assertRaises(ValueError, long, '123\0')
+1017                    self.assertRaises(ValueError, long, '53', 40)
+1018                    self.assertRaises(TypeError, long, 1, 12)
+1019            
+1020                    # SF patch #1638879: embedded NULs were not detected with
+1021                    # explicit base
+1022                    self.assertRaises(ValueError, long, '123\0', 10)
+1023                    self.assertRaises(ValueError, long, '123\x00 245', 20)
+1024            
+1025                    self.assertEqual(long('100000000000000000000000000000000', 2),
+1026                                     4294967296)
+1027                    self.assertEqual(long('102002022201221111211', 3), 4294967296)
+1028                    self.assertEqual(long('10000000000000000', 4), 4294967296)
+1029                    self.assertEqual(long('32244002423141', 5), 4294967296)
+1030                    self.assertEqual(long('1550104015504', 6), 4294967296)
+1031                    self.assertEqual(long('211301422354', 7), 4294967296)
+1032                    self.assertEqual(long('40000000000', 8), 4294967296)
+1033                    self.assertEqual(long('12068657454', 9), 4294967296)
+1034                    self.assertEqual(long('4294967296', 10), 4294967296)
+1035                    self.assertEqual(long('1904440554', 11), 4294967296)
+1036                    self.assertEqual(long('9ba461594', 12), 4294967296)
+1037                    self.assertEqual(long('535a79889', 13), 4294967296)
+1038                    self.assertEqual(long('2ca5b7464', 14), 4294967296)
+1039                    self.assertEqual(long('1a20dcd81', 15), 4294967296)
+1040                    self.assertEqual(long('100000000', 16), 4294967296)
+1041                    self.assertEqual(long('a7ffda91', 17), 4294967296)
+1042                    self.assertEqual(long('704he7g4', 18), 4294967296)
+1043                    self.assertEqual(long('4f5aff66', 19), 4294967296)
+1044                    self.assertEqual(long('3723ai4g', 20), 4294967296)
+1045                    self.assertEqual(long('281d55i4', 21), 4294967296)
+1046                    self.assertEqual(long('1fj8b184', 22), 4294967296)
+1047                    self.assertEqual(long('1606k7ic', 23), 4294967296)
+1048                    self.assertEqual(long('mb994ag', 24), 4294967296)
+1049                    self.assertEqual(long('hek2mgl', 25), 4294967296)
+1050                    self.assertEqual(long('dnchbnm', 26), 4294967296)
+1051                    self.assertEqual(long('b28jpdm', 27), 4294967296)
+1052                    self.assertEqual(long('8pfgih4', 28), 4294967296)
+1053                    self.assertEqual(long('76beigg', 29), 4294967296)
+1054                    self.assertEqual(long('5qmcpqg', 30), 4294967296)
+1055                    self.assertEqual(long('4q0jto4', 31), 4294967296)
+1056                    self.assertEqual(long('4000000', 32), 4294967296)
+1057                    self.assertEqual(long('3aokq94', 33), 4294967296)
+1058                    self.assertEqual(long('2qhxjli', 34), 4294967296)
+1059                    self.assertEqual(long('2br45qb', 35), 4294967296)
+1060                    self.assertEqual(long('1z141z4', 36), 4294967296)
+1061            
+1062                    self.assertEqual(long('100000000000000000000000000000001', 2),
+1063                                     4294967297)
+1064                    self.assertEqual(long('102002022201221111212', 3), 4294967297)
+1065                    self.assertEqual(long('10000000000000001', 4), 4294967297)
+1066                    self.assertEqual(long('32244002423142', 5), 4294967297)
+1067                    self.assertEqual(long('1550104015505', 6), 4294967297)
+1068                    self.assertEqual(long('211301422355', 7), 4294967297)
+1069                    self.assertEqual(long('40000000001', 8), 4294967297)
+1070                    self.assertEqual(long('12068657455', 9), 4294967297)
+1071                    self.assertEqual(long('4294967297', 10), 4294967297)
+1072                    self.assertEqual(long('1904440555', 11), 4294967297)
+1073                    self.assertEqual(long('9ba461595', 12), 4294967297)
+1074                    self.assertEqual(long('535a7988a', 13), 4294967297)
+1075                    self.assertEqual(long('2ca5b7465', 14), 4294967297)
+1076                    self.assertEqual(long('1a20dcd82', 15), 4294967297)
+1077                    self.assertEqual(long('100000001', 16), 4294967297)
+1078                    self.assertEqual(long('a7ffda92', 17), 4294967297)
+1079                    self.assertEqual(long('704he7g5', 18), 4294967297)
+1080                    self.assertEqual(long('4f5aff67', 19), 4294967297)
+1081                    self.assertEqual(long('3723ai4h', 20), 4294967297)
+1082                    self.assertEqual(long('281d55i5', 21), 4294967297)
+1083                    self.assertEqual(long('1fj8b185', 22), 4294967297)
+1084                    self.assertEqual(long('1606k7id', 23), 4294967297)
+1085                    self.assertEqual(long('mb994ah', 24), 4294967297)
+1086                    self.assertEqual(long('hek2mgm', 25), 4294967297)
+1087                    self.assertEqual(long('dnchbnn', 26), 4294967297)
+1088                    self.assertEqual(long('b28jpdn', 27), 4294967297)
+1089                    self.assertEqual(long('8pfgih5', 28), 4294967297)
+1090                    self.assertEqual(long('76beigh', 29), 4294967297)
+1091                    self.assertEqual(long('5qmcpqh', 30), 4294967297)
+1092                    self.assertEqual(long('4q0jto5', 31), 4294967297)
+1093                    self.assertEqual(long('4000001', 32), 4294967297)
+1094                    self.assertEqual(long('3aokq95', 33), 4294967297)
+1095                    self.assertEqual(long('2qhxjlj', 34), 4294967297)
+1096                    self.assertEqual(long('2br45qc', 35), 4294967297)
+1097                    self.assertEqual(long('1z141z5', 36), 4294967297)
+1098            
+1099            
+1100 >              def test_longconversion(self):
+1101                    # Test __long__()
+1102 >                  class Foo0:
+1103 >                      def __long__(self):
+1104                            return 42L
+1105            
+1106 >                  class Foo1(object):
+1107 >                      def __long__(self):
+1108                            return 42L
+1109            
+1110 >                  class Foo2(long):
+1111 >                      def __long__(self):
+1112                            return 42L
+1113            
+1114 >                  class Foo3(long):
+1115 >                      def __long__(self):
+1116                            return self
+1117            
+1118 >                  class Foo4(long):
+1119 >                      def __long__(self):
+1120                            return 42
+1121            
+1122 >                  class Foo5(long):
+1123 >                      def __long__(self):
+1124                            return 42.
+1125            
+1126                    self.assertEqual(long(Foo0()), 42L)
+1127                    self.assertEqual(long(Foo1()), 42L)
+1128                    self.assertEqual(long(Foo2()), 42L)
+1129                    self.assertEqual(long(Foo3()), 0)
+1130                    self.assertEqual(long(Foo4()), 42)
+1131                    self.assertRaises(TypeError, long, Foo5())
+1132            
+1133 >              def test_map(self):
+1134                    self.assertEqual(
+1135                        map(None, 'hello world'),
+1136                        ['h','e','l','l','o',' ','w','o','r','l','d']
+1137                    )
+1138                    self.assertEqual(
+1139                        map(None, 'abcd', 'efg'),
+1140                        [('a', 'e'), ('b', 'f'), ('c', 'g'), ('d', None)]
+1141                    )
+1142                    self.assertEqual(
+1143                        map(None, range(10)),
+1144                        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+1145                    )
+1146                    self.assertEqual(
+1147                        map(lambda x: x*x, range(1,4)),
+1148                        [1, 4, 9]
+1149                    )
+1150 >                  try:
+1151                        from math import sqrt
+1152 >  !               except ImportError:
+1153 >  !                   def sqrt(x):
+1154                            return pow(x, 0.5)
+1155                    self.assertEqual(
+1156                        map(lambda x: map(sqrt,x), [[16, 4], [81, 9]]),
+1157                        [[4.0, 2.0], [9.0, 3.0]]
+1158                    )
+1159                    self.assertEqual(
+1160                        map(lambda x, y: x+y, [1,3,2], [9,1,4]),
+1161                        [10, 4, 6]
+1162                    )
+1163            
+1164 >                  def plus(*v):
+1165                        accu = 0
+1166                        for i in v: accu = accu + i
+1167                        return accu
+1168                    self.assertEqual(
+1169                        map(plus, [1, 3, 7]),
+1170                        [1, 3, 7]
+1171                    )
+1172                    self.assertEqual(
+1173                        map(plus, [1, 3, 7], [4, 9, 2]),
+1174                        [1+4, 3+9, 7+2]
+1175                    )
+1176                    self.assertEqual(
+1177                        map(plus, [1, 3, 7], [4, 9, 2], [1, 1, 0]),
+1178                        [1+4+1, 3+9+1, 7+2+0]
+1179                    )
+1180                    self.assertEqual(
+1181                        map(None, Squares(10)),
+1182                        [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
+1183                    )
+1184                    self.assertEqual(
+1185                        map(int, Squares(10)),
+1186                        [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
+1187                    )
+1188                    self.assertEqual(
+1189                        map(None, Squares(3), Squares(2)),
+1190                        [(0,0), (1,1), (4,None)]
+1191                    )
+1192                    self.assertEqual(
+1193                        map(max, Squares(3), Squares(2)),
+1194                        [0, 1, 4]
+1195                    )
+1196                    self.assertRaises(TypeError, map)
+1197                    self.assertRaises(TypeError, map, lambda x: x, 42)
+1198                    self.assertEqual(map(None, [42]), [42])
+1199 >                  class BadSeq:
+1200 >                      def __getitem__(self, index):
+1201                            raise ValueError
+1202                    self.assertRaises(ValueError, map, lambda x: x, BadSeq())
+1203 >                  def badfunc(x):
+1204                        raise RuntimeError
+1205                    self.assertRaises(RuntimeError, map, badfunc, range(5))
+1206            
+1207 >              def test_max(self):
+1208                    self.assertEqual(max('123123'), '3')
+1209                    self.assertEqual(max(1, 2, 3), 3)
+1210                    self.assertEqual(max((1, 2, 3, 1, 2, 3)), 3)
+1211                    self.assertEqual(max([1, 2, 3, 1, 2, 3]), 3)
+1212            
+1213                    self.assertEqual(max(1, 2L, 3.0), 3.0)
+1214                    self.assertEqual(max(1L, 2.0, 3), 3)
+1215                    self.assertEqual(max(1.0, 2, 3L), 3L)
+1216            
+1217                    for stmt in (
+1218                        "max(key=int)",                 # no args
+1219                        "max(1, key=int)",              # single arg not iterable
+1220                        "max(1, 2, keystone=int)",      # wrong keyword
+1221                        "max(1, 2, key=int, abc=int)",  # two many keywords
+1222                        "max(1, 2, key=1)",             # keyfunc is not callable
+1223 >                      ):
+1224 >                      try:
+1225                            exec(stmt) in globals()
+1226 >                      except TypeError:
+1227                            pass
+1228 >  !                   else:
+1229                            self.fail(stmt)
+1230            
+1231                    self.assertEqual(max((1,), key=neg), 1)     # one elem iterable
+1232                    self.assertEqual(max((1,2), key=neg), 1)    # two elem iterable
+1233                    self.assertEqual(max(1, 2, key=neg), 1)     # two elems
+1234            
+1235                    data = [random.randrange(200) for i in range(100)]
+1236                    keys = dict((elem, random.randrange(50)) for elem in data)
+1237                    f = keys.__getitem__
+1238                    self.assertEqual(max(data, key=f),
+1239                                     sorted(reversed(data), key=f)[-1])
+1240            
+1241 >              def test_min(self):
+1242                    self.assertEqual(min('123123'), '1')
+1243                    self.assertEqual(min(1, 2, 3), 1)
+1244                    self.assertEqual(min((1, 2, 3, 1, 2, 3)), 1)
+1245                    self.assertEqual(min([1, 2, 3, 1, 2, 3]), 1)
+1246            
+1247                    self.assertEqual(min(1, 2L, 3.0), 1)
+1248                    self.assertEqual(min(1L, 2.0, 3), 1L)
+1249                    self.assertEqual(min(1.0, 2, 3L), 1.0)
+1250            
+1251                    self.assertRaises(TypeError, min)
+1252                    self.assertRaises(TypeError, min, 42)
+1253                    self.assertRaises(ValueError, min, ())
+1254 >                  class BadSeq:
+1255 >                      def __getitem__(self, index):
+1256                            raise ValueError
+1257                    self.assertRaises(ValueError, min, BadSeq())
+1258 >                  class BadNumber:
+1259 >                      def __cmp__(self, other):
+1260                            raise ValueError
+1261                    self.assertRaises(ValueError, min, (42, BadNumber()))
+1262            
+1263                    for stmt in (
+1264                        "min(key=int)",                 # no args
+1265                        "min(1, key=int)",              # single arg not iterable
+1266                        "min(1, 2, keystone=int)",      # wrong keyword
+1267                        "min(1, 2, key=int, abc=int)",  # two many keywords
+1268                        "min(1, 2, key=1)",             # keyfunc is not callable
+1269 >                      ):
+1270 >                      try:
+1271                            exec(stmt) in globals()
+1272 >                      except TypeError:
+1273                            pass
+1274 >  !                   else:
+1275                            self.fail(stmt)
+1276            
+1277                    self.assertEqual(min((1,), key=neg), 1)     # one elem iterable
+1278                    self.assertEqual(min((1,2), key=neg), 2)    # two elem iterable
+1279                    self.assertEqual(min(1, 2, key=neg), 2)     # two elems
+1280            
+1281                    data = [random.randrange(200) for i in range(100)]
+1282                    keys = dict((elem, random.randrange(50)) for elem in data)
+1283                    f = keys.__getitem__
+1284                    self.assertEqual(min(data, key=f),
+1285                                     sorted(data, key=f)[0])
+1286            
+1287 >              def test_oct(self):
+1288                    self.assertEqual(oct(100), '0144')
+1289                    self.assertEqual(oct(100L), '0144L')
+1290                    self.assertEqual(oct(-100), '-0144')
+1291                    self.assertEqual(oct(-100L), '-0144L')
+1292                    self.assertRaises(TypeError, oct, ())
+1293            
+1294 >              def write_testfile(self):
+1295                    # NB the first 4 lines are also used to test input and raw_input, below
+1296                    fp = open(TESTFN, 'w')
+1297 >                  try:
+1298                        fp.write('1+1\n')
+1299                        fp.write('1+1\n')
+1300                        fp.write('The quick brown fox jumps over the lazy dog')
+1301                        fp.write('.\n')
+1302                        fp.write('Dear John\n')
+1303                        fp.write('XXX'*100)
+1304                        fp.write('YYY'*100)
+1305 >                  finally:
+1306                        fp.close()
+1307            
+1308 >              def test_open(self):
+1309                    self.write_testfile()
+1310                    fp = open(TESTFN, 'r')
+1311 >                  try:
+1312                        self.assertEqual(fp.readline(4), '1+1\n')
+1313                        self.assertEqual(fp.readline(4), '1+1\n')
+1314                        self.assertEqual(fp.readline(), 'The quick brown fox jumps over the lazy dog.\n')
+1315                        self.assertEqual(fp.readline(4), 'Dear')
+1316                        self.assertEqual(fp.readline(100), ' John\n')
+1317                        self.assertEqual(fp.read(300), 'XXX'*100)
+1318                        self.assertEqual(fp.read(1000), 'YYY'*100)
+1319 >                  finally:
+1320                        fp.close()
+1321                    unlink(TESTFN)
+1322            
+1323 >              def test_ord(self):
+1324                    self.assertEqual(ord(' '), 32)
+1325                    self.assertEqual(ord('A'), 65)
+1326                    self.assertEqual(ord('a'), 97)
+1327 >                  if have_unicode:
+1328                        self.assertEqual(ord(unichr(sys.maxunicode)), sys.maxunicode)
+1329                    self.assertRaises(TypeError, ord, 42)
+1330 >                  if have_unicode:
+1331                        self.assertRaises(TypeError, ord, unicode("12"))
+1332            
+1333 >              def test_pow(self):
+1334                    self.assertEqual(pow(0,0), 1)
+1335                    self.assertEqual(pow(0,1), 0)
+1336                    self.assertEqual(pow(1,0), 1)
+1337                    self.assertEqual(pow(1,1), 1)
+1338            
+1339                    self.assertEqual(pow(2,0), 1)
+1340                    self.assertEqual(pow(2,10), 1024)
+1341                    self.assertEqual(pow(2,20), 1024*1024)
+1342                    self.assertEqual(pow(2,30), 1024*1024*1024)
+1343            
+1344                    self.assertEqual(pow(-2,0), 1)
+1345                    self.assertEqual(pow(-2,1), -2)
+1346                    self.assertEqual(pow(-2,2), 4)
+1347                    self.assertEqual(pow(-2,3), -8)
+1348            
+1349                    self.assertEqual(pow(0L,0), 1)
+1350                    self.assertEqual(pow(0L,1), 0)
+1351                    self.assertEqual(pow(1L,0), 1)
+1352                    self.assertEqual(pow(1L,1), 1)
+1353            
+1354                    self.assertEqual(pow(2L,0), 1)
+1355                    self.assertEqual(pow(2L,10), 1024)
+1356                    self.assertEqual(pow(2L,20), 1024*1024)
+1357                    self.assertEqual(pow(2L,30), 1024*1024*1024)
+1358            
+1359                    self.assertEqual(pow(-2L,0), 1)
+1360                    self.assertEqual(pow(-2L,1), -2)
+1361                    self.assertEqual(pow(-2L,2), 4)
+1362                    self.assertEqual(pow(-2L,3), -8)
+1363            
+1364                    self.assertAlmostEqual(pow(0.,0), 1.)
+1365                    self.assertAlmostEqual(pow(0.,1), 0.)
+1366                    self.assertAlmostEqual(pow(1.,0), 1.)
+1367                    self.assertAlmostEqual(pow(1.,1), 1.)
+1368            
+1369                    self.assertAlmostEqual(pow(2.,0), 1.)
+1370                    self.assertAlmostEqual(pow(2.,10), 1024.)
+1371                    self.assertAlmostEqual(pow(2.,20), 1024.*1024.)
+1372                    self.assertAlmostEqual(pow(2.,30), 1024.*1024.*1024.)
+1373            
+1374                    self.assertAlmostEqual(pow(-2.,0), 1.)
+1375                    self.assertAlmostEqual(pow(-2.,1), -2.)
+1376                    self.assertAlmostEqual(pow(-2.,2), 4.)
+1377                    self.assertAlmostEqual(pow(-2.,3), -8.)
+1378            
+1379 >                  for x in 2, 2L, 2.0:
+1380 >                      for y in 10, 10L, 10.0:
+1381 >                          for z in 1000, 1000L, 1000.0:
+1382      [++]                      if isinstance(x, float) or \
+1383      [++]                         isinstance(y, float) or \
+1384 >    [++]                         isinstance(z, float):
+1385                                    self.assertRaises(TypeError, pow, x, y, z)
+1386 >                              else:
+1387                                    self.assertAlmostEqual(pow(x, y, z), 24.0)
+1388            
+1389                    self.assertRaises(TypeError, pow, -1, -2, 3)
+1390                    self.assertRaises(ValueError, pow, 1, 2, 0)
+1391                    self.assertRaises(TypeError, pow, -1L, -2L, 3L)
+1392                    self.assertRaises(ValueError, pow, 1L, 2L, 0L)
+1393                    self.assertRaises(ValueError, pow, -342.43, 0.234)
+1394            
+1395                    self.assertRaises(TypeError, pow)
+1396            
+1397 >              def test_range(self):
+1398                    self.assertEqual(range(3), [0, 1, 2])
+1399                    self.assertEqual(range(1, 5), [1, 2, 3, 4])
+1400                    self.assertEqual(range(0), [])
+1401                    self.assertEqual(range(-3), [])
+1402                    self.assertEqual(range(1, 10, 3), [1, 4, 7])
+1403                    self.assertEqual(range(5, -5, -3), [5, 2, -1, -4])
+1404            
+1405                    # Now test range() with longs
+1406                    self.assertEqual(range(-2**100), [])
+1407                    self.assertEqual(range(0, -2**100), [])
+1408                    self.assertEqual(range(0, 2**100, -1), [])
+1409                    self.assertEqual(range(0, 2**100, -1), [])
+1410            
+1411                    a = long(10 * sys.maxint)
+1412                    b = long(100 * sys.maxint)
+1413                    c = long(50 * sys.maxint)
+1414            
+1415                    self.assertEqual(range(a, a+2), [a, a+1])
+1416                    self.assertEqual(range(a+2, a, -1L), [a+2, a+1])
+1417                    self.assertEqual(range(a+4, a, -2), [a+4, a+2])
+1418            
+1419                    seq = range(a, b, c)
+1420                    self.assert_(a in seq)
+1421                    self.assert_(b not in seq)
+1422                    self.assertEqual(len(seq), 2)
+1423            
+1424                    seq = range(b, a, -c)
+1425                    self.assert_(b in seq)
+1426                    self.assert_(a not in seq)
+1427                    self.assertEqual(len(seq), 2)
+1428            
+1429                    seq = range(-a, -b, -c)
+1430                    self.assert_(-a in seq)
+1431                    self.assert_(-b not in seq)
+1432                    self.assertEqual(len(seq), 2)
+1433            
+1434                    self.assertRaises(TypeError, range)
+1435                    self.assertRaises(TypeError, range, 1, 2, 3, 4)
+1436                    self.assertRaises(ValueError, range, 1, 2, 0)
+1437                    self.assertRaises(ValueError, range, a, a + 1, long(0))
+1438            
+1439 >                  class badzero(int):
+1440 >                      def __cmp__(self, other):
+1441                            raise RuntimeError
+1442                    self.assertRaises(RuntimeError, range, a, a + 1, badzero(1))
+1443            
+1444                    # Reject floats when it would require PyLongs to represent.
+1445                    # (smaller floats still accepted, but deprecated)
+1446                    self.assertRaises(TypeError, range, 1e100, 1e101, 1e101)
+1447            
+1448                    self.assertRaises(TypeError, range, 0, "spam")
+1449                    self.assertRaises(TypeError, range, 0, 42, "spam")
+1450            
+1451                    self.assertRaises(OverflowError, range, -sys.maxint, sys.maxint)
+1452                    self.assertRaises(OverflowError, range, 0, 2*sys.maxint)
+1453            
+1454 >              def test_input_and_raw_input(self):
+1455                    self.write_testfile()
+1456                    fp = open(TESTFN, 'r')
+1457                    savestdin = sys.stdin
+1458                    savestdout = sys.stdout # Eats the echo
+1459 >                  try:
+1460                        sys.stdin = fp
+1461                        sys.stdout = BitBucket()
+1462                        self.assertEqual(input(), 2)
+1463                        self.assertEqual(input('testing\n'), 2)
+1464                        self.assertEqual(raw_input(), 'The quick brown fox jumps over the lazy dog.')
+1465                        self.assertEqual(raw_input('testing\n'), 'Dear John')
+1466            
+1467                        # SF 1535165: don't segfault on closed stdin
+1468                        # sys.stdout must be a regular file for triggering
+1469                        sys.stdout = savestdout
+1470                        sys.stdin.close()
+1471                        self.assertRaises(ValueError, input)
+1472            
+1473                        sys.stdout = BitBucket()
+1474                        sys.stdin = cStringIO.StringIO("NULL\0")
+1475                        self.assertRaises(TypeError, input, 42, 42)
+1476                        sys.stdin = cStringIO.StringIO("    'whitespace'")
+1477                        self.assertEqual(input(), 'whitespace')
+1478                        sys.stdin = cStringIO.StringIO()
+1479                        self.assertRaises(EOFError, input)
+1480            
+1481                        # SF 876178: make sure input() respect future options.
+1482                        sys.stdin = cStringIO.StringIO('1/2')
+1483                        sys.stdout = cStringIO.StringIO()
+1484                        exec compile('print input()', 'test_builtin_tmp', 'exec')
+1485                        sys.stdin.seek(0, 0)
+1486                        exec compile('from __future__ import division;print input()',
+1487                                     'test_builtin_tmp', 'exec')
+1488                        sys.stdin.seek(0, 0)
+1489                        exec compile('print input()', 'test_builtin_tmp', 'exec')
+1490                        # The result we expect depends on whether new division semantics
+1491                        # are already in effect.
+1492 >                      if 1/2 == 0:
+1493                            # This test was compiled with old semantics.
+1494                            expected = ['0', '0.5', '0']
+1495 >  !                   else:
+1496                            # This test was compiled with new semantics (e.g., -Qnew
+1497                            # was given on the command line.
+1498                            expected = ['0.5', '0.5', '0.5']
+1499                        self.assertEqual(sys.stdout.getvalue().splitlines(), expected)
+1500            
+1501                        del sys.stdout
+1502                        self.assertRaises(RuntimeError, input, 'prompt')
+1503                        del sys.stdin
+1504                        self.assertRaises(RuntimeError, input, 'prompt')
+1505 >                  finally:
+1506                        sys.stdin = savestdin
+1507                        sys.stdout = savestdout
+1508                        fp.close()
+1509                        unlink(TESTFN)
+1510            
+1511 >              def test_reduce(self):
+1512                    self.assertEqual(reduce(lambda x, y: x+y, ['a', 'b', 'c'], ''), 'abc')
+1513                    self.assertEqual(
+1514                        reduce(lambda x, y: x+y, [['a', 'c'], [], ['d', 'w']], []),
+1515                        ['a','c','d','w']
+1516                    )
+1517                    self.assertEqual(reduce(lambda x, y: x*y, range(2,8), 1), 5040)
+1518                    self.assertEqual(
+1519                        reduce(lambda x, y: x*y, range(2,21), 1L),
+1520                        2432902008176640000L
+1521                    )
+1522                    self.assertEqual(reduce(lambda x, y: x+y, Squares(10)), 285)
+1523                    self.assertEqual(reduce(lambda x, y: x+y, Squares(10), 0), 285)
+1524                    self.assertEqual(reduce(lambda x, y: x+y, Squares(0), 0), 0)
+1525                    self.assertRaises(TypeError, reduce)
+1526                    self.assertRaises(TypeError, reduce, 42, 42)
+1527                    self.assertRaises(TypeError, reduce, 42, 42, 42)
+1528                    self.assertEqual(reduce(42, "1"), "1") # func is never called with one item
+1529                    self.assertEqual(reduce(42, "", "1"), "1") # func is never called with one item
+1530                    self.assertRaises(TypeError, reduce, 42, (42, 42))
+1531            
+1532 >                  class BadSeq:
+1533 >                      def __getitem__(self, index):
+1534                            raise ValueError
+1535                    self.assertRaises(ValueError, reduce, 42, BadSeq())
+1536            
+1537 >              def test_reload(self):
+1538                    import marshal
+1539                    reload(marshal)
+1540                    import string
+1541                    reload(string)
+1542                    ## import sys
+1543                    ## self.assertRaises(ImportError, reload, sys)
+1544            
+1545 >              def test_repr(self):
+1546                    self.assertEqual(repr(''), '\'\'')
+1547                    self.assertEqual(repr(0), '0')
+1548                    self.assertEqual(repr(0L), '0L')
+1549                    self.assertEqual(repr(()), '()')
+1550                    self.assertEqual(repr([]), '[]')
+1551                    self.assertEqual(repr({}), '{}')
+1552                    a = []
+1553                    a.append(a)
+1554                    self.assertEqual(repr(a), '[[...]]')
+1555                    a = {}
+1556                    a[0] = a
+1557                    self.assertEqual(repr(a), '{0: {...}}')
+1558            
+1559 >              def test_round(self):
+1560                    self.assertEqual(round(0.0), 0.0)
+1561                    self.assertEqual(round(1.0), 1.0)
+1562                    self.assertEqual(round(10.0), 10.0)
+1563                    self.assertEqual(round(1000000000.0), 1000000000.0)
+1564                    self.assertEqual(round(1e20), 1e20)
+1565            
+1566                    self.assertEqual(round(-1.0), -1.0)
+1567                    self.assertEqual(round(-10.0), -10.0)
+1568                    self.assertEqual(round(-1000000000.0), -1000000000.0)
+1569                    self.assertEqual(round(-1e20), -1e20)
+1570            
+1571                    self.assertEqual(round(0.1), 0.0)
+1572                    self.assertEqual(round(1.1), 1.0)
+1573                    self.assertEqual(round(10.1), 10.0)
+1574                    self.assertEqual(round(1000000000.1), 1000000000.0)
+1575            
+1576                    self.assertEqual(round(-1.1), -1.0)
+1577                    self.assertEqual(round(-10.1), -10.0)
+1578                    self.assertEqual(round(-1000000000.1), -1000000000.0)
+1579            
+1580                    self.assertEqual(round(0.9), 1.0)
+1581                    self.assertEqual(round(9.9), 10.0)
+1582                    self.assertEqual(round(999999999.9), 1000000000.0)
+1583            
+1584                    self.assertEqual(round(-0.9), -1.0)
+1585                    self.assertEqual(round(-9.9), -10.0)
+1586                    self.assertEqual(round(-999999999.9), -1000000000.0)
+1587            
+1588                    self.assertEqual(round(-8.0, -1), -10.0)
+1589            
+1590                    # test new kwargs
+1591                    self.assertEqual(round(number=-8.0, ndigits=-1), -10.0)
+1592            
+1593                    self.assertRaises(TypeError, round)
+1594            
+1595 >              def test_setattr(self):
+1596                    setattr(sys, 'spam', 1)
+1597                    self.assertEqual(sys.spam, 1)
+1598                    self.assertRaises(TypeError, setattr, sys, 1, 'spam')
+1599                    self.assertRaises(TypeError, setattr)
+1600            
+1601 >              def test_str(self):
+1602                    self.assertEqual(str(''), '')
+1603                    self.assertEqual(str(0), '0')
+1604                    self.assertEqual(str(0L), '0')
+1605                    self.assertEqual(str(()), '()')
+1606                    self.assertEqual(str([]), '[]')
+1607                    self.assertEqual(str({}), '{}')
+1608                    a = []
+1609                    a.append(a)
+1610                    self.assertEqual(str(a), '[[...]]')
+1611                    a = {}
+1612                    a[0] = a
+1613                    self.assertEqual(str(a), '{0: {...}}')
+1614            
+1615 >              def test_sum(self):
+1616                    self.assertEqual(sum([]), 0)
+1617                    self.assertEqual(sum(range(2,8)), 27)
+1618                    self.assertEqual(sum(iter(range(2,8))), 27)
+1619                    self.assertEqual(sum(Squares(10)), 285)
+1620                    self.assertEqual(sum(iter(Squares(10))), 285)
+1621                    self.assertEqual(sum([[1], [2], [3]], []), [1, 2, 3])
+1622            
+1623                    self.assertRaises(TypeError, sum)
+1624                    self.assertRaises(TypeError, sum, 42)
+1625                    self.assertRaises(TypeError, sum, ['a', 'b', 'c'])
+1626                    self.assertRaises(TypeError, sum, ['a', 'b', 'c'], '')
+1627                    self.assertRaises(TypeError, sum, [[1], [2], [3]])
+1628                    self.assertRaises(TypeError, sum, [{2:3}])
+1629                    self.assertRaises(TypeError, sum, [{2:3}]*2, {2:3})
+1630            
+1631 >                  class BadSeq:
+1632 >                      def __getitem__(self, index):
+1633                            raise ValueError
+1634                    self.assertRaises(ValueError, sum, BadSeq())
+1635            
+1636 >              def test_tuple(self):
+1637                    self.assertEqual(tuple(()), ())
+1638                    t0_3 = (0, 1, 2, 3)
+1639                    t0_3_bis = tuple(t0_3)
+1640                    self.assert_(t0_3 is t0_3_bis)
+1641                    self.assertEqual(tuple([]), ())
+1642                    self.assertEqual(tuple([0, 1, 2, 3]), (0, 1, 2, 3))
+1643                    self.assertEqual(tuple(''), ())
+1644                    self.assertEqual(tuple('spam'), ('s', 'p', 'a', 'm'))
+1645            
+1646 >              def test_type(self):
+1647                    self.assertEqual(type(''),  type('123'))
+1648                    self.assertNotEqual(type(''), type(()))
+1649            
+1650 >              def test_unichr(self):
+1651 >                  if have_unicode:
+1652                        self.assertEqual(unichr(32), unicode(' '))
+1653                        self.assertEqual(unichr(65), unicode('A'))
+1654                        self.assertEqual(unichr(97), unicode('a'))
+1655                        self.assertEqual(
+1656                            unichr(sys.maxunicode),
+1657                            unicode('\\U%08x' % (sys.maxunicode), 'unicode-escape')
+1658                        )
+1659                        self.assertRaises(ValueError, unichr, sys.maxunicode+1)
+1660                        self.assertRaises(TypeError, unichr)
+1661            
+1662                # We don't want self in vars(), so these are static methods
+1663            
+1664                @staticmethod
+1665 >              def get_vars_f0():
+1666                    return vars()
+1667            
+1668                @staticmethod
+1669 >              def get_vars_f2():
+1670                    BuiltinTest.get_vars_f0()
+1671                    a = 1
+1672                    b = 2
+1673                    return vars()
+1674            
+1675 >              def test_vars(self):
+1676                    self.assertEqual(set(vars()), set(dir()))
+1677                    import sys
+1678                    self.assertEqual(set(vars(sys)), set(dir(sys)))
+1679                    self.assertEqual(self.get_vars_f0(), {})
+1680                    self.assertEqual(self.get_vars_f2(), {'a': 1, 'b': 2})
+1681                    self.assertRaises(TypeError, vars, 42, 42)
+1682                    self.assertRaises(TypeError, vars, 42)
+1683            
+1684 >              def test_zip(self):
+1685                    a = (1, 2, 3)
+1686                    b = (4, 5, 6)
+1687                    t = [(1, 4), (2, 5), (3, 6)]
+1688                    self.assertEqual(zip(a, b), t)
+1689                    b = [4, 5, 6]
+1690                    self.assertEqual(zip(a, b), t)
+1691                    b = (4, 5, 6, 7)
+1692                    self.assertEqual(zip(a, b), t)
+1693 >                  class I:
+1694 >                      def __getitem__(self, i):
+1695      [++]                  if i < 0 or i > 2: raise IndexError
+1696                            return i + 4
+1697                    self.assertEqual(zip(a, I()), t)
+1698                    self.assertEqual(zip(), [])
+1699                    self.assertEqual(zip(*[]), [])
+1700                    self.assertRaises(TypeError, zip, None)
+1701 >                  class G:
+1702                        pass
+1703                    self.assertRaises(TypeError, zip, a, G())
+1704            
+1705                    # Make sure zip doesn't try to allocate a billion elements for the
+1706                    # result list when one of its arguments doesn't say how long it is.
+1707                    # A MemoryError is the most likely failure mode.
+1708 >                  class SequenceWithoutALength:
+1709 >                      def __getitem__(self, i):
+1710 >                          if i == 5:
+1711                                raise IndexError
+1712 >                          else:
+1713                                return i
+1714                    self.assertEqual(
+1715                        zip(SequenceWithoutALength(), xrange(2**30)),
+1716                        list(enumerate(range(5)))
+1717                    )
+1718            
+1719 >                  class BadSeq:
+1720 >                      def __getitem__(self, i):
+1721 >                          if i == 5:
+1722                                raise ValueError
+1723 >                          else:
+1724                                return i
+1725                    self.assertRaises(ValueError, zip, BadSeq(), BadSeq())
+1726            
+1727 >          class TestSorted(unittest.TestCase):
+1728            
+1729 >              def test_basic(self):
+1730                    data = range(100)
+1731                    copy = data[:]
+1732                    random.shuffle(copy)
+1733                    self.assertEqual(data, sorted(copy))
+1734                    self.assertNotEqual(data, copy)
+1735            
+1736                    data.reverse()
+1737                    random.shuffle(copy)
+1738                    self.assertEqual(data, sorted(copy, cmp=lambda x, y: cmp(y,x)))
+1739                    self.assertNotEqual(data, copy)
+1740                    random.shuffle(copy)
+1741                    self.assertEqual(data, sorted(copy, key=lambda x: -x))
+1742                    self.assertNotEqual(data, copy)
+1743                    random.shuffle(copy)
+1744                    self.assertEqual(data, sorted(copy, reverse=1))
+1745                    self.assertNotEqual(data, copy)
+1746            
+1747 >              def test_inputtypes(self):
+1748                    s = 'abracadabra'
+1749                    types = [list, tuple]
+1750 >                  if have_unicode:
+1751                        types.insert(0, unicode)
+1752 >                  for T in types:
+1753                        self.assertEqual(sorted(s), sorted(T(s)))
+1754            
+1755                    s = ''.join(dict.fromkeys(s).keys())  # unique letters only
+1756                    types = [set, frozenset, list, tuple, dict.fromkeys]
+1757 >                  if have_unicode:
+1758                        types.insert(0, unicode)
+1759 >                  for T in types:
+1760                        self.assertEqual(sorted(s), sorted(T(s)))
+1761            
+1762 >              def test_baddecorator(self):
+1763                    data = 'The quick Brown fox Jumped over The lazy Dog'.split()
+1764                    self.assertRaises(TypeError, sorted, data, None, lambda x,y: 0)
+1765            
+1766 >          def test_main(verbose=None):
+1767                test_classes = (BuiltinTest, TestSorted)
+1768            
+1769                run_unittest(*test_classes)
+1770            
+1771                # verify reference counting
+1772 >  !           if verbose and hasattr(sys, "gettotalrefcount"):
+1773                    import gc
+1774                    counts = [None] * 5
+1775 >  !               for i in xrange(len(counts)):
+1776                        run_unittest(*test_classes)
+1777                        gc.collect()
+1778                        counts[i] = sys.gettotalrefcount()
+1779                    print counts
+1780            
+1781            
+1782 >          if __name__ == "__main__":
+1783                test_main(verbose=True)
+
+------------------------------------------------------.
+Statement Coverage:                                   |
+  282 sensors created                                 |
+  17 sensors did not respond                          |
+Covered: 93%                                          |
+------------------------------------------------------'
+
+------------------------------------------------------.
+Expression Coverage:                                  |
+  8 sensors created                                   |
+  all sensors responded                               |
+Covered: 100%                                          |
+------------------------------------------------------'
