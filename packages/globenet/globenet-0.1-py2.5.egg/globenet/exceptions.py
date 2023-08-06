@@ -1,0 +1,36 @@
+#!/usr/bin/env python
+# -*- coding: UTF-8 -*-
+# globenet - Lightweight web framework for Google(tm) App Engine 
+# Version 1.1
+#
+# Copyright (C) 2008 Tristan Straub (tristanstraub@gmail.com)
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+class RequireLogin(Exception):
+	pass
+
+class Redirect(Exception):
+	def __init__(self, url):
+		self.url = url
+
+class Error(Exception):
+	def __init__(self, code, content):
+		self.code = code
+		self.content = content
+
+	def __str__(self):
+		return "ERROR " + repr(self.code) + " " + repr(self.content)
+
