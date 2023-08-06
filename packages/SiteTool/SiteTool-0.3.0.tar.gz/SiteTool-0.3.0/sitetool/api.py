@@ -1,0 +1,591 @@
+from sitetool.exception import TemplateError
+import logging
+log = logging.getLogger(__name__)
+
+# Public API
+
+from sitetool.template.dreamweaver import reapply_library_items_to_page
+from sitetool.template.dreamweaver import DreamweaverTemplateInstance
+import os.path
+def create(page, template):
+    """\
+    Create a new page.
+
+    ``page``
+        The full, absolute, normalised path of the filename of the page to 
+        create
+
+    ``template``
+        The full, absolute, normalised path to the template to use for the 
+        new page
+    """
+    if not os.path.exists(template):
+        raise TemplateError('No such template %r' % template)
+    if os.path.exists(page):
+        raise TemplateError('The page %r already exists' % page)
+    template = DreamweaverTemplateInstance(template)
+    log.info("Saving file %r...", page)
+    template.save_as_page(page)
+    log.info("Updating any context items...")
+    reapply_library_items_to_page(page, update_context_items=True)
+
+from sitetool.template.dreamweaver import DreamweaverTemplateInstance
+# This would be called list() if it wasn't already a built-in type
+def list_areas(page_or_template):
+    """\
+    List the properties and regions in a page or template
+
+    ``page_or_template``
+        The full, absolute, normalised path of the filename of the page or 
+        template whose regions and properties are to be listed
+
+    Returns a tuple: ``(properties, regions)``
+    """
+    properties = ['doctitle']
+    if not os.path.exists(page_or_template):
+        raise TemplateError('No such page or template %r' % page_or_template)
+    template = DreamweaverTemplateInstance(page_or_template)
+    regions = []
+    for key in template.keys():
+        if not key in properties:
+            regions.append(key)
+    return properties, regions
+
+from sitetool.template.dreamweaver import DreamweaverTemplateInstance
+def get(page_or_template, area):
+    """\
+    Get a page or template region or property.
+
+    ``page_or_template``
+        The full, absolute, normalised path of the filename of the page or 
+        template
+
+    ``area``
+        The name of the region or property to get
+    """
+    name = area
+    properties = ['doctitle']
+    if not os.path.exists(page_or_template):
+        raise TemplateError('No such page or template %r' % page_or_template)
+    template = DreamweaverTemplateInstance(page_or_template)
+    if area == 'doctitle':
+        return template['doctitle'].replace('<title>', '').replace('</title>', '')
+    else:
+        return template[name]
+
+from sitetool.template.dreamweaver import DreamweaverTemplateInstance
+def set(page_or_template,  name, value):
+    """\
+    Set a page or template region or property.
+
+    ``page_or_template``
+        The full, absolute, normalised path of the filename of the page or 
+        template
+
+    ``area``
+        The name of the region or property to get
+
+    ``content``
+        The content to update the area with
+    """
+    properties = ['doctitle']
+    if not os.path.exists(page_or_template):
+        raise TemplateError('No such file %r' % page_or_template)
+    template = DreamweaverTemplateInstance(page_or_template)
+    log.info("Updating file %s...", page_or_template)
+    if name == 'doctitle':
+        if '<' in value or '>' in value:
+            raise TemplateError("The doctitle property cannot contain < or > characters.")
+        template['doctitle'] = '<title>%s</title>'%value
+    else:
+        template[name] = value
+    log.info("Saving file %r...", page_or_template)
+    template.save_as_page(page_or_template)
+
+from sitetool.convert.plugin import handle_file, handle_directory_enter, handle_directory_leave
+def convert(
+    site_root,
+    plugin_classes,
+    config=None, 
+    recursive=False, 
+    force=False, 
+    user_files=False, 
+    generated_files=False,
+    plugins=None,
+    start_path=None,
+    update_context_items=False,
+):
+    """\
+    Convert pages and build generated pages with plugins
+    
+    ``site_root``
+        The full, absolute, normalised path of the site root directory
+ 
+    ``start_path``
+        The full, absolute, normalised path of the page or directory whose 
+        contents should be converted. Defaults to the value of ``site_root``
+        if not specified.
+
+    ``plugin_classes``
+        A dictionary of pluign names and classes to use for the conversion
+
+    ``config``
+        An optional dictionary of config options (such as those parsed from
+        a config file) which specifies rules about which plugins to use on
+        which files. Without this option, most plugins won't function
+        correctly.
+
+    ``recursive`` 
+        If ``True`` and ``start_path`` is a directory, recurse into child 
+        directories too.
+
+    ``force``
+        If ``True``, convert pages where an up-to-date HTML file already 
+        exists, over-writing the existing content
+
+    ``generated_files``
+        Create files which are auto-generated by the plugins such as index 
+        pages
+
+    ``user_files`` 
+        Convert files created by a user
+    
+    ``plugins``
+        A set of initialised plugins to use instead of instanciating the 
+        plugins from the classes specified in ``plugin_classes``. This is 
+        effectively just a performance optimisation for use during recursion.
+
+    ``update_context_items``
+        If ``True``, update all the context items in all files in the 
+        ``start_path``, not just the newly converted ones 
+
+    If both ``generated_files`` and ``user_files`` are ``False`` an exception
+    is raised becuase no operations are possible.
+    """
+    if not os.path.exists(os.path.join(site_root, 'Templates')):
+        raise TemplateError(
+            "Path %r does not appear to be a vaild site root, it has no "
+            "'Templates' directory"%site_root
+        )
+    if start_path is None:
+        start_path = site_root
+    if not start_path.startswith(site_root):
+        raise TemplateError(
+            "Path %r is not under site root %r"%(start_path, site_root)
+        )
+
+    # Rename variables
+    source = start_path
+
+    if plugins is None:
+        # Prepare the plugins
+        plugins = []
+        for name, plugin_class in plugin_classes:
+            plugin = plugin_class(
+                config = config,
+                site_root = site_root,
+                user_files = user_files,
+                generated_files = generated_files,
+                force = force,
+            )
+            plugins.append(plugin)
+    # Walk the directories
+    if os.path.isdir(source):
+        if recursive:
+            directories = []
+            for dirpath, dirnames, filenames in os.walk(source, topdown=False):
+                cur_dirpath = os.path.abspath(dirpath)
+                if cur_dirpath not in directories:
+                    directories.append(cur_dirpath)
+                for dirname in dirnames:
+                    cur_dir = os.path.abspath(os.path.join(dirpath, dirname))
+                    if cur_dir not in directories:
+                        directories.append(cur_dir)
+            for directory in directories:
+                convert(
+                    site_root,
+                    plugin_classes,
+                    start_path = directory,
+                    config=config,
+                    recursive=False,
+                    force=force,
+                    user_files=user_files,
+                    generated_files=generated_files,
+                    plugins = plugins,
+                    # Handle this at the end so make it False on any recursion
+                    update_context_items=False,
+                )
+        else:
+            handled = handle_directory_enter(source, plugins)
+            for filename in os.listdir(source):
+                if not os.path.isdir(os.path.join(source, filename)):
+                    handle_file(os.path.join(source, filename), plugins)
+            handle_directory_leave(source, plugins)
+    else:
+        handle_file(source, plugins)
+    params = {}
+    if update_context_items:
+        params['update_context_items'] = True
+    if params:
+        update(
+            start_path, 
+            site_root, 
+            recursive=True, 
+            **params
+        )
+        # Could have an optimisation where only the lowest depth change is 
+        # updated
+
+from sitetool.template.dreamweaver import reapply_template_to_page
+from sitetool.template.dreamweaver import reapply_library_items_to_page
+def update(
+    start_path=None, 
+    site_root=None, 
+    recursive=False,
+    update_templates=False, 
+    update_context_items=False,
+    update_dynamic_items=False,
+    update_static_items=False,
+):
+    """\
+    Update an existing page, directory or tree
+
+    ``start_path``
+        The page or directory to start updating
+
+     ``site_root``
+        The full, absolute, normalised path of the site root directory
+ 
+    ``recursive``
+        If ``True`` and ``start_path`` is a directory, all pages and 
+        directories within the directory are updated recursively
+
+    ``update_templates``, ``update_context_items``, ``update_dynamic_items, ``update_static_items``
+        Control what gets updated by setting these to ``True`` or ``False``.
+    """
+    if not site_root:
+        raise TemplateError(
+            "No site root specified"
+        )
+    if start_path is None:
+        start_path = site_root
+    if not os.path.exists(os.path.join(site_root, 'Templates')):
+        raise TemplateError(
+            "Path %r does not appear to be a vaild site root, it has no "
+            "'Templates' directory"%site_root
+        )
+    if not start_path.startswith(site_root):
+        raise TemplateError(
+            "Path %r is not under site root %r"%(start_path, site_root)
+        )
+    if update_templates is False and update_context_items is False and \
+       update_dynamic_items is False and update_static_items is False:
+        raise TemplateError(
+            'Nothing to update. Expected one of update_templates, '
+            'update_context_items, update_dynamic_items or '
+            'update_static_items to be True.'
+        )
+    if not os.path.exists(start_path):
+        raise TemplateError('No such page or directory %r' % start_path)
+    if os.path.isdir(start_path):
+        log.info("Regenerating the site %r", start_path)
+        failed = 0
+        passed = 0
+        if recursive:
+            for dirpath, dirnames, filenames in os.walk(start_path):
+                for filename in filenames:
+                    if filename.endswith('.html') or filename.endswith('.dwt'):
+                        path = os.path.join(dirpath, filename)
+                        if site_root is not None:
+                            log.info("Updating %r", path[len(site_root)+1:])
+                        else:
+                            log.info("Updating %r", path)
+                        try:
+                            if filename.endswith('.dwt'):
+                                update(
+                                    start_path=path, 
+                                    site_root=site_root,
+                                    recursive=recursive,
+                                    update_templates=False,
+                                    update_context_items=update_context_items,
+                                    update_dynamic_items=update_dynamic_items,
+                                    update_static_items=update_static_items,
+                                )
+                            else:
+                                update(
+                                    start_path=path, 
+                                    site_root=site_root,
+                                    recursive=recursive,
+                                    update_templates=update_templates, 
+                                    update_context_items=update_context_items,
+                                    update_dynamic_items=update_dynamic_items,
+                                    update_static_items=update_static_items,
+                                )
+                            passed+=1
+                        except TemplateError, e:
+                            failed += 1
+                            log.error('%s', str(e))
+        else:
+            for filename in os.listdir(start_path):
+                path = os.path.join(start_path, filename)
+                if not os.path.isdir(path):
+                    if filename.endswith('.html'):
+                        log.info("Inspecting %r", filename)
+                        try:
+                            update(
+                                start_path=path, 
+                                site_root=site_root,
+                                recursive=recursive,
+                                update_templates=update_templates, 
+                                update_context_items=update_context_items,
+                                update_dynamic_items=update_dynamic_items,
+                                update_static_items=update_static_items,
+                            )
+                            passed+=1
+                        except TemplateError, e:
+                            failed += 1
+                            log.error('%s', str(e))
+        if failed:
+            log.error('%s file(s) failed to be updated', failed)
+        elif passed:
+            log.info('%s files successfully updated', passed)
+    else:
+        if update_templates:
+            log.debug("Re-applying template to file %r...", start_path)
+            reapply_template_to_page(
+                start_path, 
+                delete_missing_sections=[],
+                #delete_missing_sections=[
+                #    'section_property', 
+                #    'breadcrumbs_bottom', 
+                #    'section_navigation_bottom',
+                #    'section_navigation'
+                #]
+            )
+        if update_context_items or update_dynamic_items or \
+           update_static_items:
+            log.debug("Re-applying library items to %r...", start_path)
+            reapply_library_items_to_page(
+                start_path, 
+                site_root, 
+                update_context_items=update_context_items,
+                update_dynamic_items=update_dynamic_items,
+                update_static_items=update_static_items,
+            )
+
+import shutil
+from sitetool.template.dreamweaver import move_file
+def move(src, dst, site_root, update_other_links=False, update_context_items=False):
+    """\
+    Move a page or section from the path ``src`` to the path ``dst``
+
+    ``site_root``
+        The full, absolute, normalised path of the site root directory
+ 
+    ``update_other_links``
+        If ``True``, the site is scanned for documents linking to the 
+        page(s) being moved and their links are updated to reflect the
+        new location of the page(s)
+
+    ``update_context_items``
+        If ``True``, after all pages have been moved, the moved pages
+        will have their context items re-generated for the new location.
+    """
+    changed_files = []
+    if os.path.isdir(src):
+        if dst.endswith('/'):
+            dst = dst[:-1]
+            dst_dir = os.path.join(dst, os.path.split(src)[1])
+        else:  
+            dst_dir = dst
+        # This doesn't work: dst_dir = os.path.join(dst, os.path.normpath(os.path.abspath(os.path.dirname(src))))
+        if os.path.exists(dst_dir):
+            raise TemplateError("The directory %r already exists"%dst_dir)
+        log.info('Making directory %r', dst_dir)
+        os.mkdir(dst_dir)
+        # Now go through every directory and make it in the destination
+        directories = []
+        for dirpath, dirnames, filenames in os.walk(src):
+            new_dirpath = dirpath.replace(src, dst_dir)
+            for directory in dirnames:
+                new_directory = os.path.join(new_dirpath, directory)
+                log.info('Making directory %r', new_directory)
+                os.mkdir(new_directory)
+            for filename in filenames:
+                for cf in move_file(
+                    os.path.join(dirpath, filename), 
+                    os.path.join(new_dirpath, filename), 
+                    site_root, 
+                    update_other_links,
+                ):
+                    changed_files.append(cf)
+        log.info("Removing old source tree %r"%src)
+        shutil.rmtree(src)
+    else:
+        # We are dealing with a file
+        cfs = move_file(src, dst, site_root, update_other_links)
+        changed_files.append(cfs[0])
+    if update_context_items:
+        for filename in changed_files:
+            if filename.endswith('.html'):
+                log.info('Updating context items in %r', filename)
+                reapply_library_items_to_page(filename, site_root, update_context_items=True)
+    return changed_files
+
+def deploy(site_root, remote_scp, delete=False, dry_run=False, exclude_from=None):
+    """\
+    Deploy a local site to a remote server
+
+    ``site_root``
+        The full, absolute, normalised path of the site root directory
+ 
+    ``remote_scp``
+        The remote directory to upload the site to in the format expected by 
+        the ``scp`` program.
+
+    ``delete``
+        If ``True``, delete remote files not also present on the local 
+        machine
+
+    ``dry_run``
+        If ``True``, output is printed as normal but no changes are actually
+        made
+
+    ``exclude_from``
+        A file listing all the files not to upload
+    """
+    local_path = os.path.abspath(site_root)+os.sep
+    args = ''
+    if delete:
+        args += ' --delete'
+    if dry_run:
+        args += ' --dry-run'
+    if exclude_from:
+        args += ' --exclude-from %s'%exclude_from
+    rsync_cmd = "rsync -aLHxvz --progress --numeric-ids%s %s %s"%(
+        args,
+        local_path, 
+        remote_scp,
+    )
+    log.info("Running command %s", rsync_cmd)
+    os.system(rsync_cmd)
+
+from sitetool.template.dreamweaver import handle_sitemap_entry
+def sitemap(sitemap_path, site_root, template):
+    """\
+    Generate a sitemap file ``sitemap_path`` from all files in ``site_root``
+    and use the template ``template``
+    """
+    if not os.path.exists(os.path.join(site_root, 'Templates')):
+        raise TemplateError(
+            "Path %r does not appear to be a vaild site root, it has no "
+            "'Templates' directory"%site_root
+        )
+    if not sitemap_path.startswith(site_root):
+        raise TemplateError(
+            "Sitemap %r is not under site root %r"%(sitemap_path, site_root)
+        )
+    log.info("Regenerating the sitemap for %r", site_root)
+    content = []
+    current_path = None
+    for dirpath, dirnames, filenames in os.walk(site_root):
+        dirnames.sort()
+        filenames.sort()
+        if 'index.html' in filenames:
+            content.append('<div class="title">')
+            current_path = handle_sitemap_entry(
+                site_root, 
+                content, 
+                dirpath, 
+                'index.html',
+                current_path,
+            )
+            filenames.pop(filenames.index('index.html'))
+            content.append('</div>')
+        for filename in filenames:
+            if filename.endswith('.html'):
+                current_path = handle_sitemap_entry(
+                    site_root, 
+                    content, 
+                    dirpath, 
+                    filename, 
+                    current_path,
+                )
+    if not os.path.exists(template):
+        raise TemplateError('No such template %r' % template)
+    template = DreamweaverTemplateInstance(template)
+    template['doctitle'] = '<title>Sitemap</title>'
+    template['heading'] = 'Sitemap'
+    template['content'] = '\n'.join(content)
+    log.info("Saving file %r...", sitemap_path)
+    template.save_as_page(sitemap_path)
+    log.info("Updating contents...")
+    reapply_library_items_to_page(
+        sitemap_path, 
+        site_root=site_root,
+        update_context_items=True,
+    )
+
+from sitetool.template.dreamweaver import links
+def broken(site_root):
+    """/
+    Search each page in ``site_root`` for any broken links to other pages
+    in the site.
+
+    Returns a dictionary where the key is the file containing the broken 
+    links and the values are list of broken links.
+    """
+    if not os.path.exists(os.path.join(site_root, 'Templates')):
+        raise TemplateError("Path %r does not appear to be a vaild site root, it has no 'Templates' directory"%site_root)   
+    passed, files, all = links(site_root)
+    return files
+
+def orphan(site_root, relative=False):
+    """\
+    Find pages, images and other files which are not linked from HTML pages 
+    in the site.
+
+    Returns a list or filenames of orphaned files.
+    """
+    if not os.path.exists(os.path.join(site_root, 'Templates')):
+        raise TemplateError("Path %r does not appear to be a vaild site root, it has no 'Templates' directory"%site_root)
+    passed, files, all = links(site_root)
+    orphans = []
+    len_ = len(os.path.abspath(os.getcwd()))+1
+    for file in all:
+       if not file in passed:
+           if relative:
+               orphans.append(file[len_:])
+           else:
+               orphans.append(file)
+       else:
+           log.debug('Not orphaned: %r', file)
+    return orphans
+
+def export():
+    log.info("Fetching data...")
+    connect = {} 
+    password = options.password 
+    if options.prompt:
+        password = getpass.getpass('Password: ')
+    if password is not None:
+        connect['passwd'] = password
+    if options.host:
+        connect['host'] = options.host
+    if options.user:
+        connect['user'] = options.user
+    if options.port:
+        connect['port'] = int(options.port)
+    connect['db'] = args[1]
+    posts, tags = export(
+        connect,
+        options.verbose
+    )
+    log.info("Processing data...")
+    if not os.path.exists(args[2]):
+        os.mkdir(args[2])
+    wordpress.save_posts(args[2], posts)
+
+
+
+
