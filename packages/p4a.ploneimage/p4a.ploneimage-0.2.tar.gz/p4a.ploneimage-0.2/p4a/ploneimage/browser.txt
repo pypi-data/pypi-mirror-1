@@ -1,0 +1,297 @@
+.. -*-doctest-*-
+
+====================================
+Plone4Artists Image Plone Functional
+====================================
+
+This functional test assumes a plone site has already been installed
+and that we're ready to actually start dealing with image files.
+
+Set Up
+======
+
+And of course we get the test browser.
+
+    >>> import Products.Five.testbrowser
+    >>> portal_url = portal.absolute_url()
+    >>> browser = Products.Five.testbrowser.Browser()
+    >>> browser.handleErrors = False
+
+Log in as a Manager.
+
+    >>> from Products.PloneTestCase import ptc
+    >>> browser.open(portal.absolute_url())
+    >>> browser.getLink('Log in').click()
+    >>> browser.getControl('Login Name').value = ptc.portal_owner
+    >>> browser.getControl(
+    ...     'Password').value = ptc.default_password
+    >>> browser.getControl('Log in').click()
+
+Collections
+-----------
+
+Start by creating a new collection.
+
+    >>> browser.getLink('Collection').click()
+    >>> browser.getControl(name='title').value = 'Test Smart Image Album'
+    >>> browser.getControl('Save').click()
+    >>> print browser.contents
+    <...
+    ...Changes saved...
+
+At this point we're inside an empty collection.  The first test here is to
+*image activate* this collection.
+
+    >>> browser.getLink('Image Container').click()
+    >>> print browser.contents
+    <...
+    ...Changed subtype to Image Container...
+
+Image Folders
+-------------
+
+We begin by setting up a test folder.
+
+    >>> browser.open(portal_url)
+    >>> browser.getLink('Folder').click()
+    >>> browser.getControl(name='title').value = 'Test Image Album'
+    >>> browser.getControl('Save').click()
+    >>> print browser.contents
+    <...
+    ...Changes saved...
+
+At this point we're inside an empty folder.  The first test here is to
+*image activate* this folder.
+
+    >>> browser.getLink('Image Container').click()
+    >>> print browser.contents
+    <...
+    ...Changed subtype to Image Container...
+
+Since we have a folder we will add new jpeg file. First create file object:
+
+    >>> import Globals
+    >>> import os
+    >>> from StringIO import StringIO
+
+    >>> maindir = Globals.package_home({'__name__': 'p4a.image'})
+    >>> samplesdir = os.path.join(maindir, 'tests', 'samples')
+
+
+Creation of JPEG File
+=======================
+
+We get one of the example jpeg's to use first.
+
+    >>> jpeg = open(os.path.join(samplesdir, 'USS_Constitution.jpg'))
+
+First we need to open folder view
+
+    >>> browser.open(portal_url + '/test-image-album')
+
+Then we need to upload in to the form
+
+    >>> browser.getLink(url='createObject?type_name=Image').click()
+    >>> browser.getControl(name='title').value = 'Test Image Title'
+    >>> browser.getControl(name='description').value = 'Test description'
+
+    >>> upload_control = browser.getControl(name='image_file')
+    >>> upload_file = upload_control.mech_control
+    >>> upload_file.add_file(jpeg, filename='USS_Constitution.jpg')
+
+Finally save the form and close the file.
+
+    >>> browser.getControl(name='form_submit').click()
+    >>> jpeg.close()
+
+    >>> 'Changes saved.' in browser.contents
+    True
+
+Since we have uploaded jpeg file we should get all meta info.
+
+    >>> 'USS-Constitution.jpg' in browser.contents
+    True
+
+    >>> 'Eric Coffman' in browser.contents
+    True
+
+Upload an image with no meta-data to make sure everything works
+without.
+
+    >>> browser.open(
+    ...     portal_url+
+    ...     '/test-image-album/createObject?type_name=Image')
+    >>> upload_control = browser.getControl(name='image_file')
+    >>> upload_file = upload_control.mech_control
+    >>> jpeg = open(os.path.join(samplesdir, 'no_metadata.jpg'))
+    >>> upload_file.add_file(jpeg,filename='no_metadata.jpg')
+    >>> browser.getControl(name='form_submit').click()
+    >>> jpeg.close()
+    >>> print browser.contents
+    <...
+    ...Changes saved...
+
+
+Edit JPEG file
+====================
+We assume that we have test-image-album folder with jpeg file inside.
+First we need to open the folder
+
+    >>> browser.open(portal_url + '/test-image-album')
+
+Than we need the jpeg file and edit form
+
+    >>> browser.getLink('U.S.S. Constitution').click()
+    >>> browser.getLink('Edit').click()
+
+Change some fields.
+
+    >>> browser.getControl(
+    ...     name='form.title').value = 'First JPEG image'
+    >>> browser.getControl(
+    ...     'Caption').value = 'Description of JPEG image'
+    >>> browser.getControl('Photographer').value = 'Burt Rocky'
+    >>> browser.getControl('Date Created').value = '2007-01-01'
+    >>> browser.getControl(
+    ...     'Comment').value = 'A test made durring Sorrento Sprint.'
+
+They keywords field is a list.  Change it's value.
+
+    >>> browser.getControl('Keywords').value
+    'Boat, Mast, Crane, House'
+    >>> browser.getControl(
+    ...     'Keywords').value = 'foo keyword, bar keyword'
+
+Save the changes.
+
+    >>> browser.getControl('Apply').click()
+
+Now the new metadata should be found
+
+    >>> print browser.contents
+    <...
+    ...Successfully updated...
+    ...Description of JPEG image...
+    ...Burt Rocky...
+    ...2007...
+    ...foo keyword, bar keyword...
+    ...A test made durring Sorrento Sprint...
+
+The keywords field populates the Plone keywords/subject field.
+
+    >>> portal['test-image-album']['USS-Constitution.jpg'].Subject()
+    ('foo keyword', 'bar keyword')
+
+The keywords field can also be set to a blank value.
+
+    >>> browser.getLink('Edit').click()
+    >>> browser.getControl('Keywords').value = ''
+    >>> browser.getControl('Apply').click()
+    >>> print browser.contents
+    <...
+    ...Successfully updated...
+    >>> portal['test-image-album']['USS-Constitution.jpg'].Subject()
+    ()
+
+    >>> browser.getLink('Edit').click()
+    >>> browser.getControl(
+    ...     'Keywords').value = 'bar keyword, foo keyword'
+    >>> browser.getControl('Apply').click()
+    >>> print browser.contents
+    <...
+    ...bar keyword, foo keyword...
+    >>> portal['test-image-album']['USS-Constitution.jpg'].Subject()
+    ('bar keyword', 'foo keyword')
+
+BTreeFolder Support
+===================
+
+First enable the adding of large plone folders via the portal_types
+
+    >>> portal_types = app.plone.portal_types
+    >>> portal_types['Large Plone Folder'].global_allow = True
+
+There's currently an annoying testbrowser bug that doesn't let us click
+on links with spaces in them.  So we'll do a little renaming of the portal
+type here.
+
+    >>> self.loginAsPortalOwner()
+    >>> portal_types.manage_renameObjects(['Large Plone Folder'], ['LargePloneFolder'])
+
+Visit the homepage, add a large folder, and finally image-activiate it.
+
+    >>> browser.open(portal_url)
+    >>> browser.getLink('Large Folder').click()
+
+When you get the error: " When URLs have spaces in them, they're handled
+correctly (before the bug was fixed, you'd get 'ValueError: too many values
+to unpack')", this is because of a bug in zope.testbrowser.
+
+    >>> browser.getControl(name='title').value = 'Large Image Folder'
+    >>> browser.getControl(name='form_submit').click()
+    >>> browser.getLink('Image Container').click()
+
+
+Activating a folder as image also activates video:  issue #28
+==============================================================
+
+Visit the test-image-album folder and check whether there are
+video-strings present.
+
+    >>> browser.open(portal_url + '/test-image-album')
+    >>> 'video-config.html' in browser.contents
+    False
+
+
+ Activate - Deactivate: issue #20
+=============================================
+
+Visit the image-activated folder. The view is currently the
+default image-view. We can check this by calling the getLayout()-method
+on the folder:
+
+    >>> browser.open(portal_url + '/test-image-album')
+    >>> image_folder = portal.contentValues(filter= {'portal_type': ('Folder',) } )[0]
+    >>> image_folder.getLayout()
+    'image-container.html'
+
+Then we deactivate the image-folder. The layout should switch back
+to the default folder-layout 'folder_listing'.
+
+    >>> browser.getLink('Image Container').click()
+    >>> image_folder.getLayout()
+    'folder_listing'
+
+Now we change default view to 'summary view',
+this will set an 'layout'-attribute to the folder.
+
+    >>> browser.getLink('Summary view').click()
+    >>> image_folder.getLayout()
+    'folder_summary_view'
+
+Now we image-activate the folder again. The new default image-view should be
+immediately active.
+
+    >>> browser.getLink('Image Container').click()
+    >>> image_folder.getLayout() # XXX
+    'folder_summary_view'
+
+Due to bug #20 this is not the case, so we need to set it explicitly to the
+default image-view.
+
+    >>> browser.getLink('Image view').click()
+
+This will change the layout-attribute on the folder to 'image-container.html'.
+
+    >>> image_folder.getLayout()
+    'image-container.html'
+
+    >>> 'id="albumlisting"' in browser.contents
+    True
+
+Now we image-deactivate it again.
+
+    >>> browser.getLink('Image Container').click()
+
+    >>> image_folder.getLayout()
+    'folder_listing'

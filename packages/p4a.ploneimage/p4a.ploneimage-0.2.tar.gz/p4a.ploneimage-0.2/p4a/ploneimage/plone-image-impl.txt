@@ -1,0 +1,88 @@
+.. -*-doctest-*-
+
+Plone Image (data format specific)
+==================================
+
+The following doctest suite is meant to be run against each available
+image implementation to ensure all features are accounted for.  In
+anticipation of this, ``self.sampleimage`` needs to point to a valid
+sample image file of the given type.  Also, ``self.required_mimetype``
+should be the mime type that image implementation is meant to handle.
+
+We begin this process by creating a new instance of a image content
+type.
+
+  >>> id = self.folder.invokeFactory(self.image_content_type, 'sampleimage')
+  >>> sampleimage = self.folder[id]
+
+Keeping the sample image files small it should be no problem loading
+them into memory for testing purposes.  So we proceed to give the
+previous image instance the sample image binary data.
+
+  >>> f = open(self.sampleimage, 'rb')
+  >>> data = f.read()
+  >>> f.close()
+  >>> sampleimage.setImage(data, mimetype=self.required_mimetype)
+
+This is all fine and dandy but since we went a little lowlevel to update
+the image, this means IImage hasn't had a chance to update the image
+metadata and related logic.  So we need to fire IObjectModifiedEvent to
+kick IImage.
+
+  >>> from zope import event
+  >>> from zope.app.event import objectevent
+  >>> event.notify(objectevent.ObjectModifiedEvent(sampleimage))
+
+Make sure ``sampleimage`` has the appropriate mime type.
+
+  >>> sampleimage.content_type == self.required_mimetype
+  True
+
+Now lets look up IImage and get the data we expect from importing the
+image file.
+
+  >>> from p4a.image.interfaces import IImage
+  >>> imagefile = IImage(sampleimage)
+
+  >>> imagefile.title == self.fields['title']
+  True
+  >>> imagefile.photographer == self.fields['photographer']
+  True
+
+Make sure all IPTC metadata is extracted.
+
+  >>> from p4a.image.thirdparty import iptcinfo
+  >>> from p4a.image.thirdparty import _imagedata
+  >>> for dataset in iptcinfo.c_datasets.itervalues():
+  ...     name = _imagedata.ImageDataAccessor._iptc_map.get(
+  ...         dataset, dataset)
+  ...     assert(imagefile.image_data[name] == self.fields[name])
+
+Do a little CMF testing.
+
+  >>> sampleimage.Title() == self.fields['title']
+  True
+
+Make sure storing and loading of image metadata works.
+
+  >>> imagefile._save_image_metadata()
+  >>> imagefile._load_image_metadata()
+
+Make sure the response doesn't write to stdout.
+
+  >>> import StringIO
+  >>> import Acquisition
+  >>> from Testing import ZopeTestCase
+  >>> requestOut = StringIO.StringIO()
+  >>> app = ZopeTestCase.utils.makerequest(
+  ...     Acquisition.aq_base(self.app), stdout=requestOut)
+  >>> sampleimage = app.plone.portal_membership.getHomeFolder(
+  ...     ZopeTestCase.user_name)[id]
+
+Now lets test out the downloading capability of the image.
+
+  >>> download = sampleimage.unrestrictedTraverse('@@downloadfile')
+  >>> download.request.form['field'] = 'p4a.image.interfaces:IImage:file'
+  >>> download() is not None
+  True
+
