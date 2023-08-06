@@ -1,0 +1,1 @@
+"""AutoRole Extensions package"""
