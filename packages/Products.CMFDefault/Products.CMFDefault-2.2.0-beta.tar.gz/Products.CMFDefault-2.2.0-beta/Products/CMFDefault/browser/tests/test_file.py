@@ -1,0 +1,30 @@
+##############################################################################
+#
+# Copyright (c) 2008 Zope Corporation and Contributors. All Rights Reserved.
+#
+# This software is subject to the provisions of the Zope Public License,
+# Version 2.1 (ZPL).  A copy of the ZPL should accompany this distribution.
+# THIS SOFTWARE IS PROVIDED "AS IS" AND ANY AND ALL EXPRESS OR IMPLIED
+# WARRANTIES ARE DISCLAIMED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF TITLE, MERCHANTABILITY, AGAINST INFRINGEMENT, AND FITNESS
+# FOR A PARTICULAR PURPOSE.
+#
+##############################################################################
+""" Test Products.CMFDefault.browser.file
+
+$Id: test_file.py 100397 2009-05-26 11:51:22Z jens $
+"""
+
+import unittest
+from Testing import ZopeTestCase
+
+from Products.CMFDefault.testing import FunctionalLayer
+
+
+ftest_suite = ZopeTestCase.FunctionalDocFileSuite('file.txt')
+ftest_suite.layer = FunctionalLayer
+
+def test_suite():
+    return unittest.TestSuite((
+        ftest_suite,
+    ))
