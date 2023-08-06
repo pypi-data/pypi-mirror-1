@@ -1,0 +1,85 @@
+-*- coding: utf-8 -*-
+
+==============================================================================
+Test that when you translate a document using LinguaPlone, the translated
+object will get translated keywords based on the original object keywords
+==============================================================================
+
+We are assuming here that the site already has a thesaurus in which 'soccer' is
+an English word that have 'fútbol' and 'balón pie' as Spanish translations.
+
+Create the browser object we'll be using.
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+    >>> browser.handleErrors = False
+    >>> self.portal.error_log._ignored_exceptions = ()
+
+Log in into the site as manager.
+
+    >>> from Products.PloneTestCase.setup import portal_owner, default_user, default_password
+    >>> login_url = portal_url + '/login_form'
+    >>> logout_url = portal_url + '/logout'
+    >>> browser.open(login_url)
+
+We have the login portlet, so let's use that.
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url)
+    >>> browser.url == portal_url
+    True
+
+Let's make three languages available in the site: English, Spanish and French.
+The default language is English.
+
+    >>> browser.getLink('Site Setup').click()
+    >>> browser.getLink('Language Settings').click()
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='en').selected = True
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='es').selected = True
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='fr').selected = True
+    >>> browser.getControl('Save').click()
+    >>> prefs_languages_url = portal_url + '/portal_languages/prefs_languages'
+    >>> browser.open(prefs_languages_url)
+    >>> browser.getControl(name='defaultLanguage').value = ('en',)
+    >>> browser.getControl('Save').click()
+
+Now we add a page.
+
+    >>> browser.getLink('Add to folder').click()
+    >>> browser.getControl('Page').click()
+    >>> browser.getControl(name='title').value = 'First Page'
+    >>> browser.getControl(name='description').value = 'First page description'
+    >>> browser.getControl(name='text').value = 'Soccer is very popular in England.'
+    >>> browser.getControl('Save').click()
+    >>> 'Changes saved.' in browser.contents
+    True
+
+Let's set the keywords to 'soccer'.
+
+    >>> browser.getLink('Properties').click()
+    >>> browser.getControl(name='subject_keywords:lines').value = 'soccer'
+    >>> browser.getControl('Save').click()
+    >>> 'Changes saved.' in browser.contents
+    True
+
+Let's translate the page into Spanish.
+
+    >>> browser.open(portal_url+'/first-page/createTranslation?set_language=es&current=en')
+    >>> browser.getControl('Title').value = 'Primera página'
+    >>> browser.getControl('Description').value = 'Descripción de la primera página'
+    >>> browser.getControl('Body Text').value = 'El balón pie es muy popular en Inglaterra. Football.'
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+Finally, let's check that the Spanish translations of the word 'soccer' were
+added automatically to the translated document.
+
+    >>> esdoc = getattr(self.portal, 'primera-pagina')
+    >>> 'fútbol' in esdoc.Subject()
+    True
+    >>> 'balón pie' in esdoc.Subject()
+    True
