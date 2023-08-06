@@ -1,0 +1,355 @@
+Scheduler
+=========
+
+IScheduler implementations
+--------------------------
+
+The ``scheduler`` module defines a couple of ``IScheduler``
+implementations:
+
+  >>> from collective.singing import scheduler
+  >>> from collective.singing import interfaces
+  >>> from zope.interface import verify
+  >>> verify.verifyClass(interfaces.IScheduler, scheduler.DailyScheduler)
+  True
+  >>> verify.verifyClass(interfaces.IScheduler, scheduler.WeeklyScheduler)
+  True
+  >>> verify.verifyClass(interfaces.IScheduler, scheduler.ManualScheduler)
+  True
+  
+Schedulers have an overwritten ``__eq__`` special method for comparison:
+
+  >>> scheduler.DailyScheduler() == scheduler.DailyScheduler()
+  True
+  >>> scheduler.WeeklyScheduler() == scheduler.DailyScheduler()
+  False
+
+Schedulers implement a ``tick`` method that'll call
+``IMessageAssemble`` when it needs to:
+
+  >>> from zope.publisher.browser import TestRequest
+  >>> request = TestRequest()
+
+Our request needs to be annotatable. 
+
+  >>> from zope.annotation.attribute import AttributeAnnotations
+  >>> from zope import component
+  >>> component.provideAdapter(
+  ...     AttributeAnnotations, (TestRequest,))
+
+
+  >>> daily = scheduler.DailyScheduler()
+  >>> daily.tick(None, request)
+
+Nothing happened because our scheduler is inactive by default:
+
+  >>> daily.active = True
+  >>> daily.tick(None, request) # doctest: +ELLIPSIS
+  Traceback (innermost last):
+  ...
+  TypeError: ...
+
+Daily won't need to trigger that function when its ``triggered_last``
+attribute is set to now:
+
+  >>> import datetime
+  >>> daily.triggered_last = datetime.datetime.now()
+  >>> daily.tick(None, request)
+
+We can override the check by calling ``trigger``:
+
+  >>> daily.trigger(None, request) # doctest: +ELLIPSIS
+  Traceback (innermost last):
+  ...
+  TypeError: ...
+
+If the ``triggered_last`` time is set to one day ago, the alarm will
+go off:
+
+  >>> daily.triggered_last = (
+  ...     datetime.datetime.now() - datetime.timedelta(days=1))
+  >>> daily.tick(None, request) # doctest: +ELLIPSIS
+  Traceback (innermost last):
+  ...
+  TypeError: ...
+
+The ``ManualScheduler`` can be programmed to send out items on a
+certain date.  For this, it holds a list of tuples of the form
+``(datetime.datetime, weak reference)``, where the datetime object
+specifies when to send the item out, and the weak reference is an
+optional callable that'll be passed to the ``IMessageAssemble``
+component for inclusion in the send-out:
+
+  >>> timed = scheduler.TimedScheduler()
+  >>> timed.items.append((datetime.datetime.now(), None, {}))
+
+Let's provide our own ``IMessageAssemble`` adapter to see what
+happens:
+
+  >>> from zope import interface, component
+  >>> class MessageAssemble(object):
+  ...     interface.implements(interfaces.IMessageAssemble)
+  ...     component.adapts(interfaces.IChannel)
+  ... 
+  ...     def __init__(self, channel):
+  ...         self.channel = channel
+  ... 
+  ...     def __call__(self, request, items=(), use_collector=True, override_vars=None):
+  ...         if override_vars is None: override_vars={}
+  ...         print "Sending out %r." % (items,)
+  ...         return 1
+
+  >>> component.provideAdapter(MessageAssemble, adapts=[interface.Interface])
+
+  >>> timed.tick(None, request)
+  Sending out ().
+  1
+
+This emptied the list of scheduled send-outs.  We won't be sending out
+something a second time:
+
+  >>> timed.tick(None, request)
+  0
+  >>> timed.items
+  []
+
+Let's add another item for now, with a content reference, and one for
+in the future.  We expect the items scheduled for later to stay in the
+queue:
+
+  >>> timed.items.append((datetime.datetime.now(), lambda: u'Hello', {}))
+  >>> timed.items.append(
+  ...     (datetime.datetime.now() + datetime.timedelta(days=1), None, {}))
+  >>> timed.tick(None, request)
+  Sending out (u'Hello',).
+  1
+  >>> timed.tick(None, request)
+  0
+  >>> timed.items # doctest: +ELLIPSIS
+  [(datetime.datetime(...), None, {})]
+
+In contrast to the ``tick`` function, the manual ``trigger`` won't
+look at the date, and just send:
+
+  >>> timed.trigger(None, request)
+  Sending out ().
+  1
+  >>> timed.items
+  []
+
+IMessageAssemble
+----------------
+
+The ``IMessageAssemble`` is used by the schedulers to do the actual
+send-outs.  See ``collective.singing.interfaces.IMessageAssemble`` for
+more details.
+
+``IMessageAssemble.__call__`` will look up the channel's collector (if
+any) and the composer and render messages.
+
+At this point, we'll provide our own ``IChannel``, ``IComposer`` and
+``ISubscription`` implementations to test that the default
+``IMessageAssemble`` implementation does the right thing:
+
+  >>> class Channel(object):
+  ...     interface.implements(interfaces.IChannel)
+  ...     def __init__(self, composers, subscriptions, collector=None):
+  ...         self.composers = composers
+  ...         self.subscriptions = subscriptions
+  ...         self.collector = collector
+
+  >>> class Subscription(object):
+  ...     def __init__(self, name, metadata):
+  ...         self.name = name
+  ...         self.metadata = metadata
+  ...     def __repr__(self):
+  ...         return '<Subscription %r>' % self.name
+
+  >>> class Composer(object):
+  ...     def render(self, subscription, items=(), override_vars=None):
+  ...	      if override_vars is None: override_vars={}
+  ...         formatted = tuple([item[0] for item in items])
+  ...         print "Rendering message with %r for %r" % (
+  ...             formatted, subscription)
+  ...         return '<Message>'
+
+  >>> subscription = Subscription('daniel', dict(format='my-format'))
+  >>> channel = Channel(
+  ...     composers={'my-format': Composer()},
+  ...     subscriptions={'my-subscription': subscription})
+
+Note that the ``IMessageAssemble.__call__`` method returns the number
+of messages that were created:
+
+  >>> component.provideAdapter(scheduler.MessageAssemble)
+  >>> interfaces.IMessageAssemble(channel)(request)
+  Rendering message with () for <Subscription 'daniel'>
+  1
+
+If our subscription were in pending state, nothing would happen:
+
+  >>> subscription.metadata['pending'] = True
+  >>> interfaces.IMessageAssemble(channel)(request)
+  0
+  >>> subscription.metadata['pending'] = False
+
+If our subscription were for a format that's unknown, an error is
+raised:
+
+  >>> subscription.metadata['format'] = 'bar'
+  >>> interfaces.IMessageAssemble(channel)(request) # doctest: +ELLIPSIS
+  Traceback (innermost last):
+  ...
+  KeyError: 'bar'
+  >>> subscription.metadata['format'] = 'my-format'
+
+Note that our channel lacks a collector; that's perfectly fine.  If
+there is a collector however, it'll be asked for items to render the
+message with:
+
+  >>> class Collector(object):
+  ...     items = ('some', 'items')
+  ...     def get_items(self, cue=None, subscription=None):
+  ...         print "Collecting items for %r with cue %r" % (subscription, cue)
+  ...         if self.items:
+  ...             items = self.items + ('for', subscription)
+  ...         else:
+  ...             items = ()
+  ...         return items, 'somecue'
+
+  >>> channel.collector = Collector()
+
+Before we can render messages now, we need to tell scheduler how to
+convert the items retrieved by the collector into something that the
+composer can work with.
+
+A ``UnicodeFormatter`` defined in the ``scheduler`` module returns
+``unicode(item)`` for any given item.  We'll use that one specifically
+for our ``my-format`` composer to render both strings and Subscription
+objects to unicode:
+
+  >>> from zope.publisher.interfaces.browser import IBrowserRequest
+  
+  >>> component.provideAdapter(scheduler.UnicodeFormatter,
+  ...                          adapts=(str, IBrowserRequest))
+  >>> component.provideAdapter(scheduler.UnicodeFormatter,
+  ...                          adapts=(Subscription, IBrowserRequest))
+
+  >>> interfaces.IMessageAssemble(channel)(request)
+  Collecting items for <Subscription 'daniel'> with cue None
+  Rendering message with (u'some', u'items', u'for', u"<Subscription 'daniel'>") for <Subscription 'daniel'>
+  1
+
+Note that the second we call this, the cue we returned in the previous
+call to ``get_items`` will be passed to the collector:
+
+  >>> interfaces.IMessageAssemble(channel)(request)
+  Collecting items for <Subscription 'daniel'> with cue 'somecue'
+  Rendering message with (u'some', u'items', u'for', u"<Subscription 'daniel'>") for <Subscription 'daniel'>
+  1
+
+If the collector decides to return no items, no messages will be
+rendered:
+
+  >>> channel.collector.items = ()
+  >>> interfaces.IMessageAssemble(channel)(request)
+  Collecting items for <Subscription 'daniel'> with cue 'somecue'
+  0
+
+We can register an ``ITransform`` adapter to rewrite text that's sent
+out:
+
+  >>> from zope import interface
+  >>> class Grappa4LifeTransform(object):
+  ...     interface.implements(interfaces.ITransform)
+  ...     component.adapts(str)
+  ... 
+  ...     sub = u'life'
+  ...     stitute = u'Grappa'
+  ...     def __init__(self, context):
+  ...         self.context = context
+  ... 
+  ...     def __call__(self, text, subscription):
+  ...         return text.replace(self.sub, self.stitute)
+
+  >>> component.provideAdapter(Grappa4LifeTransform, name=u'grappa-transform')
+  >>> channel.collector.items = ('We', 'love', 'life')
+  >>> interfaces.IMessageAssemble(channel)(request)
+  Collecting items for <Subscription 'daniel'> with cue 'somecue'
+  Rendering message with (u'We', u'love', u'Grappa', u'for', u"<Subscription 'daniel'>") for <Subscription 'daniel'>
+  1
+
+We can have more than one transform, but we cannot depend on the order
+they are applied in:
+
+  >>> class We4FrogsTransform(Grappa4LifeTransform):
+  ...     sub = u'We'
+  ...     stitute = u'Frogs'
+  >>> component.provideAdapter(We4FrogsTransform, name=u'frogs_transform')
+  >>> channel.collector.items = ('We', 'love', 'life')
+
+We do have to create a new request here. Caching in the MessageAssembler assumes that transforms
+are not changed within the same request.
+
+  >>> request = TestRequest()
+
+  >>> interfaces.IMessageAssemble(channel)(request)
+  Collecting items for <Subscription 'daniel'> with cue 'somecue'
+  Rendering message with (u'Frogs', u'love', u'Grappa', u'for', u"<Subscription 'daniel'>") for <Subscription 'daniel'>
+  1
+
+We can supply our own items to assemble_messages:
+
+  >>> items = ('Vincenzo', 'likes', 'life', 'and', 'singing')
+  >>> interfaces.IMessageAssemble(channel)(request, items)
+  Collecting items for <Subscription 'daniel'> with cue 'somecue'
+  Rendering message with (u'Vincenzo', u'likes', u'Grappa', u'and', u'singing', u'Frogs', u'love', u'Grappa', u'for', u"<Subscription 'daniel'>") for <Subscription 'daniel'>
+  1
+
+... and choose not to include the collector items:
+  
+  >>> interfaces.IMessageAssemble(channel)(request, items, use_collector=False)
+  Rendering message with (u'Vincenzo', u'likes', u'Grappa', u'and', u'singing') for <Subscription 'daniel'>
+  1
+
+We can also ask the ``IMessageAssemble`` component to not pass on the
+'cue' or set it.  ``use_cue`` controls if the cue is passed, while
+``update_cue`` controls whether we want the cue to be updated with the
+cue that the collector returns.
+
+This is what happens by default:
+
+  >>> channel.collector.items = ('Solitude',)
+  >>> subscription.metadata['cue'] = 'anothercue'
+  >>> assembler = interfaces.IMessageAssemble(channel)
+  >>> assembler(request)
+  Collecting items for <Subscription 'daniel'> with cue 'anothercue'
+  Rendering message with (u'Solitude', u'for', u"<Subscription 'daniel'>") for <Subscription 'daniel'>
+  1
+  >>> subscription.metadata['cue']
+  'somecue'
+
+Let's not pass on the queue this time by setting ``use_cue`` to
+``False``.  Note that the cue will still be updated:
+
+  >>> assembler.use_cue = False
+  >>> subscription.metadata['cue'] = 'anothercue'
+  >>> assembler(request)
+  Collecting items for <Subscription 'daniel'> with cue None
+  Rendering message with (u'Solitude', u'for', u"<Subscription 'daniel'>") for <Subscription 'daniel'>
+  1
+  >>> subscription.metadata['cue']
+  'somecue'
+
+This time, we'll request the cue to be updated, but not to be used.
+We do this by setting ``update_cue`` to ``False``:
+
+  >>> subscription.metadata['cue'] = 'anothercue'
+  >>> assembler.use_cue = True
+  >>> assembler.update_cue = False
+  >>> assembler(request)
+  Collecting items for <Subscription 'daniel'> with cue 'anothercue'
+  Rendering message with (u'Solitude', u'for', u"<Subscription 'daniel'>") for <Subscription 'daniel'>
+  1
+  >>> subscription.metadata['cue']
+  'anothercue'
