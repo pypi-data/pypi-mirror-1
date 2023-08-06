@@ -1,0 +1,346 @@
+=================
+Generic Functions
+=================
+
+Let's take pretty printing as an example. If we do it in the conventional Zope3 
+way we need a basic interface and adapters:
+
+    >>> from zope import interface
+    >>> import protocol
+    
+    >>> class IPPrint(interface.Interface):
+    ...     def pprint(): pass
+    
+A basic interface with a single method is a good candidate for a generic
+function. We can simply define this function as an instance of the 
+AdapterProtocol:
+
+    >>> pprint = protocol.AdapterProtocol('pprint', provides=IPPrint)
+
+Since no adapters have been defined we get an error if we call the Protocol 
+instance:
+
+    >>> pprint(1)
+    Traceback (most recent call last):
+    ...
+    TypeError: ('Could not adapt', 1, <InterfaceClass ...generic_txt.IPPrint>)
+
+Now let's define an adapter for integers:
+
+    >>> class PPrintInt(protocol.Adapter):
+    ...     pprint.adapter(adapts=int)
+    ...     def pprint(self):
+    ...         print self.context
+
+Again we cannot use the adapter since the protocol has not been activated:
+
+    >>> pprint(1)
+    Traceback (most recent call last):
+    ...
+    TypeError: ('Could not adapt', 1, <InterfaceClass ...generic_txt.IPPrint>)
+    
+    >>> pprint.activate()
+    >>> pprint(123)
+    123
+
+Since the protocol is now activated we can add new registrations on the fly:
+
+    >>> class Sample(object):
+    ...     name = 'sample'
+    >>> class PPrintSample(protocol.Adapter):
+    ...     pprint.adapter(adapts=Sample)
+    ...     def pprint(self):
+    ...         print self.context.__class__.__name__, self.context.name
+    >>> pprint(Sample())
+    Sample sample
+
+Typically we have an extra class definition in order to call a simple method.
+This overhead can be reduced.
+
+
+Generic Functions with a Dynamically Generated Interface
+========================================================
+
+Protocols are quite flexible. In the example above we implemented a function
+without return value. Let's try another function which must return a value. 
+This time we use generic functions directly without esplicitely defined classes 
+and interfaces. 
+The necessary interface is generated dynamically by the GenericFunction 
+constructor. We should provide a informative name for this interface:
+
+    >>> count = protocol.NonNoneFunction('ICount')
+    
+    >>> @count.when(list)
+    ... def count_list(li):
+    ...     return len(li)
+    
+    >>> @count.when(Sample)
+    ... def count_sample(li):
+    ...     return 1
+
+The colleced declarations must be activated first:
+
+    >>> count.activate()
+    
+After that we can use the generic functions:
+
+    >>> count([1, 2, 3])
+    3
+    >>> count(Sample())
+    1
+
+Again we can inspect what has been registered:
+
+    >>> print count.record()
+    <configure
+           xmlns:zope="http://namespaces.zope.org/zope"
+          >
+       <!-- GENERATED PROTOCOL. DO NOT MODIFY OR INCLUDE -->
+       <zope:adapter
+          factory="bebop.protocol.generic_txt.count_list"
+          provides="bebop.protocol.generic_txt.ICount"
+          for="list"
+       />
+       <zope:adapter
+          factory="bebop.protocol.generic_txt.count_sample"
+          provides="bebop.protocol.generic_txt.ICount"
+          for="bebop.protocol.generic_txt.Sample"
+       />
+    </configure>
+
+Since the declarations are recorded in ZCML we can inspect the records.
+If we deactivate our protocol, we get the initial state of the protocol 
+after it has been imported. 
+
+    >>> count.deactivate()
+    >>> count([1, 2, 3])
+    Traceback (most recent call last):
+    ...
+    TypeError: ('Could not adapt', [1, 2, 3], <InterfaceClass ...ICount>)
+
+
+Generic Functions returning None
+================================
+
+As a special case we must ensure that a generic function can be able to return
+None (e.g. if we want to express that a value cannot be computed). Note that this
+is a problem because a function returning ``None`` cannot be called 
+by the component architecture:
+
+    >>> class Unmanegable(object):
+    ...     pass
+    >>> unmanageable = Unmanegable()
+    
+    >>> class IManage(interface.Interface):
+    ...     pass
+
+    >>> @zope.interface.implementer(IManage)
+    ... @zope.component.adapter(Unmanegable)
+    ... def return_none(self):
+    ...     return None
+    
+    >>> zope.component.provideAdapter(return_none)
+    >>> IManage(unmanageable)
+    Traceback (most recent call last):
+    ...
+    TypeError: ('Could not adapt', <bebop.protocol.generic_txt.Unmanegable ...
+
+The protocol.GenericFunction shows a different behavior:
+
+    >>> manage1 = protocol.GenericFunction('IManage')
+    >>> @manage1.when(Unmanegable)
+    ... def manage1_unmanegable(obj):
+    ...     return None
+    
+    >>> manage1.activate()
+    >>> manage1(unmanageable) is None
+    True
+
+
+Generic Functions as Multi-Adapters
+===================================
+
+If we have more than one parameter the implementation must ensure that the 
+generic functions are called as multi-adapters:
+
+    >>> add = protocol.GenericFunction('IAdd')
+    
+    >>> @add.when(list, list)
+    ... def multi_list(l1, l2):
+    ...     return l1 + l2
+
+    >>> add.activate()    
+    >>> add([1, 2], [3, 4])
+    [1, 2, 3, 4]
+
+Since these multi-adapters are registered as ordinary adapters we can
+also play the role of standard multi-adapters like views:
+
+    >>> import browser
+    >>> view = browser.ViewFunction()
+    
+    >>> class World(object):
+    ...     pass
+    
+    >>> @view.when(World, name='hello.txt')
+    ... def hello_world(world, request):
+    ...     return 'hello world'
+    
+    >>> view.activate()
+
+The generic function returns a callable view that in turn provides
+access to the callable function implementation. These levels of indirection
+seem to be necessay to make the generic functions fit into the 
+view-class / view-method publication machinery:
+
+    >>> from zope.publisher.browser import TestRequest
+    >>> world = World()
+    >>> request = TestRequest()
+    >>> view = zope.component.getMultiAdapter(
+    ...     (world, request),
+    ...     name='hello.txt')
+    
+Note that the following complex call structure will be performed by
+the zope publisher so that you need not care about it:
+
+    >>> view(world, request).callFunction()
+    'hello world'
+
+
+Extendable Generic Functions
+============================
+
+The basic idea of overwriting the __call__ allows you to provide extensions
+in various ways. Let's assume you need some before or after hooks, which allow
+you to perform some code before or after a transaction is committed:
+
+
+    >>> class HookableGenericFunction(protocol.GenericFunction):
+    ...     before = protocol.GenericFunction('IBefore')
+    ...     after = protocol.GenericFunction('IAfter')
+    ...     def __call__(self, *args, **kw):
+    ...         self.before(*args, **kw)
+    ...         super(HookableGenericFunction, self).__call__(*args, **kw)
+    ...         self.after(*args, **kw)
+    ...     def activate(self, modules=None):
+    ...         self.before.activate(modules)
+    ...         self.after.activate(modules)
+    ...         super(HookableGenericFunction, self).activate(modules)
+    
+    >>> class Transaction(object):
+    ...     pass
+    >>> t = Transaction()
+    
+    >>> commit = HookableGenericFunction('ICommit')
+    
+    >>> @commit.when(Transaction)
+    ... def commit_transaction(transaction):
+    ...     print "Committing"
+    
+    >>> commit.activate()
+    >>> commit(t)
+    Committing
+    
+Now we provide implementations for the hooks:
+
+    >>> @commit.before.when(Transaction)
+    ... def before_transaction(transaction):
+    ...     print "Before"
+    
+    >>> @commit.after.when(Transaction)
+    ... def after_transaction(transaction):
+    ...     print "After"
+
+    >>> commit.activate()
+    >>> commit(t)
+    Before
+    Committing
+    After
+
+
+ZCML Directives
+===============
+
+We can also activate the protocol via ZCML. Before we can do this
+we need to load the metaconfiguration:
+
+    >>> from zope.configuration import xmlconfig
+    >>> import bebop.protocol
+    >>> context = xmlconfig.file('meta.zcml',  bebop.protocol)
+
+Now we reactivate the protocol via ZCML:
+
+    >>> zcml = '''<configure
+    ...       xmlns="http://iwm-kmrc.de/bebop"
+    ...      >
+    ...     <activate protocol="bebop.protocol.generic_txt.count"/>
+    ... </configure>'''
+    >>> ignore = xmlconfig.string(zcml, context=context)
+    
+    >>> count([1, 2, 3])
+    3
+    
+    >>> print count.record()
+    <configure
+           xmlns:zope="http://namespaces.zope.org/zope"
+          >
+       <!-- GENERATED PROTOCOL. DO NOT MODIFY OR INCLUDE -->
+       <zope:adapter
+          factory="bebop.protocol.generic_txt.count_list"
+          provides="bebop.protocol.generic_txt.ICount"
+          for="list"
+       />
+       <zope:adapter
+          factory="bebop.protocol.generic_txt.count_sample"
+          provides="bebop.protocol.generic_txt.ICount"
+          for="bebop.protocol.generic_txt.Sample"
+       />
+    </configure>
+
+If we want to see what has been registered we can save the record to a
+file:
+
+    >>> count.deactivate()
+    >>> record_zcml = '''<configure
+    ...       xmlns="http://iwm-kmrc.de/bebop"
+    ...      >
+    ...     <activate protocol="bebop.protocol.generic_txt.count"
+    ...                 record="demo/record.zcml"/>
+    ... </configure>'''
+    >>> ignore = xmlconfig.string(record_zcml, context=context)
+    >>> print open(context.path('demo/record.zcml')).read()
+    <configure
+           xmlns:zope="http://namespaces.zope.org/zope"
+          >
+       <!-- GENERATED PROTOCOL. DO NOT MODIFY OR INCLUDE -->
+       <zope:adapter
+          factory="bebop.protocol.generic_txt.count_list"
+          provides="bebop.protocol.generic_txt.ICount"
+          for="list"
+       />
+       <zope:adapter
+          factory="bebop.protocol.generic_txt.count_sample"
+          provides="bebop.protocol.generic_txt.ICount"
+          for="bebop.protocol.generic_txt.Sample"
+       />
+    </configure>
+
+A common use case is that we want to reuse and extend a protocol in another 
+package. This can be done with the 'extend' directive:
+
+    >>> count({1:2, 3:4})
+    Traceback (most recent call last):
+    ...
+    TypeError: ('Could not adapt', {1: 2, 3: 4}, <InterfaceClass ...ICount>)
+    
+    >>> extend_zcml = '''<configure
+    ...       xmlns="http://iwm-kmrc.de/bebop"
+    ...      >
+    ...     <extend protocol="bebop.protocol.generic_txt.count"
+    ...             module="bebop.protocol.demo.extension"
+    ...             record="demo/extension.zcml"/>
+    ... </configure>'''
+    >>> ignore = xmlconfig.string(extend_zcml, context=context)
+    
+    >>> count({1:2, 3:4})
+    4

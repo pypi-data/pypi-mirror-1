@@ -1,0 +1,263 @@
+==============================
+Resource Description Framework
+==============================
+
+RDF tries to describe metadata in a machine readable way. Dublin Core data,
+for instance might look as follows:
+
+    <?xml version="1.0" encoding="UTF-8" ?>
+    <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+             xmlns:dc="http://purl.org/dc/elements/1.1/">
+      <rdf:Description rdf:about="http://de.wikipedia.org/wiki/RDF">
+        <dc:title>Resource Description Framework</dc:title>
+        <dc:publisher>Wikipedia</dc:publisher>
+      </rdf:Description>
+    </rdf:RDF>
+
+A RDF representation makes Bebop data usable outside Bebop. At the same time
+it can be used as a general import and export format between sites. Let's start
+with some basic content objects and metadata:
+
+    >>> root = getRootFolder()
+    >>> import bop
+    >>> folder = bop.add(root, 'folder', bop.Folder())
+    >>> text = bop.add(folder, 'file.txt', bop.File('Test data', 'text/plain'))
+    >>> image = bop.add(folder, 'image.png', bop.File('', 'image/png'))
+    
+    >>> bop.dc(folder).title = u'Folder Title'
+    >>> bop.dc(text).description = u'A text file.'
+    >>> bop.dc(image).description = u'A picture'
+    >>> bop.dc(image).subjects = u'Keyword1', u'A, b, c', u'T\xe4st with "'
+    
+For test purposes we also assign a marker interface to the content:
+
+    >>> from bop import rdf
+    >>> from bop import interfaces
+    >>> import zope.interface
+    >>> zope.interface.alsoProvides(folder, interfaces.IZopeFormat)
+    >>> interfaces.IZopeFormat.providedBy(folder)
+    True
+    
+The rdf representation of single objects is straightforward. If we use the
+default zope format, we get a description that includes the Zope factory
+and IZopeDublinCore metadata:
+
+ 
+A format is enabled by a marker interface of the request parameter:
+    
+    >>> request = TestRequest()
+    >>> zope.interface.alsoProvides(request, interfaces.IZopeFormat)
+    
+    >>> print rdf.export(text, request)
+    <?xml version="1.0" encoding="UTF-8" ?>
+    <RDF:RDF
+        xmlns:RDF="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+        xmlns:dc="http://purl.org/dc/elements/1.1/"
+        xmlns:zope="http://namespaces.zope.org/zope">
+    <RDF:Description RDF:ID="file1"
+              RDF:about="/folder/file.txt"
+              dc:description="A text file."
+              dc:created="..."
+              dc:modified="..."
+              zope:factory="zope.app.file.file.File"
+              zope:name="file.txt">
+      <RDF:resource RDF:resource="folder/file.txt"/>
+    </RDF:Description>
+    </RDF:RDF>
+
+Container are represented with the help of dcterm parts:
+
+    >>> bebop_rdf = rdf.export(folder, request)
+    >>> print bebop_rdf
+    <?xml version="1.0" encoding="UTF-8" ?>
+    <RDF:RDF
+        xmlns:RDF="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+        xmlns:dc="http://purl.org/dc/elements/1.1/"
+        xmlns:dcterms="http://purl.org/dc/terms/"
+        xmlns:zope="http://namespaces.zope.org/zope">
+    <RDF:Description RDF:ID="folder2"
+              RDF:about="/folder"
+              dc:title="Folder Title"
+              dc:created="..."
+              dc:modified="..."
+              zope:factory="zope.app.folder.folder.Folder"
+              zope:marker="bop.interfaces.IZopeFormat"
+              zope:name="folder">
+      <dcterms:hasPart RDF:resource="#file1"/>
+      <dcterms:hasPart RDF:resource="#file2"/>
+    </RDF:Description>
+    <RDF:Description RDF:ID="file1"
+              RDF:about="/folder/file.txt"
+              dc:description="A text file."
+              dc:created="..."
+              dc:modified="..."
+              zope:factory="zope.app.file.file.File"
+              zope:name="file.txt">
+      <RDF:resource RDF:resource="folder/file.txt"/>
+    </RDF:Description>
+    <RDF:Description RDF:ID="file2"
+              RDF:about="/folder/image.png"
+              dc:description="A picture"
+              dc:created="..."
+              dc:modified="..."
+              dc:subjects="Keyword1, A%2C b%2C c, Täst with %22"
+              zope:factory="zope.app.file.file.File"
+              zope:name="image.png">
+      <RDF:resource RDF:resource="folder/image.png"/>
+    </RDF:Description>
+    </RDF:RDF>
+   
+
+Export Formats
+==============
+
+As a framework RDF can be used to define numerous export formats. Here
+we use the Zotero Firefox plugin (http://www.zotero.org) as a non-trivial
+test case:
+
+    >>> request = TestRequest()
+    >>> class TestPrincipal(object):
+    ...     id = 'u.oestermeier'
+    ...     title = u'Uwe Oestermeier'
+    >>> request.setPrincipal(TestPrincipal())
+    >>> zope.interface.alsoProvides(request, interfaces.IZoteroFormat)
+
+The Zotero format looks as follows:
+    
+    >>> print rdf.export(text, request)
+    <?xml version="1.0" encoding="UTF-8" ?>
+    <RDF:RDF
+        xmlns:RDF="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+        xmlns:dc="http://purl.org/dc/elements/1.1/"
+        xmlns:z="http://www.zotero.org/namespaces/export#">
+    <z:Attachment RDF:ID="file1"
+              dc:title="file.txt"
+              z:itemType="attachment">
+      <RDF:resource RDF:resource="folder/file.txt"/>
+    </z:Attachment>
+    </RDF:RDF>
+
+In Zotero containers are represented as z:Collections:
+
+    >>> print rdf.export(folder, request)
+    <?xml version="1.0" encoding="UTF-8" ?>
+    <RDF:RDF
+        xmlns:RDF="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+        xmlns:dc="http://purl.org/dc/elements/1.1/"
+        xmlns:dcterms="http://purl.org/dc/terms/"
+        xmlns:z="http://www.zotero.org/namespaces/export#">
+    <z:Collection RDF:ID="folder2"
+              dc:title="folder">
+      <dcterms:hasPart RDF:resource="#file1"/>
+      <dcterms:hasPart RDF:resource="#file2"/>
+    </z:Collection>
+    <z:Attachment RDF:ID="file1"
+              dc:title="file.txt"
+              z:itemType="attachment">
+      <RDF:resource RDF:resource="folder/file.txt"/>
+    </z:Attachment>
+    <z:Attachment RDF:ID="file2"
+              dc:title="image.png"
+              z:itemType="attachment">
+      <RDF:resource RDF:resource="folder/image.png"/>
+    </z:Attachment>
+    </RDF:RDF>
+
+The complete file contents and RDF descriptions can be exported as a ZipFile
+if the user has the correct privileges:
+
+    >>> rdf.export_zip_container(folder, request)
+    Traceback (most recent call last):
+    ...
+    Unauthorized
+
+
+Import Formats
+==============
+
+Importing RDF formats can be tricky since formats differ in numerous ways.
+The Zotero RDF format, for instance, uses special node types to define
+content objects. Each Zotero node needs a registered factory, in order to
+generate the corresponding content type:
+
+    >>> rdf.z.etreename('Attachment')
+    '{http://www.zotero.org/namespaces/export#}Attachment'
+    
+    >>> bop.query(interfaces.IRDFFactory, name=rdf.z.etreename('Attachment'))
+    <class 'bop.rdf.ZAttachmentNode'>
+    
+    >>> import os.path
+    >>> here = os.path.dirname(bop.__file__)
+    >>> zotero_rdf = file(os.path.join(here, 'testdata', 'zotero.rdf')).read()
+
+    >>> target = bop.add(root, 'target', bop.Folder())
+    >>> rdf.importGraph(zotero_rdf, target, request)
+
+    >>> sorted(target.keys())
+    [u'Folder']
+    
+The Bebop default format can, of course, also be imported:
+
+    >>> request = TestRequest()
+    >>> zope.interface.alsoProvides(request, interfaces.IZopeFormat)
+    >>> target2 = bop.add(root, 'target2', bop.Folder())
+    >>> rdf.importGraph(bebop_rdf, target2, request, debug=True)
+    >>> sorted(target2.keys())
+    [u'folder']
+
+The metadata are restored as well:
+
+    >>> folder = target2[u'folder']
+    >>> bop.dc(folder).title
+    u'Folder Title'
+
+    >>> image = folder[u'image.png']
+    >>> bop.dc(image).description
+    u'A picture'
+
+Comma seperated values are reconstructed properly:
+
+    >>> bop.dc(image).subjects
+    (u'Keyword1', u'A, b, c', u'T\xe4st with "')
+
+Even very Zopish implementation issues like marker interfaces are
+restored:
+
+    >>> interfaces.IZopeFormat.providedBy(folder)
+    True
+    
+Clean up:
+    
+    >>> del root['target']
+    >>> del root['target2']
+    
+    
+Export to a Directory
+=====================
+
+Besides a dump to a Zip Archive the package also supports writing RDF
+data and file data to a server directory. This function calls ISnapshot
+adapters to allow efficient dump operations which write blob or other
+filesystem based data (e.g. z3c.extfile or bebop.file) as symlinks to
+the filesystem.
+
+    >>> target = root[u'folder']
+    >>> snapshot = rdf.Snapshot(target, TestRequest())
+    >>> path = snapshot.dump()
+    >>> sorted([x for x in os.listdir(path) if not x.startswith('.')])
+    [u'bebop.rdf', u'file.txt', u'image.png']
+
+
+The data can also be read back from a snapshot directory:
+
+    >>> for key in target.keys():
+    ...     del target[key]
+    
+    >>> path = snapshot.load()
+    >>> sorted(target.keys())
+    [u'file.txt', u'image.png']
+    
+    >>> for name, file in sorted(target.items()):
+    ...     print name, file.data
+    file.txt Test data
+    image.png 
