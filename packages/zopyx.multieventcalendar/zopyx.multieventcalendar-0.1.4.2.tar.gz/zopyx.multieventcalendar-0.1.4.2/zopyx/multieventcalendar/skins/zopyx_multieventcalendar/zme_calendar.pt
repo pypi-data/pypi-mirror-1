@@ -1,0 +1,226 @@
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"
+      lang="en"
+      metal:use-macro="context/main_template/macros/master"
+      i18n:domain="plone">
+
+<metal:head fill-slot="top_slot"
+            tal:define="dummy python:request.set('disable_border',1)" />
+
+    <div metal:fill-slot="main"
+                  tal:define="now            modules/DateTime/DateTime;
+                              calendar       modules/calendar;
+                              now_month      now/month;
+                              now_year       now/year;
+                              month          request/month | now_month;
+                              year           request/year | now_year;
+                              months         request/months | python: 1;
+                              subject        request/subject | python:[];
+                              mode           request/mode | string:month;
+                              today_str      python: DateTime().strftime('%d.%m.%Y');
+                              months_lst     python: ('Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember');
+                              ">
+
+        <div tal:condition="python: request.get('mode') == 'flat'" 
+             tal:define="calendar    modules/calendar;
+                         result      context/zme_calcEvents;
+                         ranges      python: result[0];
+                         eventD      python: result[1];
+                         datestrs    eventD/keys;
+                         dummy       datestrs/sort">
+
+
+            <tal:loop repeat="datestr datestrs">
+                 <h2 tal:content="python: context.toLocalizedTime(datestr)" />
+                 <ul>
+                     <li tal:repeat="event eventD/?datestr"
+                         tal:attributes="class event/class">
+                         <a tal:attributes="href event/url"
+                            tal:content="event/title" />
+                     </li>
+                </ul>
+            </tal:loop>
+       </div>
+
+
+       <div tal:condition="python: request.get('mode') == 'month'" 
+            tal:define="calendar    modules/calendar;
+                         result      context/zme_calcEvents;
+                         ranges      python: result[0];
+                         eventD      python: result[1]">
+
+
+          <tal:loop repeat="ym ranges">
+
+              <table class="calendar listing"
+                     style="width: 100%"
+                          tal:define="year  python: ym[0];
+                                      month python: ym[1];
+                                      dummy python: calendar.setfirstweekday(0);
+                                      weeks python: calendar.monthcalendar(year, month)">
+                        <thead>
+                          <tr>
+                              <th colspan="8" class="nosort" class="calendar-month-year">
+                                  <span id="month-name"
+                                        i18n:translate="" 
+                                        tal:content="python: DateTime(year, month, 1).strftime('%B')" i
+                                  />
+                                  <span id="year" tal:content="year" />
+                              </th>
+                          </tr>
+                          <tr class="weekdays">
+                            <th id="week" i18:translate="" class="nosort">Week</th>
+                            <th id="mon" i18:translate="" class="nosort">Monday</th>
+                            <th id="tue" i18:translate="" class="nosort">Tuesday</th>
+                            <th id="wed" i18:translate="" class="nosort">Wednesday</th>
+                            <th id="thu" i18:translate="" class="nosort">Thursday</th>
+                            <th id="fri" i18:translate="" class="nosort">Friday</th>
+                            <th id="sat" i18:translate="" class="nosort">Saturday</th>
+                            <th id="son" i18:translate="" class="nosort">Sunday</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tal:loop repeat="row weeks">
+                            <tr tal:attributes="class python: test(repeat['row'].even(), 'even', 'odd')">
+                              <td class="week-in-year">
+                                
+                                <a tal:define="nextDate    python: DateTime(year, month, [r for r in row if r][0]);
+                                               nextDateStr python: nextDate.strftime('%Y-%m-%d')"
+                                   tal:attributes="href string:zme_weekcalendar?date=$nextDateStr"
+                                   tal:content="nextDate/week" 
+                                   tal:on-error="nothing" 
+                                 />
+                              </td>
+							  <tal:block tal:repeat="day row">
+							  <td style="width: 12%; vertical-align: top;"
+								tal:define="day_class python: test(today_str == '%02d.%02d.%04d' % (day, month, year), 'today', 'day-in-month')"
+								tal:attributes="class day_class">
+                                  <tal:if tal:condition="day"
+                                      tal:define="datestr python: '%04d/%02d/%02d' % (year, month, day);
+                                                  events  python: eventD.get(datestr, [])">
+                                      <div tal:attributes="class day_class"
+                                           style="text-align: right">
+                                        <a tal:attributes="href string:zme_new_event?datestr=$datestr"
+                                           tal:condition="is_editable">
+                                           <img i18n:attributes="title label_new_event" title="New event" src="add_icon.gif"/></a>
+                                        <span  tal:content="day" /> 
+                                      </div>
+                                      <ul tal:condition="events">
+                                          <li tal:repeat="event events"
+                                              tal:attributes="class event/class">
+                                              <a tal:attributes="href event/url"
+                                                 tal:content="event/title" />
+                                          </li>
+                                      </ul>
+                                 </tal:if>
+                              </td>
+						  </tal:block>
+                            </tr>
+                          </tal:loop>
+                        </tbody>
+                    </table> 
+          </tal:loop>
+        </div>
+
+        <div tal:define="ZT          modules/ZTUtils;
+                         make_query  nocall: ZT/make_query;
+                         qs          python: make_query({'month' : month, 'year' : year, 'mode' : mode, 'subject' : subject, 'months' : months});
+                         qsvcal      python: make_query({'mode' : mode, 'subject' : subject, 'months' : months});
+                        ">
+
+            <a tal:attributes="href string:zme_calendarExportVCalendar?restrict_to_folder:int=1&$qsvcal">
+                <img tal:attributes="src string:$portal_url/icon_export_ical.png" title="Export vCalendar">
+                <span i18n:translate="label_ical_export">Export vCalendar</span>
+            </a>
+        </div>
+
+        <fieldset>
+          <legend i18n:translate="label_calendar">Calendar</legend>
+
+          <form action="zme_calendar" method="GET" name="calendar_form">
+              <table id="calendar">
+                  <tr>
+                      <td class="label" i18n:translate="label_month_year">Month/year</td>
+                      <td>
+                          <select name="month:int" size="1" onchange="document.calendar_form.submit()">
+                              <option tal:repeat="i python: range(1, 13)"
+                                      tal:content="python: DateTime(2000, i, 1).Month()"
+                                      i18n:translate=""
+                                      tal:attributes="value i;
+                                                      SELECTED python: i==month and 1 or 0"
+                              />
+                          </select>
+                          <select name="year:int" size="1" onchange="document.calendar_form.submit()">
+                              <option tal:repeat="i python: range(2006, 2006+6)"
+                                      tal:content="i"
+                                      tal:attributes="value i;
+                                                      SELECTED python: i==year and 1 or 0"
+                              />
+                          </select>
+                      </td>
+                  </tr>
+
+                  <tr>
+                      <td class="label" i18n:translate="label_calendar_mode">Mode</td>
+                      <td>
+                           <select name="mode">
+                               <option value="flat" tal:attributes="selected python: mode=='flat'" i18n:translate="label_flat_listing">flat listing</option>
+                               <option value="month" tal:attributes="selected python: mode=='month'" i18n:translate="label_by_month_listing">by month</option>
+                           </select>
+                      </td>
+                  </tr>
+
+                  <tr>
+                      <td class="label" i18n:translate="label_subject">Subject</td>
+                      <td>
+                          <select name="subject:list:ignore_empty"
+                                  multiple="1"
+                                  size="10"
+                                  tal:define="subjects   python: list(context.portal_catalog.uniqueValuesFor('Subject'));
+                                              dummy      subjects/sort">
+                              <option value="" i18n:translate="label_all" 
+                                      tal:attributes="selected not: subject">all</option>
+                              <option tal:repeat="subject subjects"
+                                      tal:attributes="value subject;
+                                                      selected python: subject in request.get('subject', [])"
+                                      tal:content="subject"
+                                      />
+                          </select>
+                      </td>
+                  </tr>
+
+                  <tr>
+                      <td class="label" i18n:translate="label_how_many_month">For how many months?</td>
+                      <td>
+                           <select name="months:int">"
+                               <option tal:repeat="n python: range(1, 13)"
+                                       tal:content="n"
+                                       tal:attributes="value n;
+                                                       selected python: n == request.get('months')"
+                                                       />
+                           </select>
+                      </td>
+                  </tr>
+
+                  <tr>
+                      <td class="label" i18n:translate="label_only_events_in_subfolders">Show only events in this folder</td>
+                      <td>
+                          <input type="checkbox"
+                                 name="restrict_to_folder:int"
+                                 tal:attributes="checked request/restrict_to_folder|nothing" 
+                                 value="1"
+                          />
+                      </td>
+                  </tr>
+                                      
+              </table>
+
+              <input type="submit" value="Update" i18n:attributes="value" class="context"/>
+
+          </form>
+
+        </fieldset>
+
+
+    </div>
+</html>
+
