@@ -1,0 +1,214 @@
+Metadata-Version: 1.0
+Name: gocept.paypal
+Version: 0.1.8
+Summary: Paypal Utility providing the paypal API
+Home-page: http://pypi.python.org/pypi/gocept.paypal/
+Author: Sebastian Wehrmann, Daniel Havlik
+Author-email: sw@gocept.com
+License: ZPL 2.1
+Description: With this package you can easily use the PayPal NVP API in your Python or
+        Zope / Plone based environment. It supports the ExpressCheckout and
+        DirectPayment API from PayPal.
+        
+        You will need a `PayPal Developer Account <https://developer.paypal.com/>`_.
+        
+        Please note, that the DirectPayment API does only work with US or UK
+        business accounts.
+        
+        
+        ===============
+        gocept.paypal
+        ===============
+        
+        
+        Base setup
+        ==========
+        
+        
+        First we need to import some packages and setup a testbrowser:
+        
+        >>> import cgi
+        >>> import os
+        >>> import urlparse
+        >>> import zope.component
+        >>> import gocept.paypal.paypal
+        >>> import gocept.paypal.interfaces
+        >>> from zc.testbrowser.browser import Browser
+        >>> browser = Browser()
+        >>> browser.mech_browser.set_handle_robots(False)
+        >>> callback_url = os.environ['pp_api_callback_url']
+        >>> callback_cancel_url = os.environ['pp_api_callback_cancel_url']
+        
+        
+        Then, we need a PayPalDataProvider, which provides our PayPal API with the
+        information about your PayPal buisness account and API Credentials:
+        
+        >>> class PPData(object):
+        ...     zope.component.adapts(gocept.paypal.interfaces.IPayPal)
+        ...     zope.interface.implements(
+        ...         gocept.paypal.interfaces.IPayPalDataProvider)
+        ...
+        ...     username = os.environ['pp_api_username']
+        ...     password = os.environ['pp_api_password']
+        ...     signature = os.environ['pp_api_signature']
+        ...     version = os.environ['pp_api_version']
+        ...     api_endpoint = os.environ['pp_api_endpoint']
+        ...     paypal_url = os.environ['pp_api_url']
+        ...     currency = os.environ['pp_currency']
+        ...
+        ...     def __init__(self, context):
+        ...         self.context = context
+        
+        
+        Register the DataProvider at the SiteManager:
+        
+        >>> gsm = zope.component.getGlobalSiteManager()
+        >>> gsm.registerAdapter(PPData)
+        
+        
+        This test runs in development mode, which means, that only virtual money is
+        being tranfered. To get the things work, we have to be logged in at the
+        Paypal Developer Site. In productive environment, this step is not needed:
+        
+        >>> browser.open('https://developer.paypal.com/')
+        >>> browser.getControl(name='login_email').value =\
+        ...     os.environ['pp_dev_username']
+        >>> browser.getControl(name='login_password').value =\
+        ...     os.environ['pp_dev_password']
+        >>> browser.getControl(name='submit').click()
+        >>> 'Now loading,' in browser.contents
+        True
+        
+        
+        Using the PayPal ExpressCheckout API
+        ====================================
+        
+        
+        Setup the paypal API:
+        
+        >>> paypal = gocept.paypal.paypal.PayPal()
+        
+        
+        We now make a new payment request with the amount $1,00 and get back a token
+        from the API. callback_cancel_url is the url, PayPal will redirect the buyer,
+        if he manually cancels the transaction. In all other circumstances,
+        callback_url will be used.
+        
+        >>> amt = 1
+        >>> token = paypal.SetExpressCheckout(amt, callback_url,
+        ...                                       callback_cancel_url)
+        
+        
+        Call the paypal site with the token as an argument, login and click continue.
+        This step is in production environment done by the buyer.
+        
+        >>> url = '%s%s' % (os.environ['pp_api_url'], token)
+        >>> browser.open(url)
+        >>> browser.getControl(name='login_email').value =\
+        ...     os.environ['pp_buyer_username']
+        >>> browser.getControl(name='login_password').value =\
+        ...     os.environ['pp_buyer_password']
+        >>> browser.getControl(name='login.x').click()
+        >>> browser.mech_browser.set_handle_redirect(False)
+        >>> browser.getControl(name='continue.x', index=0).click()
+        Traceback (most recent call last):
+        ...
+        httperror_seek_wrapper: HTTP Error 302: Found
+        >>> browser.mech_browser.set_handle_redirect(True)
+        
+        
+        The User is now redirected to the callback_url. The token is submitted as a
+        GET parameter which we need to catch:
+        
+        >>> url = browser.mech_browser.response().hdrs['location']
+        >>> query_string = urlparse.urlparse(url)[4]
+        >>> token = cgi.parse_qs(query_string)['token'][0]
+        
+        
+        With the token, we now can, but must not, call GetExpressCheckoutDetails,
+        which returns some information about the buyer and the status of his
+        transaction. In most cases the call is neccessary to get the payerid, which
+        is needed to finalize the process:
+        
+        >>> express_tokens = paypal.GetExpressCheckoutDetails(token, callback_url,
+        ...                                                   callback_cancel_url)
+        >>> express_tokens['ACK'] == 'Success'
+        True
+        
+        
+        To complete the transaction, we must call the DoExpressCheckoutPayment with
+        many information about the transaction:
+        
+        >>> payerid = express_tokens['PAYERID']
+        >>> pay_tokens = paypal.DoExpressCheckoutPayment(
+        ...                 express_tokens['TOKEN'], payerid, amt, callback_url,
+        ...                 callback_cancel_url)
+        
+        
+        The pay_tokens dictionary holds all neccessary information about the
+        completed transaction. In the test case we only check, if everything is fine:
+        
+        >>> pay_tokens['ACK']
+        'Success'
+        
+        
+        Using the DirectPayment API:
+        ============================
+        
+        
+        If you buyers do not have a PayPal Account or you want to accept creditcard
+        based direct payments, you may user the DoDirectPayment API, which needs some
+        extra info like creditcard number and so on. Please refer to the PayPal API
+        documentation for more info.
+        
+        >>> pay_direct_token = paypal.DoDirectPayment(
+        ...                 1.00,
+        ...                 '192.168.0.1',
+        ...                 os.environ['pp_buyer_cc_number'],
+        ...                 '052018',
+        ...                 '123',
+        ...                 'David',
+        ...                 'Duchovny',
+        ...                 'VISA',
+        ...                 'Mainstreet 21',
+        ...                 'New York',
+        ...                 'NY',
+        ...                 '12345',
+        ...                 callback_url,
+        ...                 callback_cancel_url,
+        ...         )
+        >>> pay_direct_token['ACK']
+        'Success'
+        
+        
+        Changes
+        =======
+        
+        0.1.8 (2008-05-17)
+        ------------------
+        
+        - improved the way, the token is fetched from the callback url
+        - fixed a bug in DoDirectPayment causing PayPal to always ask for an item
+        amount
+        
+        
+        0.1.7 (2008-05-16)
+        ------------------
+        
+        - started recording changlog
+        - fixed a bug with multiple continue-buttons on paypals website causeing the
+        tests to crash
+        - added support to specify the currency of transactions (was USD only)
+        - moved paypal login information to buildout.cfg
+        - improved documentation
+        
+Keywords: zope3 gocept paypal
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet :: WWW/HTTP
