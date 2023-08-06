@@ -1,0 +1,98 @@
+Usage of tha.coverage
+=====================
+
+.. :doctest:
+
+tha.coverage provides a ``createcoverage`` script, which has an entry point:
+
+    >>> from tha.coverage import script
+    >>> script.main
+    <function main at ...>
+
+The createcoverage script looks at sys.argv, so we reset that one first.
+
+    >>> import sys
+    >>> original_argv = sys.argv[1:]
+    >>> sys.argv[1:] = []
+
+I haven't mocked up a test environment yet, so we get an error about a missing
+bin/test file:
+
+    >>> script.main()
+    Traceback (most recent call last):
+    ...
+    RuntimeError: Test command doesn't exist: .../parts/test/bin/test
+
+I set up a temp directory:
+
+    >>> import os
+    >>> import tempfile
+    >>> tempdir = tempfile.mkdtemp()
+    >>> os.chdir(tempdir)
+    >>> bindir = os.path.join(tempdir, 'bin')
+    >>> os.mkdir(bindir)
+    >>> testbinary = os.path.join(bindir, 'test')
+    >>> open(testbinary, 'w').write('hello')
+
+And to prevent this test from opening browser windows, we monkey patch the
+build-in webbrowser module:
+
+    >>> import webbrowser
+    >>> def monkey_open(path):
+    ...     print "Opening %s in webbrowser" % path
+    >>> original_open = webbrowser.open
+    >>> webbrowser.open = monkey_open
+
+And we monkey patch the command runner:
+
+    >>> import subprocess
+    >>> original_call = subprocess.call
+    >>> def monkey_call(items):
+    ...     print "Calling %s" % ' '.join(items)
+    ...     if 'bin/test' in items[0]:
+    ...         # bin/test creates a coverage dir, normally.
+    ...         os.mkdir(os.path.join(tempdir, 'coverage'))
+    >>> subprocess.call = monkey_call
+
+Now we're ready for testing:
+
+    >>> script.main()
+    Running tests in coverage mode (can take a long time)
+    Calling .../bin/test --coverage=.../coverage
+    Creating coverage reports...
+    Done.
+    Opening .../coverage/reports/all.html in webbrowser
+
+After this first run, there's a coverage dir.  A second run will remove it first:
+
+    >>> script.main()
+    Removing old coverage dir
+    Running tests in coverage mode (can take a long time)
+    Calling .../bin/test --coverage=.../coverage
+    Creating coverage reports...
+    Done.
+    Opening .../coverage/reports/all.html in webbrowser
+
+If we pass in a command line argument we treat that as the output directory,
+which gets created if it doesn't exist.  We also assume that this will be only
+done by buildbot, so we won't open the results in a webbrowser.
+
+    >>> outputdir = os.path.join(tempdir, 'output')
+    >>> os.path.exists(outputdir) # Not yet!
+    False
+    >>> sys.argv[1:] = [outputdir]
+    >>> script.main()
+    Buildbot mode, output will be placed in .../output
+    Removing old coverage dir
+    Running tests in coverage mode (can take a long time)
+    Calling .../bin/test --coverage=.../coverage
+    Creating coverage reports...
+    Done.
+
+Test cleanup:
+
+    >>> import shutil
+    >>> shutil.rmtree(tempdir)
+    >>> webbrowser.open = original_open
+    >>> subprocess.call = original_call
+    >>> sys.argv[1:] = original_argv
