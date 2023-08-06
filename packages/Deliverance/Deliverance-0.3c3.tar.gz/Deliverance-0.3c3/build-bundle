@@ -1,0 +1,56 @@
+#!/bin/sh
+
+fail () {
+    echo "$@"
+    exit 1
+}
+
+if [ "$1" = "upload" ] ; then
+    shift
+    FILENAME="$1"
+    if [ -z "$FILENAME" ] ; then
+        echo "Usage: `basename $0` uplaod FILENAME"
+        exit 2
+    fi
+    cat $FILENAME | ssh flow.openplans.org "ssh acura.openplans.org \"cd /www/deliverance.openplans.org/dist/ ; cat > $FILENAME ; rm Deliverance-snapshot-latest.pybundle ; ln -s $FILENAME Deliverance-snapshot-latest.pybundle\""
+    exit
+fi
+
+mkdir -p download-cache
+export PIP_DOWNLOAD_CACHE="`pwd`/download-cache"
+
+REV=$(python -c 'import pip; print pip.Subversion().get_revision(".")')
+FILE="Deliverance-snapshot-r${REV}.pybundle"
+
+if [ -e "$FILE" ] ; then
+    echo "Bundle file $FILE already exists"
+    exit 0
+fi
+
+echo "CREATING BUNDLE: $FILE"
+echo
+
+## FIXME: httplib2 still isn't being included
+## httplib2 location is a temporary problem with a bad pypi entry
+pip bundle $FILE --build=build-bundle-files/ --src=src-bundle-files/ \
+  http://httplib2.googlecode.com/files/httplib2-0.4.0.zip \
+  ./lxml-2.2alpha1-staticbuild.tar.gz \
+  -e svn+http://codespeak.net/svn/z3/deliverance/trunk#egg=Deliverance \
+  supervisor PasteScript nose \
+  http://svn.colorstudy.com/home/ianb/PageCollector/trunk#egg=PageCollector \
+  Dozer \
+  || fail 'Bundle failed'
+
+echo 'INSTALLING'
+echo
+
+rm -rf TEST
+virtualenv --no-site-packages TEST
+pip install -E TEST $FILE \
+  || fail 'Install failed'
+
+cd TEST/bin
+cd ../src/deliverance
+chmod +x test
+NOSE=../../bin/nosetests ./test \
+  || fail 'Tests failed'
