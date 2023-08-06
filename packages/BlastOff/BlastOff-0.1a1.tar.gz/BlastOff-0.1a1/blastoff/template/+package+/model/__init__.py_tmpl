@@ -1,0 +1,142 @@
+"""The application's model objects"""
+from datetime import datetime
+import hashlib
+import logging
+import os
+
+import sqlalchemy as sa
+from sqlalchemy import orm
+from schemabot import SchemaBot, SchemaManager
+
+from {{package}}.model import meta
+
+USERNAME_SIZE=16
+
+log = logging.getLogger(__name__)
+
+def init_model(engine, auto_schema_update=False):
+    """Call me before using any of the tables or classes in the model"""
+    ## Reflected tables must be defined and mapped here
+    #global reflected_table
+    #reflected_table = sa.Table("Reflected", meta.metadata, autoload=True,
+    #                           autoload_with=engine)
+    #orm.mapper(Reflected, reflected_table)
+    #
+    meta.Session.configure(bind=engine)
+    meta.engine = engine
+    
+    schema_mgr = SchemaManager()
+    schema_mgr.register(1, upgrade=schema_version_1_upgrade, downgrade=schema_version_1_downgrade)
+    
+    schemabot = SchemaBot(schema_mgr, engine=engine)
+    (model_version, current_db_version) = schemabot.version_check()
+    
+    force_version = os.environ.get('SCHEMABOT_FORCE_VERSION')
+    if force_version is not None:
+        # User override of model_version. This will force an upgrade or downgrade
+        #   to the specified model version.
+        model_version = int(force_version)
+        if model_version != 0 and schema_mgr.get(model_version) is None:
+            raise ValueError("Model version %d requested by SCHEMABOT_FORCE_VERSION does not exist." %model_version)
+        log.warn("Forcing a DB schema update to version %d" %model_version)
+    
+    if model_version != current_db_version:
+        if auto_schema_update:
+            schemabot.schema_update(model_version)
+        
+        else:
+            raise Exception("SchemaBot reports that the model version (%d) does not match the DB schema version (%d). Please run 'paster setup-app config.ini' to update the database schema." %(model_version, current_db_version))
+
+
+## Non-reflected tables may be defined and mapped at module level
+user_table = sa.Table('user', meta.metadata,
+    sa.Column('id', sa.Integer, primary_key=True),
+    sa.Column('user_name', sa.Unicode(USERNAME_SIZE), unique=True),
+    sa.Column('email_address', sa.Unicode(255)),
+    sa.Column('display_name', sa.Unicode(255)),
+    sa.Column('password', sa.String(128)),          # room for SHA-512 hashed passwords (hexdigest)
+    sa.Column('created', sa.DateTime, default=datetime.now),
+    sa.Column('activated', sa.Boolean, nullable=False, default=False),
+)
+
+schema_version_1_upgrade = [user_table]
+schema_version_1_downgrade = [user_table]
+
+{{if email_confirmation}}
+user_activation_table = sa.Table('user_activation', meta.metadata,
+    sa.Column('id', sa.Integer, primary_key=True),
+    sa.Column('user_id', sa.Integer, sa.ForeignKey('user.id')),
+    sa.Column('key', sa.Unicode(128), nullable=False),
+    sa.Column('created', sa.DateTime, default=datetime.now),
+)
+
+schema_version_1_upgrade.append(user_activation_table)
+schema_version_1_downgrade.append(user_activation_table)
+
+{{endif}}
+{{if default_user}}
+# Insert a default user "{{default_user}}" with password "{{default_user}}"
+default_user_password_hash = hashlib.sha512("{{default_user}}").hexdigest()
+insert_default_user = 'INSERT INTO "user" '                             \
+        "(id, user_name, display_name, password, activated) VALUES "    \
+        "(0, '{{default_user}}', 'Default User', '%s', 1)"%default_user_password_hash
+schema_version_1_upgrade.append(insert_default_user)
+
+{{endif}}
+
+# ---- ORM Mapped Classes ----
+
+class User(object):
+    def __init__(self, **kwargs):
+        for key,value in kwargs.items():
+            if key == 'password':
+                # Hash password
+                self.set_password(value)
+            else:
+                setattr(self, key, value)
+    
+    def validate_password(self, password):
+        """The given password is hashed and compared against the one
+        stored in the database.  Returns True if they are equal, else
+        False.
+        
+        This method is called by repoze.who.plugins.sa.SQLAlchemyAuthenticatorPlugin
+        """
+        hashed_password = self._hash_password(password)
+        return self.password == hashed_password and self.activated
+    
+    def set_password(self, raw_pass):
+        """Set a new password for the account.  The raw password
+        will be stored in hashed form and will not be reversible.
+        """
+        self.password = self._hash_password(raw_pass)
+    
+    def _hash_password(self, raw_pass):
+        return hashlib.sha512(raw_pass).hexdigest()
+    
+
+
+{{if email_confirmation}}
+class UserActivation(object):
+    pass
+
+{{endif}}
+
+orm.mapper(User, user_table,
+{{if email_confirmation}}
+    properties = dict(    
+        activation = sa.orm.relation(UserActivation, backref='user', cascade="all, delete, delete-orphan"),
+    )
+{{endif}}
+)
+{{if email_confirmation}}
+orm.mapper(UserActivation, user_activation_table)
+{{endif}}
+
+
+## Classes for reflected tables may be defined here, but the table and
+## mapping itself must be done in the init_model function
+#reflected_table = None
+#
+#class Reflected(object):
+#    pass
