@@ -1,0 +1,94 @@
+Tests for buildout.eggtractor buildout extension
+------------------------------------------------
+
+Lets create a buildout configuration file::
+
+    >>> data = """
+    ... [buildout]
+    ... parts = zope2 instance
+    ... extensions = buildout.eggtractor
+    ... eggs =
+    ... develop = 
+    ... [instance]
+    ... recipe = plone.recipe.zope2instance
+    ... zope2-location = ${zope2:location}
+    ... user = admin:admin
+    ... [zope2]
+    ... recipe = plone.recipe.zope2install
+    ... url = http://www.zope.org/Products/Zope/2.9.8/Zope-2.9.8-final.tgz
+    ... """
+    >>> rmdir(tempdir, 'buildout.test')
+    >>> cd(tempdir)
+    >>> sh('mkdir buildout.test')
+    mkdir buildout.test
+    <BLANKLINE>
+    >>> cd('buildout.test')
+    >>> touch('buildout.cfg', data=data)
+    >>> ls('.')
+    buildout.cfg
+
+run the buildout first time so wget a zope instance::
+
+    >>> sh('buildout bootstrap')
+    buildout bootstrap
+    Creating directory '/tmp/buildout.test/bin'.
+    Creating directory '/tmp/buildout.test/parts'.
+    Creating directory '/tmp/buildout.test/develop-eggs'.
+    Generated script '/tmp/buildout.test/bin/buildout'.
+    <BLANKLINE>
+    >>> sh('./bin/buildout')
+    ./bin/buildout
+    ...
+    Generated script '/tmp/buildout.test/bin/instance'.
+    Generated script '/tmp/buildout.test/bin/repozo'.
+    <BLANKLINE>
+    
+Now let's create an egg in the src directory::
+
+    >>> sh("paster create --no-interactive -o src -t plone_app com.mustap.www namespace_package=com namespace_package2=mustap package=www")
+    paster create --no-interactive -o src -t plone_app com.mustap.www namespace_package=com namespace_package2=mustap package=www
+    ...
+    Running /home/mustapha/parissprint/tractor/bin/python2.4 setup.py egg_info
+    <BLANKLINE>
+
+Ok, so now that we have an egg, lets run the buildout in offline mode. We should
+get a link file in develop-egg, a zcml file in parts/instance/etc/package-includes
+and a line with the path to our egg in the bin/instance file. 
+
+First we check that there is nothing of the previous mentioned things:
+
+   >>> ls('develop-eggs')
+   >>> ls('parts/instance/etc/package-includes') 
+   No directory named parts/instance/etc/package-includes
+   >>> sh('grep com.mustap.www bin/instance')
+   grep com.mustap.www bin/instance
+   <BLANKLINE>
+
+OK, now run the buildout in offline mode::
+   
+   >>> sh('./bin/buildout -o')
+   ./bin/buildout -o
+   ...
+
+Check that we have a correct created buildout. First check taht we have
+a link in the develop-eggs directory::
+
+   >>> ls('develop-eggs')
+   com.mustap.www.egg-link
+
+Check that we have zcml slug in parts/instance/etc/package-includes::
+
+   >>> ls('parts', 'instance', 'etc', 'package-includes')
+   001-com.mustap.www-configure.zcml
+
+and in the end check that there is line in bin/bindout that includes
+our egg in the path::
+
+    >>> cat('bin', 'instance')
+    #!/usr/bin/python2.4
+    ...
+    sys.path[0:0] = [
+      '/tmp/buildout.test/src/com.mustap.www',
+    ...
+      ]
+    ...
