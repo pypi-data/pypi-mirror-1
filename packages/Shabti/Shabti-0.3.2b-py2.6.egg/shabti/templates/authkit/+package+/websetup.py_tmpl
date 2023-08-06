@@ -1,0 +1,123 @@
+# -*- coding: utf-8 -*-
+"""Setup the {{package}} application"""
+import logging
+
+from {{package}}.config.environment import load_environment
+
+log = logging.getLogger(__name__)
+
+from paste.deploy import loadapp
+from pylons import config
+from elixir import *
+
+
+from sqlalchemy import *
+from {{package}}.model import *
+from {{package}}.config.environment import load_environment
+from pylons import config
+
+import {{package}}.lib.helpers as h
+from paste.deploy import appconfig
+
+
+def setup_app(command, conf, vars):
+    load_environment(conf.global_conf, conf.local_conf)
+    print("Setup_app " + config['sqlalchemy.url'])
+    import datetime
+    import hashlib
+    from {{package}} import model
+    model.metadata.create_all()
+    fine = True
+    
+    # Most likely to go wrong so do first
+    if config.get('use_passurl', '').lower() == 'true':
+        try:
+            import openid
+        except ImportError:
+            print "ERROR: Could not import the openid library"
+            fine = False
+        else:
+            if not config.get('passurl_store'):
+                print "ERROR: No 'passurl_store' option specified"
+                fine = False
+            elif config.get('passurl_store', '') == "'file'":
+                import sys
+                if sys.platform == 'win32':
+                    print "ERROR: The 'file' option for 'passurl_store' doesn't work on Windows"
+                    fine = False
+                elif config.get('passurl_store', '') == 'mysql':
+                    if raw_input("Create the OpenID store? [Y/n]").lower() in ['y','']:
+                    # Check Openid is installed
+                    # Check the store type 
+                    # If the store type is file check not on windows
+                        try:
+                            import MySQLdb
+                            from DBUtils.PersistentDB import PersistentDB
+                            from openid.store.sqlstore import MySQLStore
+                            from sqlalchemy.engine.url import make_url
+                            
+                            def create_conn(dburi):
+                                url = make_url(dburi)
+                                p={'db':url.database}
+                                if url.username:
+                                    p['user'] = url.username
+                                if url.password:
+                                    p['passwd'] = url.password
+                                if url.host:
+                                    p['host'] = url.host
+                                if url.port:
+                                    p['port'] = url.port
+                                return PersistentDB(MySQLdb, 1, **p).connection()
+                                
+                            conn = create_conn(CONFIG['app_conf']['passurl_config'])
+                            cstore = MySQLStore(conn)
+                            cstore.createTables()
+                        except:
+                            print "ERROR: Setting up the openid database failed"
+                            import sys
+                            print str(sys.exc_info()[1])
+                            fine = False
+                else:
+                    print "ERROR: Unknown option |%r| for 'passurl_store'"%app_conf['passurl_store']
+                    fine = False
+    if raw_input("Create the main user store? [Y/n]").lower() in ['y','']:
+        try:
+            import datetime
+            import hashlib
+            from {{package}} import model
+            # from coastal.model.conference import *
+
+            print "Adding data..."
+            g = model.Group()
+            g.name = 'Everyone'
+            model.Session.add(g)
+            r = model.Role()
+            r.name = 'Role'
+            model.Session.add(r)
+            a = model.App()
+            a.name = 'Admin'
+            model.Session.add(a)
+            model.Session.flush()
+            u = model.User(username='admin', password='pylons',
+                           password_check='pylons',
+                           email='admin@example.com', active=True)
+            e = model.Email()
+            e.email=u.email
+            e.verified=now()
+            model.Session.add(e)
+            u.emails.append(e)
+            
+            model.Session.add(u)
+            model.Session.commit()
+        except:
+            print "ERROR: Setting up the account database failed"
+            import sys
+            print str(sys.exc_info()[1])
+            fine = False
+    if fine:
+        print "Successfully setup. You can now run `paster serve' and sign in"
+        print "with username `admin' and password `pylons'."
+    else:
+        print "Setup failed."
+    # Place any other commands to setup {{package}} here.
+

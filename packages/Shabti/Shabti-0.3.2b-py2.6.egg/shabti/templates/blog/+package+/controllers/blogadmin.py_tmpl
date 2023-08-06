@@ -1,0 +1,421 @@
+# -*- coding: utf-8 -*-
+import re, random, threading, formencode
+from pylons import request
+from pylons.decorators import jsonify, validate
+from pylons.helpers import abort, redirect_to, log
+from authkit.permissions import NotAuthenticatedError
+from authkit.pylons_adaptors import authorize
+from authkit.permissions import RemoteUser
+from sqlalchemy import *
+from elixir import *
+from bel.lib.base import *
+from bel.apps import antispam
+import bel.util as util
+from bel.util import get_dc
+# import bel.lib.database
+# from bel.lib import database
+from bel.models import *
+from formencode import validators
+from pprint import pformat
+
+debug = 1
+
+class Settings(object):
+    def __init__(self, admin=1, default_blog=1):
+        self.admin = admin
+        self.default_blog = default_blog 
+
+settings = Settings(admin=1, default_blog=1)
+#settings = Settings.get(1)
+
+# ----------------------------------------------------------------
+# --
+# --
+# --
+# -- Blog Administration facility
+# --
+# --
+# --
+# ----------------------------------------------------------------
+
+class BlogadminController(BaseController):
+    # Interface for managing an individual blog
+    
+    # Integrate with Authkit
+    #require = identity.has_permission('can_admin')
+
+    def fake_auth(self, obj):
+        if debug > 1: log("FakeAuth with: %s" % (obj))
+        return True
+
+    def kick(self, kw):
+        # blog=Blog.get(kw['bid'])
+        # identity = kw['identity']
+        # h.log("kick: identity.current.user: %s blog owner %s settings.admin: %s" % \
+        #         (identity.current.user.user_id, blog.owner, settings.admin))
+        # if identity.current.user.user_id != blog.owner: # and identity.current.user != settings.admin:
+        #     raise identity.IdentityFailure( _("You are not this blog's owner!") )
+        pass
+        
+    def dash(self, *args, **kw):
+        dc = util.get_dc(title='Blog Store, Dashboard')
+        if debug > 1: log("BlogAdminController dash: %s %s" % (args, pformat(kw)))
+        self.kick(kw)
+        comments = Comment.get_last(3)
+        posts = Post.get_last(3)
+        blog=Blog.get(kw.get('bid', settings.default_blog))
+        # admincheck = turbogears.identity.conditions.has_permission
+        ns = dict(dc=dc, admincheck=self.fake_auth, blog=blog, comments=comments)
+        return render('genshi', 'turboblog.blog_admin.dash', **ns)
+    
+    def manage(self, *args, **kw):
+        return self.manage_posts(*args, **kw)
+
+    def index(self, *args, **kw):
+        if debug: log("BlogAdminController index: %s %s" % (args, pformat(kw)))
+        blogname = False
+        if not blogname:
+            return self.blogs()
+        else:
+            return self.dash(*args, **kw)
+
+    # ---- Blog management-related stuff -------------------------------------------------
+    def blogs(self):
+        """Produces a list of blogs for management
+        """
+        users = User.select()
+        blogs = Blog.select()
+        ag = Group.select(Group.c.group_name=="admin")
+        c.beldict = get_dc(title='Blog Store, Select point')
+        log("admincontrol:blogs default blog=[%s] curadmin=[%s]" % \
+                      (settings.default_blog, settings.admin))
+        ns = dict(dc=c.beldict, 
+                  defblog=settings.default_blog,
+                  curadmin=settings.admin, 
+                  blogs=blogs,
+                  bloggers=users,
+                  ag=ag)
+        return render('genshi', 'turboblog/admin/blogs', **ns)
+    
+    def delete_blog(self, *args, **kw):
+        """Delete a specific blog
+        """
+        if settings.default_blog == int(kw['bid']):
+             # turbogears.flash('Cannot delete default blog!')
+             pass
+        else:
+            session = create_session()
+            Blog.delete(kw['bid'])
+            session.flush()
+        return redirect_to('/blogadmin/blogs')
+    
+    def create_blog(self, *args, **kwargs):
+        """Create a new blog
+        """
+        bn = kwargs['name']
+        bt = kwargs.get('tagline', 'insert witty tagline here')
+        bo = User.get(kwargs['owner'])
+        # Do we need to create a db session?
+        session = create_session()
+        newblog = Blog(name=bn,tagline=bt,owner=bo)
+        session.flush()
+        # Try url_for instead
+        return redirect_to('/blogadmin/%s/manage'%newblog.id)
+
+    # ---- User-related stuff -------------------------------------------------
+    def users(self, *args, **kw):
+        dc = util.get_dc(title='Blog Store, Select user')
+        ns = dict(dc=dc, users=User.select(), groups=Group.select())
+        return render('genshi',
+                               'turboblog.admin.users',
+                               **ns)
+
+    def user_info(self, uid):
+        z = {}
+        for p in Group.select():
+            z[p.group_name] = { 'id':p.id, 'desc':p.display_name }
+        ns = dict(user=User.get(uid), allgroup=z)
+
+    def set_admin(self, **kwargs):
+        session = create_session()
+        settings.admin = User.get(kwargs['aid'])
+        session.flush()
+        ns = dict()
+ 
+    def set_default(self, **kwargs):
+        session = create_session()
+        settings.default_blog = int(kwargs['defblog'])
+        session.flush()
+        ns = dict()
+
+    # ---- Post-related stuff -------------------------------------------------
+    
+    def manage_posts(self, *args, **kw):
+        if debug > 1: log("ManagePosts %s %s" % (args, pformat(kw)))
+        from toscawidgets.widgets.forms.datagrid import DataGrid
+        from toscawidgets.mods.pylonshf import render as twrender
+        self.kick(kw)
+        blog=Blog.get(kw['bid'])
+        c.beldict = get_dc(title='Blog Store, Manage posts')
+        # To do more complicated stuff use ElementTree as a construction kit. 
+        # def makeTeamLink(team):
+        #     link = ElementTree.Element('a',
+        #                                href='/team/%d' % team.id)
+        #     link.text = team
+        #     return link        
+        post_fields = [('Id', 'id'),
+                        ('Modification time', 'modification_time'),
+                        ('Title', 'title'),
+                        ('Tags **** Length of', 'tags'),
+                        ('Comments ***** Length of', 'comments'),
+                        ('Published', 'published'),
+                        ('Author', 'author_name'),
+                        ('View', 'get_view_link'),
+                        ('Edit', 'get_edit_link'),
+                        ('Delete', 'get_delete_link')]
+        # admincheck = turbogears.identity.conditions.has_permission
+        ns = dict(dc=c.beldict,
+                    admincheck=self.fake_auth,
+                    blog=blog,
+                    posts=blog.posts,
+                    posts_widget=DataGrid(fields=post_fields))
+        if debug > 1: log("ManagePosts ns %s" % (pformat(ns)))
+        resp = twrender('genshi', 'turboblog.blog_admin.manage_posts', **ns)
+        if debug > 1: log("ManagePosts resp %s" % (pformat(resp)))
+        # return render('genshi', 'turboblog.blog_admin.manage_posts', **ns)
+        return resp
+
+    def delete_post(self, *args, **kw):
+        self.kick(kw)
+        session = create_session()
+        blog=Blog.get(kw['bid'])
+        post = Post.get(kw['pid'])
+        post.deleteMe()
+        session.flush()
+        return url_for('/blogadmin/%s/manage_tags'%kw['bid'])
+    
+    def new_post(self, *args, **kw):
+        self.kick(kw)
+        u = validators.URL(add_http=False, check_exists=False)        
+        for tburl in kw.get('trackback_url','').split(' '):
+            if tburl:
+                # FIXME: what is supposed to happen to this?
+                print u.to_python(tburl)
+        user = identity.current.user
+        blog = Blog.get(kw['bid'])        
+        pub = 'publish' in kw
+        edit = ('edit' in kw) or ('publishedit' in kw)
+        session = create_session()
+        if edit:
+            p = Post.get(kw['post_id'])
+            p.title = kw['post_title']
+            p.content = kw['content']
+            p.published = 'publishedit' in kw
+            p.trackback_urls = kw['trackback_url']
+        else:
+            p = Post(title=kw['post_title'],
+                     content=kw['content'],
+                     author=user,
+                     published=pub,
+                     blog=blog,
+                     trackback_urls = kw['trackback_url'])
+        session.flush()
+        if p.published:
+            p.send_trackbacks()
+        return redirect_to('/blogadmin/%d/manage'%blog.id)
+ 
+    def write(self, *args, **kw):
+        self.kick(kw)
+        blog=Blog.get(kw['bid'])
+        post = None
+        if 'pid' in kw:
+            post = Post.get(kw['pid'])
+            edit = post != None
+        else:
+            edit = post != None
+            title = "Write"
+            post_title = "Title here"
+            post_content = "Content here"
+        if edit:
+            title = "Edit"
+            post_id = post.id
+            post_title = post.title
+            post_content = post.content
+        dc = util.get_dc(title='Blog Store, Write blog')
+        # admincheck = turbogears.identity.conditions.has_permission
+        ns = dict(dc=dc,
+                    admincheck=self.fake_auth,
+                    blog=blog,
+                    post=post,
+                    title=title,
+                    post_title=post_title,
+                    post_content=post_content,
+                    edit=edit,
+                    fancy_editing=False)
+        return render('genshi', 'turboblog.blog_admin.write', **ns)
+    
+    # ---- Comment-related stuff -------------------------------------------------
+
+    def manage_comments(self, *args, **kw):
+        #### FIX ME --- Genshi template seriously broken on enumeration of 0-length comment list
+        dc = util.get_dc(title='Blog Store, Manage comments')
+        self.kick(kw)
+        blog=Blog.get(kw['bid'])
+        mass = False
+        if 'mode' in kw:
+            mass = kw['mode'] == 'mass'
+            try:
+                mass = int(mass)
+            except:
+                mass = 0          
+        # admincheck = turbogears.identity.conditions.has_permission
+        ns = dict(dc=dc,admincheck=self.fake_auth,blog=blog,mass=mass)
+        return render('genshi', 'turboblog.blog_admin.manage_comments', **ns)    
+     
+    def delete_comment(self, *args, **kw):
+        self.kick(kw)
+        session = create_session()
+        c = Comment.get(kw['cid'])
+        c.destroySelf()
+        session.flush()
+        return url_for('/blogadmin/%s/manage_comments'%kw['bid'])
+
+    def edit_comment(self, *args, **kw):
+        self.kick(kw)
+        c = Comment.get(kw['cid'])
+        return url_for('/blogadmin/%s/manage_comments'%kw['bid'])
+
+    def delete_comments(self, *args, **kw):
+        self.kick(kw)
+        session = create_session()
+        for cid in kw['delete_comments[]']:
+            c = Comment.get(cid)
+            c.destroySelf()
+        session.flush()
+        return redirect_to('/blogadmin/%s/manage_comments'%kw['bid'])
+
+    # ---- Tag-related stuff -------------------------------------------------
+
+    def manage_tags(self, *args, **kw):
+        dc = util.get_dc(title='Blog Store, Tag management')
+        self.kick(kw)
+        blog=Blog.get(kw['bid'])
+        # admincheck = turbogears.identity.conditions.has_permission
+        ns = dict(dc=dc,admincheck=self.fake_auth,blog=blog)
+        return render('genshi', 'turboblog.blog_admin.manage_tags', **ns)
+    
+    def rename_tag(self, *args, **kw):
+        self.kick(kw)
+        session = create_session()
+        blog=Blog.get(kw['bid'])
+        tag = Tag.get(kw['tid'])
+        tag.name = kw['tag']
+        session.flush()
+        return url_for('/blogadmin/%s/manage_tags'%kw['bid'])
+        
+    def add_tag(self, *args, **kw):
+        self.kick(kw)
+        session = create_session()
+        blog=Blog.get(kw['bid'])
+        tag = Tag(name=kw['tag'], blogID=blog.id)
+        blog.tags.append(tag)
+        session.flush()
+        return url_for('/blogadmin/%s/manage_tags'%kw['bid'])
+
+    def delete_tag(self, *args, **kw):
+        self.kick(kw)
+        session = create_session()
+        blog=Blog.get(kw['bid'])
+        tag = Tag.get(kw['tid'])
+        tag.deleteMe()
+        session.flush()
+        return redirect_to('/blogadmin/%s/manage_tags'%kw['bid'])
+
+    # ---- Settings-related stuff -------------------------------------------------
+
+    def settings(self, *args, **kw):
+        if debug: log("BlogAdminController settings called")
+        return self.settings_general(*args, **kw)
+
+    def settings_general(self, *args, **kw):
+        if debug: log("BlogAdminController settings_general called")
+        self.kick(kw)
+        blog=Blog.get(kw['bid'])
+        users=User.select()
+        # admincheck = turbogears.identity.conditions.has_permission
+        dc = util.get_dc(title='Blog Store, Settings general')
+        ns = dict(dc=dc,admincheck=self.fake_auth,blog=blog,users=users)
+        return render('genshi', 'turboblog.blog_admin.settings_general', **ns)
+     
+    def settings_comments(self, *args, **kw):
+        if debug: log("BlogAdminController settings_comments called")
+        self.kick(kw)
+        blog=Blog.get(kw['bid'])
+        # admincheck = turbogears.identity.conditions.has_permission
+        dc = util.get_dc(title='Blog Store, Settings comments')
+        ns = dict(dc=dc,admincheck=self.fake_auth,blog=blog)
+        return render('genshi', 'turboblog.blog_admin.settings_comments', **ns)
+     
+    def settings_reading(self, *args, **kw):
+        if debug: log("BlogAdminController settings_reading called")
+        self.kick(kw)
+        blog=Blog.get(kw['bid'])
+        # admincheck = turbogears.identity.conditions.has_permission
+        dc = util.get_dc(title='Blog Store, Settings reading')
+        ns = dict(dc=dc,admincheck=self.fake_auth,blog=blog)
+        return render('genshi', 'turboblog.blog_admin.settings_reading', **ns)
+     
+    def update_settings(self, *args, **kw):
+        if debug: log("Update settings args: %s kw:%s" % (args, kw))
+        try:
+            blog = Blog.get(kw['bid'])
+            if blog.owner != kw['admin']: blog.owner = kw['admin']
+            if blog.name != kw['blogname']: blog.name = kw['blogname']
+            if blog.tagline != kw['blogdescription']: blog.tagline = kw['blogdescription']
+            if blog.theme != kw['theme']: blog.theme = kw['theme']
+            session.save()
+        except Exception, msg:
+            log("Update settings error %s %s, %s" % (msg, args, kw))
+        return self.settings_general(*args, **kw)
+
+    # ---- User-related stuff -------------------------------------------------
+    # Not required on voyage
+    # def user_create(self, *args, **kw):
+    #     groups = kw['groups'].split(',')
+    #     validators.FieldsMatch('psw', 'psw2').to_python(kw)
+    #     session = create_session()
+    #     u=User(id=kw['login'],
+    #            display_name=kw['fullname'],
+    #            password=kw['psw'],
+    #            email_address=kw['email'],
+    #            avatar=None,
+    #            about='')
+    #     for g in groups:
+    #         log("Adding user: %s" % g)
+    #         # print 'adding: ',g
+    #         u.addGroup(Group.get_by(group_id=g))
+    #     session.flush()
+    #     ns = dict(user_id=u.id,display_name=kw['fullname'])
+    # 
+    # def user_delete(self, *args, **kw):
+    #     session = create_session()
+    #     User.delete(kw['uid'])
+    #     session.flush()
+    #     ns = dict()
+    #    
+    # def user_update(self, *args, **kw):
+    #     groups = kw['groups'].split(',')
+    #     validators.FieldsMatch('psw', 'psw2').to_python(kw)
+    #     session = create_session()
+    #     u = User.get(kw['uid'])
+    #     u.email_address = email_address=kw['email']
+    #     u.display_name=kw['fullname']
+    #     u.password=kw['psw']
+    #     for g in u.groups[:]:
+    #         u.removeGroup(g)
+    #     for g in groups:
+    #         u.addGroup(Group.get_by(group_id=g))
+    #     session.flush()
+    #     ns = dict(user_id=u.id,display_name=kw['fullname'])
+
+

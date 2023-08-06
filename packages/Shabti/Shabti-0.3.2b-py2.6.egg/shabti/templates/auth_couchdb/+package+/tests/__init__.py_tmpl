@@ -1,0 +1,135 @@
+"""Pylons application test package
+
+This package assumes the Pylons environment is already loaded, such as
+when this script is imported from the `nosetests --with-pylons=test.ini`
+command.
+
+This module initializes the application via ``websetup`` (`paster
+setup-app`) and provides the base testing objects.
+"""
+from unittest import TestCase
+
+from paste.deploy import loadapp
+from paste.script.appinstall import SetupCommand
+from pylons import config, url
+from routes.util import URLGenerator
+from webtest import TestApp
+
+import pylons.test
+import datetime
+import hashlib
+
+from {{package}}.model import *
+from {{package}} import model as model
+from couchdb import Database
+
+__all__ = ['environ', 'url', 'TestController', 'TestModel']
+
+
+# Invoke websetup with the current config file
+# SetupCommand('setup-app').run([config['__file__']])
+
+# additional imports ...
+import os
+from paste.deploy import appconfig
+from {{package}}.config.environment import load_environment
+
+here_dir = os.path.dirname(__file__)
+conf_dir = os.path.dirname(os.path.dirname(here_dir))
+
+test_file = os.path.join(conf_dir, 'test.ini')
+conf = appconfig('config:' + test_file)
+load_environment(conf.global_conf, conf.local_conf)
+environ = {}
+
+db = Database(pylons.config['couchdb_uri'])
+
+from couchdb.design import ViewDefinition
+from {{package}}.model import *
+from {{package}} import model
+
+def setup():
+    load_environment(conf.global_conf, conf.local_conf)
+    server = pylons.config['{{package}}.server']
+    
+    # Change teardown to True if the database
+    # exists and is to be torn down and re-created
+    teardown = True
+    if teardown and '{{package}}_test' in server:
+        del server['{{package}}_test']
+        db = server.create('{{package}}_test')
+    elif not '{{package}}_test' in server:
+        db = server.create('{{package}}_test')
+    else:
+        db = pylons.config['{{package}}.db']
+    
+    gadmin = model.user.Group(
+            name = "Administrators",
+            description = u"Administration group",
+            created = datetime.datetime.utcnow(),
+            active = True)
+    gadmin.store(db)
+    
+    gadmin_retrieved = Group.load(db, gadmin.id)
+    admin = model.user.User(
+                displayname = u"admin", 
+                password=hashlib.sha1("admin").hexdigest(),
+                password_check=hashlib.sha1("admin").hexdigest(), 
+                email="admin@example.com",
+                created = datetime.datetime.utcnow(),
+                active = True)
+    admin.groups.append(gadmin.id)
+    admin.store(db)
+    gadmin_retrieved.users.append(admin.id)
+    gadmin_retrieved.store(db)
+    ViewDefinition.sync_many(db, [
+        User.by_displayname,
+        User.by_email,
+        Group.by_name, 
+        Permission.by_name,
+    ])
+
+
+def teardown():
+    pass
+
+
+class TestModel(TestCase):
+    def setUp(self):
+        pass
+    
+    
+    def tearDown(self):
+        pass
+    
+
+
+class TestController(TestModel):
+    
+    def __init__(self, *args, **kwargs):
+        if pylons.test.pylonsapp:
+            wsgiapp = pylons.test.pylonsapp
+        else:
+            wsgiapp = loadapp('config:%s' % config['__file__'])
+        self.app = TestApp(wsgiapp)
+        url._push_object(URLGenerator(config['routes.map'], environ))
+        TestCase.__init__(self, *args, **kwargs)
+    
+
+
+class TestAuthenticatedController(TestModel):
+    
+    def __init__(self, *args, **kwargs):
+        if pylons.test.pylonsapp:
+            wsgiapp = pylons.test.pylonsapp
+        else:
+            wsgiapp = loadapp('config:%s' % config['__file__'])
+        self.app = TestApp(wsgiapp, extra_environ=dict(REMOTE_USER='admin'))
+        url._push_object(URLGenerator(config['routes.map'], environ))
+        TestCase.__init__(self, *args, **kwargs)
+    
+
+
+
+
+

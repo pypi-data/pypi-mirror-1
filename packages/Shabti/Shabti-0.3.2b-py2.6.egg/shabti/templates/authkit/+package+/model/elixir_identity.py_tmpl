@@ -1,0 +1,229 @@
+import datetime
+# from sqlalchemy import *
+# from sqlalchemy.orm import *
+from elixir import *
+from elixir import events
+import hashlib
+from {{package}}.model import Session, metadata
+
+meta = metadata
+
+#
+# Domain objects
+#
+
+now = datetime.datetime.now()
+
+options_defaults['inheritance'] = 'multi'
+
+def encrypt_value(value):
+    return hashlib.sha1(value).hexdigest()
+    
+
+class User(Entity):
+    """
+    User
+    """
+    username = Field(String(255), unique=True,  nullable=False)
+    password = Field(String)
+    password_check = Field(String)
+    firstname = Field(Unicode)
+    lastname = Field(Unicode)
+    
+    email = Field(String(255))
+    nickname = Field(String(255))
+    fullname = Field(String(255))
+    dob = Field(DateTime(timezone=False))
+    gender = Field(String(1))
+    postcode = Field(String(255))
+    country = Field(String(255))
+    language = Field(String(255))
+    timezone = Field(String(255))
+    
+    active = Field(Boolean())
+    sleep = Field(DateTime(timezone=False))
+    registered = Field(DateTime(timezone=False), nullable=False, default=now)
+    session = Field(Integer, nullable=False, default=30)
+    passurl = Field(String(1023))
+    groups = ManyToMany('Group')
+    emails = OneToMany('Email',inverse='user')
+    sites = OneToMany('Site')
+    histories = OneToMany('History',inverse='user')
+    using_options(shortnames=True,tablename='users')
+    
+    def __repr__(self):
+        return '<User %r, email: %r, created: %d, active: %s>' \
+               % (self.username, self.email, self.registered, self.active)
+    
+    def current_sessions(self):
+        return [h for h in self.histories if h.signed_out is None]
+    
+    @classmethod
+    def authenticate(cls, username, password):
+        log.debug("Attempting to authenticate %s with %s" % \
+                                            (username, password))
+        try:
+            user=cls.query.filter_by(username=username, active=True).one()
+            if user:
+                log.debug("User id %s retrieved" % user.id)
+                log.debug("Password comparison, stored: %s, provided: %s" % \
+                    (encrypt_value(password), user.password))
+            else:
+                log.debug("NO user id retrieved!" % user.id)
+            if user and encrypt_value(password) == user.password:
+                return user
+        except Exception, emsg:
+            raise NotAuthenticated
+            log.debug("Authentication failed %s" % emsg)
+        raise NotAuthenticated
+    
+    
+    @events.before_insert
+    @events.before_update
+    def encrypt_password(self):
+        if self.password and self.password != self.password_check:
+            self.password = encrypt_value(self.password)
+            self.password_check = self.password
+    
+    
+    @property
+    def permissions(self):
+        permissions = set()
+        for g in self.groups:
+            permissions = permissions | set(g.permissions)
+        return permissions
+    
+    
+    @property
+    def permission_names(self):
+        return [p.name for p in self.permissions]
+    
+    
+    def has_permission(self, perm):
+        return (perm in self.permission_names)
+    
+
+
+class Group(Entity):
+    name = Field(String(255), unique=True, nullable=False)
+    description = Field(Unicode)
+    users = ManyToMany('User')
+    using_options(shortnames=True,tablename='groups')
+    
+    def __repr__(self):
+        return "<Group %s>" % self.name
+    
+
+
+# class Group(Entity):
+#     """Group"""
+#     name = Field(Unicode(30)) # undocumented
+#     description = Field(Unicode(255)) # undocumented
+#     created = Field(DateTime) # undocumented
+#     active = Field(Boolean) # undocumented
+#     users = ManyToMany('User')
+#     permissions = ManyToMany('Permission')
+#     using_options(shortnames=True,shortnames=True)
+# 
+#     def __repr__(self):
+#         return '<Group %r, description: %r, created: %d, active: %s>' \
+#                % (self.name, self.description, self.created, self.active)
+
+class Role(Entity):
+    name = Field(String(255), unique=True, nullable=False)
+    description = Field(Unicode(255)) # undocumented
+    permissions = OneToMany('Permission')
+    using_options(shortnames=True,tablename='roles')
+    
+    def __repr__(self):
+        return"<Role %s>" %  self.name
+    
+
+
+class Permission(Entity):
+    name = Field(String(255))
+    description = Field(Unicode())
+    user = ManyToOne('User')
+    app = ManyToOne('App')
+    role = ManyToOne('Role')
+    using_options(shortnames=True,tablename='permissions')
+    
+    def __repr__(self):
+        return "<Permission %s>" % self.name
+    
+
+
+# class Permission(Entity):
+#     """Permission"""
+#     name = Field(Unicode(30)) # undocumented
+#     description = Field(Unicode(255)) # undocumented
+#     groups = ManyToMany('Group', onupdate = 'CASCADE', 
+#                         ondelete = 'CASCADE', uselist = True)
+#     using_options(shortnames=True)
+# 
+#     def __repr__(self):
+#         return '<Permission %r, description: %r>' \
+#                % (self.name, self.description)
+
+
+class Email(Entity):
+    user = ManyToOne('User')
+    email = Field(String(255), nullable=False)
+    verified = Field(DateTime(timezone=False))
+    code = Field(String(255))
+    using_options(shortnames=True,tablename='emails')
+    
+    def __repr__(self):
+        return "<Email %s>" % self.email
+    
+
+
+class App(Entity):
+    name = Field(String(255), unique=True, nullable=False)
+    description = Field(Unicode) # undocumented
+    permissions = OneToMany('Permission')
+    using_options(shortnames=True,tablename='apps')
+    
+    def __repr__(self):
+        return"<App %s>" %  self.name
+    
+
+
+class History(Entity):
+    user = ManyToOne('User')
+    signed_in = Field(DateTime(timezone=False), nullable=False, default=now)
+    last_accessed = Field(DateTime(timezone=False))
+    signed_out = Field(DateTime(timezone=False))
+    using_options(shortnames=True,tablename='histories')
+    
+    def __repr__(self):
+        return "<History %s>" % self.user.username
+    
+
+
+class Site(Entity):
+    user = ManyToOne('User')
+    name = Field(String())
+    trustroot = Field(String(255), nullable=False)
+    using_options(shortnames=True,tablename='sites')
+    
+    def __repr__(self):
+        return "<Site %s>" % self.user.username
+    
+
+
+class Persona(Entity):
+    name = Field(Unicode)
+    user = ManyToOne('User')
+    using_options(shortnames=True,tablename='personae')
+    
+    def __repr__(self):
+        return "<Persona %s for %s>" % (name, user.username)
+    
+
+#
+# Functions (used in column defaults)
+#
+
+def now():
+    return datetime.datetime.now()
