@@ -1,0 +1,379 @@
+<project name="${dist_name}" basedir="${base_dir}">
+
+    <property name="dist.name" value="${dist_name}"/>
+    <property name="dist.dir" value="${dist_dir}"/>
+    <property name="mainEntryPoint" value="${main_entry_point}"/>
+    <property name="javaOnly" value="${java_only}"/>
+
+    <property name="lib.dir" value="lib"/>
+    <property name="binlib.dir" value="binlib"/>
+
+    <property name="build.dir" value="${build_dir}"/>
+    <%text><property name="build.lib.dir" value="${build.dir}/lib"/>
+    <property name="build.class.dir" value="${build.dir}/classes"/>
+    <property name="build.resc.dir" value="${build.dir}/resources"/>
+    <property name="build.tmp.dir" value="${build.dir}/temp"/></%text>
+
+    <property name="jython.home" value="${jython_home}"/>
+    <property name="packages" value="${include_packages}"/>
+
+    <property name="jump.dir" value="${jump_dir}"/>
+    <property name="jump.version" value="${jump_version}"/>
+    <property name="jump.jythonfactory" value="${jump_jython_factory}"/>
+
+    <property name="app.shortname" value="${short_name}"/>
+    <property name="app.icns" value="${icns}"/>
+    <property name="app.vmarguments" value="${vm_arguments}"/>
+    <property name="app.vmoptions" value="${vm_options}"/>
+    <property name="app.developmentregion" value="${development_region}"/>
+    <property name="app.infostring" value="${info_string}"/>
+    <property name="app.jvmversion" value="${jvm_version}"/>
+    <property name="app.signature" value="${signature}"/>
+
+    <property name="exe.onefile" value="${'true' if onefile else 'false'}"/>
+    <property name="exe.gui" value="${'gui' if gui else 'console'}"/>
+    <property name="exe.ico" value="${ico}"/>
+
+    <property name="war.googleAppEngine" value="${google_app_engine}"/>
+    <property name="war.wsgihandler" value="${wsgi_handler}"/>
+    <property name="war.multithread" value="${multithread}"/>
+    <property name="war.cachecallables" value="${cache_callables}"/>
+    <property name="war.loglevel" value="${log_level}"/>
+    <property name="war.gae.id" value="${gae_id}"/>
+    <property name="war.gae.version" value="${gae_version}"/>
+
+    <%text><fileset dir="${lib.dir}" id="proj.lib">
+        <include name="**/*.jar"/>
+    </fileset>
+
+    <fileset dir="${build.lib.dir}" id="build.lib">
+        <include name="**/*.jar"/>
+    </fileset>
+
+    <fileset dir="${basedir}" id="proj.resc">
+        <include name=""/></%text>
+        % for command, pattern in manifest_patterns:
+        <${command} name="${pattern}"/>
+        % endfor
+        <%text><exclude name="build/**"/>
+        <exclude name="dist/**"/>
+    </fileset>
+
+    <fileset dir="${build.resc.dir}" id="build.resc">
+        <include name="**"/>
+    </fileset>
+
+    <target name="init">
+        <delete dir="${build.dir}"/>
+        <mkdir dir="${build.lib.dir}"/>
+        <mkdir dir="${build.class.dir}"/>
+        <mkdir dir="${build.resc.dir}"/>
+        <mkdir dir="${build.tmp.dir}"/>
+        <mkdir dir="${lib.dir}"/>
+        <mkdir dir="${binlib.dir}"/>
+        <mkdir dir="${dist.dir}"/>
+    </target>
+
+    <target name="env" depends="init">
+        <path id="jump.classpath">
+            <fileset dir="${jython.home}"
+                     includes="jython.jar,jythonlib.jar"/>
+            <fileset dir="${jump.dir}/lib" includes="**/*.jar"/>
+        </path>
+
+        <taskdef resource="net/sf/antcontrib/antcontrib.properties"
+                 classpathref="jump.classpath"/>
+
+        <taskdef name="fmpp" classpathref="jump.classpath"
+                 classname="fmpp.tools.AntTask"/>
+
+        <if>
+            <not>
+                <available file="${jython.home}/jythonlib.jar"/>
+            </not>
+            <then>
+                <jar destfile="${jython.home}/jythonlib.jar"
+                     basedir="${jython.home}/Lib"
+                     excludes="site-packages/,**/test/" includes="**/*.py"/>
+            </then>
+        </if>
+
+        <path id="proj.classpath">
+            <fileset dir="${basedir}" includes="lib/**/*.jar"/>
+            <fileset dir="${basedir}" includes="${build.lib.dir}/**/*.jar"/>
+            <fileset dir="${jython.home}" includes="jython.jar,jythonlib.jar"/>
+        </path>
+
+        <if>
+            <isfalse value="${javaOnly}"/>
+            <then>
+                <fileset dir="${jython.home}" id="jython.lib"
+                         includes="jython.jar,jythonlib.jar"/>
+            </then>
+            <else>
+                <fileset dir="${jython.home}" id="jython.lib"
+                         excludes="**"/>
+            </else>
+        </if>
+
+        <if>
+            <istrue value="${jump.jythonfactory}"/>
+            <then>
+                <copy file="${jump.dir}/lib/jump-jython-factory.jar"
+                      todir="${build.lib.dir}"/>
+            </then>
+        </if>
+    </target>
+
+    <target name="mainclass" depends="env">
+        <if>
+            <contains string="${mainEntryPoint}" substring=":"/>
+            <then>
+                <echo>Creating Jython driver: ${build.tmp.dir}/Main.java</echo>
+                <fmpp sourceFile="${jump.dir}/templates/Main.java"
+                      outputFile="${build.tmp.dir}/Main.java">
+                    <data>
+                        main_entry_point: antProperty(mainEntryPoint)
+                    </data>
+                </fmpp>
+                <property name="mainClass" value="com.ollix.jump.Main"/>
+            </then>
+            <else>
+                <property name="mainClass" value="${mainEntryPoint}"/>
+            </else>
+        </if>
+    </target>
+
+    <target name="compile" depends="env">
+        <javac destdir="${build.class.dir}" srcdir="${basedir}"
+               classpathref="proj.classpath"/>
+
+        <javac destdir="${build.class.dir}" srcdir="${build.tmp.dir}"
+               classpathref="proj.classpath"/>
+
+        <if>
+            <isfalse value="${javaOnly}"/>
+            <then>
+                <taskdef name="jythonc" classpathref="jump.classpath"
+                         classname="com.ollix.jump.ant.JythonCompiler"/>
+                <jythonc destdir="${build.class.dir}"
+                         fullpackages="${packages}"/>
+            </then>
+        </if>
+    </target>
+
+    <target name="jar" depends="mainclass,compile">
+        <copy todir="${build.resc.dir}"
+              file="${jump.dir}/resources/LICENSE.One-JAR"/>
+
+        <taskdef name="one-jar" classpathref="jump.classpath"
+                 classname="com.simontuffs.onejar.ant.OneJarTask"/>
+
+        <one-jar destfile="${dist.dir}/${dist.name}.jar">
+            <main>
+                <fileset dir="${build.class.dir}"/>
+            </main>
+            <lib>
+                <fileset refid="proj.lib"/>
+                <fileset refid="build.lib"/>
+                <fileset refid="jython.lib"/>
+            </lib>
+            <binlib>
+                <fileset dir="${binlib.dir}" includes="**/*.jnilib"/>
+            </binlib>
+            <manifest>
+                <attribute name="Main-Class"
+                           value="com.simontuffs.onejar.Boot"/>
+                <attribute name="One-Jar-Main-Class"
+                           value="${mainClass}"/>
+                <attribute name="Built-By" value="${jump.version}"/>
+            </manifest>
+            <fileset refid="proj.resc"/>
+            <fileset refid="build.resc"/>
+        </one-jar>
+    </target>
+
+    <target name="jarlib" depends="compile">
+        <jar destfile="${dist.dir}/${dist.name}.jar"
+             basedir="${build.class.dir}">
+			<manifest>
+                <attribute name="Built-By" value="${jump.version}"/>
+            </manifest>
+            <fileset refid="proj.resc"/>
+            <fileset refid="build.resc"/>
+		</jar>
+    </target>
+
+    <target name="app" depends="mainclass,compile">
+        <jar destfile="${build.lib.dir}/main.jar" basedir="${build.class.dir}">
+        	<manifest>
+                <attribute name="Built-By" value="${jump.version}"/>
+            </manifest>
+        </jar>
+
+        <if>
+            <contains string="${app.vmoptions}"
+                      substring="-XstartOnFirstThread"/>
+            <then>
+                <property name="app.startOnMainThread" value="true"/>
+            </then>
+            <else>
+                <property name="app.startOnMainThread" value="false"/>
+            </else>
+        </if>
+
+        <taskdef name="jarbundler" classpathref="jump.classpath"
+                 classname="net.sourceforge.jarbundler.JarBundler"/>
+
+        <jarbundler dir="${dist.dir}" name="${dist.name}"
+                    mainclass="${mainClass}"
+                    shortname="${app.shortname}"
+                    icon="${app.icns}"
+                    arguments="${app.vmarguments}"
+                    vmoptions="${app.vmoptions}"
+                    developmentregion="${app.developmentregion}"
+                    infostring="${app.infostring}"
+                    jvmversion="${app.jvmversion}"
+                    signature="${app.signature}"
+                    startOnMainThread="${app.startOnMainThread}">
+            <jarfileset refid="proj.lib"/>
+            <jarfileset refid="build.lib"/>
+            <jarfileset refid="jython.lib"/>
+            <jarfileset refid="proj.resc"/>
+            <jarfileset refid="build.resc"/>
+        </jarbundler>
+
+        <if>
+            <contains string="${app.vmoptions}" substring="-d32"/>
+            <then>
+                <property name="stubPath"
+                          value="Contents/MacOS/JavaApplicationStub"/>
+                <property name="targetJavaApplicationStub"
+                          value="${dist.dir}/${dist.name}.app/${stubPath}"/>
+                <copy file="${jump.dir}/lib/JavaApplicationStub"
+                      tofile="${targetJavaApplicationStub}"
+                      overwrite="true"/>
+                <if>
+                    <os family="unix"/>
+                    <then>
+                        <exec executable="chmod">
+                            <arg line="+x ${targetJavaApplicationStub}"/>
+                        </exec>
+                    </then>
+                </if>
+            </then>
+        </if>
+    </target>
+
+    <target name="exe.init" depends="mainclass,compile">
+        <taskdef name="launch4j" classpathref="jump.classpath"
+                 classname="net.sf.launch4j.ant.Launch4jTask"/>
+    </target>
+
+    <target name="oneexe" depends="exe.init,jar">
+        <launch4j>
+            <config headerType="${exe.gui}" jar="${dist.dir}/${dist.name}.jar"
+                    outfile="${dist.dir}/${dist.name}.exe" icon="${exe.ico}"
+                    errTitle="${dist.name}" chdir="." customProcName="true">
+                <classPath mainClass="com.simontuffs.onejar.Boot">
+                    <cp>.</cp>
+                </classPath>
+                <jre minVersion="1.5.0" maxHeapSize="512"/>
+            </config>
+        </launch4j>
+    </target>
+
+    <target name="exe" depends="exe.init">
+        <property name="exe.dir" value="${dist.dir}/${dist.name}"/>
+        <property name="exe.lib" value="lib"/>
+        <property name="exe.main.jar" value="${build.tmp.dir}/main.jar"/>
+
+        <jar destfile="${exe.main.jar}" basedir="${build.class.dir}">
+        	<manifest>
+        	    <attribute name="Main-Class" value="${mainClass}"/>
+                <attribute name="Built-By" value="${jump.version}"/>
+            </manifest>
+        </jar>
+
+        <delete dir="${exe.dir}"/>
+        <mkdir dir="${exe.dir}/${exe.lib}"/>
+        <copy todir="${exe.dir}/${exe.lib}">
+            <fileset refid="proj.lib"/>
+            <fileset refid="build.lib"/>
+            <fileset refid="jython.lib"/>
+        </copy>
+
+        <copy todir="${exe.dir}">
+            <fileset refid="proj.resc"/>
+            <fileset refid="build.resc"/>
+        </copy>
+
+        <launch4j>
+            <config headerType="${exe.gui}" jar="${exe.main.jar}"
+                    outfile="${dist.dir}/${dist.name}/${dist.name}.exe"
+                    icon="${exe.ico}" errTitle="${dist.name}" chdir="."
+                    customProcName="true">
+                <classPath mainClass="${mainClass}">
+                    <cp>lib/*</cp>
+                </classPath>
+                <jre minVersion="1.5.0" maxHeapSize="512"/>
+            </config>
+        </launch4j>
+    </target>
+
+    <target name="war" depends="compile">
+        <jar destfile="${build.lib.dir}/main.jar" basedir="${build.class.dir}">
+        	<manifest>
+                <attribute name="Built-By" value="${jump.version}"/>
+            </manifest>
+        </jar>
+
+        <echo>Creating web.xml file: ${build.tmp.dir}/web.xml</echo>
+        <fmpp sourceFile="${jump.dir}/templates/web.xml"
+              outputFile="${build.tmp.dir}/web.xml">
+            <data>
+                wsgi_handler: antProperty(war.wsgihandler)
+                multithread: antProperty(war.multithread)
+                cache_callables: antProperty(war.cachecallables)
+                log_level: antProperty(war.loglevel)
+            </data>
+        </fmpp>
+
+        <if>
+            <and>
+                <length string="${war.gae.id}" when="greater" length="0"/>
+                <length string="${war.gae.version}" when="greater" length="0"/>
+            </and>
+            <then>
+                <echo>Creating appengine-web.xml file: ${build.tmp.dir}/appengine-web.xml</echo>
+                <fmpp sourceFile="${jump.dir}/templates/appengine-web.xml"
+                      outputFile="${build.tmp.dir}/appengine-web.xml">
+                    <data>
+                        gae_id: antProperty(war.gae.id)
+                        gae_version: antProperty(war.gae.version)
+                    </data>
+                </fmpp>
+            </then>
+        </if>
+
+        <war destfile="${dist.dir}/${dist.name}.war"
+             webxml="${build.tmp.dir}/web.xml">
+            <manifest>
+                <attribute name="Built-By" value="${jump.version}"/>
+            </manifest>
+            <lib refid="proj.lib"/>
+            <lib refid="build.lib"/>
+            <lib refid="jython.lib"/>
+		    <fileset refid="proj.resc"/>
+            <fileset refid="build.resc"/>
+            <webinf dir="${build.tmp.dir}">
+                <include name="appengine-web.xml"/>
+            </webinf>
+        </war>
+    </target>
+
+    <target name="clean">
+        <delete dir="${build.dir}"/>
+    </target></%text>
+
+</project>
