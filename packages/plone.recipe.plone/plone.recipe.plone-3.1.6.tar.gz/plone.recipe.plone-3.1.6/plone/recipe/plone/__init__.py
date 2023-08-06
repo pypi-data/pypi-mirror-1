@@ -1,0 +1,1 @@
+from plone.recipe.plone.recipe import Recipe
