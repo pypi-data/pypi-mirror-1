@@ -1,0 +1,496 @@
+:mod:`pydermonkey` --- Access SpiderMonkey from Python
+======================================================
+
+.. module:: pydermonkey
+   :synopsis: Access SpiderMonkey from Python
+
+.. testsetup:: *
+
+   import pydermonkey
+
+This module offers a low-level interface to the `Mozilla SpiderMonkey
+<https://developer.mozilla.org/en/SpiderMonkey>`_ JavaScript engine.
+
+.. exception:: error
+
+   This is the type of any SpiderMonkey-related errors thrown by this
+   module.
+
+   If the error is a wrapped JavaScript exception, the first argument
+   will be the thrown JS exception, and the second argument will be 
+   the JS exception converted to a string. Otherwise, the error
+   will only contain a descriptive string argument.
+
+   For example:
+
+     >>> cx = pydermonkey.Runtime().new_context()
+     >>> cx.evaluate_script(cx.new_object(), 'throw 1', '<string>', 1)
+     Traceback (most recent call last):
+     ...
+     error: (1, u'1')
+
+.. data:: undefined
+
+   This is the singleton that represents the JavaScript value
+   ``undefined``, as Python has no equivalent representation
+   (JavaScript's ``null`` is mapped to Python's ``None`` object).
+   For instance:
+
+     >>> cx = pydermonkey.Runtime().new_context()
+     >>> cx.evaluate_script(cx.new_object(), '', '<string>', 1)
+     pydermonkey.undefined
+
+   This object also has a "falsy" value:
+
+     >>> if not pydermonkey.undefined:
+     ...   print "See, it's falsy!"
+     See, it's falsy!
+
+.. class:: Object
+
+   This is the type of JavaScript objects. Such objects can only be
+   created via Pydermonkey calls like :meth:`Context.new_object()` or
+   through the execution of JS code, but this type object can be used
+   with Python's built-in :func:`isinstance()` to verify that an
+   object is a JS object, like so:
+
+     >>> obj = pydermonkey.Runtime().new_context().new_object()
+     >>> isinstance(obj, pydermonkey.Object)
+     True
+
+   Note that :class:`Object` and all its subclasses are
+   identity-preserving when passed between Python and
+   JavaScript code. For instance:
+
+     >>> cx = pydermonkey.Runtime().new_context()
+     >>> obj1 = cx.new_object()
+     >>> obj2 = cx.evaluate_script(obj1, 'this', '<string>', 1)
+     >>> obj1 is obj2
+     True
+
+   .. method:: get_runtime()
+
+      Returns the :class:`Runtime` that the object belongs to.
+
+.. class:: Function
+
+   This is the type of JavaScript functions, which is a subtype of
+   :class:`Object`.
+
+   .. data:: filename
+
+      Name of the file that contains the function's original JS source
+      code. If the function isn't a JS function, this value is
+      ``None``.
+
+   .. data:: base_lineno
+
+      The line number at which the function's JS source code begins.
+
+   .. data:: line_extent
+
+      The number of lines comprising the function's JS source code.
+
+   .. data:: is_python
+
+      Whether or not the function is actually implemented in Python.
+      If it is, you can use :meth:`Context.get_object_private()` to
+      retrieve this Python function.
+
+.. class:: Script
+
+   This is the type of compiled JavaScript scripts; it's actually a
+   subtype of :class:`Object`, though when exposed to JS code it
+   doesn't provide access to any special data or functionality.
+
+   Script instances have a read-only buffer interface that exposes
+   their bytecode. This can be accessed by passing an instance to
+   Python's built-in ``buffer()`` function.
+
+   .. data:: filename
+
+      The filename of the script's original source code.
+
+   .. data:: base_lineno
+
+      The line number at which the script's original source code
+      begins.
+
+   .. data:: line_extent
+
+      The number of lines comprising the original source code.
+
+.. class:: Context
+
+   This is the type of JavaScript context objects. Contexts can only
+   be created via a call to :meth:`Runtime.new_context()`, but this
+   type object can be used with Python's built-in :func:`isinstance()`
+   to verify that an object is a context, like so:
+
+     >>> cx = pydermonkey.Runtime().new_context()
+     >>> isinstance(cx, pydermonkey.Context)
+     True
+
+   JS contexts are weak-referencable.
+
+   .. method:: get_runtime()
+
+      Returns the :class:`Runtime` that the context belongs to.
+
+   .. method:: get_stack()
+
+      Returns a dictionary containing information about the context's
+      current stack.
+
+      The dictionary contains the following string keys:
+
+      +------------------------------+-------------------------------------+
+      | key                          | value                               |
+      +==============================+=====================================+
+      | :const:`script`              | :class:`Script` of the frame.       |
+      |                              | This may be ``None`` if the frame   |
+      |                              | isn't a scripted frame, or if it's  |
+      |                              | not possible to expose the script   |
+      |                              | to Python for some reason.          |
+      +------------------------------+-------------------------------------+
+      | :const:`lineno`              | Line number of the frame, if the    |
+      |                              | frame is scripted.                  |
+      +------------------------------+-------------------------------------+
+      | :const:`pc`                  | Program counter of the frame; this  |
+      |                              | is an index into the bytecode of    |
+      |                              | the frame's script, if the frame    |
+      |                              | is scripted.                        |
+      +------------------------------+-------------------------------------+
+      | :const:`function`            | The :class:`Function` in which the  |
+      |                              | frame is executing, if any.         |
+      +------------------------------+-------------------------------------+
+      | :const:`caller`              | Dictionary containing information   |
+      |                              | about the stack frame of the        |
+      |                              | caller of this frame. If this frame |
+      |                              | has no caller, this value is        |
+      |                              | ``None``.                           |
+      +------------------------------+-------------------------------------+
+
+      If the context isn't currently executing any code (i.e., the stack
+      is empty), this method returns ``None``.
+
+   .. method:: new_object([private_obj[, proto]])
+
+      Creates a new :class:`Object` instance and returns
+      it.
+
+      `private_obj` is any Python object that is privately
+      stored within the new JS object; it can be retrieved using
+      :meth:`get_object_private()`.
+
+      `proto` is an :class:`Object` instance representing the
+      prototype for the new object. The new object will inherit all of
+      the prototype object's properties and methods, and the new
+      object's ``__proto__`` property will be a reference to the
+      prototype object. If not provided, a default prototype object is
+      used.
+
+   .. method:: new_function(func, name)
+
+      Creates a new :class:`Function` instance that wraps the
+      given Python callable.  In JS-land, the function will
+      have the given name.
+
+      When the function is executed from JavaScript, `func`
+      will be passed three positional arguments.
+
+      The first argument is a :class:`Context` that represents the
+      JS context which is calling the function.
+
+      The second argument is an :class:`Object` that represents the
+      value of ``this`` for the duration of the call.
+
+      The third argument is a tuple containing the arguments
+      passed to the function.
+
+      For instance:
+
+        >>> def add(cx, this, args):
+        ...   return args[0] + args[1]
+        >>> cx = pydermonkey.Runtime().new_context()
+        >>> obj = cx.new_object()
+        >>> cx.define_property(obj, 'add', cx.new_function(add, 'add'))
+        >>> cx.evaluate_script(obj, 'add(1, 1);', '<string>', 1)
+        2
+
+   .. method:: new_array_object()
+
+      Creates a new JavaScript ``Array`` object and returns it.
+
+   .. method:: is_array_object(object)
+
+      Returns whether or not the given JavaScript object is an ``Array``.
+
+   .. method:: enumerate(object)
+
+      Returns a tuple containing the names of all enumerable properties
+      in `object`.
+
+   .. method:: define_property(object, key, value)
+
+      Creates a new property on `object`, bypassing any JavaScript setters.
+
+   .. method:: set_property(object, key, value)
+
+      Sets the given property on `object`, triggering any JavaScript
+      setters. Returns the value that the property was set to; this is
+      usually the same as `value`, but in some cases--such as custom
+      JavaScript setters--it is different.
+
+   .. method:: has_property(object, key)
+
+      Returns whether or not `object` has the specified property.
+
+   .. method:: get_property(object, key)
+
+      Finds the specified property on `object` and returns its value,
+      possibly invoking a JavaScript getter.
+
+      Example:
+
+        >>> cx = pydermonkey.Runtime().new_context()
+        >>> obj = cx.new_object()
+        >>> cx.define_property(obj, 'beets', 'i like beets.')
+        >>> cx.get_property(obj, 'beets')
+        u'i like beets.'
+
+      Note also that calling this function on undefined properties
+      yields :data:`undefined`:
+
+        >>> cx.get_property(obj, 'carrots')
+        pydermonkey.undefined
+
+   .. method:: lookup_property(object, key)
+
+      Retrieves the `stored value
+      <https://developer.mozilla.org/En/SpiderMonkey/JSAPI_Reference/Stored_value>`_
+      of the given object's property without invoking any JavaScript
+      getter.
+
+   .. method:: delete_property(object, key)
+
+      Deletes the given property on the given object. If the property is permanent
+      and can't be deleted, this method returns ``False``.  Otherwise, it
+      returns ``True``.
+
+   .. method:: get_object_private(object)
+
+      Returns the ``private_obj`` passed to :meth:`new_object()`
+      when `object` was first created. If it doesn't exist, ``None``
+      is returned.
+
+      If `object` was created with :meth:`new_function()`, then this
+      method returns the Python callable wrapped by `object`.
+
+      This functionality is useful if you want to securely represent
+      Python objects in JS-land.
+
+   .. method:: clear_object_private(object)
+
+      Clears the ``private_obj`` passed to :meth:`new_object()`
+      when `object` was first created. If it doesn't exist, this
+      function returns nothing.
+
+      If `object` was created with :meth:`new_function()`, then this
+      method effectively "unbinds" the Python callable wrapped by
+      `object`. If `object` is later called, an exception will be
+      raised.
+
+   .. method:: evaluate_script(globalobj, code, filename, lineno)
+
+      Evaluates the text `code` using `globalobj` as the global
+      object/scope.
+
+      It's assumed that `code` is coming from the file named by `filename`;
+      the first line of `code` is assumed to be line number `lineno` of
+      `filename`. This metadata is very useful for debugging stack traces,
+      exceptions, and so forth.
+
+      For example:
+
+        >>> cx = pydermonkey.Runtime().new_context()
+        >>> obj = cx.new_object()
+        >>> cx.init_standard_classes(obj)
+        >>> cx.evaluate_script(obj, '5 * Math', '<string>', 1)
+        nan
+
+   .. method:: compile_script(code, filename, lineno)
+
+      Compiles the given string of code and returns a :class:`Script`
+      instance that can be executed via :meth:`execute_script()`.
+
+      `filename` and `lineno` are used just as in
+      :meth:`evaluate_script()`.
+
+   .. method:: execute_script(globalobj, script)
+
+      Executes the code in the given :class:`Script` object, using
+      `globalobj` as the global object/scope, and returns the result.
+
+      For example:
+
+        >>> cx = pydermonkey.Runtime().new_context()
+        >>> obj = cx.new_object()
+        >>> cx.init_standard_classes(obj)
+        >>> script = cx.compile_script('5 * Math', '<string>', 1)
+        >>> cx.execute_script(obj, script)
+        nan
+
+   .. method:: call_function(thisobj, func, args)
+
+      Calls a JavaScript function.
+
+      `thisobj` is an :class:`Object` that will be used as the value
+      of ``this`` when the function executes, `func` is the
+      :class:`Function` to execute, and `args` is a tuple of arguments
+      to pass to the function.
+
+      For instance:
+
+        >>> cx = pydermonkey.Runtime().new_context()
+        >>> obj = cx.new_object()
+        >>> cx.init_standard_classes(obj)
+        >>> Math = cx.get_property(obj, 'Math')
+        >>> floor = cx.get_property(Math, 'floor')
+        >>> cx.call_function(Math, floor, (5.3,))
+        5
+
+   .. method:: init_standard_classes(object)
+
+      Defines the standard JavaScript classes on the given
+      :class:`Object`, such as ``Array``, ``eval``, ``undefined``, and
+      so forth. For more information, see the documentation to
+      `JS_InitStandardClasses()
+      <https://developer.mozilla.org/en/SpiderMonkey/JSAPI_Reference/JS_InitStandardClasses>`_,
+      which this method wraps.
+
+   .. method:: gc()
+
+      Performs garbage collection on the context's JavaScript runtime.
+
+   .. method:: is_exception_pending()
+
+      Returns whether an exception is currently being propagated in
+      the context.
+
+   .. method:: get_pending_exception()
+
+      Returns the current exception being propagated in the context. If
+      no exception is being propagated, this method returns ``None``.
+
+      If you need to disambiguate between whether ``None`` is the
+      pending exception or there is no pending exception, use
+      :meth:`is_exception_pending()`.
+
+   .. method:: set_throw_hook(func)
+
+      Sets the throw hook for the context to the given Python callable.
+      The hook is triggered whenever an exception is thrown in the
+      context.
+
+      `func` takes one argument: the context that triggered it.
+
+      For example, here's a throw hook that prints information about
+      an exception as it's being propagated through the stack:
+
+        >>> def throwhook(cx): 
+        ...   stack = cx.get_stack()
+        ...   if stack['function']:
+        ...     where = stack['function'].name
+        ...   else:
+        ...     where = stack['script'].filename
+        ...   exc = cx.get_pending_exception()
+        ...   print "%s being thrown in %s" % (exc, where)
+
+      Here's the hook in action:
+
+        >>> cx = pydermonkey.Runtime().new_context()
+        >>> cx.set_throw_hook(throwhook)
+        >>> obj = cx.new_object()
+        >>> code = "(function foo() { throw 'oops' })()"
+        >>> try:
+        ...   cx.evaluate_script(obj, code, '<string>', 1)
+        ... except pydermonkey.error, e:
+        ...   print "caught %s" % e.args[0]
+        oops being thrown in foo
+        oops being thrown in <string>
+        caught oops
+
+   .. method:: set_operation_callback(func)
+
+      Sets the operation callback for the context to the given Python
+      callable. The callback can be triggered via
+      :meth:`trigger_operation_callback()`.
+
+      `func` takes one argument: the context that triggered it.
+
+   .. method:: trigger_operation_callback()
+
+      Triggers the context's operation callback. If no callback has
+      yet been set, this function does nothing.
+
+      This function is one of the few thread-safe functions available
+      to a JS runtime, and together with
+      :meth:`set_operation_callback()` can be used to abort the
+      execution of long-running code.
+
+      For instance, we can first create a custom exception class for
+      script timeouts:
+
+        >>> class ScriptTimeout(BaseException):
+        ...   # Derived from BaseException, like KeyboardInterrupt,
+        ...   # which ensures that JS code can't catch it.
+        ...   pass
+
+      Now, we create an operation callback to stop long-running code
+      by throwing the custom exception:
+
+        >>> import time, threading
+        >>> cx = pydermonkey.Runtime().new_context()
+        >>> def stop_running_code(cx):
+        ...   raise ScriptTimeout()
+        >>> cx.set_operation_callback(stop_running_code)
+
+      Then we create a watchdog thread to trigger the operation
+      callback once a long amount of time has passed:
+
+        >>> def watchdog_thread():
+        ...   time.sleep(0.1)                 # An eternity to a computer!
+        ...   cx.trigger_operation_callback()
+        >>> thread = threading.Thread(target=watchdog_thread)
+        >>> thread.start()
+
+      Now, when we execute code that takes too long to run, it gets
+      aborted:
+
+        >>> cx.evaluate_script(cx.new_object(),
+        ...                    'try { while (1) {} } catch (e) {}',
+        ...                    '<string>', 1)
+        Traceback (most recent call last):
+        ...
+        ScriptTimeout
+
+.. class:: Runtime()
+
+   Creates a new JavaScript runtime. JS objects created by the runtime
+   may only interact with other JS objects of the same runtime.
+
+   With few exceptions, objects belonging to a runtime can currently
+   only be used in the same thread that the runtime was created
+   in. This may be changed in the future, since SpiderMonkey itself
+   has support for thread safety.
+
+   JS runtimes are weak-referencable.
+
+   .. method:: new_context()
+
+      Creates a new Context object and returns it. Contexts are best
+      conceptualized as threads of execution in a JS runtme; each one
+      has a program counter, a current exception state, and so
+      forth. JS objects may be freely accessed and changed by contexts
+      that are associated with the same JS runtime as the objects.
