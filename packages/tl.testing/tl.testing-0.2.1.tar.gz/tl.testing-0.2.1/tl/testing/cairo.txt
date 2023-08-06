@@ -1,0 +1,311 @@
+===================================================
+Doc-testing the graphical content of cairo surfaces
+===================================================
+
+While it is straight-forward to compare the content of two `cairo`_ surfaces
+in Python code, handling graphics is beyond doc tests. However, the `manuel`_
+package can be used to extract more general test cases from a text document
+while allowing to mix them with doc tests in a natural way.
+
+The ``tl.testing.cairo`` module provides a test suite factory that uses manuel
+to execute graphical tests formulated as restructured-text figures. The
+caption of such a figure is supposed to be a literal Python expression whose
+value is a cairo surface, and its image is used as the test expectation.
+Python expressions are run in the same context as the doc-test examples.
+Images need to be stored in PNG format. Image paths are either absolute or
+relative to the doc test file's directory and must use the forward slash, "/",
+as the path separator.
+
+For demonstration, we use two different images:
+
+>>> import cairo
+>>> from pkg_resources import resource_filename
+
+>>> holmenkollen = resource_filename(
+...     'tl.testing', 'testimages/holmenkollen.png')
+
+.. figure:: testimages/holmenkollen.png
+
+    ``cairo.ImageSurface.create_from_png(holmenkollen)``
+
+>>> nordmark = resource_filename('tl.testing', 'testimages/nordmark.png')
+
+.. figure:: testimages/nordmark.png
+
+    ``cairo.ImageSurface.create_from_png(nordmark)``
+
+
+Running successful tests
+========================
+
+Let's write a sample test [write]_ that demonstrates how a Python expressions
+in figure captions is evaluated and compared to an image. We put one of our
+images beside it:
+
+>>> sample_txt = write('sample.txt', """\
+...
+... ---------------------------------------------------
+... A test for the graphical content of a cairo surface
+... ---------------------------------------------------
+...
+... >>> import cairo
+...
+... Locate an image:
+...
+... >>> src = '%s'
+...
+... Look at the image:
+...
+... .. figure:: holmenkollen.png
+...
+...     ``cairo.ImageSurface.create_from_png(src)``
+...
+... """ % holmenkollen)
+
+>>> import shutil
+>>> shutil.copyfile(holmenkollen, os.path.join(test_dir, 'holmenkollen.png'))
+
+The test suite has 3 tests, one for each doc test example, and one for the
+graphical test. It passes without failures [run]_:
+
+>>> from tl.testing.cairo import DocFileSuite
+>>> suite = DocFileSuite(sample_txt, module_relative=False)
+>>> run(suite)
+<SET UP>
+  Ran 3 tests with 0 failures and 0 errors in 0.011 seconds.
+<TEAR DOWN>
+
+While this example references the image by a path name relative to the sample
+doc-test file, image path names may also be absolute:
+
+>>> sample_txt = write('sample.txt', """\
+... >>> import cairo
+... >>> src = '%s'
+...
+... .. figure:: %s
+...
+...     ``cairo.ImageSurface.create_from_png(src)``
+... """ % (nordmark, nordmark))
+
+>>> suite = DocFileSuite(sample_txt, module_relative=False)
+>>> run(suite)
+<SET UP>
+  Ran 3 tests with 0 failures and 0 errors in 0.011 seconds.
+<TEAR DOWN>
+
+When mixing doc-test examples and graphical tests, all of them will be
+executed in the order they appear in the file:
+
+>>> sample_txt = write('sample.txt', """\
+... >>> import cairo
+... >>> src = '%s'
+...
+... .. figure:: holmenkollen.png
+...
+...     ``cairo.ImageSurface.create_from_png(src)``
+...
+... >>> src = '%s'
+...
+... .. figure:: %s
+...
+...     ``cairo.ImageSurface.create_from_png(src)``
+... """ % (holmenkollen, nordmark, nordmark))
+
+>>> suite = DocFileSuite(sample_txt, module_relative=False)
+>>> run(suite)
+<SET UP>
+  Ran 5 tests with 0 failures and 0 errors in 0.011 seconds.
+<TEAR DOWN>
+
+
+Failures and errors
+===================
+
+If the content of a surface being tested is different from the associated
+expected image, a failure is reported:
+
+>>> sample_txt = write('sample.txt', """\
+... >>> import cairo
+... >>> src = '%s'
+...
+... .. figure:: holmenkollen.png
+...
+...     ``cairo.ImageSurface.create_from_png(src)``
+... """ % nordmark)
+
+>>> suite = DocFileSuite(sample_txt, module_relative=False)
+>>> run(suite)
+<SET UP>
+Failure in test Manuel Test: /test_dir/sample.txt
+----------------------------------------------------------------------
+File "/test_dir/sample.txt", line 3, in sample.txt:
+Failed example:
+    cairo.ImageSurface.create_from_png(src)
+Image differs from expectation: holmenkollen.png
+  Ran 3 tests with 1 failures and 0 errors in 0.011 seconds.
+<TEAR DOWN>
+
+It is also a failure if the Python expression in a figure caption does not
+evaluate to a cairo Surface:
+
+>>> sample_txt = write('sample.txt', """\
+... .. figure:: holmenkollen.png
+...
+...     ``42``
+... """)
+
+>>> suite = DocFileSuite(sample_txt, module_relative=False)
+>>> run(suite)
+<SET UP>
+Failure in test Manuel Test: /test_dir/sample.txt
+----------------------------------------------------------------------
+File "/test_dir/sample.txt", line 1, in sample.txt:
+Failed example:
+    42
+Expected a cairo surface
+Got:
+    42
+  Ran 1 tests with 1 failures and 0 errors in 0.011 seconds.
+<TEAR DOWN>
+
+In the event that the Python expression raises an exception, the exception is
+reported as a failure:
+
+>>> sample_txt = write('sample.txt', """\
+... .. figure:: holmenkollen.png
+...
+...     ``asdf``
+... """)
+
+>>> suite = DocFileSuite(sample_txt, module_relative=False)
+>>> run(suite)
+<SET UP>
+Failure in test Manuel Test: /test_dir/sample.txt
+----------------------------------------------------------------------
+File "/test_dir/sample.txt", line 1, in sample.txt:
+Failed example:
+    asdf
+Exception raised:
+    Traceback (most recent call last):
+      File "...cairo.py", line ..., in evaluate
+        result = eval(self.expression, globs)
+      File "<string>", line 1, in <module>
+    NameError: name 'asdf' is not defined
+  Ran 1 tests with 1 failures and 0 errors in 0.011 seconds.
+<TEAR DOWN>
+
+If, however, a file containing an expected image could not be opened, this
+gives rise to an error:
+
+>>> sample_txt = write('sample.txt', """\
+... >>> import cairo
+...
+... .. figure:: not-found.png
+...
+...     ``cairo.ImageSurface.create_from_png('%s')``
+... """ % holmenkollen)
+
+>>> suite = DocFileSuite(sample_txt, module_relative=False)
+>>> run(suite)
+<SET UP>
+Error in test Manuel Test: /test_dir/sample.txt
+Traceback (most recent call last):
+  ...
+  File "...cairo.py", line ..., in evaluate
+    expected = cairo.ImageSurface.create_from_png(path)
+Error: file not found
+  Ran 2 tests with 0 failures and 1 errors in 0.011 seconds.
+<TEAR DOWN>
+
+Another reason why an image could not be opened besides the file not being
+found is the file not being in PNG format. Let's try to use a JPG file as the
+expected image:
+
+>>> sample_txt = write('sample.txt', """\
+... >>> import cairo
+...
+... .. figure:: %s
+...
+...     ``cairo.ImageSurface.create_from_png('%s')``
+... """ % (resource_filename('tl.testing', 'testimages/nordmark.jpg'),
+...        holmenkollen))
+
+>>> suite = DocFileSuite(sample_txt, module_relative=False)
+>>> run(suite)
+<SET UP>
+Error in test Manuel Test: /test_dir/sample.txt
+Traceback (most recent call last):
+  ...
+  File "...cairo.py", line ..., in evaluate
+    expected = cairo.ImageSurface.create_from_png(path)
+MemoryError
+  Ran 2 tests with 0 failures and 1 errors in 0.011 seconds.
+<TEAR DOWN>
+
+
+Test suite options
+==================
+
+The test suite factory has a signature compatible with that of
+``doctest.DocFileSuite``. Let's just demonstrate two of the most often used
+parameters with an xmas-tree example:
+
+>>> sample_txt = write('sample.txt', """\
+... >>> import cairo
+... >>> surface = cairo.ImageSurface.create_from_png(src)
+... >>> surface
+... <cairo.ImageSurface object at 0x...>
+...
+... .. figure:: holmenkollen.png
+...
+...     ``surface``
+... """)
+
+>>> import doctest
+>>> suite = DocFileSuite(sample_txt, module_relative=False,
+...                      globs={'src': holmenkollen},
+...                      optionflags=doctest.ELLIPSIS)
+>>> run(suite)
+<SET UP>
+  Ran 4 tests with 0 failures and 0 errors in 0.011 seconds.
+<TEAR DOWN>
+
+
+Clean up
+========
+
+>>> shutil.rmtree(test_dir)
+
+
+Footnotes
+=========
+
+.. _cairo: http://cairographics.org/pycairo/
+
+.. _manuel: http://pypi.python.org/pypi/manuel
+
+.. [write] Set up a test directory and provide a convenient way of writing
+    text to a file in that directory:
+
+    >>> import os.path
+    >>> import tempfile
+    >>> test_dir = tempfile.mkdtemp()
+    >>> def write(name, text):
+    ...     path = os.path.join(test_dir, name)
+    ...     f = open(path, 'w')
+    ...     f.write(text)
+    ...     f.close()
+    ...     return path
+
+.. [run] Provide a convenient way of running a test suite and capturing the
+    runner's output on standard out:
+
+    >>> import sys
+    >>> from zope.testing.testrunner.runner import Runner
+    >>> def run(suite):
+    ...     Runner(found_suites=[suite]).run()
+
+
+.. Local Variables:
+.. mode: rst
+.. End:
