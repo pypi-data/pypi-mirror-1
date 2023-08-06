@@ -1,0 +1,92 @@
+Batcher
+-------
+
+Batches any sliceable object into batches.
+
+.. doctest::
+
+	>>> from batcher import Batcher
+	>>> items = list('ABCDEFGHIJ')
+	>>> batcher = Batcher(items, 4)
+
+	>>> # How many batches are available?
+	>>> len(batcher)
+	3
+
+	>>> # Get contents of the first batch
+	>>> list(batcher[0])
+	['A', 'B', 'C', 'D']
+
+Batches look like lists but know about their context too:
+
+.. doctest::
+
+
+	>>> batch = batcher[1]
+	>>> batch
+	<Batch #1>
+
+	>>> batcher[1].previous
+	<Batch #0>
+
+	>>> batcher[1].next 
+	<Batch #2>
+
+	>>> batcher[2].next
+	None
+
+A common requirement in web applications is to implement a pager widget.
+The range method can help when the user is viewing page **n** and we want to
+display a range of pages centered on **n**, adjusting endpoints to keep
+them in range:
+
+.. doctest::
+
+	>>> items = range(100)
+	>>> batcher = Batcher(items, 4)
+
+	>>> len(batcher)
+	25
+
+	>>> # The range of 5 batches centered on the given batch
+	>>> batcher[0].range(5)
+	[<Batch #0>, <Batch #1>, <Batch #2>, <Batch #3>, <Batch #4>]
+
+
+	>>> batcher[7].range(5)
+	[<Batch #5>, <Batch #6>, <Batch #7>, <Batch #8>, <Batch #9>]
+
+	>>> batcher[23].range(5)
+	[<Batch #20>, <Batch #21>, <Batch #22>, <Batch #23>, <Batch #24>]
+
+If there aren't enough batches available, the entire batch will be returned:
+
+.. doctest::
+
+	>>> items = range(10)
+	>>> batcher = Batcher(items, 4)
+	>>> len(batcher)
+	3
+	>>> batcher[1].range(5)
+	[<Batch #0>, <Batch #1>, <Batch #2>]
+
+Because batches use python's slicing API to retrieve data, we can
+interrogate the slice object to find out the indices of the first and last
+items in a batch, useful for showing data such as "Page 1 (items 1-10)":
+
+.. doctest::
+
+	>>> items = range(25)
+	>>> batcher = Batcher(items, 10)
+	>>> batch = batcher[0]
+	>>> batch.slice
+	slice(0, 10, None)
+	>>> "Page %d (items %d-%d)" % (batch.index + 1, batch.slice.start + 1, batch.slice.stop)
+	'Page 1 (items 1-10)'
+
+Note how python's slice semantics mean that the indices are zero-based (so
+we add 1 when formatting for display) and that the stop index of the slice
+points to the item after the end of the series.
+
+.. automodule:: batcher
+	:members:
