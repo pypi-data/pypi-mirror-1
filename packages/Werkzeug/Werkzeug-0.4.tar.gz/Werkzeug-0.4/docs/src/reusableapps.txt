@@ -1,0 +1,169 @@
+=====================
+Reusable Applications
+=====================
+
+One of the great advantage of WSGI is that it's possible to combine multiple
+applications together easily.  This document explains multiple ways to avoid
+repeating oneself and get the best out of WSGI.
+
+
+Reusable or just Modular?
+=========================
+
+The ultimative reusable application that runs in every environment is more or
+less a fantasy.  Because different situations require different tools or
+different developers have different likes and dislikes there will be never the
+situation where you can drop `$randomapplication` into an unaltered existing
+application.
+
+The first question you have to ask yourself is if you want to have a reusable
+application or just a modular one.  The difference is that a reusable
+application can be used outside of a master application.  Sounds confusing, so
+let's look at an example situation.
+
+Many applications are devided into multiple modules.  For example if you have
+a portal software you probably have modules like these:
+
+-   `auth` -- a module that handles authentication and authorization,
+    user sessions and all that stuff.
+-   `wiki` -- maybe you run a wiki there
+-   `forum` -- and a forum
+-   `planet` -- and probably a planet application
+-   `api` -- you're a web 2.0 guy, so there is an API too
+
+That means you have five components in total and most likely they will depend
+on each other.  So the forum, wiki and planet will use the session managed by
+the auth module, the wiki will probably link to the forum and vice versa.
+That's a situation where it makes more trouble keeping the applications
+reusable than just modular.
+
+Modular applications are a lot easier because they can depend on each other
+and share information.  For example our portal application from above can
+use the same database, template engine system, url routing, request dispatching
+and much more.
+
+For that situation we can use a high level abstraction which does not work
+on the WSGI layer.  That's less flexible but easier to maintain and to extend.
+
+
+Modular Applications
+====================
+
+Let's concentrate on modular applications first.  A very popular web
+application developed in Python that is modular is trac.  It is based on
+a component system inspired by `zope.interface`.  Zine on the other
+hand uses signals and a registration system to combine multiple separate
+components into one big application.  But you don't have to go that far.
+For most applications it's enough to have a list of known modules somewhere
+and import all the required stuff on startup.
+
+The important design decision you have to think about when starting the
+development of the application is if you want to support multiple instances
+of the application or if the application takes over the whole interpreter.
+
+A very common approach is storing an object in a module that contains the
+configuration for the application.  This is for example what the Django
+framework does.  The huge advantage of this approach is, that it's very
+easy to implement and straightforward to use.  The downside is that due to
+the fact that the modules are singletons, it's impossible to run two separate
+Django applications in the same Python interpreter.  This isn't necessarily
+a bad thing but something you have to decide on a per-application basis.
+
+For example trac is designed to support multiple trac installations in the
+same Python interpreter.  This allows scripts to connect to multiple trac
+installations at the same time and syncronize data, or run multiple trac
+web interfaces in the exact same Python interpreter and share some resources
+all those installations have in common.
+
+
+The Setup Phase
+---------------
+
+Python web applications are long term processes.  They are initialized when
+the interpreter starts up and listen for connections until something tells
+the application to shut down again.  This means that unlike in CGI programming
+you have a setup phase where the application doesn't have access to an HTTP
+request but can do expensive stuff you don't want to do every request.
+
+In TextPress for example there is a class called `TextPress` which when
+instanciated with the path to the folder holding the configuration and some
+other files like binary data, will load all the plugins for this textpress
+environment.  Trac on the other hand has a central object called the trac
+`Environment` which does roughly the same.
+
+But if you don't need multiple installations in the same process you don't
+have to create a class for your application but provide a function to
+configure the application.
+
+For example you could have a module called `yourapplication.core` that
+provides a `wsgi_app` and a `setup` function.  In your runner file (for
+example the `yourapplication.fcgi`) you call setup first and pass the
+`wsgi_app` to the real application then::
+
+    from yourapplication import core
+    core.setup('/path/to/your/application/instance')
+    serve(core.wsgi_app)
+
+This setup function then looks up all the modules it thinks it should load.
+Django for example does something very similar to that.  In the configuration
+there is a list of import paths to applications, Django should load.
+
+A possible `setup` function that assambles an application from multiple small
+parts looks like this in pseudocode::
+
+    from werkzeug import module_name
+    from werkzeug.routing import Map
+    from werkzeug.exceptions import HTTPException
+
+    config = Configuration()
+    url_map = Map()
+    modules = []
+
+    def setup(instance_path):
+        config.load(instance_path)
+        for module_name in config['enabled_modules']:
+            module = import_string(module_name)
+            for url_rule in module.url_rules:
+                url_map.add(url_rule)
+            modules.append(module)
+
+When called this function looks at the `enabled_modules` list from the
+configuration (probably a YAML file) and goes through all of them.  Each
+module is loaded and the `url_rules` from that module are added to the
+global `url_map`.
+
+Imagine you have a `yourapplication.forum`.  The `__init__.py` would then
+look like this::
+
+    from werkzeug import Rule, Submount
+
+    url_rules = [Submount('/forum', [
+        Rule('/', endpoint='yourapplication.forum.views.index'),
+        Rule('/<slug>/', endpoint='yourapplication.forum.views.forum'),
+        Rule('/<slug>/<int:topic_id>',
+             endpoint='yourapplication.forum.views.topic')
+    ])]
+
+And so forth.  Of course you can abbreviate the endpoints somehow or make
+the endpoints even implicit but you get the idea.
+
+Depending on what your application does it makes sense to use the setup
+function to register database migrations, database tables/schemas, signals
+and much more.
+
+
+The Request Phase
+-----------------
+
+The wsgi application for the particular setup from above could look like
+this::
+
+    @Request.application
+    def wsgi_app(request):
+        adapter = url_map.bind_to_environ(request)
+        try:
+            endpoint, values = adapter.match()
+            view = import_string(endpoint)
+            return view(request, **values)
+        except HTTPException, e:
+            return e
