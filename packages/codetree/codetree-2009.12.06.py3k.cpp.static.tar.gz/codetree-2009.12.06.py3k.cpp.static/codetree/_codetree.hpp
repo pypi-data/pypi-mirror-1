@@ -1,0 +1,86 @@
+namespace NUMBYTES {
+NUMBYTES_METH(PyObject *, static_tsize_from_tcode, NULL, TCODE_ARGS(args));
+NUMBYTES_METH(PyObject *, _getitem, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, _setitem, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, get_base, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, get_bytes, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, get_contiguous, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, get_shape0, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, get_shape1, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, get_strides0, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, get_strides1, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, get_T, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, get_tcode, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, get_transposed, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, get_tsize, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, copy_to, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, fill_from_itr, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, reshape, NULL, TCODE_SELF(self));
+NUMBYTES_METH(PyObject *, retype, NULL, TCODE_SELF(self));
+
+struct _init {
+_init() {
+METHOD.add("tsize_from_tcode", static_tsize_from_tcode, METH_VARARGS | METH_STATIC);
+METHOD.add("_getitem", _getitem, METH_VARARGS);
+METHOD.add("_setitem", _setitem, METH_VARARGS);
+GETSET.add("base", get_base);
+GETSET.add("bytes", get_bytes);
+GETSET.add("contiguous", get_contiguous);
+GETSET.add("shape0", get_shape0);
+GETSET.add("shape1", get_shape1);
+GETSET.add("strides0", get_strides0);
+GETSET.add("strides1", get_strides1);
+GETSET.add("T", get_T);
+GETSET.add("tcode", get_tcode);
+GETSET.add("transposed", get_transposed);
+GETSET.add("tsize", get_tsize);
+METHOD.add("copy_to", copy_to, METH_VARARGS);
+METHOD.add("fill_from_itr", fill_from_itr, METH_VARARGS);
+METHOD.add("reshape", reshape, METH_VARARGS);
+METHOD.add("retype", retype, METH_VARARGS);
+METHOD.add("__neg__", math___neg__, METH_VARARGS);
+METHOD.add("__pos__", math___pos__, METH_VARARGS);
+METHOD.add("__abs__", math___abs__, METH_VARARGS);
+METHOD.add("__invert__", math___invert__, METH_VARARGS);
+METHOD.add("cos", math_cos, METH_VARARGS);
+METHOD.add("sin", math_sin, METH_VARARGS);
+METHOD.add("tan", math_tan, METH_VARARGS);
+METHOD.add("acos", math_acos, METH_VARARGS);
+METHOD.add("asin", math_asin, METH_VARARGS);
+METHOD.add("atan", math_atan, METH_VARARGS);
+METHOD.add("cosh", math_cosh, METH_VARARGS);
+METHOD.add("sinh", math_sinh, METH_VARARGS);
+METHOD.add("tanh", math_tanh, METH_VARARGS);
+METHOD.add("exp", math_exp, METH_VARARGS);
+METHOD.add("log", math_log, METH_VARARGS);
+METHOD.add("log10", math_log10, METH_VARARGS);
+METHOD.add("sqrt", math_sqrt, METH_VARARGS);
+METHOD.add("ceil", math_ceil, METH_VARARGS);
+METHOD.add("floor", math_floor, METH_VARARGS);
+METHOD.add("log2", math_log2, METH_VARARGS);
+METHOD.add("popcount", math_popcount, METH_VARARGS);
+METHOD.add("roundeven", math_roundeven, METH_VARARGS);
+METHOD.add("sign", math_sign, METH_VARARGS);
+METHOD.add("__add__", math___add__, METH_VARARGS);
+METHOD.add("__sub__", math___sub__, METH_VARARGS);
+METHOD.add("__mul__", math___mul__, METH_VARARGS);
+METHOD.add("__truediv__", math___truediv__, METH_VARARGS);
+METHOD.add("__mod__", math___mod__, METH_VARARGS);
+METHOD.add("__pow__", math___pow__, METH_VARARGS);
+METHOD.add("__lshift__", math___lshift__, METH_VARARGS);
+METHOD.add("__rshift__", math___rshift__, METH_VARARGS);
+METHOD.add("__and__", math___and__, METH_VARARGS);
+METHOD.add("__or__", math___or__, METH_VARARGS);
+METHOD.add("__xor__", math___xor__, METH_VARARGS);
+METHOD.add("atan2", math_atan2, METH_VARARGS);
+METHOD.add("__eq__", math___eq__, METH_VARARGS);
+METHOD.add("__ne__", math___ne__, METH_VARARGS);
+METHOD.add("__lt__", math___lt__, METH_VARARGS);
+METHOD.add("__le__", math___le__, METH_VARARGS);
+METHOD.add("__gt__", math___gt__, METH_VARARGS);
+METHOD.add("__ge__", math___ge__, METH_VARARGS);
+METHOD.add("fma", math_fma, METH_VARARGS);
+
+}
+} __init;
+}
