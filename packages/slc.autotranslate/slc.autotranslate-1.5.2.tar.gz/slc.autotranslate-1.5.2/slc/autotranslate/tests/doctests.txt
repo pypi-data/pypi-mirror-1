@@ -1,0 +1,181 @@
+Additional DocTests:
+====================
+
+Do the necessary imports:
+
+    >>> from z3c.widget.flashupload.interfaces import FlashUploadedEvent
+    >>> from Products.Archetypes.event import ObjectInitializedEvent
+    >>> from zope import event
+
+Create a new parent folder, in which to upload the files:
+
+    >>> folder.invokeFactory('Folder', 'publications')
+    'publications'
+    >>> parent = getattr(folder, 'publications')
+
+To enable the autotranslation feature, we must set the 'autoTranslateUploadedFiles' 
+field on the parent folder. 
+
+    >>> parent.Schema().get('autoTranslateUploadedFiles', True).set(parent, True)
+
+1. We test now that every file's language as well as it's relationship to the
+canonical is properly set, when the canonical is uploaded last.
+
+Create the files and call the event:
+    
+    >>> filenames = ['de_file.txt', 'file_es.txt', 'fr_file.txt', 'en_file.txt']
+    >>> for fn in filenames:
+    ...     fid = parent.invokeFactory('File', fn)
+    ...     file = getattr(parent, fid)
+    ...     f = open('src/slc.autotranslate/slc/autotranslate/tests/files/%s' % fn)
+    ...     file.setFile(f)
+    ...     event.notify(ObjectInitializedEvent(file))
+
+Test that everything is still in order:
+
+    >>> file = getattr(parent, 'de_file.txt')
+    >>> file.getLanguage()
+    'de'
+
+    >>> file.getCanonical()
+    <ATFile at /plone/Members/test_user_1_/publications/en_file.txt> 
+
+    >>> file = getattr(parent, 'file_es.txt')
+    >>> file.getLanguage()
+    'es'
+
+    >>> file.getCanonical()
+    <ATFile at /plone/Members/test_user_1_/publications/en_file.txt> 
+
+    >>> file = getattr(parent, 'fr_file.txt')
+    >>> file.getLanguage()
+    'fr'
+
+    >>> file.getTranslation('es')
+    <ATFile at /plone/Members/test_user_1_/publications/file_es.txt> 
+
+    >>> file.getCanonical()
+    <ATFile at /plone/Members/test_user_1_/publications/en_file.txt> 
+
+    >>> file = getattr(parent, 'en_file.txt')
+    >>> file.getLanguage()
+    'en'
+
+    >>> file.getTranslation('es')
+    <ATFile at /plone/Members/test_user_1_/publications/file_es.txt> 
+
+    >>> file.getCanonical()
+    <ATFile at /plone/Members/test_user_1_/publications/en_file.txt> 
+
+Tear down:
+    >>> parent.manage_delObjects(filenames)
+        
+
+2. Test that translated files are also moved to the appropriate folders. In
+other words, a file translated to another language, must now also reside in
+that same language's version of the file's parent parent.
+
+Add a Czech translation of parent
+    
+    >>> cs_parent = parent.addTranslation('cs')
+
+    >>> filenames = ['cs_file.txt', 'en_file.txt']
+    >>> for fn in filenames:
+    ...     fid = parent.invokeFactory('File', fn)
+    ...     file = getattr(parent, fid)
+    ...     f = open('src/slc.autotranslate/slc/autotranslate/tests/files/%s' % fn)
+    ...     file.setFile(f)
+    ...     event.notify(ObjectInitializedEvent(file))
+
+    >>> parent.objectIds()
+    ['en_file.txt']
+
+    >>> cs_parent.objectIds()
+    ['cs_file.txt']
+
+Now make sure that the Czech file has been identified as a translation of
+the English file. 
+
+Note: utils.py:get_translations is mostly responsible for this
+
+    >>> en_file = getattr(parent, 'en_file.txt')
+    >>> en_file.getTranslation('cs')
+    <ATFile at .../publications-cs/cs_file.txt>
+
+Tear down:
+    >>> parent.manage_delObjects('en_file.txt')
+    >>> cs_parent.manage_delObjects('cs_file.txt')
+
+
+3. Test that files whose names do not conform to the slc.autotranslate naming
+convention are still uploaded normally
+
+    >>> fid = parent.invokeFactory('File', 'file.txt')
+    >>> file = getattr(parent, fid)
+    >>> f = open('src/slc.autotranslate/slc/autotranslate/tests/files/file.txt')
+    >>> file.setFile(f)
+    >>> event.notify(ObjectInitializedEvent(file))
+
+    >>> parent.objectIds()
+    ['file.txt']
+
+    >>> parent.manage_delObjects(['file.txt'])
+
+4. Test the ignoreDuplicateUploadedFiles setting.
+
+Set the boolean to not ignore uploaded files
+
+    >>> parent.Schema().get('ignoreDuplicateUploadedFiles', True).set(parent, False)
+
+Create a file that will act as the existing translation.
+
+    >>> fid = parent.invokeFactory('File', 'file_de.txt')
+    >>> file = getattr(parent, fid)
+    >>> f = open('src/slc.autotranslate/slc/autotranslate/tests/files/file.txt')
+    >>> file.setFile(f)
+
+    >>> file_de = getattr(parent, 'file_de.txt')
+    >>> file_de.getFile().filename
+    'file.txt'
+
+Test that if a new file is uploaded, the original's file field is replaced with
+the new file and the new file's object is dropped/deleted.
+
+    >>> fid = parent.invokeFactory('File', 'de_file.txt')
+    >>> file = getattr(parent, fid)
+    >>> f = open('src/slc.autotranslate/slc/autotranslate/tests/files/de_file.txt')
+    >>> file.setFile(f)
+    >>> event.notify(ObjectInitializedEvent(file))
+
+    >>> parent.objectIds()
+    ['file_de.txt']
+
+    >>> file_de = getattr(parent, 'file_de.txt')
+    >>> file_de.getFile().filename
+    'de_file.txt'
+
+Set the boolean to ignore uploads that are duplicates of existing files
+
+    >>> parent.Schema().get('ignoreDuplicateUploadedFiles', True).set(parent, True)
+
+Test that when a duplicate is uploaded, that the existing file is not changed
+and the duplicate dropped/deleted.
+
+    >>> f = open('src/slc.autotranslate/slc/autotranslate/tests/files/file.txt')
+    >>> file_de = getattr(parent, 'file_de.txt')
+    >>> file_de.setFile(f)
+
+    >>> fid = parent.invokeFactory('File', 'de_file.txt')
+    >>> file = getattr(parent, fid)
+    >>> f = open('src/slc.autotranslate/slc/autotranslate/tests/files/de_file.txt')
+    >>> file.setFile(f)
+    >>> event.notify(ObjectInitializedEvent(file))
+
+    >>> parent.objectIds()
+    ['file_de.txt']
+
+    >>> file_de = getattr(parent, 'file_de.txt')
+    >>> file_de.getFile().filename
+    'file.txt'
+
+
