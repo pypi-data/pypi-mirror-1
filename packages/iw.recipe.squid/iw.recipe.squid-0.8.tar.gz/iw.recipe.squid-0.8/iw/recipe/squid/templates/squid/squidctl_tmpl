@@ -1,0 +1,105 @@
+#!/bin/sh
+# squid controler
+
+DAEMON=%(squid_executable)s
+CONFIG=%(squid_config_file)s
+CACHE_DIR=%(squid_cache_dir)s
+PID=`cat %(squid_var_dir)s/squid.pid 2>/dev/null`
+
+start () {
+    ${DAEMON} -f ${CONFIG}
+}
+
+stop () {
+    ${DAEMON} -f ${CONFIG} -k shutdown
+    if test -n "$PID" && kill -0 $PID 2>/dev/null
+    then
+        cnt=0
+        while kill -0 $PID 2>/dev/null
+        do
+                cnt=`expr $cnt + 1`
+                if [ $cnt -gt 24 ]
+                then
+                        echo "mmm there is a problem to stop squid !!"
+                        return 1
+                fi
+                sleep 1
+                echo -n "."
+
+        done
+
+        return 0
+    else
+        return 0
+    fi
+}
+
+reload () {
+    ${DAEMON} -f ${CONFIG} -k reconfigure
+}
+
+status () {
+    ${DAEMON} -f ${CONFIG} -k check
+}
+
+configtest () {
+    ${DAEMON} -f ${CONFIG} -k parse
+}
+
+createswap () {
+    ${DAEMON} -f ${CONFIG} -z
+}
+
+debug () {
+    ${DAEMON} -f ${CONFIG} -NCd1
+}
+
+rotate () {
+    ${DAEMON} -f ${CONFIG} -k rotate
+}
+
+purgecache () {
+    stop
+    echo "" > ${CACHE_DIR}/swap.state
+    createswap
+    start
+}
+
+case "$1" in
+    start)
+        start
+    ;;
+    stop)
+        stop
+    ;;
+    restart)
+        stop
+    start
+    ;;
+    reload)
+    reload
+    ;;
+    status)
+        status
+    ;;
+    debug)
+        debug
+    ;;
+    purgecache)
+        purgecache
+    ;;
+    createswap)
+        createswap
+    ;;
+    configtest)
+        configtest
+    ;;
+    rotate)
+        rotate
+    ;;
+    *)
+        echo "Usage: squidctl {start|stop|reload|restart|status|debug|purgecache|createswap|configtest|rotate}"
+    exit 3
+    ;;
+esac
+exit 0
