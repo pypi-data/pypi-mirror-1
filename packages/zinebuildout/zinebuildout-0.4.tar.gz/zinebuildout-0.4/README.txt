@@ -1,0 +1,55 @@
+Installation
+============
+
+This package allows you to install Zine and its dependencies in a sandbox with
+buildout, then serve it with any WSGI server while using the Paste facilities
+for WSGI stack configuration.
+
+Install Zine:
+-------------
+Download and extract the zinebuildout archive from PyPI,
+(or clone it with: hg clone https://cody.gorfou.fr/hg/zinebuildout ).
+You don't need to easy_install it.
+Then run: ::
+
+  $ python bootstrap.py
+  $ ./bin/buildout
+
+Configure Zine:
+---------------
+Edit "deploy.ini" to adapt ``instance_folder``, ``host`` and ``port`` to
+your needs. You don't need to change anything if you just want to try it on
+your local host.
+
+Start Zine:
+-----------
+In foreground: ::
+
+  $ ./bin/paster serve deploy.ini
+
+Or in background: ::
+
+  $ ./bin/paster serve --daemon deploy.ini
+
+Versions
+========
+
+0.4 (2009-02-19)
+----------------
+- remove the zine section from Paste config. (thx Calvin)
+  It will allow defining several zine instances in the same config file.
+
+0.3  (2009-01-29)
+-----------------
+- fixed the bad 0.2 release
+
+0.2  (2009-01-27)
+-----------------
+- move to zine 0.1.2
+- no more need to configure the instance folder
+- Added pygments and docutils (for the rst parser)
+
+0.1  (2009-01-14)
+-----------------
+
+initial buildout for Zine 0.1.1
