@@ -1,0 +1,1 @@
+{type:"class",attributes:{"isStatic":"true","name":"GroupBox","packageName":"qx.ui.groupbox","childClasses":"spamfighter.ui.MessageWidget","fullName":"qx.ui.groupbox.GroupBox"}}
