@@ -1,0 +1,182 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+  <title>Reusable Applications // Werkzeug Documentation</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <link rel="stylesheet" type="text/css" href="style.css">
+  <link rel="stylesheet" type="text/css" href="pygments.css">
+  <link rel="stylesheet" type="text/css" media="print" href="print.css">
+  <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <h1><a href="index.html"><span>Werkzeug</span></a></h1>
+      <p><span>The Swiss Army Knife For Python Web Developers</span></p>
+    </div>
+    <div class="body">
+      <h2>Reusable Applications</h2>
+      
+      <div class="toc">
+        <h4>Table of Contents</h4>
+        <ul><li><a class="reference internal" href="#reusable-or-just-modular" id="id1">Reusable or just Modular?</a></li>
+<li><p class="first"><a class="reference internal" href="#modular-applications" id="id2">Modular Applications</a></p>
+<ul class="simple">
+<li><a class="reference internal" href="#the-setup-phase" id="id3">The Setup Phase</a></li>
+<li><a class="reference internal" href="#the-request-phase" id="id4">The Request Phase</a></li>
+</ul>
+</li>
+</ul>
+      </div>
+      
+      <p>One of the great advantage of WSGI is that it&#8217;s possible to combine multiple
+applications together easily.  This document explains multiple ways to avoid
+repeating oneself and get the best out of WSGI.</p>
+<div class="section" id="reusable-or-just-modular">
+<h3>Reusable or just Modular?</h3>
+<p>The ultimative reusable application that runs in every environment is more or
+less a fantasy.  Because different situations require different tools or
+different developers have different likes and dislikes there will be never the
+situation where you can drop <cite>$randomapplication</cite> into an unaltered existing
+application.</p>
+<p>The first question you have to ask yourself is if you want to have a reusable
+application or just a modular one.  The difference is that a reusable
+application can be used outside of a master application.  Sounds confusing, so
+let&#8217;s look at an example situation.</p>
+<p>Many applications are devided into multiple modules.  For example if you have
+a portal software you probably have modules like these:</p>
+<ul class="simple">
+<li><cite>auth</cite> &#8211; a module that handles authentication and authorization,
+user sessions and all that stuff.</li>
+<li><cite>wiki</cite> &#8211; maybe you run a wiki there</li>
+<li><cite>forum</cite> &#8211; and a forum</li>
+<li><cite>planet</cite> &#8211; and probably a planet application</li>
+<li><cite>api</cite> &#8211; you&#8217;re a web 2.0 guy, so there is an API too</li>
+</ul>
+<p>That means you have five components in total and most likely they will depend
+on each other.  So the forum, wiki and planet will use the session managed by
+the auth module, the wiki will probably link to the forum and vice versa.
+That&#8217;s a situation where it makes more trouble keeping the applications
+reusable than just modular.</p>
+<p>Modular applications are a lot easier because they can depend on each other
+and share information.  For example our portal application from above can
+use the same database, template engine system, url routing, request dispatching
+and much more.</p>
+<p>For that situation we can use a high level abstraction which does not work
+on the WSGI layer.  That&#8217;s less flexible but easier to maintain and to extend.</p>
+</div>
+<div class="section" id="modular-applications">
+<h3>Modular Applications</h3>
+<p>Let&#8217;s concentrate on modular applications first.  A very popular web
+application developed in Python that is modular is trac.  It is based on
+a component system inspired by <cite>zope.interface</cite>.  Zine on the other
+hand uses signals and a registration system to combine multiple separate
+components into one big application.  But you don&#8217;t have to go that far.
+For most applications it&#8217;s enough to have a list of known modules somewhere
+and import all the required stuff on startup.</p>
+<p>The important design decision you have to think about when starting the
+development of the application is if you want to support multiple instances
+of the application or if the application takes over the whole interpreter.</p>
+<p>A very common approach is storing an object in a module that contains the
+configuration for the application.  This is for example what the Django
+framework does.  The huge advantage of this approach is, that it&#8217;s very
+easy to implement and straightforward to use.  The downside is that due to
+the fact that the modules are singletons, it&#8217;s impossible to run two separate
+Django applications in the same Python interpreter.  This isn&#8217;t necessarily
+a bad thing but something you have to decide on a per-application basis.</p>
+<p>For example trac is designed to support multiple trac installations in the
+same Python interpreter.  This allows scripts to connect to multiple trac
+installations at the same time and syncronize data, or run multiple trac
+web interfaces in the exact same Python interpreter and share some resources
+all those installations have in common.</p>
+<div class="section" id="the-setup-phase">
+<h4>The Setup Phase</h4>
+<p>Python web applications are long term processes.  They are initialized when
+the interpreter starts up and listen for connections until something tells
+the application to shut down again.  This means that unlike in CGI programming
+you have a setup phase where the application doesn&#8217;t have access to an HTTP
+request but can do expensive stuff you don&#8217;t want to do every request.</p>
+<p>In TextPress for example there is a class called <cite>TextPress</cite> which when
+instanciated with the path to the folder holding the configuration and some
+other files like binary data, will load all the plugins for this textpress
+environment.  Trac on the other hand has a central object called the trac
+<cite>Environment</cite> which does roughly the same.</p>
+<p>But if you don&#8217;t need multiple installations in the same process you don&#8217;t
+have to create a class for your application but provide a function to
+configure the application.</p>
+<p>For example you could have a module called <cite>yourapplication.core</cite> that
+provides a <cite>wsgi_app</cite> and a <cite>setup</cite> function.  In your runner file (for
+example the <cite>yourapplication.fcgi</cite>) you call setup first and pass the
+<cite>wsgi_app</cite> to the real application then:</p>
+<div class="syntax"><pre><span class="kn">from</span> <span class="nn">yourapplication</span> <span class="kn">import</span> <span class="n">core</span>
+<span class="n">core</span><span class="o">.</span><span class="n">setup</span><span class="p">(</span><span class="s">&#39;/path/to/your/application/instance&#39;</span><span class="p">)</span>
+<span class="n">serve</span><span class="p">(</span><span class="n">core</span><span class="o">.</span><span class="n">wsgi_app</span><span class="p">)</span>
+</pre></div>
+<p>This setup function then looks up all the modules it thinks it should load.
+Django for example does something very similar to that.  In the configuration
+there is a list of import paths to applications, Django should load.</p>
+<p>A possible <cite>setup</cite> function that assambles an application from multiple small
+parts looks like this in pseudocode:</p>
+<div class="syntax"><pre><span class="kn">from</span> <span class="nn">werkzeug</span> <span class="kn">import</span> <span class="n">module_name</span>
+<span class="kn">from</span> <span class="nn">werkzeug.routing</span> <span class="kn">import</span> <span class="n">Map</span>
+<span class="kn">from</span> <span class="nn">werkzeug.exceptions</span> <span class="kn">import</span> <span class="n">HTTPException</span>
+
+<span class="n">config</span> <span class="o">=</span> <span class="n">Configuration</span><span class="p">()</span>
+<span class="n">url_map</span> <span class="o">=</span> <span class="n">Map</span><span class="p">()</span>
+<span class="n">modules</span> <span class="o">=</span> <span class="p">[]</span>
+
+<span class="k">def</span> <span class="nf">setup</span><span class="p">(</span><span class="n">instance_path</span><span class="p">):</span>
+    <span class="n">config</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">instance_path</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">module_name</span> <span class="ow">in</span> <span class="n">config</span><span class="p">[</span><span class="s">&#39;enabled_modules&#39;</span><span class="p">]:</span>
+        <span class="n">module</span> <span class="o">=</span> <span class="n">import_string</span><span class="p">(</span><span class="n">module_name</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">url_rule</span> <span class="ow">in</span> <span class="n">module</span><span class="o">.</span><span class="n">url_rules</span><span class="p">:</span>
+            <span class="n">url_map</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">url_rule</span><span class="p">)</span>
+        <span class="n">modules</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">module</span><span class="p">)</span>
+</pre></div>
+<p>When called this function looks at the <cite>enabled_modules</cite> list from the
+configuration (probably a YAML file) and goes through all of them.  Each
+module is loaded and the <cite>url_rules</cite> from that module are added to the
+global <cite>url_map</cite>.</p>
+<p>Imagine you have a <cite>yourapplication.forum</cite>.  The <cite>__init__.py</cite> would then
+look like this:</p>
+<div class="syntax"><pre><span class="kn">from</span> <span class="nn">werkzeug</span> <span class="kn">import</span> <span class="n">Rule</span><span class="p">,</span> <span class="n">Submount</span>
+
+<span class="n">url_rules</span> <span class="o">=</span> <span class="p">[</span><span class="n">Submount</span><span class="p">(</span><span class="s">&#39;/forum&#39;</span><span class="p">,</span> <span class="p">[</span>
+    <span class="n">Rule</span><span class="p">(</span><span class="s">&#39;/&#39;</span><span class="p">,</span> <span class="n">endpoint</span><span class="o">=</span><span class="s">&#39;yourapplication.forum.views.index&#39;</span><span class="p">),</span>
+    <span class="n">Rule</span><span class="p">(</span><span class="s">&#39;/&lt;slug&gt;/&#39;</span><span class="p">,</span> <span class="n">endpoint</span><span class="o">=</span><span class="s">&#39;yourapplication.forum.views.forum&#39;</span><span class="p">),</span>
+    <span class="n">Rule</span><span class="p">(</span><span class="s">&#39;/&lt;slug&gt;/&lt;int:topic_id&gt;&#39;</span><span class="p">,</span>
+         <span class="n">endpoint</span><span class="o">=</span><span class="s">&#39;yourapplication.forum.views.topic&#39;</span><span class="p">)</span>
+<span class="p">])]</span>
+</pre></div>
+<p>And so forth.  Of course you can abbreviate the endpoints somehow or make
+the endpoints even implicit but you get the idea.</p>
+<p>Depending on what your application does it makes sense to use the setup
+function to register database migrations, database tables/schemas, signals
+and much more.</p>
+</div>
+<div class="section" id="the-request-phase">
+<h4>The Request Phase</h4>
+<p>The wsgi application for the particular setup from above could look like
+this:</p>
+<div class="syntax"><pre><span class="nd">@Request</span><span class="o">.</span><span class="n">application</span>
+<span class="k">def</span> <span class="nf">wsgi_app</span><span class="p">(</span><span class="n">request</span><span class="p">):</span>
+    <span class="n">adapter</span> <span class="o">=</span> <span class="n">url_map</span><span class="o">.</span><span class="n">bind_to_environ</span><span class="p">(</span><span class="n">request</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">endpoint</span><span class="p">,</span> <span class="n">values</span> <span class="o">=</span> <span class="n">adapter</span><span class="o">.</span><span class="n">match</span><span class="p">()</span>
+        <span class="n">view</span> <span class="o">=</span> <span class="n">import_string</span><span class="p">(</span><span class="n">endpoint</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">view</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="o">**</span><span class="n">values</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">HTTPException</span><span class="p">,</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">e</span>
+</pre></div>
+</div>
+</div>
+
+      <div style="clear:both"></div>
+    </div>
+    <div class="footer">
+      Werkzeug is a <a href="http://pocoo.org/">Pocoo</a> project licensed under the
+      BSD license.
+    </div>
+  </div>
+</body>
+</html>
