@@ -1,0 +1,253 @@
+-*- coding: utf-8 -*-
+
+==============================================================================
+Test SearchableRelatedText index for smart folders
+==============================================================================
+
+Create the browser object we'll be using.
+
+    >>> from DateTime.DateTime import DateTime
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+    >>> browser.handleErrors = False
+    >>> self.portal.error_log._ignored_exceptions = ()
+
+Import a variable to decide if we are in Plone 3 or not.
+
+    >>> from icsemantic.catalog.config import HAS_PLONE3
+
+Hide the recent changes portlet.
+
+    >>> self.portal.left_slots = ()
+
+Log in into the site as manager.
+
+    >>> from Products.PloneTestCase.setup import portal_owner, default_user, default_password
+    >>> login_url = portal_url + '/login_form'
+    >>> logout_url = portal_url + '/logout'
+    >>> browser.open(login_url)
+
+We have the login portlet, so let's use that.
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url)
+    >>> browser.url == portal_url
+    True
+
+Let's make three languages available in the site: English, Spanish and French.
+The default language is English.
+
+    >>> browser.getLink('Site Setup').click()
+    >>> browser.getLink('Language Settings').click()
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='en').selected = True
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='es').selected = True
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='fr').selected = True
+    >>> browser.getControl('Save').click()
+    >>> prefs_languages_url = portal_url + '/portal_languages/prefs_languages'
+    >>> browser.open(prefs_languages_url)
+    >>> browser.getControl(name='defaultLanguage').value = ('en',)
+    >>> browser.getControl('Save').click()
+
+Create a new user with the "icsemantic.langfallback" property set.
+
+    >>> member1 = portal.portal_registration.addMember('test1', 'test1')
+    >>> member1.setMemberProperties({'language': 'es', 'icsemantic.preferred_languages': ('en',)})
+
+First, let's create a folder to put a few documents.
+
+    >>> if HAS_PLONE3:
+    ...     browser.getLink('Add new').click()
+    ...     browser.getControl('Folder').click()
+    ...     browser.getControl(name='form.button.Add').click()
+    ... else:
+    ...     browser.getLink('Add to folder').click()
+    ...     browser.getControl('Add Folder').click()
+    >>> browser.getControl(name='title').value = 'My Folder'
+    >>> browser.getControl('Save').click()
+    >>> browser.getLink('View').click()
+    >>> browser.url == portal_url + '/my-folder/'
+    True
+
+Now let's create three pages according to these tables:
+Language      Title             Contains
+en            First Page        mundial
+es            Primera página    fútbol
+
+Language      Title             Contains
+-             Second Page       mundial, fútbol
+
+Language      Title             Contains
+en            Third Page        -
+fr            Troisième page    mundial, fútbol
+
+So, if the user test1 searches for documents related to "mundial", she will
+get: First Page and Primera página; but not Troisième page because French is not
+preferred by the user test1, neither Second Page, since it's in neutral
+language.or Third
+
+We are going to make sure that the first page we create includes the word
+'mundial' in the body.
+
+    >>> if HAS_PLONE3:
+    ...     browser.getLink('Add new').click()
+    ...     browser.getControl('Page').click()
+    ...     browser.getControl(name='form.button.Add').click()
+    ... else:
+    ...     browser.getLink('Add item').click()
+    ...     browser.getControl('Page').click()
+    >>> browser.getControl(name='title').value = 'First Page'
+    >>> browser.getControl(name='description').value = 'First page description'
+    >>> browser.getControl(name='text').value = "The soccer world cup is know as 'el mundial' in Spanish."
+    >>> browser.getControl('Save').click()
+
+Let's translate the page into Spanish.
+
+    >>> browser.open(portal_url+'/my-folder/first-page/createTranslation?set_language=es&current=en')
+    >>> browser.getControl('Title').value = 'Primera página'
+    >>> browser.getControl('Description').value = 'Descripción de la primera página'
+    >>> browser.getControl('Body Text').value = "El fútbol es un deporte."
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+We are creating another page. This time around, we are making sure that the page
+contains the words 'mundial' and 'fútbol'.
+
+    >>> browser.open(portal_url+'/my-folder?set_language=en')
+    >>> browser.getLink('My Folder').click()
+    >>> browser.url == portal_url + '/my-folder'
+    True
+    >>> if HAS_PLONE3:
+    ...     browser.getLink('Add new').click()
+    ...     browser.getControl('Page').click()
+    ...     browser.getControl(name='form.button.Add').click()
+    ... else:
+    ...     browser.getLink('Add item').click()
+    ...     browser.getControl('Page').click()
+    >>> browser.getControl(name='title').value = 'Second Page'
+    >>> browser.getControl(name='description').value = 'This is another test description'
+    >>> browser.getControl(name='text').value = 'Mundial and fútbol.'
+    >>> browser.getControl('Save').click()
+
+A third page is created with unrelated content.
+
+    >>> browser.getLink('My Folder').click()
+    >>> browser.url == portal_url + '/my-folder'
+    True
+    >>> if HAS_PLONE3:
+    ...     browser.getLink('Add new').click()
+    ...     browser.getControl('Page').click()
+    ...     browser.getControl(name='form.button.Add').click()
+    ... else:
+    ...     browser.getLink('Add item').click()
+    ...     browser.getControl('Page').click()
+    >>> browser.getControl(name='title').value = 'Third Page'
+    >>> browser.getControl(name='description').value = 'Yet another test description'
+    >>> browser.getControl(name='text').value = 'Nothing to do.'
+    >>> browser.getControl('Save').click()
+
+Let's translate the page into French and make sure it includes the words
+'fútbol' and 'mundial'.
+
+    >>> browser.open(portal_url+'/my-folder/third-page/createTranslation?set_language=fr&current=en')
+    >>> browser.getControl('Title').value = 'Troisième page'
+    >>> browser.getControl('Description').value = ''
+    >>> browser.getControl('Body Text').value = 'Fútbol and mundial.'
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+Go back to the site root and create a collection.
+
+    >>> browser.open(portal_url+'/my-folder?set_language=en')
+    >>> browser.open(portal_url)
+    >>> browser.url == portal_url
+    True
+    >>> if HAS_PLONE3:
+    ...     browser.getLink('Add new').click()
+    ...     browser.getControl('Collection').click()
+    ...     browser.getControl(name='form.button.Add').click()
+    ... else:
+    ...     browser.getLink('Add to folder').click() # different in Plone 3
+    ...     browser.getControl('Smart Folder').click() # different in Plone 3
+    >>> browser.getControl(name='title').value = 'Related to mundial'
+    >>> browser.getControl('Save').click()
+
+    >>> browser.getLink('Properties').click()
+    >>> browser.getControl(name='language').value = ('es',)
+    >>> browser.getControl('Save').click()
+
+With an empty criteria, none of the pages created linked from the collection
+view. But first we must login with the test user we created.
+
+    >>> logout_url = portal_url + '/logout'
+    >>> browser.open(logout_url)
+    >>> browser.open(login_url)
+    >>> browser.getControl(name='__ac_name').value = 'test1'
+    >>> browser.getControl(name='__ac_password').value = 'test1'
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url)
+    >>> browser.url == portal_url
+    True
+
+    >>> browser.open(portal_url+'?set_language=es')
+    >>> browser.open(portal_url)
+    >>> browser.getLink('Related to mundial').click()
+    >>> 'First Page' in browser.contents
+    False
+    >>> 'Primera página' in browser.contents
+    False
+    >>> 'Second Page' in browser.contents
+    False
+    >>> 'Third Page' in browser.contents
+    False
+    >>> 'Troisième page' in browser.contents
+    False
+
+Set the collection criteria to query for content items that contains words
+related to 'mundial'.
+
+    >>> browser.open(logout_url)
+    >>> browser.open(login_url)
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url)
+    >>> browser.url == portal_url
+    True
+
+    >>> browser.getLink('Related to mundial').click()
+    >>> browser.getLink('Criteria').click()
+    >>> browser.getControl(name='field', index=0).value = ('SearchableRelatedText',)
+    >>> browser.getControl('Criteria type').value = ('ATRelatedCriterion',)
+    >>> browser.getControl('Add').click()
+    >>> browser.getControl(name='crit__SearchableRelatedText_ATRelatedCriterion_value').value = 'mundial'
+    >>> browser.getControl('Save', index=0).click()
+
+Finally, let's check that the second page previously created is among the
+results of the collection.
+
+    >>> logout_url = portal_url + '/logout'
+    >>> browser.open(logout_url)
+    >>> browser.open(login_url)
+    >>> browser.getControl(name='__ac_name').value = 'test1'
+    >>> browser.getControl(name='__ac_password').value = 'test1'
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url)
+    >>> browser.url == portal_url
+    True
+
+    >>> browser.getLink('Related to mundial').click()
+    >>> 'First Page' in browser.contents
+    True
+    >>> 'Primera página' in browser.contents
+    True
+    >>> 'Second Page' in browser.contents
+    False
+    >>> 'Third Page' in browser.contents
+    False
+    >>> 'Troisième page' in browser.contents
+    False
