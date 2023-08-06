@@ -1,0 +1,32 @@
+from setuptools import setup, find_packages
+ 
+setup(
+    name='django-markitup',
+    version='0.2.6',
+    description='Django integration with the MarkItUp universal markup editor',
+    long_description=open('README.txt').read(),
+    author='Carl Meyer',
+    author_email='carl@dirtcircle.com',
+    url='http://launchpad.net/django-markitup',
+    packages=find_packages(),
+    classifiers=[
+        'Development Status :: 3 - Alpha',
+        'Environment :: Web Environment',
+        'Intended Audience :: Developers',
+        'License :: OSI Approved :: BSD License',
+        'Operating System :: OS Independent',
+        'Programming Language :: Python',
+        'Framework :: Django',
+    ],
+    package_data= {'': ['templates/markitup/preview.html',
+                        'media/markitup/*.js',
+                        'media/markitup/*.css',
+                        'media/markitup/sets/*/*.css',
+                        'media/markitup/sets/*/*.js',
+                        'media/markitup/sets/*/*.txt',
+                        'media/markitup/sets/*/images/*.png',
+                        'media/markitup/skins/*/*.css',
+                        'media/markitup/skins/*/images/*.png',
+                        'media/markitup/templates/preview.*']},
+    zip_safe=False,
+)
