@@ -1,0 +1,70 @@
+==========================================
+Utilities for writing munin client scripts
+==========================================
+
+This package provides base classes for defining Munin graphs and a main
+function to handle munin-typical symlinked scripts.
+
+Munin plugin scripts
+====================
+
+A single plugin file defines (multiple) graphs by subclassing the bases as mentioned in
+the next section. The main function uses the called script's filename  to
+determine which of the defined graphs is relevant.
+
+Data for each graph is determined by retrieving a text file from a URL (with
+possibly given basic authentication data).
+
+The format for the data is plain/text wich each line having key/value pairs
+split by ':'. The values are expected to be floats.
+
+All graph bases expect two environment variables to be set:
+
+URL
+  The URL at which to retrieve data from. Must include a '%s' which encodes
+  the graph name.
+AUTH
+  HTTP basic authentication information. Either empty or in the form of
+  'username:password'.
+
+The environment variables can be configured using munin's `plugin-conf.d` like
+this:
+
+The plugin is called `prefix_something_1`::
+
+[prefix_*]
+env.URL http://foo:8900/myapp/munin?data=%s
+env.AUTH admin:admin
+
+Graph bases
+===========
+
+The following base classes are currently defined:
+
+SimpleGraph
+  A simple graph with a single value that is plotted as an absolute value.
+
+SimpleMultiGraph
+  Multiple absolute values plotted on the same graph and scale.
+
+more bases will be added as needed.
+
+Main function
+=============
+
+The main function handles munin-typical `type_option_index` symlink scripts by
+looking at the name from which the main script was called.
+
+Example script
+==============
+
+Here's a sample script that you could symlink into the `plugins` directory::
+
+    from gocept.munin.client import SimpleGraph, main
+
+    class people(SimpleGraph):
+        name = key = 'people'
+        title = 'How many people are there?'
+        category = 'Office'
+
+    main()
