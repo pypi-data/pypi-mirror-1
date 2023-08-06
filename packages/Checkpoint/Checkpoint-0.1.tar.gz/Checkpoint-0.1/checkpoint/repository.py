@@ -1,0 +1,926 @@
+"""Checkpoint repository management"""
+
+from __future__ import with_statement
+
+import os
+import shutil
+import hashlib
+import logging
+from textwrap import dedent
+
+from checkpoint.database import Database
+from checkpoint.filestore import FileStore, FILE, DIRECTORY, LINK
+from checkpoint.error import (
+    RepositoryLocked, FileError, UninitializedRepositoryError, CheckpointBug,
+    RepositoryError, NoChanges, UnsupportedFileType, NotFound, MirrorLocked,
+    UninitializedMirrorError
+)
+from checkpoint.util import (
+    acquire_lock, release_lock, PickleProperty, filter_all_patterns,
+    matches_any_pattern, sha1_hash, filter_duplicates
+)
+
+__all_ = [
+    'Repository', 'STATUS_CODES', 'NO_CHANGE', 'ADDED', 'DELETED', 'MODIFIED',
+    'DEFAULT_REPOSITORY_BASENAME', 'SUPPORTED_REPOSITORY_FORMAT'
+]
+
+log = logging.getLogger("checkpoint")
+#logging.basicConfig(level=logging.DEBUG)
+
+DEFAULT_REPOSITORY_BASENAME = '.cpt'
+SUPPORTED_REPOSITORY_FORMAT = "1" # format supported by this release
+
+NO_CHANGE = 0
+MODIFIED = 1
+ADDED = 2
+DELETED = 3
+
+STATUS_CODES = {
+    NO_CHANGE: '',
+    ADDED: 'A',
+    DELETED: 'D',
+    MODIFIED: 'M'
+}
+
+# Notes on relative/absolute paths:
+#   * All file operations (open, shutil.copytree, etc) should use absolute
+#     paths as obtained from os.path.abspath(path).
+#   * All database operations (select, insert, etc) should use relative paths,
+#     relative to the 'watched' directory.
+#   * Other operations should use relative paths, unless otherwise indicated.
+
+class Common(object):
+    """Common functionality for Repository and Mirror classes"""
+    
+    @staticmethod
+    def get_repository_basename():
+        """Return the basename (default '.cpt') for the repository."""
+        basename = DEFAULT_REPOSITORY_BASENAME
+        try:
+            basename = os.environ['CHECKPOINT_REPOSITORY_BASENAME']
+        except KeyError:
+            pass 
+        return basename
+
+    @classmethod
+    def get_repository_path(cls, directory):
+        """Return the absolute repository path for a given directory."""
+        # Determine repository path
+        basename = cls.get_repository_basename()
+        directory = os.path.abspath(directory)
+        return os.path.join(directory, basename)
+
+    @classmethod
+    def get_ignored_patterns(cls):
+        """Determine the basename patterns (ex: '*.jpg') to ignore."""
+        # Always ignore repositories
+        ignored_patterns = [cls.get_repository_basename()]
+        # Check for additional patterns specified by environment variables
+        try:
+            ignored_patterns.extend(
+                os.environ['CHECKPOINT_IGNORED_PATTERNS'].split(':')
+            )
+        except KeyError:
+            pass
+        return ignored_patterns
+
+class Mirror(Common):
+    """Checkpoint Repository Mirror.
+    
+    This is an *incredibly* fast and efficient mirroring process that uses 
+    the mirrored repository's database of changes in order to minimize the
+    number of file system operations needed to mirror the repository.
+    
+    """
+    
+    # Use PickleProperty's to load/save the state of the mirror
+    source_directory = PickleProperty(
+        lambda inst: os.path.join(
+            os.path.abspath(inst.config_directory), 
+            'mirror_path'
+        )
+    )
+    changeset = PickleProperty(
+        lambda inst: os.path.join(
+            os.path.abspath(inst.config_directory), 
+            'changeset'
+        )
+    )
+
+    def __init__(self, destination_directory):
+        # Determine paths for the mirror directory
+        self.destination_directory = os.path.abspath(destination_directory)
+        self.config_directory = Mirror.get_repository_path(
+            self.destination_directory
+        )
+        self.lockfile_path = os.path.join(self.config_directory, 'lock')
+        
+        # Create destination and config directories, as needed.
+        for d in [self.destination_directory, self.config_directory]:
+            if not os.path.exists(d):
+                try:
+                    os.makedirs(d)
+                except (OSError, IOError), e:
+                    raise FileError(
+                        "Could not create mirror directory %r: %s" % (d, e)
+                    )
+    
+    @staticmethod
+    def contains_mirror(directory):
+        """Returns True if directory contains a Mirror, False otherwise."""
+        if directory is None: return False
+        some_mirror_file = os.path.join(
+            Mirror.get_repository_path(directory),
+            'mirror_path'
+        )
+        if os.path.exists(some_mirror_file):
+            return True
+        else:
+            return False
+
+    def lock(method):
+        """Return decorator that locks the mirror while method is running."""
+        def wrapper(self, *args, **kwargs):
+            # Acquire a lock
+            lock = acquire_lock(self.lockfile_path, MirrorLocked)
+            # Call the decorated method
+            return_value = method(self, *args, **kwargs)
+            # Release the lock
+            release_lock(lock)
+            # Return
+            return return_value
+        return wrapper
+
+    def require_mirror(method):
+        """Decorator that raises an error if mirror doesn't exist."""
+        def wrapper(self, *args, **kwargs):
+            if not Mirror.contains_mirror(self.destination_directory):
+                raise UninitializedMirrorError()
+            else:
+                return method(self, *args, **kwargs)
+        return wrapper
+
+    @require_mirror
+    def delete_mirror(self):
+        """Completely delete the mirror."""
+        log.info(
+            "Deleting mirror for directory %r" % self.destination_directory
+        )
+        # Delete mirror config stuff, leaving the directory untouched
+        try:
+            shutil.rmtree(self.config_directory)
+        except (OSError, IOError), e:
+            raise FileError("Error deleting mirror %r: %s" % 
+                (self.config_directory, e)
+            )
+
+    def mirror(self, source_directory):
+        """Create a mirror of the specified Checkpoint directory."""
+
+        # Determine path to the source directory, and save this
+        # configuration data to the filesystem (thanks to a PickleProperty).
+        self.source_directory = os.path.abspath(source_directory)
+
+        log.info(
+            "Initializing mirror of directory: %r" % self.source_directory
+        )
+
+        # Instantiate a Repository object pointed at the source directory
+        self.source_repository = Repository(self.source_directory)
+
+        # Assert that the source repository has been initialized
+        if not Repository.contains_repository(self.source_directory):
+            raise UninitializedRepositoryError()
+        
+        # Mirror the repository's active set of files
+        active_set = self.source_repository.db.select('active_set', 
+            columns=['path', 'hash', 'fingerprint', 'type']
+        )
+        for relpath, path_hash, fingerprint, file_type in active_set:
+            log.info("%s\t%s" % (STATUS_CODES[ADDED], relpath))
+            self.source_repository.filestore.restore(
+                self.get_abspath(relpath), 
+                path_hash, 
+                fingerprint, 
+                file_type
+            )
+        # Record the currently-mirrored changeset
+        self.changeset = self.source_repository.current_changeset
+        log.info("Current changeset: %s" % self.changeset)
+
+    def get_abspath(self, relpath):
+        """Return the absolute path to relpath in the mirror directory."""
+        return os.path.abspath(
+            os.path.join(self.destination_directory, relpath)
+        )
+    
+    @require_mirror
+    @lock
+    def refresh(self):
+        """Mirror the source repository."""
+
+        # Instantiate a Repository object pointed at the source directory
+        # Note: self.source_directory is a PickleProperty
+        self.source_repository = Repository(self.source_directory)
+
+        # Assert that the source repository has been initialized
+        if not Repository.contains_repository(self.source_directory):
+            raise UninitializedRepositoryError()
+
+        # Iterate through changesets committed since the last 'refresh'
+        changecount = 0
+        start = self.changeset + 1
+        end = self.source_repository.current_changeset + 1
+        for mod_changeset in range(start, end):
+            additions = []
+            deletions = []
+            modifications = []
+            # Iterate through changes in this changeset
+            changeset_changes = self.source_repository.db.select(
+                'modification', 
+                columns=[
+                    'changeset_id', 'path', 'hash', 'fingerprint', 'type', 
+                    'status'
+                ],
+                where_clauses=dict(changeset_id=mod_changeset)
+            )
+            for change in changeset_changes:
+                # Unpack data in the 'change' tuple
+                (mod_changeset, relpath, path_hash, 
+                fingerprint, file_type, status) = change
+                # Determine path to target file in mirror directory
+                target_path = self.get_abspath(relpath)
+                # Log what's happening
+                changecount += 1
+                log.info("%s\t%s" % (STATUS_CODES[status], relpath))
+                # Add change to the appropriate list
+                if status == ADDED:
+                    additions.append(
+                        (target_path, path_hash, fingerprint, file_type)
+                    )
+                elif status == DELETED:
+                    deletions.append(
+                        (target_path, path_hash, fingerprint, file_type)
+                    )
+                elif status == MODIFIED:
+                    modifications.append(
+                        (target_path, path_hash, fingerprint, file_type)
+                    )
+                else:
+                    raise CheckpointBug(
+                        "Invalid modification status: %r" % status
+                    )
+            # Perform all file changes
+            self.source_repository.filestore.restore_multiple(modifications)
+            self.source_repository.filestore.restore_multiple(additions)
+            self.source_repository.filestore.delete_multiple(deletions)
+            
+            # Record the currently-mirrored changeset
+            self.changeset = self.source_repository.current_changeset
+            log.info("Current changeset: %s" % self.changeset)
+
+    @require_mirror
+    def recover(self):
+        """Attempt to re-mirror the directory"""
+        try:
+            self.__recover()
+        except:
+            log.info(dedent("""
+                --------------------------------------------------------------
+                !!! Recovery Failed! !!!
+
+                Checkpoint failed to restore mirror %r.
+
+                Further error messages may indicate the source of the failure.
+
+                Manual crash-recovery may be the only option.  
+                Check the documentation for more information.
+                --------------------------------------------------------------
+
+            """ % (self.destination_directory)
+            ))
+            raise
+
+    def __recover(self):
+        """Attempt to delete and re-mirror the mirror."""
+        source_directory = self.source_directory
+        self.delete_mirror()
+        self.mirror(source_directory)
+        # Delete any lockfiles
+        if os.path.exists(self.lockfile_path):
+            try:
+                os.remove(self.lockfile_path)
+            except (OSError, IOError), e:
+                raise FileError(
+                    "Could not remove lockfile %r:  %s" % 
+                    (self.lockfile_path, e)
+                )
+        
+class Repository(Common):
+    """Checkpoint Repository"""
+
+    # Use a PickleProperty to load/save the repository format number    
+    repository_format = PickleProperty(
+        lambda inst: os.path.join(
+            os.path.abspath(inst.repository_path), 
+            'repository_format'
+        )
+    )
+    
+    def __init__(self, directory):
+        # Raise error if directory has not been created
+        if not os.path.isdir(directory):
+            raise NotFound("Could not find directory %r" % directory)
+        
+        self.directory = os.path.abspath(directory) # directory to 'watch'
+        self.repository_path = Repository.get_repository_path(self.directory)
+        self.db = Database(self.repository_path)
+        self.filestore = FileStore(self.repository_path)
+        self.lockfile_path = os.path.join(self.repository_path, 'lock')
+
+    def initialize(self):
+        """Initialize the repository. Used by the `watch` command."""
+        log.info("Initializing repository for directory: %r" % self.directory)
+
+        # Create repository directory and crash-recovery directory
+        try:
+            os.makedirs(self.repository_path)
+        except (OSError, IOError), e:
+            raise FileError("Could not create repository %r: %s" % 
+                (self.repository_path, e)
+            )
+
+        # Record the supported repository format
+        self.repository_format = SUPPORTED_REPOSITORY_FORMAT
+
+        # Initialize db and filestore
+        self.db.initialize()
+        self.filestore.initialize()
+
+    @staticmethod
+    def contains_repository(directory):
+        """Return True if directory contains a Repository, False otherwise."""
+        some_repository_file = os.path.join(
+            Repository.get_repository_path(directory),
+            'repository_format'
+        )
+        if os.path.exists(some_repository_file):
+            return True
+        else:
+            return False
+
+    def lock(method):
+        """Return decorator that locks repository while method is running."""
+        def wrapper(self, *args, **kwargs):
+            # Acquire a lock
+            lock = acquire_lock(self.lockfile_path, RepositoryLocked)
+            # Call the decorated method
+            return_value = method(self, *args, **kwargs)
+            # Release the lock
+            release_lock(lock)
+            # Return
+            return return_value
+        return wrapper
+
+    def require_repository(method):
+        """Decorator that raises an error if repository wasn't initialized."""
+        def wrapper(self, *args, **kwargs):
+            if not Repository.contains_repository(self.directory):
+                raise UninitializedRepositoryError()
+            else:
+                return method(self, *args, **kwargs)
+        return wrapper
+
+    def __get_current_changeset(self):
+        """Return the last committed changeset id."""
+        return self.db.current_changeset
+    current_changeset = property(__get_current_changeset)
+
+    def get_relpath(self, abspath):
+        """Return the relative path from `path` to the "watched" directory"""
+        return abspath[len(self.directory):].lstrip(os.sep)
+
+    def get_abspath(self, relpath):
+        """Return the absolute path to relpath in the 'watched' directory."""
+        return os.path.abspath(os.path.join(self.directory, relpath))
+
+    def get_fingerprint(self, relpath):
+        """Return a fingerprint to help determine if path has been changed."""
+        # Determine file type (link, directory, file)
+        abspath = self.get_abspath(relpath)
+        file_type = self.filestore.get_file_type(abspath)
+        
+        # Create the hash for this fingerprint, starting with 'relpath' data
+        h = hashlib.sha1()
+        h.update(unicode(relpath))
+        
+        # Use 'lstat' to get additional fingerprint info
+        stat_info = os.lstat(abspath)
+        if file_type == FILE or file_type == LINK:
+            for k in ['st_mode', 'size', 'st_mtime', 'st_flags']:
+                if hasattr(stat_info, k):
+                    h.update(str(getattr(stat_info, k)))
+            return h.hexdigest()
+        elif file_type == DIRECTORY:
+            h.update(str(stat_info.st_mode))
+            return h.hexdigest()
+        else:
+            raise UnsupportedFileType(abspath)
+
+    def get_modification_status(self, relpath, fingerprint):
+        """Return the modification status of the given file or directory.
+
+        For files and directories that exist currently in the 'watch'ed
+        directory, determine if file or directory was newly ADDED or 
+        newly MODIFIED, and return the corresponding constant.  For files and 
+        directories that do not currently exist on the file system, look in 
+        the database to determine if the file or directory was recently 
+        DELETED.  If the file or directory has not changed since the last 
+        commit, then NO_CHANGE is returned.
+
+        """
+        # Determine file type, catching NotFound error for nonexistant files
+        # but letting UnsupportedFileType errors bubble up.
+        abspath = self.get_abspath(relpath)
+        try:
+            file_type = self.filestore.get_file_type(abspath)
+        except NotFound:
+            pass
+        exists_in_filesystem = os.path.lexists(abspath)
+        exists_in_db = self.db.exists('active_set', dict(path=relpath))
+
+        # If path is not in database, assume it was recently ADDED.
+        if not exists_in_db:
+            return ADDED
+
+        # If path exists in the database but not in the filesystem,
+        # assume it was recently DELETED.
+        if exists_in_db and not exists_in_filesystem:
+            return DELETED
+
+        # If path exists in the database and in the filesystem,
+        # test path to see if it was recently MODIFIED.
+        if exists_in_db and exists_in_filesystem:
+            original_fingerprint = self.db.get_active_fingerprint(relpath)
+            if unicode(original_fingerprint) == unicode(fingerprint):
+                return NO_CHANGE
+            else:
+                return MODIFIED
+
+    @require_repository
+    def delete_repository(self):
+        """Completely delete the repository."""
+        log.info("Deleting repository for directory %r" % self.directory)
+        # Delete repository, leaving the 'watched' directory untouched
+        try:
+            shutil.rmtree(self.repository_path)
+        except (OSError, IOError), e:
+            raise FileError("Error deleting repository %r: %s" % 
+                (self.repository_path, e)
+            )
+
+    @require_repository
+    @lock
+    def print_changes(self):
+        """Print a list of changes since the last commit."""
+        log.info("Printing status of directory: %r" % self.directory)
+        # Print changes to stdout.
+        current_changeset = self.current_changeset
+        log.info("Changes since changeset %s..." % str(current_changeset))
+        for change in self.__iter_changes():
+            path, path_hash, fingerprint, file_type, status = change
+            log.info("%s\t%s" % (STATUS_CODES[status], path))
+    
+    @require_repository
+    @lock
+    def iter_changes(self):
+        """Return an iterable of repository changes since the last commit.
+        
+        Each item returned will be a tuple containing these fields:
+            `path` - path to the changed file (relative to 'watched' directory)
+            `path_hash` - sha1 hash of the changed file
+                for MODIFIED or ADDED files, this is a hash of the current file
+                for DELETED files, this is the hash of the old file
+            `fingerprint` - sha1 hash of various stat() data, used to 
+                quickly detect if the file has changed or not
+            `file_type` - FILE, DIRECTORY, or LINK
+            `status` - ADDED, DELETED, or MODIFIED
+
+        Results are not sorted in any way, and the order of yield-ed
+        results should not be relied on for any particular purpose.
+
+        Special files (pipes, sockets, etc) are ignored.
+
+        Paths that were renamed or moved will be detected as one path being 
+        deleted and another path being added.
+        
+        """
+        # This method is merely a @lock-ed version of self.__iter_changes
+        for change in self.__iter_changes():
+            yield change
+
+    def __iter_changes(self):
+        """See iter_changes() for details."""
+        # Iterate through the 'active_set' database table (which stores the 
+        # state of all files at the time of the last commit), and see if any 
+        # of those files or directories have been DELETED
+        active_set = self.db.select('active_set', 
+            columns=['path', 'hash', 'fingerprint', 'type']
+        )
+        for relpath, path_hash, fingerprint, file_type in active_set:
+            try:
+                status = self.get_modification_status(relpath, fingerprint)
+            except UnsupportedFileType, e:
+                log.warning(e.message)
+            else:
+                if status == DELETED:
+                    yield (relpath, path_hash, fingerprint, file_type, status)
+        
+        # Walk directory and yield files and directories that 
+        # were ADDED or MODIFIED since the last commit
+        ignored_patterns = self.get_ignored_patterns()
+        for root, dirs, files in os.walk(self.directory):
+            # Ignore certain files and directories.  Note that 
+            # dirs is modified inplace so that os.walk will not recurse
+            # into those directories.
+            files = filter_all_patterns(files, ignored_patterns)                
+            for d in dirs:
+                if matches_any_pattern(d, ignored_patterns):
+                    dirs.remove(d)
+            # Iterate through files and directories looking for changes
+            for x in dirs + files:
+                abspath = os.path.join(root, x)
+                relpath = self.get_relpath(abspath)
+                try:
+                    fingerprint = self.get_fingerprint(relpath)
+                except (OSError, IOError), e:
+                    raise FileError(
+                        "Could not determine status of file %r: %s" %
+                        (abspath, e)
+                    )
+                try:
+                    status = self.get_modification_status(relpath, fingerprint)
+                except UnsupportedFileType, e:
+                    log.warning(e.message)
+                else:
+                    # Yield any files/dirs that have been ADDED or MODIFIED
+                    if status == ADDED or status == MODIFIED:
+                        file_type = self.filestore.get_file_type(abspath)
+                        path_hash = sha1_hash(abspath)
+                        yield (
+                            relpath, path_hash, fingerprint, file_type, status
+                        )
+    
+    @require_repository
+    @lock
+    def commit(self):
+        """Commit any unsaved changes to a new changeset.
+        
+        Returns the new changeset id.
+        
+        """
+        # Wrap the actual __commit() call inside a transaction that will 
+        # automatically rollback if an exception is thrown,
+        # and automatically commit otherwise.
+        try: 
+            with self.db:
+                return self.__commit()
+        except NoChanges:
+            log.info("No changes to commit")
+
+    def __commit(self):
+        """See commit() for details."""
+        log.info("Committing changes for directory %r" % self.directory)
+
+        # Start a new changeset
+        new_changeset = self.db.insert('changeset', dict(id=None)).lastrowid
+        
+        # Iterate through changes and commit them to the repository
+        changecount = 0
+        for change in self.__iter_changes():
+            relpath, path_hash, fingerprint, file_type, status = change
+            abspath = self.get_abspath(relpath)
+            # Log what's happening
+            changecount += 1
+            log.info("%s\t%s" % (STATUS_CODES[status], relpath))
+            # Commit changes as appropriate for the type of change
+            if status == ADDED:
+                self.db.record_added(
+                    new_changeset, relpath, path_hash, 
+                    fingerprint, file_type, status
+                )
+                self.filestore.save(abspath, path_hash, fingerprint, file_type)
+            elif status == DELETED:
+                self.db.record_deleted(
+                    new_changeset, relpath, path_hash, 
+                    fingerprint, file_type, status
+                )
+            elif status == MODIFIED:
+                self.db.record_modified(
+                    new_changeset, relpath, path_hash, 
+                    fingerprint, file_type, status
+                )
+                self.filestore.save(abspath, path_hash, fingerprint, file_type)
+            else:
+                raise CheckpointBug("Invalid modification status: %r" % status)
+
+        # If there were no changes, roll back transaction
+        if changecount == 0:
+            raise NoChanges()
+        else:
+            log.info("New changeset: %s" % new_changeset)
+            return new_changeset
+
+    def __restore_active_set(self):
+        """Undo all changes since the last commit.
+        
+        Returns the number of changes that were undone.
+        
+        """
+        additions = []
+        deletions = []
+        modifications = []
+        changecount = 0
+
+        # Determine how to reverse all *uncommitted* changes
+        for change in self.__iter_changes():
+            # Unpack tuple of information about this change
+            relpath, path_hash, fingerprint, file_type, status = change
+            abspath = self.get_abspath(relpath)
+            # Peform the reverse of the change, to undo the change.
+            action = None
+            if status == ADDED:
+                # Remove path
+                action = DELETED
+                deletions.append(abspath)
+            elif status == DELETED:
+                # Put path back where it was
+                action = ADDED
+                original_hash = self.db.get_active_hash(relpath)
+                original_fingerprint = self.db.get_active_fingerprint(relpath)
+                original_type = self.db.get_active_file_type(relpath)
+                additions.append([
+                    abspath, original_hash, original_fingerprint, 
+                    original_type
+                ])
+            elif status == MODIFIED:
+                # Locate and restore original path
+                action = MODIFIED
+                original_hash = self.db.get_active_hash(relpath)
+                original_fingerprint = self.db.get_active_fingerprint(relpath)
+                original_type = self.db.get_active_file_type(relpath)
+                modifications.append([
+                    abspath, original_hash, original_fingerprint, 
+                    original_type
+                ])
+            else:
+                raise CheckpointBug("Invalid modification status: %r" % status)
+            # Log what's happening
+            changecount += 1
+            log.info("%s\t%s" % (STATUS_CODES[action], relpath))
+
+        # Perform all file changes
+        self.filestore.restore_multiple(modifications)
+        self.filestore.restore_multiple(additions)
+        self.filestore.delete_multiple(deletions)
+        
+        return changecount
+    
+    @require_repository
+    @lock
+    def revert(self, changeset=None):
+        """Revert to a previous changeset.
+        
+        All uncommitted changes are reverted.  Then, if a changeset
+        was specified, recent changesets are iterated in descending order
+        and reverted, until the desired_changeset is reached.
+        
+        Returns the new changeset id.
+        
+        """
+        # Wrap the actual __revert() call inside a transaction that will 
+        # automatically rollback if an exception is thrown,
+        # and automatically commit otherwise.
+        try: 
+            with self.db:
+                return self.__revert(desired_changeset=changeset)
+        except NoChanges:
+            log.info("No changes to revert")
+     
+    def __revert(self, desired_changeset=None):
+        """See revert() for details."""
+
+        # Undo any uncommited changes.
+        changecount = self.__restore_active_set()
+        
+        # If no changeset was specified, our work here is done.
+        if desired_changeset is None: 
+            if changecount == 0:
+                raise NoChanges()
+            else:
+                return
+
+        # Log what's happening.
+        log.info("Reverting directory %r to changeset %s" % 
+            (self.directory, desired_changeset)
+        )
+        
+        # Make sure desired changeset is a valid changeset.
+        if not self.db.exists('changeset', dict(id=desired_changeset)):
+            raise RepositoryError("Invalid changeset: %s" % desired_changeset)
+
+        # Start a new changeset to hold all the changes.
+        new_changeset = self.db.insert('changeset', dict(id=None)).lastrowid
+
+        # Iterate changesets in decending order (starting with the 
+        # most recent) and reverse the changes made in each changeset,
+        # until the desired_changeset is reached.
+        for i in range(new_changeset-1, desired_changeset, -1):
+            additions = []
+            deletions = []
+            modifications = []
+            # Iterate through changes in this changeset
+            changeset_changes = self.db.select('modification', 
+                columns=[
+                    'changeset_id', 'path', 'hash', 'fingerprint', 'type', 
+                    'status'
+                ],
+                where_clauses=dict(changeset_id=i)
+            )
+            for change in changeset_changes:
+                # Unpack data in the 'change' tuple
+                (mod_changeset, relpath, path_hash, 
+                fingerprint, file_type, status) = change
+                abspath = self.get_abspath(relpath)
+                # Perform the reverse of the original modification
+                action = None
+                if status == ADDED:
+                    # Remove path
+                    action = DELETED
+                    deletions.append(
+                        (new_changeset, relpath, path_hash, 
+                        fingerprint, file_type, action)
+                    )
+                elif status == DELETED:
+                    action = ADDED
+                    additions.append(
+                        (new_changeset, relpath, path_hash, 
+                        fingerprint, file_type, action)
+                    )
+                elif status == MODIFIED:
+                    action = MODIFIED
+                    # Locate the previous version of path
+                    last_version = self.db.get_previous_version(
+                        relpath, mod_changeset
+                    )
+                    (last_hash, last_fingerprint, 
+                    last_type, last_status) = last_version
+                    # A file can not possibly be DELETED and then MODIFIED.
+                    # If the previous state was not ADDED or MODIFIED,
+                    # something is horribly wrong and could be a bug
+                    if last_status not in [ADDED, MODIFIED]:
+                        message = textwrap.dedent("""
+                            DEBUG INFO:
+                            path: %r
+                            path_hash: %r
+                            path_fingerprint: %r
+                            mod_changeset: %r
+                        """ % (abspath, path_hash, fingerprint, mod_changeset))
+                        raise CheckpointBug(message)
+                    modifications.append(
+                        (new_changeset, relpath, last_hash, 
+                        last_fingerprint, last_type, action)
+                    )
+                else:
+                    raise CheckpointBug(
+                        "Invalid modification status: %r" % status
+                    )
+
+            # Remove duplicates 
+            deletions = filter_duplicates(deletions)
+            additions = filter_duplicates(additions)
+            modifications = filter_duplicates(modifications)
+
+            # Prune additions and deletions so that we don't try to
+            # add and delete the same exact thing.
+            redundant_additions = []
+            redundant_deletions = []
+            for d in deletions:
+                file_infos = d[:-1]
+                corresponding_addition = file_infos + tuple([ADDED])
+                if corresponding_addition in additions:
+                    additions.remove(corresponding_addition)
+                    redundant_deletions.append(d)
+            for r in redundant_deletions:
+                deletions.remove(r)
+
+            # Perform all modifications, then additions, then deletions,
+            # in that order.  This prevents most dependency problems.
+            for changes in [modifications, additions]:
+                path_changes = []
+                for c in changes:
+                    (new_changeset, relpath, path_hash, 
+                    fingerprint, file_type, action) = c
+                    self.db.record_modified(*c)
+                    abspath = self.get_abspath(relpath)
+                    path_changes.append(
+                        [abspath, path_hash, fingerprint, file_type]
+                    )
+                    # Log what's happening
+                    changecount += 1
+                    log.info("%s\t%s" % (STATUS_CODES[action], relpath))
+                self.filestore.restore_multiple(path_changes)
+            
+            path_deletions = []
+            for d in deletions:
+                (new_changeset, relpath, path_hash, 
+                fingerprint, file_type, action) = d
+                self.db.record_deleted(*d)
+                path_deletions.append(self.get_abspath(relpath))
+                # Log what's happening
+                changecount += 1
+                log.info("%s\t%s" % (STATUS_CODES[action], relpath))
+            self.filestore.delete_multiple(path_deletions)
+
+        # Raise an error if there were no changes.  This allows the
+        # actual revert() method to rollback the transaction and cancel
+        # the unnecessary new changeset.
+        if changecount == 0:
+            raise NoChanges()
+        else:
+            log.info("New changeset: %s" % new_changeset)
+            return new_changeset
+
+    @require_repository
+    def recover(self):
+        """Attempt to repair directory and restore any missing files."""
+        recovery_directory = self.__create_recovery_directory()
+        try:
+            self.__recover(recovery_directory)
+        except:
+            log.info(dedent("""
+                --------------------------------------------------------------
+                !!! Recovery Failed! !!!
+
+                Checkpoint failed to restore directory %r.
+            
+                Further error messages may indicate the source of the failure.
+            
+                If files are missing, you may find them in the crash
+                recovery directory %r
+            
+                Manual crash-recovery may be the only option.  
+                Check the documentation for more information.
+                --------------------------------------------------------------
+                
+            """ % (self.directory, recovery_directory)
+            ))
+            raise
+
+    def __create_recovery_directory(self):
+        """Create a new crash-recovery directory and return the path."""
+        recovery_basedir = os.path.join(self.repository_path, 'recovery')
+        if not os.path.exists(recovery_basedir):
+            new_dir_num = 1
+        else:
+            new_dir_num = len(os.listdir(recovery_basedir)) + 1
+        recovery_directory = os.path.join(recovery_basedir, str(new_dir_num))
+        try:
+            os.makedirs(recovery_directory)
+        except (OSError, IOError), e:
+            raise FileError(
+                "Could not create a new crash-recovery directory %r: %s" %
+                (recovery_directory, e)
+            )
+        return recovery_directory
+
+    def __recover(self, recovery_directory):
+        """See recover() for details"""
+        log.info("Attempting to recover directory %r" % self.directory)
+        # Move all existing files out of the checkpoint directory and
+        # into a crash-recovery directory inside the repository
+        for path in os.listdir(self.directory):
+            # Skip the repository directory
+            if path == self.get_basename():
+                continue
+            source = os.path.join(self.directory, path)
+            destination = os.path.join(recovery_directory, path)
+            try:
+                shutil.move(source, destination)
+            except (OSError, IOError), e:
+                raise FileError(
+                    "Could not move %r to recovery directory %r: %s" % 
+                    (source, recovery_directory, e)
+                )
+        # Attempt to restore the active set of files
+        self.restore_active_set()
+        # Delete any lockfiles
+        if os.path.exists(self.lockfile_path):
+            try:
+                os.remove(self.lockfile_path)
+            except (OSError, IOError), e:
+                raise FileError(
+                    "Could not remove lockfile %r:  %s" % 
+                    (self.lockfile_path, e)
+                )
