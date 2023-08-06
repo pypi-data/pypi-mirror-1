@@ -1,0 +1,108 @@
+#!/usr/bin/env python
+#coding=utf8
+#
+#       Copyright 2009 Antoine Millet <antoine@inaps.org>
+#       
+#       This program is free software; you can redistribute it and/or modify
+#       it under the terms of the GNU General Public License as published by
+#       the Free Software Foundation; either version 2 of the License, or
+#       (at your option) any later version.
+#       
+#       This program is distributed in the hope that it will be useful,
+#       but WITHOUT ANY WARRANTY; without even the implied warranty of
+#       MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#       GNU General Public License for more details.
+#       
+#       You should have received a copy of the GNU General Public License
+#       along with this program; if not, write to the Free Software
+#       Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+#       MA 02110-1301, USA.
+
+'''
+	GraphIT is a monitoring server that get monitoring data from agents
+	via ReSTful API and which distribute these data to an Ajax 
+	application to display it in graphical form.
+	
+	GraphIT use a SQLite database to store monitoring data.
+	
+	Agents can be written in any languages, but an Python helper library
+	is available to program it in Python.
+'''
+import sys
+from optparse import OptionParser
+
+from graphit.server import GraphItServer
+
+def cb_daemonize(*args, **kwargs):
+	''' Daemonize program. Callback called by optparse when option "-d" 
+		is specified. '''
+	
+	try:
+		from grizzled.os import daemonize, DaemonError
+	except ImportError: 
+		print ('Warning: Unable to daemonize daemon. Please install '
+				'grizzled with `easy_install grizzled` command.')
+		print '         Netcond will continue on foreground.'
+	else:
+		try:
+			daemonize()
+		except DaemonError, err:
+			print 'Warning: Unabled to daemonize daemon. %s' % err
+			print '         Netcond will continue on foreground.'
+
+if __name__ == '__main__':
+	
+	op = OptionParser()
+	
+	# Registering cli options
+	op.add_option('-v', '--verbose',
+		action='store_true',
+		default=False,
+		help='print debug text on stdout'
+	)
+
+	op.add_option('-d', '--daemonize', 
+		action='callback', 
+		callback=cb_daemonize, 
+		help='detach process from current terminal'
+	)
+
+	op.add_option('-p', '--port',
+		type='int',
+		default=8080,
+		help='http port to listen'
+	)
+	
+	op.add_option('-i', '--interface',
+		default='0.0.0.0',
+		help='ip address of interface to bind'
+	)
+	
+	op.add_option('-f', '--database-file',
+		default='graphit.db',
+		help='path to the database file'
+	)
+	
+	op.add_option('-l', '--login',
+		default=None,
+		help='login to adding monitoring data'
+	)
+	
+	op.add_option('-w', '--passwd',
+		default=None,
+		help='password to adding monitoring data'
+	)
+	
+	(options, args) = op.parse_args()
+	
+	# Validating options :
+	if options.port < 1 or options.port > 65535:
+		op.error('Tcp port is between 0 and 65535')
+	
+	# Launching GraphIT :
+	git = GraphItServer(options)
+	git.init_db() # Initialize database (if it doesnt exists)
+	try:
+		git.serve_forever()
+	except KeyboardInterrupt:
+		sys.exit(0)
