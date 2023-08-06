@@ -1,0 +1,140 @@
+Relations
+=========
+
+Relations also need to be managed by a workflow system. Clio knows how
+to handle objects that have relations, if at least we define these
+relations in a special manner.
+
+One to Many Relations
+---------------------
+
+Normally when creating a relation using the SQLAlchemy ORM, you use
+the ``relation`` constructor in the mapper. With Clio you have to use
+``dynamic_loader`` instead. This is also supplied by SQLAlchemy and
+receives the same parameters as ``relation``. The difference is that
+``dynamic_loader`` easily allows further filtering to be done on the
+generated relation properties, which Clio uses to set up its
+workflow-aware properties. ``dynamic_loader`` generates properties
+that are queries, not true collections.
+
+We define two Clio tables with a foreign key relation between them::
+
+  jar = clio.Table('jar', metadata,
+     Column(name, Unicode(20), nullable=False))
+
+  cookie = clio.Table('cookie', metadata,
+     Column(name, Unicode(20), nullable=False),
+     Column('jar_id', Integer, ForeignKey('jar.id'), nullable=False))
+
+We can now set up two models that represent these tables::
+ 
+  class Jar(clio.Model):
+      def __init__(self, code, name):
+          super(Jar, self).__init__(code)
+          self.name = name
+
+  class Cookie(clio.Model):
+      def __init__(self, code, name):
+          super(Cookie, self).__init__(code)
+          self.name = name
+
+We map the classes to the tables and define a relation::
+
+  mapper(Jar, jar,
+         properties={
+           'cookies': dynamic_loader(Cookie, backref('jar')),
+         })
+
+``Jar`` instances will now have a ``cookies`` property on it. This
+property is not a collection like you would get if you had used
+``relation``, but a SQLAlchemy query object. You can loop through it
+and access individual items like you would with a Python ``list``, but
+other operations (like ``len``) won't work. To treat it as a list, you
+can however always simply use ``list`` on it::
+
+  list(somejar.cookies)
+
+This executes the query and puts the resulting objects in a list.
+
+Workflow properties
+-------------------
+
+The ``cookies`` property represents *all* cookies that are in the jar,
+new, published or archived. Clio provides other relation properties
+that give just the published relations, the archived relations or the
+newly created or under edit relations (or the under edit relations and
+those relations that were deleted). To establish those properties, you
+need to call ``clio.workflow_properties`` on the mapped classes::
+
+  clio.workflow_properties(Jar)
+  clio.workflow_properties(Cookie)
+
+Now you can access the following extra properties::
+
+  somejar.cookies_archived
+  somejar.cookies_published
+  somejar.cookies_editable
+  somejar.cookies_actual
+
+A special ``cookies_original`` relation also exists. This is because
+the ``cookies`` relation has special behavior for ``UPDATABLE``
+versions (it refers back to the published version to retrieve relation
+information).
+
+Many to Many Relations
+----------------------
+
+The other major type of relation that Clio supports is the
+many-to-many relation. In this case a pivot (or secondary) table
+exists that describes a many to many relationship between two other
+tables::
+
+  bird = clio.Table('bird', metadata,
+     Column(name, Unicode(20), nullable=False))
+
+  feeding_site = clio.Table('feeding_site', metadata,
+     Column(name, Unicode(20), nullable=False))
+
+  from sqlalchemy import Table
+
+  # the secondary table
+  bird_feeding_site = Table('bird_feeding_site', metadata,
+     Column('bird_id', Integer, ForeignKey('bird.id'), nullable=False),
+     Column('feeding_site_id', Integer, ForeignKey('feeding_site.id'), nullable=False))
+
+Note that the pivot table is not defined as a Clio table but is
+instead a normal SQLALchemy table.
+
+Next, we set up the classes to be mapped by the ORM::
+
+  class Bird(clio.Model):
+      def __init__(self, code, name):
+          super(Bird, self).__init__(code)
+          self.name = name
+
+  class FeedingSite(clio.Model):
+      def __init__(self, code, name):
+          super(FeedingSite, self).__init__(code)
+          self.name = name
+   
+And we set up the mapping itself::
+
+  mapper(Bird, bird)
+
+  mapper(FeedingSite, feeding_site,
+         properties={
+           'birds': dynamic_loader(
+              Bird,
+              secondary=bird_feeding_site,
+              backref=backref('feeding_sites', lazy='dynamic')),
+          })
+
+Again, we use ``dynamic_loader``. This time we also need to supply a
+special parameter to the ``backref``, namely ``lazy='dynamic'``. This
+is to ensure that the ``feeding_sites`` properties generated on the
+``Bird`` class is also a ``dynamic_loader`` relation.
+
+Finally we need to set up the workflow properties::
+
+  clio.workflow_properties(Bird)
+  clio.workflow_properties(FeedingSite)
