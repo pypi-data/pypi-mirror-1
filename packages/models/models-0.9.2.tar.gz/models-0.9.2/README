@@ -1,0 +1,172 @@
+The Models
+==========
+
+`Models` is a lightweight framework for mapping Python classes to schema-less
+databases. It is not an ORM as it doesn't map existing schemata to Python
+objects but instead defines them on a higher layer built upon a schema-less
+storage (key/value or document-oriented). You define models as a valuable subset
+of the whole database and work with only certain parts of existing entities --
+the parts you need.
+
+Installation
+------------
+
+    $ sudo easy_install models
+
+You will also need to install `pyrant`_ to enable the Tokyo Tyrant backend.
+In order to use Models with Tokyo Cabinet (i.e. directly, not through Tyrant)
+you will also need a recent snapshot of the `tc`_ from github along with
+`pyrant`. You might want to use another library (or libraries) with Models.
+
+  .. _pyrant: http://pypi.python.org/pypi/pyrant/
+  .. _tc: http://github.com/rsms/tc/
+
+Backends
+--------
+
+Currently `Tokyo Cabinet`_ and `Tokyo Tyrant`_ backends are included. Any other
+backend can be more or less easily created by wrapping existing bindings in
+Storage and Query classes which can loosely follow existing guidelines.
+
+The `Models` library does not impose a strict API, it only recommends one. In
+fact, you will only *need* to have the backend return a query instance (even
+bindings' native one) and wrap the results in given model's objects. See
+`models.backends.tyrant` for examples.
+
+  .. _Tokyo Cabinet: http://1978th.net/tokyocabinet/
+  .. _Tokyo Tyrant: http://1978th.net/tokyotyrant/
+
+Usage
+-----
+
+Not surprising to those who had ever used an ORM::
+
+    class Country(Model):
+        name = Property(unicode)    # any Python type; default is unicode
+
+        def __unicode__(self):
+            return self.name
+
+        class Meta:
+            must_have = {'type': 'country'}
+
+
+    class Person(Model):
+        first_name = Property(required=True)
+        last_name = Property(required=True)
+        gender = Property()
+        birth_date = Date()
+        birth_place = Property(Country)    # reference to another model
+
+        def __unicode__(self):
+            return self.full_name    # full_name is a dynamic attr, see below
+
+        @property
+        def age(self):
+            return (datetime.datetime.now().date() - self.birth_date).days / 365
+
+        @property
+        def full_name(self):
+            return '%s %s' % (self.first_name, self.last_name)
+
+        class Meta:
+            must_have = {'is_person': True}
+
+The interesting part is the Meta subclass. It contains a must_have attribute
+which actually binds the model to a subset of data in the storage.
+``{'is_person': True}`` states that a data row/document/... must contain a bool
+field `is_person` with value `True`. You can easily define any other query
+conditions. If you create an empty Person instance, it will have all the "must
+haves" pre-filled.
+
+Now let's try these models with a Tokyo Cabinet database::
+
+    >>> storage = models.get_storage(backend='models.backends.tokyo_cabinet',
+    ...                              kind='TABLE', path='test.tct')
+    >>> guido = Person.query(storage).filter(first_name='Guido')[0]
+    >>> guido
+    <Person Guido van Rossum>
+    >>> guido.first_name
+    Guido
+    >>> guido.birth_date
+    datetime.date(1960, 1, 31)
+    >>> guido.age
+    49
+    >>> guido.birth_place = Country(name="Netherlands")
+    >>> guido.save(storage)
+    >>> guido.birth_place
+    <Country Netherlands>
+
+...and so on.
+
+Note that relations are supported out of the box.
+
+Switching backends
+------------------
+
+The Models library provides backends for both Tokyo Cabinet
+(`models.backends.tokyo_cabinet`) and Tokyo Tyrant
+(`models.backends.tokyo_tyrant`). You can choose the TC backend to use the DB
+file directly, or switch to the TT backend to access the same file through the
+manager. The first option is great for development and some other cases where
+you would use SQLite; the second option is important for most production
+environments where multiple connections are expected. The good news is that
+there's no more import and export, dump/load sequences, create/alter/drop and
+friends. Having tested the application against the database `storage.tct` with
+Cabinet backend, just run `ttserver storage.tct` and switch the backend config.
+
+Let's create our application::
+
+    import models
+    import settings
+    import schemata     # the actual models described above (Country and Person)
+
+    storage = models.get_storage(settings.DATABASE)
+
+    print schemata.Person.query(storage)   # prints all Person objects from DB
+
+Now define settings for both backends (settings.py)::
+
+    # direct access to the database (simple, not scalable)
+    TOKYO_CABINET_DATABASE = {
+        'backend': 'models.backends.tokyo_cabinet',
+        'kind': 'TABLE',
+        'path': 'storage.tct',
+    }
+
+    # access through the Tyrant manager (needs daemon, scalable)
+    TOKYO_TYRANT_DATABASE = {
+        'backend': 'models.backends.tokyo_tyrant',
+        'host': 'localhost',
+        'port': '1978',
+    }
+
+    # this is the *only* line you need to change in order to change the backend
+    DATABASE = TOKYO_CABINET_DATABASE
+
+Author
+------
+
+Originally written by Andrey Mikhaylenko in 2009.
+
+See the file AUTHORS for a complete authors list of this application.
+
+Please feel free to submit patches, report bugs or request features:
+
+    http://bitbucket.org/neithere/models/issues/
+
+Licensing
+---------
+
+Models is free software: you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+Models is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License
+along with Models.  If not, see <http://gnu.org/licenses/>.
