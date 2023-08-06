@@ -1,0 +1,90 @@
+-----------------------------
+import content in file system
+-----------------------------
+
+    >>> self.portal
+    <PloneSite ...
+
+    >>> from collective.synchro.scripts import import_queue
+    >>> from collective.synchro.scripts.utils import create_queue_structure
+    >>> filename = 'testimport'
+    >>> import os
+    >>> from tempfile import gettempdir
+    >>> queue = os.path.join( gettempdir(), filename)
+    >>> from tempfile import gettempdir
+    >>> class Dir(object):
+    ...     path =  queue
+
+Create an directory structure for import/export data::
+
+    >>> create_queue_structure(Dir())
+
+Create an new plone site in zodb::
+
+    >>> self.loginAsPortalOwner()
+    >>> self.app.manage_addProduct['CMFPlone'].addPloneSite('import')
+    >>> self.app['import']
+    <PloneSite at /import>
+
+Ok now create some content in portal to be synchronized::
+
+    >>> self.portal.invokeFactory('Document','tobeexported')
+    'tobeexported'
+    >>> self.portal.tobeexported.update(title = 'To be exported')
+    >>> from transaction import commit
+    >>> commit()
+
+Install the synchronisation tool::
+
+    >>> self.install_portal_synchronisation()
+    True
+
+Configure it::
+
+    >>> self.portal.portal_synchronisation.expression = 'python:True'
+    >>> self.portal.portal_synchronisation.queues.append(queue)
+
+Now synchronize tobexported::
+
+    >>> self.portal.tobeexported.restrictedTraverse('@@synchronize_content')()
+
+Now the content is in queue, we can see that::
+
+    >>> queue = self.portal.portal_synchronisation._queues[0]
+    >>> queue.listQueue()
+    ['data_...zs']
+
+Ok now fire the ssh synchronisation (you must provide an ssh key for that)::
+
+    >>> from collective.synchro.scripts.synchro_queues import SshRemoteQueue
+    >>> from collective.synchro.scripts.synchro_queues import ExportQueue
+    >>> from collective.synchro.scripts.synchro_queues import get_sysuser
+
+    >>> user = get_sysuser()
+    >>> host = 'localhost'
+    >>> remote_queue = SshRemoteQueue(user, host,
+    ...                               queue.import_to_process_path , gettempdir() )
+
+    >>> synchro = ExportQueue(queue.path , remote_queue)
+    >>> synchro.fire()
+
+We are ready to import content, lets see that::
+
+    >>> queue.listQueue('import','to_process')
+    ['data_...zs']
+
+Ok and now fire the import::
+
+    >>> self.logout()
+    >>> from collective.synchro.scripts.import_queue import ImportQueue
+    >>> importer = ImportQueue(queue.path,'plone')
+
+    >>> import shutil
+    >>> shutil.rmtree(queue.path)
+
+
+
+
+
+
+
