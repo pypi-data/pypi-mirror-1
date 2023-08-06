@@ -1,0 +1,157 @@
+# -*- coding: utf-8 -*-
+
+import formencode
+from tw.forms.validators import *
+from formencode.schema import Schema
+
+from tw.api import WidgetsList, CSSLink, JSLink
+from tw.core.js import js_function
+from tw.forms import *
+
+from {{package}}.forms.validators.unique import Unique
+from {{package}}.forms.validators.related_fetcher import RelatedFetcher
+from {{package}} import model as model
+
+__all__ = ["PageForm","NewPageForm"]
+
+def get_users():
+    return model.Session.query(model.User).order_by(model.User.username).all()
+
+# Standard settings for cmxforms
+css = CSSLink(link="/css/cmxform.css", media="screen", title="cmxform")
+functions = JSLink(link="/js/cmxform.js")
+alert = js_function('alert')
+focus_element = js_function('focus_element')
+
+# Strip spurious variables.
+class FilteringSchema(Schema):
+    filter_extra_fields = True
+    allow_extra_fields = True
+
+class NewPageForm(ListForm):
+    # Just collect the minimum data necessary.
+    # Don't bother with date and author because
+    # the controller can add those automatically.
+    class fields(WidgetsList):
+        title = TextField(
+            validator = UnicodeString(not_empty=True),
+            label_text = "Page title",
+            maxlength = 255,
+            size = 45
+            )
+        slug = TextField(
+            validator = Unique(model.Page, "slug", context_name="slug", not_empty=True),
+            label_text = "Slug",
+            maxlength = 25,
+            size = 25,
+            help_text = "(lowercase letters and underscore)"
+            )
+        display = CheckBox(
+            validator = StringBool(if_missing=False),
+            label_text = "Display?",
+            default = True,
+            )
+        content = TextArea(
+            validator = UnicodeString(not_empty=True),
+            label_text = "Page content",
+            cols = 60,
+            rows = 12
+            )
+
+    # allow adding js calls dynamically for a request
+    include_dynamic_js_calls = True
+
+    css = [css]
+    # Add cmxform styling to the form
+    css_classes = ['cmxform']
+    javascript = [functions]
+    # Note usage of the chained test "CheckAgreed" validator, of which
+    # Alberto observes: "What might be tripping you is that the chained 
+    # validator approach only raises the Invalid when there are no other 
+    # errors in the form."
+    
+    # Unchanged from the original 'new user' form.
+    validator = Schema(
+        chained_validators = [],
+        )
+
+    def update_params(self, d):
+        super(NewPageForm, self).update_params(d)
+        # Focus and select the 'name' field on the form
+        # The adapter we just wrote lets us pass formfields as parameters and
+        # the right thing will be done.
+        if not d.error:
+            self.add_call(focus_element(d.c.title))
+        else:
+            self.add_call(
+                alert('The form contains invalid data\n%s'% unicode(d.error))
+                )
+
+class PageForm(ListForm):
+    class fields(WidgetsList):
+        # The _method hidden field is required
+        # in oder to trigger the correct REST route.
+        # Make all the data editable.
+        rest_method = HiddenField(
+            default = "PUT",
+            name = "_method")
+        title = TextField(
+            validator = UnicodeString(not_empty=True),
+            label_text = "Title",
+            maxlength = 255,
+            size = 45
+            )
+        content = TextArea(
+            validator = UnicodeString(not_empty=True),
+            label_text = "Content",
+            cols = 60,
+            rows = 12,
+            help_text = "[markdown or HTML]"
+            )
+        slug = TextField(
+            # validator = Unique(Page, "slug", context_name="slug"),
+            validator = String(not_empty=True),
+            label_text = "Slug",
+            maxlength = 25,
+            size = 25,
+            help_text = "[ a-z, 0-9, _ ]"
+            )
+        author = SingleSelectField(
+            validator = RelatedFetcher(model.User),
+            options = get_users,
+            )
+        published = CalendarDateTimePicker(
+            label_text="Published",
+            )
+        display = CheckBox(
+            validator = StringBool(if_missing=False),
+            label_text = "Display?",
+            )
+
+    # allow adding js calls dynamically for a request
+    include_dynamic_js_calls = True
+
+    css = [css]
+    # Add cmxform styling to the form
+    css_classes = ['cmxform']
+    javascript = [functions]
+    # Note usage of the chained test "CheckAgreed" validator, of which
+    # Alberto observes: "What might be tripping you is that the chained 
+    # validator approach only raises the Invalid when there are no other 
+    # errors in the form."
+    validator = Schema(
+        chained_validators = [],
+        )
+
+    def update_params(self, d):
+        super(PageForm, self).update_params(d)
+        # Focus and select the 'name' field on the form
+        # The adapter we just wrote lets us pass formfields as parameters and
+        # the right thing will be done.
+        if not d.error:
+            self.add_call(focus_element(d.c.title))
+        else:
+            self.add_call(
+                alert('The form contains invalid data\n%s'% unicode(d.error))
+                )
+

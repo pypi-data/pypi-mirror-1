@@ -1,0 +1,1309 @@
+import formencode
+import datetime
+import time
+import string
+from formencode.variabledecode import NestedVariables
+
+from {{package}}.lib.base import *
+from {{package}}.model import *
+
+from pylons import config
+
+dns_checking = False
+if config['app_conf'].has_key('dns_checking'):
+    if config['app_conf']['dns_checking'].lower() == 'true':
+        dns_checking = True
+
+#
+# Sign in
+#
+
+class ExistingUsername(formencode.FancyValidator):
+    def _to_python(self, value, c):
+        if not value:
+            raise formencode.Invalid(
+                'Please enter a value', value, c)
+        users = Session.query(User).filter_by(username=value.lower()).all()
+        if len(users)>1:
+            raise Exception('More that one user with username in database')
+        if not users:
+            raise formencode.Invalid(
+                'No such username', value, c)
+        else:
+            c.user = users[0]
+        return value.lower()
+    
+
+
+class AuthenticateValidator(formencode.FancyValidator):
+    def _to_python(self, value, c): 
+        if not c.user.email:
+            msg = 'Email address not verified. Please verify your email address before signing in'
+            raise formencode.Invalid(
+                msg, value, c, error_dict={'username':msg})
+        sleep = 2
+        # this would not be called since ExistingUsername would have failed, we can use c.user
+        # We can use user[0] because if the user didn't exist this would not be called
+        if c.user.sleep and c.user.sleep > datetime.datetime.now():
+            msg = ('An incorrect password was entered for this account and so, '
+                ' as a security measure, it is locked for %s seconds to help prevent'
+                ' password attacks. Please try again in %s seconds time.') % (sleep, sleep)
+            raise formencode.Invalid(
+                msg, value, c, error_dict={'username':msg})
+        elif c.user.password != value['password']:
+            c.user.sleep = datetime.datetime.now() + datetime.timedelta(seconds=sleep)
+            c.session.flush()
+            raise formencode.Invalid(
+                    'Incorrect password', value, c, error_dict={'password':'Incorrect password'})
+        elif not c.user.active:
+            msg = 'This account has been deactivated'
+            raise formencode.Invalid(
+                msg, value, c, error_dict={'username':msg})
+        else:
+            return value
+    
+
+
+class SignIn(formencode.Schema):
+    # I don't think we want to filter extra fields but I can't
+    # remember why!
+    #filter_extra_fields = True
+    allow_extra_fields = True
+    username = ExistingUsername()
+    password = formencode.validators.String(not_empty=True)
+    chained_validators = [AuthenticateValidator(),]
+
+
+#
+# Change Password
+#
+
+class SecurePassword(formencode.FancyValidator):
+    words = 'chocolate'
+    def _to_python(self, value, c):
+        lower = value.strip().lower()
+        for line in self.words.split('\n'):
+            if line.strip().lower() == lower:
+                raise formencode.Invalid(
+                    'Please do not base your password on a dictionary term', value, c)
+        if len(value) < 5 or len(value)>20:
+            raise formencode.Invalid(
+                'Your password must contain between 5-20 characters.', value, c)
+        return value
+    
+
+
+class CorrectPassword(formencode.FancyValidator):
+    def _to_python(self, value, c):
+        if not c.user.password == value:
+            raise formencode.Invalid(
+                'Invalid current password', value, c)
+        return value
+    
+
+
+class PasswordChange(formencode.Schema):
+    allow_extra_fields = True
+    password = CorrectPassword(not_empty=True)
+    newpassword = formencode.validators.String(not_empty=True)
+    cnewpassword = SecurePassword(not_empty=True)
+    chained_validators = [
+        formencode.validators.FieldsMatch('newpassword', 'cnewpassword')
+    ]
+
+
+#
+# Update Details
+#
+
+class MinMaxInt(formencode.validators.Int):
+    def _to_python(self, value, c):
+        value = formencode.validators.Int._to_python(self, value, c)
+        if hasattr(self, 'max') and value > self.max:
+            raise formencode.Invalid(
+                    'Number must be less than %s'%self.max, value, c)
+        if hasattr(self, 'min') and value < self.min:
+            raise formencode.Invalid(
+                    'Number must be greater than %s'%self.min, value, c)
+        return value
+    
+
+
+class ExistingUserEmail(formencode.validators.Email):
+    def _to_python(self, value, c):
+        #raise Exception('adsasd')
+        matched = False
+        for email in c.user.emails:
+            if email.email.lower() == value.lower() and email.verified != None:
+                matched = True
+                break
+        if not matched:
+            raise formencode.Invalid(
+                'Please choose a verified email address.', value, c)
+        return value
+    
+
+
+#
+# Unused
+
+class ExistingUserPersona(formencode.validators.String):
+    def _to_python(self, value, c):
+        # No persona is fine:
+        if value == '-':
+            return value
+        else:
+            matched = False
+            for persona in c.user.personas:
+                if persona.name.lower() == value.lower():
+                    matched = True
+                    break
+            if not matched:
+                raise formencode.Invalid(
+                      'Please choose an existing persona.', value, c)
+            return value
+    
+
+
+class UpdateDetails(formencode.Schema):
+    allow_extra_fields = True
+    filter_extra_fields = True
+    firstname = formencode.validators.String(not_empty=True)
+    surname = formencode.validators.String()
+    email = ExistingUserEmail(resolve_domain=dns_checking, not_empty=True)
+    #persona = ExistingUserPersona()
+    session = MinMaxInt(not_empty=True, max=1440, min=5)
+
+
+#
+# Password Reminder
+#
+
+class PasswordReminder(formencode.Schema):
+    allow_extra_fields = True
+    username = ExistingUsername(not_empty=True)
+
+
+#
+# Sign up
+#
+
+class UniqueUsername(formencode.FancyValidator):
+    def _to_python(self, value, c):
+        users = c.session.query(c.model.User).filter_by(username=value.lower()).all()
+        if len(users)>1:
+            raise Exception('More that one user with username in database')
+        if not users:
+            return value
+        else:
+            raise formencode.Invalid(
+                'Sorry, the username <tt>%s</tt> is not available. Please try another.' % \
+                    value, value, c)
+    
+
+username_regex = formencode.validators.Regex("^[a-zA-Z0-9]+$", strip=True)
+username_regex._messages['invalid'] = 'Your username should only contain letters and numbers.'
+username_validator = formencode.All(
+                            UniqueUsername(), 
+                            formencode.validators.String(not_empty=True, min=5, max=20), 
+                            username_regex,)
+
+class RequireIfMissing(formencode.validators.FormValidator):
+    field = None
+    error = None
+    validate_partial_form = True
+    __unpackargs__ = ('field', 'error')
+     
+    def validate_partial(self, field_dict, c):
+        return self.validate_python(field_dict, c)
+
+    def validate_python(self, field_dict, c):
+        if self.field not in field_dict:
+            raise formencode.Invalid(self.error, field_dict, c, error_dict={self.field:self.error})
+    
+
+class PassURLRegistrationFirst(formencode.Schema):
+    pre_validators = [NestedVariables()]
+    allow_extra_fields = True
+
+
+class PassURLRegistrationSecond(formencode.Schema):
+    pre_validators = [NestedVariables()]
+    allow_extra_fields = True
+    username = username_validator
+    # Otherwise agree is filtered! filter_extra_fields = True
+    chained_validators = [
+        RequireIfMissing('agree','Please tick the box to agree to our terms and conditions.'),
+    ]
+
+
+class ManualRegistration(formencode.Schema):
+    pre_validators = [NestedVariables()]
+    allow_extra_fields = True
+    password =formencode.validators.String(not_empty=True)
+    cpassword = SecurePassword()
+    chained_validators = [
+        formencode.validators.FieldsMatch('password', 'cpassword'),
+        RequireIfMissing('agree','Please tick the box to agree to our terms and conditions.'),
+    ]
+
+
+#
+# Passurl Sign in
+#
+
+from yadis.discover import DiscoveryFailure
+from urljr.fetchers import HTTPFetchingError
+from openid.oidutil import appendArgs
+
+class PassURLField(formencode.validators.URL):
+    def _oid_build_url(self, base_url, controller_name, url_for, action, **query):
+        return appendArgs(
+            base_url + url_for(
+                controller=controller_name, 
+                action=action,
+            ), 
+            query
+        )
+    
+
+    def to_python(self, value, state):
+        openid_url = value
+        if not value:
+            raise formencode.Invalid(
+                            "Please enter a value", '', state,
+                            error_dict={'passurl':"Please enter a value"})
+        try:
+            request_ = state.oidconsumer.begin(openid_url)
+            #raise Exception(openid_url)
+        except HTTPFetchingError, exc:
+            msg = 'URL does not exist, please check your typing' # % (str(exc.why))
+            raise formencode.Invalid(
+                            msg, openid_url, state, error_dict={'passurl':msg})
+        except DiscoveryFailure, exc:
+            msg = 'Not a valid passurl' # % (str(exc[0]))
+            raise formencode.Invalid(
+                            msg, openid_url, state, error_dict={'passurl':msg})
+        else:
+            if request_ is None:
+                msg = 'No OpenID services found for <code>%s</code>' % (openid_url,)
+                raise formencode.Invalid(
+                            msg, openid_url, state, error_dict={'passurl':msg})
+            else:
+                # Then, ask the library to begin the authorization.
+                # Here we find out the identity server that will verify the
+                # user's identity, and get a token that allows us to
+                # communicate securely with the identity server.
+                if state.mode == 'register':
+                    return_to = self._oid_build_url(state.base_url, 
+                                                    state.controller_name, 
+                                                    state.url_for, 
+                                                    'process_register')
+                    policy_url = state.policy_url
+                    
+                    # openid.consumer.consumer:766 fails. Hack it instead
+                    # request_.addExtensionArg("sreg", "optional", 
+                    #     "openid.sreg.email")
+                    # request_.addExtensionArg("sreg", "policy_url", 
+                    #     "http://google.com")
+                    
+                    if state.fields['optional']:
+                        request_.extra_args[
+                            'openid.sreg.optional'] = ','.join(state.fields['optional'])
+                    if state.fields['required']:
+                        request_.extra_args[
+                            'openid.sreg.required'] = ','.join(state.fields['required'])
+                    if policy_url:
+                        request_.extra_args[
+                            'openid.sreg.policy_url'] = policy_url
+
+                    request_.extra_args[
+                        'openid.ns.sreg'] =  "http://openid.net/sreg/1.0"
+
+                elif state.mode=='signin':
+                    return_to = self._oid_build_url(state.base_url, 
+                                                    state.controller_name, 
+                                                    state.url_for, 
+                                                    'process_signin')
+                else:
+                    raise Exception("Invalid mode passurl %r"%mode)
+                
+                return request_.redirectURL(
+                    state.base_url + state.url_for(
+                                    controller=state.controller_name), return_to)
+    
+
+class PassURLForm(formencode.Schema):
+    allow_extra_fields = True
+    filter_extra_fields = True
+    passurl = PassURLField(add_http=True)
+
+#
+# Register new email
+#
+
+class NotExistingUserEmail(formencode.validators.Email):
+    def _to_python(self, value, c):
+        for email in c.user.emails:
+            if email.email.lower() == value.lower() and email.verified != None:
+                raise formencode.Invalid('This email address is already registered and verified.', value, c)
+        return value
+    
+
+class RegisterNewEmail(formencode.Schema):
+    allow_extra_fields = True
+    filter_extra_fields = True
+    email = NotExistingUserEmail(resolve_domain=dns_checking, not_empty=True)
+
+#
+# Confirm
+#
+
+class VerifyEmail(formencode.FancyValidator):
+    def _to_python(self, value, c):
+        users = c.session.query(c.model.User).filter_by(username=value['username'].lower()).all()
+        if len(users)>1:
+            raise Exception('More that one user with username in database')
+        if not users:
+            raise formencode.Invalid(
+                        'No such user', value, c, error_dict={'username':'No such user'})
+        email_match = None
+        for email in users[0].emails:
+            if value['code'] and email.code == value['code'].strip():
+                email_match = email
+                break
+        if not email_match:
+            raise formencode.Invalid(
+                'Incorrect validation code', value, c, error_dict={'code':'Invalid code'})
+        if email.verified:
+            raise formencode.Invalid(
+                'Already verified', value, c, 
+                error_dict={'code':'The email address for this code has already been verified.'}) 
+        c.email_match = email_match
+        return value
+    
+
+#
+# Request new code
+#
+
+class RequestVerificationCode(formencode.Schema):
+    #username = ExistingUsername(not_empty=True)
+    #password = SecurePassword(not_empty=True)
+    #email = validators.Email(resolve_domain=dns_checking, not_empty=True)
+    def _to_python(self, value, c):
+        errors = {}
+        email_match = None
+        users = c.session.query(c.model.User).filter_by(username=value['username'].lower()).all()
+        if len(users)>1:
+            raise Exception('More that one user with username in database')
+        if not users:
+            errors['username'] = 'Invalid username'
+            raise formencode.Invalid(
+                    errors['username'], value, c, error_dict=errors)
+        else:
+            user = users[0]
+            for email in user.emails:       
+                if email.code and email.verified == None:
+                    email_match = email
+                    break
+        #raise Exception(user[0].username, user[0].emails, email.code, email.verified)
+        if user.emails and not email_match:
+            errors['username'] = 'This account has already been verified so you don\'t need '
+            errors['username'] += 'another verification code.'
+        if errors:
+            raise formencode.Invalid(
+                    errors['username'], value, c, error_dict=errors)
+        else:
+            if user.password != value['password']:
+                errors['password'] = 'Invalid password'
+            if not value['email']:
+                errors['email'] = 'Please enter the email address you wish to use'
+            if errors:
+                 raise formencode.Invalid(
+                        'Please correct the errors', value, c, error_dict=errors)
+            else:
+                return value
+    
+
+#
+# Personas
+#
+
+timezones = [
+    ('CI', 'Africa/Abidjan'),
+    ('GH', 'Africa/Accra'),
+    ('ET', 'Africa/Addis_Ababa'),
+    ('DZ', 'Africa/Algiers'),
+    ('ER', 'Africa/Asmera'),
+    ('ML', 'Africa/Bamako'),
+    ('CF', 'Africa/Bangui'),
+    ('GM', 'Africa/Banjul'),
+    ('GW', 'Africa/Bissau'),
+    ('MW', 'Africa/Blantyre'),
+    ('CG', 'Africa/Brazzaville'),
+    ('BI', 'Africa/Bujumbura'),
+    ('EG', 'Africa/Cairo'),
+    ('MA', 'Africa/Casablanca'),
+    ('ES', 'Africa/Ceuta'),
+    ('GN', 'Africa/Conakry'),
+    ('SN', 'Africa/Dakar'),
+    ('TZ', 'Africa/Dar_es_Salaam'),
+    ('DJ', 'Africa/Djibouti'),
+    ('CM', 'Africa/Douala'),
+    ('EH', 'Africa/El_Aaiun'),
+    ('SL', 'Africa/Freetown'),
+    ('BW', 'Africa/Gaborone'),
+    ('ZW', 'Africa/Harare'),
+    ('ZA', 'Africa/Johannesburg'),
+    ('UG', 'Africa/Kampala'),
+    ('SD', 'Africa/Khartoum'),
+    ('RW', 'Africa/Kigali'),
+    ('CD', 'Africa/Kinshasa'),
+    ('NG', 'Africa/Lagos'),
+    ('GA', 'Africa/Libreville'),
+    ('TG', 'Africa/Lome'),
+    ('AO', 'Africa/Luanda'),
+    ('CD', 'Africa/Lubumbashi'),
+    ('ZM', 'Africa/Lusaka'),
+    ('GQ', 'Africa/Malabo'),
+    ('MZ', 'Africa/Maputo'),
+    ('LS', 'Africa/Maseru'),
+    ('SZ', 'Africa/Mbabane'),
+    ('SO', 'Africa/Mogadishu'),
+    ('LR', 'Africa/Monrovia'),
+    ('KE', 'Africa/Nairobi'),
+    ('TD', 'Africa/Ndjamena'),
+    ('NE', 'Africa/Niamey'),
+    ('MR', 'Africa/Nouakchott'),
+    ('BF', 'Africa/Ouagadougou'),
+    ('BJ', 'Africa/Porto'),
+    ('ST', 'Africa/Sao_Tome'),
+    ('LY', 'Africa/Tripoli'),
+    ('TN', 'Africa/Tunis'),
+    ('NA', 'Africa/Windhoek'),
+    ('US', 'America/Adak'),
+    ('US', 'America/Anchorage'),
+    ('AI', 'America/Anguilla'),
+    ('AG', 'America/Antigua'),
+    ('BR', 'America/Araguaina'),
+    ('AR', 'America/Argentina/Buenos_Aires'),
+    ('AR', 'America/Argentina/Catamarca'),
+    ('AR', 'America/Argentina/Cordoba'),
+    ('AR', 'America/Argentina/Jujuy'),
+    ('AR', 'America/Argentina/La_Rioja'),
+    ('AR', 'America/Argentina/Mendoza'),
+    ('AR', 'America/Argentina/Rio_Gallegos'),
+    ('AR', 'America/Argentina/San_Juan'),
+    ('AR', 'America/Argentina/Tucuman'),
+    ('AR', 'America/Argentina/Ushuaia'),
+    ('AW', 'America/Aruba'),
+    ('PY', 'America/Asuncion'),
+    ('BR', 'America/Bahia'),
+    ('BB', 'America/Barbados'),
+    ('BR', 'America/Belem'),
+    ('BZ', 'America/Belize'),
+    ('BR', 'America/Boa_Vista'),
+    ('CO', 'America/Bogota'),
+    ('US', 'America/Boise'),
+    ('CA', 'America/Cambridge_Bay'),
+    ('BR', 'America/Campo_Grande'),
+    ('MX', 'America/Cancun'),
+    ('VE', 'America/Caracas'),
+    ('GF', 'America/Cayenne'),
+    ('KY', 'America/Cayman'),
+    ('US', 'America/Chicago'),
+    ('MX', 'America/Chihuahua'),
+    ('CA', 'America/Coral_Harbour'),
+    ('CR', 'America/Costa_Rica'),
+    ('BR', 'America/Cuiaba'),
+    ('AN', 'America/Curacao'),
+    ('GL', 'America/Danmarkshavn'),
+    ('CA', 'America/Dawson'),
+    ('CA', 'America/Dawson_Creek'),
+    ('US', 'America/Denver'),
+    ('US', 'America/Detroit'),
+    ('DM', 'America/Dominica'),
+    ('CA', 'America/Edmonton'),
+    ('BR', 'America/Eirunepe'),
+    ('SV', 'America/El_Salvador'),
+    ('BR', 'America/Fortaleza'),
+    ('CA', 'America/Glace_Bay'),
+    ('GL', 'America/Godthab'),
+    ('CA', 'America/Goose_Bay'),
+    ('TC', 'America/Grand_Turk'),
+    ('GD', 'America/Grenada'),
+    ('GP', 'America/Guadeloupe'),
+    ('GT', 'America/Guatemala'),
+    ('EC', 'America/Guayaquil'),
+    ('GY', 'America/Guyana'),
+    ('CA', 'America/Halifax'),
+    ('CU', 'America/Havana'),
+    ('MX', 'America/Hermosillo'),
+    ('US', 'America/Indiana/Indianapolis'),
+    ('US', 'America/Indiana/Knox'),
+    ('US', 'America/Indiana/Marengo'),
+    ('US', 'America/Indiana/Petersburg'),
+    ('US', 'America/Indiana/Vevay'),
+    ('US', 'America/Indiana/Vincennes'),
+    ('CA', 'America/Inuvik'),
+    ('CA', 'America/Iqaluit'),
+    ('JM', 'America/Jamaica'),
+    ('US', 'America/Juneau'),
+    ('US', 'America/Kentucky/Louisville'),
+    ('US', 'America/Kentucky/Monticello'),
+    ('BO', 'America/La_Paz'),
+    ('PE', 'America/Lima'),
+    ('US', 'America/Los_Angeles'),
+    ('BR', 'America/Maceio'),
+    ('NI', 'America/Managua'),
+    ('BR', 'America/Manaus'),
+    ('MQ', 'America/Martinique'),
+    ('MX', 'America/Mazatlan'),
+    ('US', 'America/Menominee'),
+    ('MX', 'America/Merida'),
+    ('MX', 'America/Mexico_City'),
+    ('PM', 'America/Miquelon'),
+    ('CA', 'America/Moncton'),
+    ('MX', 'America/Monterrey'),
+    ('UY', 'America/Montevideo'),
+    ('CA', 'America/Montreal'),
+    ('MS', 'America/Montserrat'),
+    ('BS', 'America/Nassau'),
+    ('US', 'America/New_York'),
+    ('CA', 'America/Nipigon'),
+    ('US', 'America/Nome'),
+    ('BR', 'America/Noronha'),
+    ('US', 'America/North_Dakota/Center'),
+    ('PA', 'America/Panama'),
+    ('CA', 'America/Pangnirtung'),
+    ('SR', 'America/Paramaribo'),
+    ('US', 'America/Phoenix'),
+    ('HT', 'America/Port'),
+    ('TT', 'America/Port_of_Spain'),
+    ('BR', 'America/Porto_Velho'),
+    ('PR', 'America/Puerto_Rico'),
+    ('CA', 'America/Rainy_River'),
+    ('CA', 'America/Rankin_Inlet'),
+    ('BR', 'America/Recife'),
+    ('CA', 'America/Regina'),
+    ('BR', 'America/Rio_Branco'),
+    ('CL', 'America/Santiago'),
+    ('DO', 'America/Santo_Domingo'),
+    ('BR', 'America/Sao_Paulo'),
+    ('GL', 'America/Scoresbysund'),
+    ('US', 'America/Shiprock'),
+    ('CA', 'America/St_Johns'),
+    ('KN', 'America/St_Kitts'),
+    ('LC', 'America/St_Lucia'),
+    ('VI', 'America/St_Thomas'),
+    ('VC', 'America/St_Vincent'),
+    ('CA', 'America/Swift_Current'),
+    ('HN', 'America/Tegucigalpa'),
+    ('GL', 'America/Thule'),
+    ('CA', 'America/Thunder_Bay'),
+    ('MX', 'America/Tijuana'),
+    ('CA', 'America/Toronto'),
+    ('VG', 'America/Tortola'),
+    ('CA', 'America/Vancouver'),
+    ('CA', 'America/Whitehorse'),
+    ('CA', 'America/Winnipeg'),
+    ('US', 'America/Yakutat'),
+    ('CA', 'America/Yellowknife'),
+    ('AQ', 'Antarctica/Casey'),
+    ('AQ', 'Antarctica/Davis'),
+    ('AQ', 'Antarctica/DumontDUrville'),
+    ('AQ', 'Antarctica/Mawson'),
+    ('AQ', 'Antarctica/McMurdo'),
+    ('AQ', 'Antarctica/Palmer'),
+    ('AQ', 'Antarctica/Rothera'),
+    ('AQ', 'Antarctica/South_Pole'),
+    ('AQ', 'Antarctica/Syowa'),
+    ('AQ', 'Antarctica/Vostok'),
+    ('SJ', 'Arctic/Longyearbyen'),
+    ('YE', 'Asia/Aden'),
+    ('KZ', 'Asia/Almaty'),
+    ('JO', 'Asia/Amman'),
+    ('RU', 'Asia/Anadyr'),
+    ('KZ', 'Asia/Aqtau'),
+    ('KZ', 'Asia/Aqtobe'),
+    ('TM', 'Asia/Ashgabat'),
+    ('IQ', 'Asia/Baghdad'),
+    ('BH', 'Asia/Bahrain'),
+    ('AZ', 'Asia/Baku'),
+    ('TH', 'Asia/Bangkok'),
+    ('LB', 'Asia/Beirut'),
+    ('KG', 'Asia/Bishkek'),
+    ('BN', 'Asia/Brunei'),
+    ('IN', 'Asia/Calcutta'),
+    ('MN', 'Asia/Choibalsan'),
+    ('CN', 'Asia/Chongqing'),
+    ('LK', 'Asia/Colombo'),
+    ('SY', 'Asia/Damascus'),
+    ('BD', 'Asia/Dhaka'),
+    ('TL', 'Asia/Dili'),
+    ('AE', 'Asia/Dubai'),
+    ('TJ', 'Asia/Dushanbe'),
+    ('PS', 'Asia/Gaza'),
+    ('CN', 'Asia/Harbin'),
+    ('HK', 'Asia/Hong_Kong'),
+    ('MN', 'Asia/Hovd'),
+    ('RU', 'Asia/Irkutsk'),
+    ('ID', 'Asia/Jakarta'),
+    ('ID', 'Asia/Jayapura'),
+    ('IL', 'Asia/Jerusalem'),
+    ('AF', 'Asia/Kabul'),
+    ('RU', 'Asia/Kamchatka'),
+    ('PK', 'Asia/Karachi'),
+    ('CN', 'Asia/Kashgar'),
+    ('NP', 'Asia/Katmandu'),
+    ('RU', 'Asia/Krasnoyarsk'),
+    ('MY', 'Asia/Kuala_Lumpur'),
+    ('MY', 'Asia/Kuching'),
+    ('KW', 'Asia/Kuwait'),
+    ('MO', 'Asia/Macau'),
+    ('RU', 'Asia/Magadan'),
+    ('ID', 'Asia/Makassar'),
+    ('PH', 'Asia/Manila'),
+    ('OM', 'Asia/Muscat'),
+    ('CY', 'Asia/Nicosia'),
+    ('RU', 'Asia/Novosibirsk'),
+    ('RU', 'Asia/Omsk'),
+    ('KZ', 'Asia/Oral'),
+    ('KH', 'Asia/Phnom_Penh'),
+    ('ID', 'Asia/Pontianak'),
+    ('KP', 'Asia/Pyongyang'),
+    ('QA', 'Asia/Qatar'),
+    ('KZ', 'Asia/Qyzylorda'),
+    ('MM', 'Asia/Rangoon'),
+    ('SA', 'Asia/Riyadh'),
+    ('VN', 'Asia/Saigon'),
+    ('RU', 'Asia/Sakhalin'),
+    ('UZ', 'Asia/Samarkand'),
+    ('KR', 'Asia/Seoul'),
+    ('CN', 'Asia/Shanghai'),
+    ('SG', 'Asia/Singapore'),
+    ('TW', 'Asia/Taipei'),
+    ('UZ', 'Asia/Tashkent'),
+    ('GE', 'Asia/Tbilisi'),
+    ('IR', 'Asia/Tehran'),
+    ('BT', 'Asia/Thimphu'),
+    ('JP', 'Asia/Tokyo'),
+    ('MN', 'Asia/Ulaanbaatar'),
+    ('CN', 'Asia/Urumqi'),
+    ('LA', 'Asia/Vientiane'),
+    ('RU', 'Asia/Vladivostok'),
+    ('RU', 'Asia/Yakutsk'),
+    ('RU', 'Asia/Yekaterinburg'),
+    ('AM', 'Asia/Yerevan'),
+    ('PT', 'Atlantic/Azores'),
+    ('BM', 'Atlantic/Bermuda'),
+    ('ES', 'Atlantic/Canary'),
+    ('CV', 'Atlantic/Cape_Verde'),
+    ('FO', 'Atlantic/Faeroe'),
+    ('SJ', 'Atlantic/Jan_Mayen'),
+    ('PT', 'Atlantic/Madeira'),
+    ('IS', 'Atlantic/Reykjavik'),
+    ('GS', 'Atlantic/South_Georgia'),
+    ('SH', 'Atlantic/St_Helena'),
+    ('FK', 'Atlantic/Stanley'),
+    ('AU', 'Australia/Adelaide'),
+    ('AU', 'Australia/Brisbane'),
+    ('AU', 'Australia/Broken_Hill'),
+    ('AU', 'Australia/Currie'),
+    ('AU', 'Australia/Darwin'),
+    ('AU', 'Australia/Hobart'),
+    ('AU', 'Australia/Lindeman'),
+    ('AU', 'Australia/Lord_Howe'),
+    ('AU', 'Australia/Melbourne'),
+    ('AU', 'Australia/Perth'),
+    ('AU', 'Australia/Sydney'),
+    ('NL', 'Europe/Amsterdam'),
+    ('AD', 'Europe/Andorra'),
+    ('GR', 'Europe/Athens'),
+    ('CS', 'Europe/Belgrade'),
+    ('DE', 'Europe/Berlin'),
+    ('SK', 'Europe/Bratislava'),
+    ('BE', 'Europe/Brussels'),
+    ('RO', 'Europe/Bucharest'),
+    ('HU', 'Europe/Budapest'),
+    ('MD', 'Europe/Chisinau'),
+    ('DK', 'Europe/Copenhagen'),
+    ('IE', 'Europe/Dublin'),
+    ('GI', 'Europe/Gibraltar'),
+    ('FI', 'Europe/Helsinki'),
+    ('TR', 'Europe/Istanbul'),
+    ('RU', 'Europe/Kaliningrad'),
+    ('UA', 'Europe/Kiev'),
+    ('PT', 'Europe/Lisbon'),
+    ('SI', 'Europe/Ljubljana'),
+    ('GB', 'Europe/London'),
+    ('LU', 'Europe/Luxembourg'),
+    ('ES', 'Europe/Madrid'),
+    ('MT', 'Europe/Malta'),
+    ('AX', 'Europe/Mariehamn'),
+    ('BY', 'Europe/Minsk'),
+    ('MC', 'Europe/Monaco'),
+    ('RU', 'Europe/Moscow'),
+    ('NO', 'Europe/Oslo'),
+    ('FR', 'Europe/Paris'),
+    ('CZ', 'Europe/Prague'),
+    ('LV', 'Europe/Riga'),
+    ('IT', 'Europe/Rome'),
+    ('RU', 'Europe/Samara'),
+    ('SM', 'Europe/San_Marino'),
+    ('BA', 'Europe/Sarajevo'),
+    ('UA', 'Europe/Simferopol'),
+    ('MK', 'Europe/Skopje'),
+    ('BG', 'Europe/Sofia'),
+    ('SE', 'Europe/Stockholm'),
+    ('EE', 'Europe/Tallinn'),
+    ('AL', 'Europe/Tirane'),
+    ('UA', 'Europe/Uzhgorod'),
+    ('LI', 'Europe/Vaduz'),
+    ('VA', 'Europe/Vatican'),
+    ('AT', 'Europe/Vienna'),
+    ('LT', 'Europe/Vilnius'),
+    ('PL', 'Europe/Warsaw'),
+    ('HR', 'Europe/Zagreb'),
+    ('UA', 'Europe/Zaporozhye'),
+    ('CH', 'Europe/Zurich'),
+    ('MG', 'Indian/Antananarivo'),
+    ('IO', 'Indian/Chagos'),
+    ('CX', 'Indian/Christmas'),
+    ('CC', 'Indian/Cocos'),
+    ('KM', 'Indian/Comoro'),
+    ('TF', 'Indian/Kerguelen'),
+    ('SC', 'Indian/Mahe'),
+    ('MV', 'Indian/Maldives'),
+    ('MU', 'Indian/Mauritius'),
+    ('YT', 'Indian/Mayotte'),
+    ('RE', 'Indian/Reunion'),
+    ('WS', 'Pacific/Apia'),
+    ('NZ', 'Pacific/Auckland'),
+    ('NZ', 'Pacific/Chatham'),
+    ('CL', 'Pacific/Easter'),
+    ('VU', 'Pacific/Efate'),
+    ('KI', 'Pacific/Enderbury'),
+    ('TK', 'Pacific/Fakaofo'),
+    ('FJ', 'Pacific/Fiji'),
+    ('TV', 'Pacific/Funafuti'),
+    ('EC', 'Pacific/Galapagos'),
+    ('PF', 'Pacific/Gambier'),
+    ('SB', 'Pacific/Guadalcanal'),
+    ('GU', 'Pacific/Guam'),
+    ('US', 'Pacific/Honolulu'),
+    ('UM', 'Pacific/Johnston'),
+    ('KI', 'Pacific/Kiritimati'),
+    ('FM', 'Pacific/Kosrae'),
+    ('MH', 'Pacific/Kwajalein'),
+    ('MH', 'Pacific/Majuro'),
+    ('PF', 'Pacific/Marquesas'),
+    ('UM', 'Pacific/Midway'),
+    ('NR', 'Pacific/Nauru'),
+    ('NU', 'Pacific/Niue'),
+    ('NF', 'Pacific/Norfolk'),
+    ('NC', 'Pacific/Noumea'),
+    ('AS', 'Pacific/Pago_Pago'),
+    ('PW', 'Pacific/Palau'),
+    ('PN', 'Pacific/Pitcairn'),
+    ('FM', 'Pacific/Ponape'),
+    ('PG', 'Pacific/Port_Moresby'),
+    ('CK', 'Pacific/Rarotonga'),
+    ('MP', 'Pacific/Saipan'),
+    ('PF', 'Pacific/Tahiti'),
+    ('KI', 'Pacific/Tarawa'),
+    ('TO', 'Pacific/Tongatapu'),
+    ('FM', 'Pacific/Truk'),
+    ('UM', 'Pacific/Wake'),
+    ('WF', 'Pacific/Wallis'),
+]
+
+countries = [
+    ('US','United States'),
+    
+    ('AF','Afghanistan'),
+    ('AX','Aland Islands'),
+    ('AL','Albania'),
+    ('DZ','Algeria'),
+    ('AS','American Samoa'),
+    ('AD','Andorra'),
+    
+    ('AO','Angola'),
+    ('AI','Anguilla'),
+    ('AQ','Antarctica'),
+    ('AG','Antigua and Barbuda'),
+    ('AR','Argentina'),
+    ('AM','Armenia'),
+    
+    ('AW','Aruba'),
+    ('AU','Australia'),
+    ('AT','Austria'),
+    ('AZ','Azerbaijan'),
+    ('BS','Bahamas'),
+    ('BH','Bahrain'),
+    
+    ('BD','Bangladesh'),
+    ('BB','Barbados'),
+    ('BY','Belarus'),
+    ('BE','Belgium'),
+    ('BZ','Belize'),
+    ('BJ','Benin'),
+    
+    ('BM','Bermuda'),
+    ('BT','Bhutan'),
+    ('BO','Bolivia'),
+    ('BA','Bosnia And Herzegovina'),
+    ('BW','Botswana'),
+    ('BV','Bouvet Island'),
+    
+    ('BR','Brazil'),
+    ('IO','British Indian Ocean Territory'),
+    ('BN','Brunei Darussalam'),
+    ('BG','Bulgaria'),
+    ('BF','Burkina Faso'),
+    ('BI','Burundi'),
+    
+    ('KH','Cambodia'),
+    ('CM','Cameroon'),
+    ('CA','Canada'),
+    ('CV','Cape Verde'),
+    ('KY','Cayman Islands'),
+    ('CF','Central African Republic'),
+    
+    ('TD','Chad'),
+    ('CL','Chile'),
+    ('CN','China'),
+    ('CX','Christmas Island'),
+    ('CC','Cocos (Keeling) Islands'),
+    ('CO','Colombia'),
+    
+    ('KM','Comoros'),
+    ('CG','Congo'),
+    ('CD','Congo, The Democratic Republic Of The'),
+    ('CK','Cook Islands'),
+    ('CR','Costa Rica'),
+    ('CI',"Cote D'Ivoire"),
+    
+    ('HR','Croatia'),
+    ('CU','Cuba'),
+    ('CY','Cyprus'),
+    ('CZ','Czech Republic'),
+    ('DK','Denmark'),
+    ('DJ','Djibouti'),
+    
+    ('DM','Dominica'),
+    ('DO','Dominican Republic'),
+    ('EC','Ecuador'),
+    ('EG','Egypt'),
+    ('SV','El Salvador'),
+    ('GQ','Equatorial Guinea'),
+    
+    ('ER','Eritrea'),
+    ('EE','Estonia'),
+    ('ET','Ethiopia'),
+    ('FK','Falkland Islands (Malvinas)'),
+    ('FO','Faroe Islands'),
+    ('FJ','Fiji'),
+    
+    ('FI','Finland'),
+    ('FR','France'),
+    ('GF','French Guiana'),
+    ('PF','French Polynesia'),
+    ('TF','French Southern Territories'),
+    ('GA','Gabon'),
+    
+    ('GM','Gambia'),
+    ('GE','Georgia'),
+    ('DE','Germany'),
+    ('GH','Ghana'),
+    ('GI','Gibraltar'),
+    ('GR','Greece'),
+    
+    ('GL','Greenland'),
+    ('GD','Grenada'),
+    ('GP','Guadeloupe'),
+    ('GU','Guam'),
+    ('GT','Guatemala'),
+    ('GN','Guinea'),
+    
+    ('GW','Guinea-Bissau'),
+    ('GY','Guyana'),
+    ('HT','Haiti'),
+    ('HM','Heard Island and McDonald Islands'),
+    ('VA','Holy See (Vatican City State)'),
+    ('HN','Honduras'),
+    
+    ('HK','Hong Kong'),
+    ('HU','Hungary'),
+    ('IS','Iceland'),
+    ('IN','India'),
+    ('ID','Indonesia'),
+    ('IR','Iran, Islamic Republic Of'),
+    
+    ('IQ','Iraq'),
+    ('IE','Ireland'),
+    ('IL','Israel'),
+    ('IT','Italy'),
+    ('JM','Jamaica'),
+    ('JP','Japan'),
+    
+    ('JO','Jordan'),
+    ('KZ','Kazakhstan'),
+    ('KE','Kenya'),
+    ('KI','Kiribati'),
+    ('KP',"Korea, Democratic People's Republic Of"),
+    ('KR',"Korea, Republic Of"),
+    
+    ('KW','Kuwait'),
+    ('KG','Kyrgyzstan'),
+    ('LA',"Lao People's Democratic Republic"),
+    ('LV','Latvia'),
+    ('LB','Lebanon'),
+    ('LS','Lesotho'),
+    
+    ('LR','Liberia'),
+    ('LY','Libyan Arab Jamahiriya'),
+    ('LI','Liechtenstein'),
+    ('LT','Lithuania'),
+    ('LU','Luxembourg'),
+    ('MO','Macao'),
+    
+    ('MK','Macedonia, The Former Yugoslav Republic Of'),
+    ('MG','Madagascar'),
+    ('MW','Malawi'),
+    ('MY','Malaysia'),
+    ('MV','Maldives'),
+    ('ML','Mali'),
+    
+    ('MT','Malta'),
+    ('MH','Marshall Islands'),
+    ('MQ','Martinique'),
+    ('MR','Mauritania'),
+    ('MU','Mauritius'),
+    ('YT','Mayotte'),
+    
+    ('MX','Mexico'),
+    ('FM','Micronesia, Federated States Of'),
+    ('MD','Moldova, Republic Of'),
+    ('MC','Monaco'),
+    ('MN','Mongolia'),
+    ('MS','Montserrat'),
+    
+    ('MA','Morocco'),
+    ('MZ','Mozambique'),
+    ('MM','Myanmar'),
+    ('NA','Namibia'),
+    ('NR','Nauru'),
+    ('NP','Nepal'),
+    
+    ('NL','Netherlands'),
+    ('AN','Netherlands Antilles'),
+    ('NC','New Caledonia'),
+    ('NZ','New Zealand'),
+    ('NI','Nicaragua'),
+    ('NE','Niger'),
+    
+    ('NG','Nigeria'),
+    ('NU','Niue'),
+    ('NF','Norfolk Island'),
+    ('MP','Northern Mariana Islands'),
+    ('NO','Norway'),
+    ('OM','Oman'),
+    
+    ('PK','Pakistan'),
+    ('PW','Palau'),
+    ('PS','Palestinian Territory, Occupied'),
+    ('PA','Panama'),
+    ('PG','Papua New Guinea'),
+    ('PY','Paraguay'),
+    
+    ('PE','Peru'),
+    ('PH','Philippines'),
+    ('PN','Pitcairn'),
+    ('PL','Poland'),
+    ('PT','Portugal'),
+    ('PR','Puerto Rico'),
+    
+    ('QA','Qatar'),
+    ('RE','Reunion'),
+    ('RO','Romania'),
+    ('RU','Russian Federation'),
+    ('RW','Rwanda'),
+    ('SH','Saint Helena'),
+    
+    ('KN','Saint Kitts And Nevis'),
+    ('LC','Saint Lucia'),
+    ('PM','Saint Pierre And Miquelon'),
+    ('VC','Saint Vincent And The Grenadines'),
+    ('WS','Samoa'),
+    ('SM','San Marino'),
+    
+    ('ST','Sao Tome And Principe'),
+    ('SA','Saudi Arabia'),
+    ('SN','Senegal'),
+    ('CS','Serbia And Montenegro'),
+    ('SC','Seychelles'),
+    ('SL','Sierra Leone'),
+    
+    ('SG','Singapore'),
+    ('SK','Slovakia'),
+    ('SI','Slovenia'),
+    ('SB','Solomon Islands'),
+    ('SO','Somalia'),
+    ('ZA','South Africa'),
+    
+    ('GS','South Georgia And The South Sandwich Islands'),
+    ('ES','Spain'),
+    ('LK','Sri Lanka'),
+    ('SD','Sudan'),
+    ('SR','Suriname'),
+    ('SJ','Svalbard And Jan Mayen'),
+    
+    ('SZ','Swaziland'),
+    ('SE','Sweden'),
+    ('CH','Switzerland'),
+    ('SY','Syrian Arab Republic'),
+    ('TW','Taiwan'),
+    ('TJ','Tajikistan'),
+    
+    ('TZ','Tanzania, United Republic Of'),
+    ('TH','Thailand'),
+    ('TL','Timor-leste'),
+    ('TG','Togo'),
+    ('TK','Tokelau'),
+    ('TO','Tonga'),
+    
+    ('TT','Trinidad And Tobago'),
+    ('TN','Tunisia'),
+    ('TR','Turkey'),
+    ('TM','Turkmenistan'),
+    ('TC','Turks And Caicos Islands'),
+    ('TV','Tuvalu'),
+    
+    ('UG','Uganda'),
+    ('UA','Ukraine'),
+    ('AE','United Arab Emirates'),
+    ('GB','United Kingdom'),
+    ('UM','United States Minor Outlying Islands'),
+    ('UY','Uruguay'),
+    
+    ('UZ','Uzbekistan'),
+    ('VU','Vanuatu'),
+    ('VE','Venezuela'),
+    ('VN','Viet Nam'),
+    ('VG','Virgin Islands, British'),
+    ('VI','Virgin Islands, U.S.'),
+    
+    ('WF','Wallis And Futuna'),
+    ('EH','Western Sahara'),
+    ('YE','Yemen'),
+    ('ZM','Zambia'),
+    ('ZW','Zimbabwe'),
+]
+
+languages = [
+    ('EN','English'),
+    
+    ('AA','Afar'),
+    ('AB','Abkhazian'),
+    ('AF','Afrikaans'),
+    ('AM','Amharic'),
+    ('AR','Arabic'),
+    ('AS','Assamese'),
+    
+    ('AY','Aymara'),
+    ('AZ','Azerbaijani'),
+    ('BA','Bashkir'),
+    ('BE','Byelorussian'),
+    ('BG','Bulgarian'),
+    ('BH','Bihari'),
+    
+    ('BI','Bislama'),
+    ('BN','Bengali'),
+    ('BO','Tibetan'),
+    ('BR','Breton'),
+    ('CA','Catalan'),
+    ('CO','Corsican'),
+    
+    ('CS','Czech'),
+    ('CY','Welsh'),
+    ('DA','Danish'),
+    ('DE','German'),
+    ('DZ','Bhutani'),
+    ('EL','Greek'),
+    
+    ('EO','Esperanto'),
+    ('ES','Spanish'),
+    ('ET','Estonian'),
+    ('EU','Basque'),
+    ('FA','Persian'),
+    ('FI','Finnish'),
+    
+    ('FJ','Fiji'),
+    ('FO','Faeroese'),
+    ('FR','French'),
+    ('FY','Frisian'),
+    ('GA','Irish'),
+    ('GD','Gaelic'),
+    
+    ('GL','Galician'),
+    ('GN','Guarani'),
+    ('GU','Gujarati'),
+    ('HA','Hausa'),
+    ('HI','Hindi'),
+    ('HR','Croatian'),
+    
+    ('HU','Hungarian'),
+    ('HY','Armenian'),
+    ('IA','Interlingua'),
+    ('IE','Interlingue'),
+    ('IK','Inupiak'),
+    ('IN','Indonesian'),
+    
+    ('IS','Icelandic'),
+    ('IT','Italian'),
+    ('IW','Hebrew'),
+    ('JA','Japanese'),
+    ('JI','Yiddish'),
+    ('JW','Javanese'),
+    
+    ('KA','Georgian'),
+    ('KK','Kazakh'),
+    ('KL','Greenlandic'),
+    ('KM','Cambodian'),
+    ('KN','Kannada'),
+    ('KO','Korean'),
+    
+    ('KS','Kashmiri'),
+    ('KU','Kurdish'),
+    ('KY','Kirghiz'),
+    ('LA','Latin'),
+    ('LN','Lingala'),
+    ('LO','Laothian'),
+    
+    ('LT','Lithuanian'),
+    ('LV','Latvian'),
+    ('MG','Malagasy'),
+    ('MI','Maori'),
+    ('MK','Macedonian'),
+    ('ML','Malayalam'),
+    
+    ('MN','Mongolian'),
+    ('MO','Moldavian'),
+    ('MR','Marathi'),
+    ('MS','Malay'),
+    ('MT','Maltese'),
+    ('MY','Burmese'),
+    
+    ('NA','Nauru'),
+    ('NE','Nepali'),
+    ('NL','Dutch'),
+    ('NO','Norwegian'),
+    ('OC','Occitan'),
+    ('OM','Oromo'),
+    
+    ('OR','Oriya'),
+    ('PA','Punjabi'),
+    ('PL','Polish'),
+    ('PS','Pashto'),
+    ('PT','Portuguese'),
+    ('QU','Quechua'),
+    
+    ('RM','Rhaeto-Romance'),
+    ('RN','Kirundi'),
+    ('RO','Romanian'),
+    ('RU','Russian'),
+    ('RW','Kinyarwanda'),
+    ('SA','Sanskrit'),
+    
+    ('SD','Sindhi'),
+    ('SG','Sangro'),
+    ('SH','Serbo-Croatian'),
+    ('SI','Singhalese'),
+    ('SK','Slovak'),
+    ('SL','Slovenian'),
+    
+    ('SM','Samoan'),
+    ('SN','Shona'),
+    ('SO','Somali'),
+    ('SQ','Albanian'),
+    ('SR','Serbian'),
+    ('SS','Siswati'),
+    
+    ('ST','Sesotho'),
+    ('SU','Sudanese'),
+    ('SV','Swedish'),
+    ('SW','Swahili'),
+    ('TA','Tamil'),
+    ('TE','Tegulu'),
+    
+    ('TG','Tajik'),
+    ('TH','Thai'),
+    ('TI','Tigrinya'),
+    ('TK','Turkmen'),
+    ('TL','Tagalog'),
+    ('TN','Setswana'),
+    
+    ('TO','Tonga'),
+    ('TR','Turkish'),
+    ('TS','Tsonga'),
+    ('TT','Tatar'),
+    ('TW','Twi'),
+    ('UK','Ukrainian'),
+    
+    ('UR','Urdu'),
+    ('UZ','Uzbek'),
+    ('VI','Vietnamese'),
+    ('VO','Volapuk'),
+    ('WO','Wolof'),
+    ('XH','Xhosa'),
+    
+    ('YO','Yoruba'),
+    ('ZH','Chinese'),
+    ('ZU','Zulu'),
+]
+
+country_codes = [x[0] for x in countries]
+languages_codes = [x[0] for x in languages]
+timezone_codes = [x[0] for x in timezones]
+
+class DateChecker(formencode.validators.DateConverter):
+    def _to_python(self, value, c):
+        if value == {'year':None,'month':None,'day':None}:
+            if self.not_empty:
+                raise formencode.Invalid(
+                        'Please choose a date',value, c)
+            else:
+                return None
+        if not value.has_key('day') or not value['day']:
+            raise formencode.Invalid(
+                    'Please choose a day',value, c)
+        elif not value.has_key('month') or not value['month']:
+            raise formencode.Invalid(
+                    'Please choose a month',value, c)
+        elif not value.has_key('year') or not value['year']:
+            raise formencode.Invalid(
+                    'Please choose a year',value, c)
+        else:
+            value = "%s/%s/%s"%(value['month'],value['day'],value['year'])
+            if self.accept_day:
+                return self.convert_day(value, c)
+            else:
+                return self.convert_month(value, c)
+    
+
+class DateOptional(formencode.Schema):
+    day = MinMaxInt(min=1, max=31)
+    month = MinMaxInt(min=1, max=12)
+    year = MinMaxInt(min=1880, max=datetime.datetime.now().year)
+    chained_validators = [DateChecker()]
+
+class DateRequired(formencode.Schema):
+    day = MinMaxInt(min=1, max=31)
+    month = MinMaxInt(min=1, max=12)
+    year = MinMaxInt(min=1880, max=datetime.datetime.now().year)
+    chained_validators = [DateChecker(not_empty=True)]
+
+
+

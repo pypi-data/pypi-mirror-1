@@ -1,0 +1,157 @@
+import os
+import md5
+import sha
+import hashlib
+from datetime import datetime
+
+import pylons
+from pylons import tmpl_context as c
+from couchdb.schema import DateTimeField, Document, TextField, ListField, View
+
+usermatch_map_fn = '''function(doc)
+{ if ( doc.type == "User" 
+       && doc.displayname == "%s" 
+       && doc.active == "True" 
+      ) 
+        emit(doc._id,doc); 
+ }'''
+
+
+def encrypt_value(value):
+    return hashlib.sha1(value).hexdigest()
+
+class NotAuthenticated(Exception):pass
+
+class User(Document):
+    """Represents a human user"""
+    type = TextField(default='User')
+    displayname = TextField()
+    email = TextField()
+    password = TextField()
+    password_check = TextField()
+    created = DateTimeField(default=datetime.utcnow)
+    active = TextField()
+    session_id = TextField()
+    groups = ListField(TextField())
+
+    by_displayname = View('user', '''
+        function(doc) {
+          if (doc.type == 'User') { emit(doc.displayname,doc) }
+        }''')
+    
+    by_email = View('user', '''
+        function(doc) {
+          if (doc.type == 'User') { emit(doc.email, doc) }
+        }''')
+    
+    @staticmethod
+    def hash_password(plain_text):
+        """Returns a crypted/salted password field
+        
+        The salt is stored in front of the password, for per user 
+        salts.
+        
+        """
+        if isinstance(plain_text, unicode):
+            plain_text = plain_text.encode('utf-8')
+        password_salt = sha.new(os.urandom(60)).hexdigest()
+        crypt = sha.new(plain_text + password_salt).hexdigest()
+        return password_salt + crypt
+    
+    def verify_password(self, plain_text):
+        """Verify a plain text string is the users password"""  
+        if isinstance(plain_text, unicode):
+            plain_text = plain_text.encode('utf-8')
+        
+        # Some users don't have passwords, like OpenID users, so they
+        # can't use a password to login
+        if not self.password:
+            return False
+        
+        password_salt = self.password[:40]
+        crypt_pass = sha.new(plain_text + password_salt).hexdigest()
+        if crypt_pass == self.password[40:]:
+            return True
+        else:
+            return False
+    
+    def email_hash(self):
+        return md5.md5(self.email).hexdigest()
+    
+    def in_group(self, group):
+        if group in list(self.groups):
+            return True
+        else:
+            return False
+    
+    def process_login(self):
+        session = pylons.session._current_obj()
+        session['logged_in'] = True
+        session['displayname'] = self.displayname
+        session['user_id'] = self.id
+        session.save()
+        self.session_id = session.id
+        self.store(pylons.c.db)
+
+
+    @classmethod
+    def authenticate(cls, username, password):
+        try:
+            # (usermatch_map_fn is defined earlier, after the imports)
+            rows = c.db.query(usermatch_map_fn % username)
+            for row in rows:
+                if encrypt_value(password) == row.value['password']:
+                    return c.db.get(row.key)
+        except Exception:
+            raise NotAuthenticated
+        raise NotAuthenticated
+
+    def encrypt_password(self):
+        if self.password and self.password != self.password_check:
+            self.password = encrypt_value(self.password)
+            self.password_check = self.password
+
+    @property
+    def permissions(self):
+        permissions = set()
+        for g in self.groups:
+            permissions = permissions | set(g.permissions)
+        return permissions        
+
+    @property
+    def permission_names(self):
+        return [p.name for p in self.permissions]
+
+    def has_permission(self, perm):
+        return (perm in self.permission_names)
+
+class Group(Document):
+    """Represents a user group"""
+    type = TextField(default='Group')
+    name = TextField()
+    description = TextField()
+    created = DateTimeField(default=datetime.utcnow)
+    active = TextField()
+    users = ListField(TextField())
+    permissions = ListField(TextField())
+
+    by_name = View('group', '''
+        function(doc) {
+          if (doc.type == 'Group') { emit(doc.name, doc) }
+        }''')
+        
+
+class Permission(Document):
+    """Represents a permission"""
+    type = TextField(default='Permission')
+    name = TextField()
+    description = TextField()
+    created = DateTimeField(default=datetime.utcnow)
+    active = TextField()
+
+    by_name = View('permission', '''
+        function(doc) {
+          if (doc.type == 'Permission') { emit(doc.name,doc) }
+        }''')
+        
+
