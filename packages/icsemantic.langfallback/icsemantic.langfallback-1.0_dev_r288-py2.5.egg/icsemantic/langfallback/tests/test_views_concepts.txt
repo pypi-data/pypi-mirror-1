@@ -1,0 +1,474 @@
+Pretendo probar en este test las formas de implementar
+las vistas y los pro y crontras de cada una...
+
+Primero las configuraciones de rutina...
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> from Products.CMFCore.utils import getToolByName
+    >>> from Products.PloneTestCase.setup import portal_owner, \
+    ...                                          default_user, \
+    ...                                          default_password
+	>   >> from icsemantic.langfallback.tests import utils as icsemantic.core
+
+    >>> browser = Browser()
+
+    >>> portal = self.portal
+    >>> folder = self.folder
+    >>> portal_url = portal.absolute_url()
+    >>> folder_url = self.folder.absolute_url()
+    >>> login_url = portal_url + '/login_form'
+    >>> logout_url = portal_url + '/logout'
+    >>> prefs_languages_url = portal_url + '/portal_languages/prefs_languages'
+
+	>>> portal.error_log._ignored_exceptions = ()
+    >>> browser.handleErrors = False
+
+	>>> self.setRoles(['Manager', 'Member'])
+
+Now, we must login...
+    >>> browser.open(login_url)
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+
+	>>> member = portal.portal_membership.getAuthenticatedMember()
+	>>> member.setMemberProperties({'icsemantic.preferred_languages': ('es', 'en', 'it')})
+	>>> member.getProperty('icsemantic.preferred_languages')
+	('es', 'en', 'it')
+
+Y configuro los lenguajes disponibles...
+
+	>>> browser.getLink('Site Setup').click()
+	>>> browser.getLink('Language Settings').click()
+
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='en').selected = True
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='es').selected = True
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='it').selected = True
+	>>> browser.getControl('Save').click()
+
+    >>> browser.open(prefs_languages_url)
+    >>> browser.getControl(name='defaultLanguage').value = ('es',)
+	>>> browser.getControl('Save').click()
+
+Ahora vamos a definir un AT para hacer algunas pruebas...
+
+	>>> from App.ProductContext import ProductContext
+    >>>	from icsemantic.langfallback.config import *
+	>>> prod_context = ProductContext(getattr(app.Control_Panel.Products, 'icsemantic.langfallback'),
+	...								app,
+	...								icsemantic.langfallback)
+	>>> from Products.CMFCore import utils as cmfutils
+	>>> from Products.Archetypes.public import *
+	>>> from icsemantic.langfallback.tests.helpers import ATMock
+	>>> from icsemantic.langfallback.setuphandlers import unpatchPortalTypes
+	>>> # unpatchPortalTypes(portal, None) esto ya no tiene sentido...
+
+    >>>	content_types, constructors, ftis = process_types(listTypes(PROJECTNAME),
+    ...                                                   PROJECTNAME)
+    >>>	cmfutils.ContentInit(PROJECTNAME + ' Content',
+    ...	                     content_types=content_types,
+    ...	                     permission = DEFAULT_ADD_CONTENT_PERMISSION,
+    ...	                     extra_constructors=constructors,
+    ...	                     fti=ftis,
+    ...	                     ).initialize(prod_context)
+
+	>>> # cargar un perfil de GS
+
+yahooo... ahora tengo para probar...
+
+	>>> folder.invokeFactory('ATMock', 'mi_primer_mock')
+	'mi_primer_mock'
+
+Bien, el ATMock esta ahi... ahora a usarlo con linguaplone...
+Primero lo emparcho...
+
+	>>> # from icsemantic.langfallback.utils import generateMultilingualAccessors
+	>>> # generateMultilingualAccessors(ATMock, PACKAGENAME) asi no se hace mas...
+    >>> from zope.component import getUtility
+    >>> from Products.Archetypes.atapi import *
+    >>> from Products.ATContentTypes.content.base import ATCTContent
+    >>> from icsemantic.core.interfaces import IContentTypesMultilingualPatcher, \
+    ...										  IMultilingualContentMarker, \
+    ...										  IMultilingualGettersMarker
+    >>> ccpatcher = getUtility(IContentTypesMultilingualPatcher)
+	>>> ccpatcher.unpatch(ATMock) # por las dudas lo limpio...
+    >>> ccpatcher.patch(ATMock)
+
+Y ahora uso el browser para crear documentos como lo haria el usuario...
+
+	>>> browser.open(folder_url)
+    >>> browser.getLink('ATMock').click()
+    >>> browser.getControl('Title').value = 'Esta es una prueba.'
+    >>> browser.getControl('Description').value = 'Una simple prueba para verificar el funcionamiento de LinguaView.'
+    >>> browser.getControl('Body Text').value = 'La prueba tiene que mostrar el mismo documento en diferentes idiomas.'
+    >>> browser.getControl('Save').click()
+    >>> 'Changes saved.' in browser.contents
+    True
+
+Y ahora la paso al Inglés:
+
+    >>> # browser.getLink('Translate into').click()
+    >>> browser.getLink('English').click()
+    >>> # browser.getControl('Title').value = 'Just a test'
+    >>> browser.getControl('Description').value = 'A simple test to check how works LinguaView.'
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+Y tambien al Italiano, mama mia!:
+
+    >>> # browser.getLink('Translate into').click()
+    >>> browser.getLink('Italiano').click()
+    >>> browser.getControl('Title').value = 'Questo e una prova.'
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+Estan todos ahi...
+    >>> folder.objectIds()
+	['mi_primer_mock', 'esta-es-una-prueba', 'esta-es-una-prueba-en', 'questo-e-una-prova']
+	>>> mock_es = getattr( folder, 'esta-es-una-prueba')
+	>>> mock_en = getattr( folder, 'esta-es-una-prueba-en')
+	>>> mock_it = getattr( folder, 'questo-e-una-prova')
+
+Y tienen las traducciones definidas...
+	>>> mock_es.getTranslations()
+	{'en': [<ATMock at /plone/Members/test_user_1_/esta-es-una-prueba-en>, 'visible'], 'it': [<ATMock at /plone/Members/test_user_1_/questo-e-una-prova>, 'visible'], 'es': [<ATMock at /plone/Members/test_user_1_/esta-es-una-prueba>, 'visible']}
+	>>> mock_en.getTranslations()
+	{'en': [<ATMock at /plone/Members/test_user_1_/esta-es-una-prueba-en>, 'visible'], 'it': [<ATMock at /plone/Members/test_user_1_/questo-e-una-prova>, 'visible'], 'es': [<ATMock at /plone/Members/test_user_1_/esta-es-una-prueba>, 'visible']}
+	>>> mock_it.getTranslations()
+	{'en': [<ATMock at /plone/Members/test_user_1_/esta-es-una-prueba-en>, 'visible'], 'it': [<ATMock at /plone/Members/test_user_1_/questo-e-una-prova>, 'visible'], 'es': [<ATMock at /plone/Members/test_user_1_/esta-es-una-prueba>, 'visible']}
+
+Entonces ahora vamos a probar la navegacion de LinguaPlone...
+primero abro la version original...
+
+	>>> browser.open( folder_url + '/esta-es-una-prueba')
+	>>>	# open('/tmp/languages.html', 'w').write(browser.contents)
+
+    >>> 'Esta es una prueba' in browser.contents
+    True
+
+	>>> browser.getLink('English').click()
+    >>> 'A simple test to check how works LinguaView.' in browser.contents
+    True
+
+	>>> browser.getLink('Italiano').click()
+    >>> 'Questo e una prova' in browser.contents
+    True
+
+Los getters comunes de Archetypes estan definidos...
+	>>> mock_es.getTextoMultilingue()
+	''
+	>>> mock_en.getTextoMultilingue()
+	''
+	>>> mock_it.getTextoMultilingue()
+	''
+
+Y nuestras properties tambien...
+	>>> mock_es.multilingual_text
+	''
+	>>> mock_en.multilingual_text
+	''
+	>>> mock_it.multilingual_text
+	''
+
+Y son iguales!
+	>>> mock_es.getTextoMultilingue() == mock_es.multilingual_text
+	True
+	>>> mock_en.getTextoMultilingue() == mock_es.multilingual_text
+	True
+	>>> mock_it.getTextoMultilingue() == mock_es.multilingual_text
+	True
+
+Y puedo cambiarlo y se sigue respetando...
+	>>> mock_es.setTextoMultilingue('Hola')
+	>>> mock_es.getTextoMultilingue()
+	'Hola'
+	>>> mock_es.getTextoMultilingue() == mock_es.multilingual_text
+	True
+
+	>>> mock_es.multilingual_text = 'mundo'
+	>>> mock_es.multilingual_text
+	'mundo'
+	>>> mock_es.getTextoMultilingue() == mock_es.multilingual_text
+	True
+
+Bien, y ahora vamos a ver si podemos trabajar sobre campos ya definidos...
+	>>> mock_es.Title()
+	'Esta es una prueba.'
+	>>> mock_es.Title() == mock_es.multilingual_title
+	True
+
+y ahora a los bifes, vamos a ver si podemos obtener una version multilingüe de un campo...
+	>>> mock_en.Title()
+	''
+	>>> mock_en.getMultilingualField('title')
+	'Esta es una prueba.'
+    >>> mock_en.getMultilingualField('description') # en el nuevo modo se priorizan los lenguages del user
+    'Una simple prueba para verificar el funcionamiento de LinguaView.'
+	>>> # mock_en.multilingual_title 'Esta es una prueba.'
+
+	>>> mock_en.getMultilingualTitle()
+	'Esta es una prueba.'
+    >>> mock_en.getMultilingualDescription() # en el nuevo modo se priorizan los lenguages del user
+    'Una simple prueba para verificar el funcionamiento de LinguaView.'
+
+Voy a agregar unos index al catalogo y veo que pasa cuando reindexo...
+
+	>>> portal.portal_catalog.manage_addIndex("getMultilingualTitle", "FieldIndex")
+	>>> portal.portal_catalog.manage_addIndex("getMultilingualDescription", "FieldIndex")
+
+	>>> mock_en.reindexObject()
+
+Obtengo los indices...
+	>>> title_index = portal.portal_catalog._catalog.getIndex('getMultilingualTitle')
+	>>> desc_index = portal.portal_catalog._catalog.getIndex('getMultilingualDescription')
+
+Y vamos a ver que hay adentro...
+	>>> title_index.uniqueValues(withLengths=True)
+	(('', 1),)
+	>>> desc_index.uniqueValues(withLengths=True)
+	(('A simple test to check how works LinguaView.', 1),)
+
+Ummm, indexo el valor en español del title, porque lo estoy llamando yo con el user
+que tiene seteada la propertie, vamos a ver que pasa si creo un obj ahora y dejo que
+se indexe solo...
+
+Primero limpio los indices...
+
+	>>> title_index.clear()
+	>>> desc_index.clear()
+
+	>>> browser.open(folder_url)
+    >>> browser.getLink('ATMock').click()
+    >>> browser.getControl('Title').value = 'Otra prueba.'
+    >>> browser.getControl('Description').value = 'Otra simple prueba...'
+    >>> browser.getControl('Body Text').value = 'Mas texto...'
+    >>> browser.getControl('Save').click()
+    >>> 'Changes saved.' in browser.contents
+    True
+
+Y ahora la paso al Inglés:
+
+    >>> browser.getLink('English').click()
+    >>> browser.getControl('Description').value = 'A simple desc...'
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+Y volvamos a ver que hay adentro de los indices...
+Tenemos que tener dos documentos indexados, de los dos tenemos
+la desc en los dos y el titulo solo en un uno.
+Si el metodo funciona como un getter comun de archetypes,
+deberiamos tener un valor vacio en los uniqueValues del title.
+
+	>>> mock2_es = getattr( folder, 'otra-prueba')
+	>>> mock2_en = getattr( folder, 'otra-prueba-en')
+
+El metodo me devuelve el valor en español...
+	>>> mock2_en.getMultilingualField('title')
+	'Otra prueba.'
+
+pero en los valores indexados?!
+	>>> title_index.uniqueValues(withLengths=True)
+	(('', 1), ('Otra prueba.', 1))
+	>>> desc_index.uniqueValues(withLengths=True)
+	(('A simple desc...', 1), ('Otra simple prueba...', 1))
+
+Bingo! funciona como esperamos!!!
+
+Y ahora vamos a probar algunas cosas mas y si funcionan documentar como y porque lo hacen! :)
+Voy a empezar repitiendo un poco lo que se pidio en las especificaciones...
+
+1) Crear tres usuario con la propiedad "prefered_languages" modificada:
+
+    usuario:    prefered_languages:
+    test1        en;es;it
+    test2        es;en
+    test3        it
+
+	>>> member1 = portal.portal_registration.addMember('test1', 'test1')
+	>>> member1
+	<MemberData at /plone/portal_memberdata/test1 used for /plone/acl_users>
+
+	>>> member1.setMemberProperties({'icsemantic.preferred_languages': ('en', 'es', 'it')})
+	>>> member1.getProperty('icsemantic.preferred_languages')
+	('en', 'es', 'it')
+
+	>>> member2 = portal.portal_registration.addMember('test2', 'test2')
+	>>> member2
+	<MemberData at /plone/portal_memberdata/test2 used for /plone/acl_users>
+
+	>>> member2.setMemberProperties({'icsemantic.preferred_languages': ('es', 'en')})
+	>>> member2.getProperty('icsemantic.preferred_languages')
+	('es', 'en')
+
+	>>> member3 = portal.portal_registration.addMember('test3', 'test3')
+	>>> member3
+	<MemberData at /plone/portal_memberdata/test3 used for /plone/acl_users>
+
+	>>> member3.setMemberProperties({'icsemantic.preferred_languages': ('it',)})
+	>>> member3.getProperty('icsemantic.preferred_languages')
+	('it',)
+
+Limpio las pruebas viejas...
+    >>> icsemantic.core.cleanup_folder(folder)
+
+El catalogo quedo vacio?
+	>>> title_index.uniqueValues(withLengths=True)
+	()
+
+Now, we must login...
+    >>> browser.open(logout_url)
+    >>> browser.open(login_url)
+
+    >>> browser.getControl(name='__ac_name').value = 'test1'
+    >>> browser.getControl(name='__ac_password').value = 'test1'
+    >>> browser.getControl(name='submit').click()
+    >>> user_folder = portal.Members.test1
+
+	>>> browser.open(portal_url)
+    >>> browser.getLink('My Folder').click()
+    >>> browser.getLink('ATMock').click()
+    >>> browser.getControl('Title').value = 'Otra prueba.'
+    >>> browser.getControl('Description').value = 'Otra simple prueba...'
+    >>> browser.getControl('Body Text').value = 'Mas texto...'
+    >>> browser.getControl('Save').click()
+    >>> 'Changes saved.' in browser.contents
+    True
+
+Y ahora la paso al Inglés:
+
+    >>> browser.getLink('English').click()
+    >>> browser.getControl('Description').value = 'A simple desc...'
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+Y volvamos a ver que hay adentro de los indices...
+Tenemos que tener dos documentos indexados, de los dos tenemos
+la desc en los dos y el titulo solo en un uno.
+Si el metodo funciona como un getter comun de archetypes,
+deberiamos tener un valor vacio en los uniqueValues del title.
+
+	>>> mock2_es = getattr( user_folder, 'otra-prueba')
+	>>> mock2_en = getattr( user_folder, 'otra-prueba-en')
+
+El metodo me devuelve el valor en español...
+	>>> mock2_en.getMultilingualField('title')
+	'Otra prueba.'
+
+pero en los valores indexados?!
+	>>> desc_index.uniqueValues(withLengths=True)
+	(('A simple desc...', 1), ('Otra simple prueba...', 1))
+	>>> title_index.uniqueValues(withLengths=True)
+	(('', 1), ('Otra prueba.', 1))
+
+
+Y ahora a los bifes, voy a cambiar los getters generados por Archetypes...
+
+antes del cambio el Title() del objeto en ingles me tiene que dar ''...
+	>>> mock2_en.Title()
+	''
+
+Y despues...
+	>>> # from icsemantic.langfallback.utils import replaceArchetypesAccessors
+	>>> # replaceArchetypesAccessors(ATMock, PACKAGENAME) No se hace mas asi...
+
+    >>> ccpatcher.unpatch(ATMock)
+    >>> ccpatcher.patch(ATMock, replace_accessors=True)
+
+	>>> mock2_en.Title()
+	'Otra prueba.'
+
+yahooooooooooooo!!! FUNCIONA!!!
+
+La ultima, juro que es la ultima prueba... :)
+
+	>>> browser.open(mock2_en.absolute_url())
+	>>> 'Otra prueba.' in browser.contents
+	True
+
+Weeeeeeeeeeeeee!!! :)
+
+
+Y con ATCT como el ATDocument?!
+Ahora con el utility que defini...
+
+	>>> from Products.ATContentTypes.content.document import ATDocument
+	>>> from zope.component import getUtility
+	>>> from icsemantic.core.interfaces import IContentTypesMultilingualPatcher
+
+	>>> ccpatcher = getUtility(IContentTypesMultilingualPatcher)
+	>>> ccpatcher.patch(ATDocument, True)
+
+	>>> browser.open(portal_url)
+    >>> browser.getLink('My Folder').click()
+    >>> browser.getLink('Page').click()
+    >>> browser.getControl('Title').value = 'ATDocument de prueba.'
+    >>> browser.getControl('Description').value = 'La descripcion de la prueba con un ATDocument...'
+    >>> browser.getControl('Body Text').value = 'Texto de la prueba con un ATDocument'
+    >>> browser.getControl('Save').click()
+    >>> 'Changes saved.' in browser.contents
+    True
+
+    >>> browser.getLink('English').click()
+    >>> browser.getControl('Description').value = 'Test ATDocument description...'
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+	>>> doc_es = getattr( user_folder, 'atdocument-de-prueba')
+	>>> doc_en = doc_es.getTranslations()['en'][0]
+
+	>>> # doc_en.Title()	'ATDocument de prueba.'
+
+	>>> # doc_en._old_Title()	''
+
+Quiero probar que no me afecte otro ATCT...
+
+	>>> browser.open(portal_url)
+    >>> browser.getLink('My Folder').click()
+    >>> browser.getLink(url='www.platecom.com').click()
+    >>> browser.getControl('Title').value = 'ATEvent de prueba.'
+    >>> browser.getControl('Description').value = 'La descripcion de la prueba con un ATEvent...'
+    >>> browser.getControl('Save').click()
+    >>> 'Changes saved.' in browser.contents
+    True
+
+    >>> browser.getLink('English').click()
+    >>> browser.getControl('Description').value = 'Test ATEvent description...'
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+	>>> ev_es = getattr( user_folder, 'atevent-de-prueba')
+	>>> ev_en = ev_es.getTranslations()['en'][0]
+
+Este es el titulo seteado...
+	>>> ev_es.Title()
+	'ATEvent de prueba.'
+
+Este es el que no tiene que mostrar nada porque el ATEvent
+no implementa IMultilingualContentMarker
+	>>> ev_en.Title()
+	''
+
+Y ahora en caliente hago al ATEvent multilingüe...
+	>>> from Products.ATContentTypes.content.event import ATEvent
+	>>> ccpatcher.patch(ATEvent, True)
+
+Y...
+	>>> ev_es.Title()
+	'ATEvent de prueba.'
+	>>> ev_en.Title()
+	'ATEvent de prueba.'
+
+Charan!!! :)
+
+... algo de limpieza ahora...
+
+	>>> ccpatcher.unpatch(ATEvent)
+	>>> ccpatcher.unpatch(ATDocument)
+	>>> ccpatcher.unpatch(ATMock)
