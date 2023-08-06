@@ -1,0 +1,347 @@
+This file provides a couple of functional tests for `collective.indexing` in
+order to make sure the combination of queueing, hooking into the transaction
+machinery, monkey-patches, interaction with the portal catalog, several event
+subscribers, thread-local variables etc is actually working... :)
+
+First a testbrowser with a logged-in user holding the necessary permissions
+is needed:
+
+  >>> self.setRoles(('Manager',))
+  >>> browser = self.getBrowser()
+  >>> browser.open('http://nohost/plone/')
+
+Since the queueing and optimizing of indexing operations is supposed to be
+transparent on the user level, counters are set up to make it possible to
+check if things are in place and working.  The idea here is that the number
+of times something is put into the queue (for indexing) should be greater
+than the number of `index` call made by the queue processor.  Also, non-zero
+numbers show that the queue was used in the first place:
+
+  >>> from collective.indexing.queue import IndexQueue
+  >>> q_index = IndexQueue.index
+  >>> queuedIndex = []
+  >>> def index(self, obj, attributes=None):
+  ...     queuedIndex.append(repr(obj))
+  ...     q_index(self, obj, attributes)
+  >>> IndexQueue.index = index
+
+  >>> from collective.indexing.indexer import PortalCatalogProcessor
+  >>> p_index = PortalCatalogProcessor.index
+  >>> calledIndex = []
+  >>> def index(self, obj, attributes=None):
+  ...     calledIndex.append(repr(obj))
+  ...     p_index(self, obj, attributes)
+  >>> PortalCatalogProcessor.index = index
+
+Now a first news item gets created, ...
+
+  >>> browser.getLink('News Item').click()
+  >>> browser.url
+  'http://nohost/plone/portal_factory/News Item/news_item.../edit'
+  >>> browser.getControl('Title').value = 'first news today'
+  >>> browser.getControl('Save').click()
+  >>> browser.url
+  'http://nohost/plone/first-news-today'
+  >>> browser.contents
+  '...Info...Changes saved...'
+
+which should have resulted in some indexing operations on the queue and the
+queue processor as well.  The latter should also have fewer operations, since
+Plone calls them redundantly after all:
+
+  >>> self.failUnless(queuedIndex, 'indexing queue not used?')
+  >>> self.failUnless(calledIndex, 'queue processor not used?')
+  >>> self.failUnless(len(queuedIndex) > len(calledIndex), 'not optimizing?')
+  >>> self.assertEqual(len(calledIndex), 2)
+
+Let's make sure the new item has actually been indexed, that is added to the
+portal catalog:
+
+  >>> catalog = portal.portal_catalog
+  >>> [ brain.getObject() for brain in catalog(portal_type='News Item') ]
+  [<ATNewsItem at /plone/first-news-today>]
+
+Being in the catalog would also make it show up in the global section
+navigation as a link:
+
+  >>> browser.getLink('Home').click()
+  >>> browser.getLink('first news today')
+  <Link text='first news today' url='http://nohost/plone/first-news-today'>
+  >>> browser.contents
+  '...<ul id="portal-globalnav"...
+   ...first news today...
+   ...<ul id="portal-personaltools"...'
+
+Another news item gets created to make sure there are no problems with
+the hook into the transaction machinery:
+
+  >>> browser.getLink('News Item').click()
+  >>> browser.url
+  'http://nohost/plone/portal_factory/News Item/news_item.../edit'
+  >>> browser.getControl('Title').value = 'second news today'
+  >>> browser.getControl('Save').click()
+  >>> browser.url
+  'http://nohost/plone/second-news-today'
+  >>> browser.contents
+  '...Info...Changes saved...'
+
+Now both should be in the catalog and show up in the global sections:
+
+  >>> self.assertEqual(len(calledIndex), 4)
+  >>> path = lambda obj: '/'.join(obj.getPhysicalPath())
+  >>> def sort(brains):
+  ...     return sorted([ brain.getObject() for brain in brains ], key=path)
+  >>> sort(catalog(portal_type='News Item'))
+  [<ATNewsItem at /plone/first-news-today>, <ATNewsItem at /plone/second-news-today>]
+
+  >>> browser.getLink('first news today')
+  <Link text='first news today' url='http://nohost/plone/first-news-today'>
+  >>> browser.getLink('second news today')
+  <Link text='second news today' url='http://nohost/plone/second-news-today'>
+  >>> browser.contents
+  '...<ul id="portal-globalnav"...
+   ...first news today...
+   ...second news today...
+   ...<ul id="portal-personaltools"...'
+
+And the search should of course also return the new news:
+
+  >>> browser.getControl('Search Site').value = 'today'
+  >>> browser.getForm(name='searchform').submit()
+  >>> browser.url
+  'http://nohost/plone/search?SearchableText=today'
+  >>> browser.contents
+  '...Search results...2 items matching your search terms...
+   ...second news today...
+   ...first news today...'
+
+Now let's try some other operations, for example moving items around.  The
+change of location should be correctly reflected by the catalog.  First some
+preparations including more counters for reindexing and unindexing operations:
+
+  >>> browser.getLink('Home').click()
+  >>> browser.getLink(url='createObject?type_name=Folder').click()
+  >>> browser.getControl('Title').value = 'a folder'
+  >>> browser.getControl('Save').click()
+
+  >>> self.assertEqual(len(calledIndex), 6)
+  >>> calledIndex[:] = []
+  >>> uid = portal['first-news-today'].UID()
+  >>> folder = portal['a-folder']
+
+  >>> p_reindex = PortalCatalogProcessor.reindex
+  >>> calledReindex = []
+  >>> def reindex(self, obj, attributes=None):
+  ...     calledReindex.append(repr(obj))
+  ...     p_reindex(self, obj, attributes)
+  >>> PortalCatalogProcessor.reindex = reindex
+
+  >>> p_unindex = PortalCatalogProcessor.unindex
+  >>> calledUnindex = []
+  >>> def unindex(self, obj):
+  ...     calledUnindex.append(repr(obj))
+  ...     p_unindex(self, obj)
+  >>> PortalCatalogProcessor.unindex = unindex
+
+Now the item can be moved to the newly created folder:
+
+  >>> browser.getLink('Home').click()
+  >>> browser.getLink('Contents').click()
+  >>> form = browser.getForm(name='folderContentsForm')
+  >>> form.getControl('first news today').selected = True
+  >>> form.getControl('Cut').click()
+  >>> browser.contents
+  '...Info...1 item(s) cut...'
+
+  >>> browser.getLink('a folder').click()
+  >>> browser.getLink('Contents').click()
+  >>> browser.url
+  'http://nohost/plone/a-folder/folder_contents'
+  >>> browser.getControl('Paste').click()
+  >>> browser.contents
+  '...Info...Item(s) pasted...'
+  >>> browser.getControl('first news today')
+  <ItemControl ... optionValue='/plone/a-folder/first-news-today' ...>
+
+Afterwards various aspects are checked:
+
+  >>> portal['first-news-today']
+  Traceback (most recent call last):
+  ...
+  KeyError: 'first-news-today'
+  >>> folder.objectValues()
+  [<ATNewsItem at /plone/a-folder/first-news-today>]
+  >>> uid == folder['first-news-today'].UID()
+  True
+  >>> calledIndex
+  ['<ATNewsItem at /plone/a-folder/first-news-today>']
+  >>> self.assertEqual(len(calledReindex), 2)
+  >>> calledUnindex
+  ['<PathWrapper at /plone/first-news-today>']
+  >>> sort(catalog(Title='first'))
+  [<ATNewsItem at /plone/a-folder/first-news-today>]
+
+Copying an item should also work:
+
+  >>> browser.getLink('Home').click()
+  >>> browser.getLink('Contents').click()
+  >>> form = browser.getForm(name='folderContentsForm')
+  >>> form.getControl('second news today').selected = True
+  >>> form.getControl('Copy').click()
+  >>> browser.contents
+  '...Info...1 item(s) copied...'
+
+  >>> browser.getLink('a folder').click()
+  >>> browser.getLink('Contents').click()
+  >>> browser.getControl('Paste').click()
+  >>> browser.contents
+  '...Info...Item(s) pasted...
+   ...a folder...
+   ...Up one level...
+   ...first news today...
+   ...second news today...'
+  >>> browser.getControl('second news today')
+  <ItemControl ... optionValue='/plone/a-folder/second-news-today' ...>
+
+  >>> portal['second-news-today']
+  <ATNewsItem at /plone/second-news-today>
+  >>> folder['second-news-today']
+  <ATNewsItem at /plone/a-folder/second-news-today>
+  >>> portal['second-news-today'].UID() == folder['second-news-today'].UID()
+  False
+  >>> self.assertEqual(len(calledIndex), 2)
+  >>> '<ATNewsItem at /plone/a-folder/second-news-today>' in calledIndex
+  True
+  >>> self.assertEqual(len(calledReindex), 3)
+  >>> self.assertEqual(len(calledUnindex), 1)
+  >>> sort(catalog(Title='second'))
+  [<ATNewsItem at /plone/a-folder/second-news-today>, <ATNewsItem at /plone/second-news-today>]
+
+Removing an item should uncatalog it, of course:
+
+  >>> sort(catalog(Title='first'))
+  [<ATNewsItem at /plone/a-folder/first-news-today>]
+  >>> form = browser.getForm(name='folderContentsForm')
+  >>> form.getControl('first news today').selected = True
+  >>> form.getControl('Delete').click()
+  >>> browser.contents
+  '...Info...Item(s) deleted...'
+
+  >>> self.assertEqual(len(calledIndex), 2)
+  >>> self.assertEqual(len(calledReindex), 4)
+  >>> self.assertEqual(len(calledUnindex), 2)
+  >>> calledUnindex[-1]
+  '<PathWrapper at /plone/a-folder/first-news-today>'
+  >>> sort(catalog(Title='first'))
+  []
+
+Modifying an item should trigger a reindex operation:
+
+  >>> sort(catalog(Title='folder'))
+  [<ATFolder at /plone/a-folder>]
+
+  >>> browser.getLink('Edit').click()
+  >>> browser.getControl('Title').value = 'latest news'
+  >>> browser.getControl('Save').click()
+
+  >>> self.assertEqual(len(calledIndex), 2)
+  >>> self.assertEqual(len(calledReindex), 5)
+  >>> self.assertEqual(len(calledUnindex), 2)
+  >>> calledReindex[-1]
+  '<ATFolder at /plone/a-folder>'
+  >>> sort(catalog(Title='folder'))
+  []
+  >>> sort(catalog(Title='latest'))
+  [<ATFolder at /plone/a-folder>]
+
+Publishing should do the same:
+
+  >>> info = self.portal.portal_workflow.getInfoFor
+  >>> info(self.portal['a-folder'], 'review_state')
+  'private'
+  >>> sort(catalog(Title='latest', review_state='published'))
+  []
+
+  >>> browser.getLink('Publish').click()
+
+  >>> self.assertEqual(len(calledIndex), 2)
+  >>> self.assertEqual(len(calledReindex), 6)
+  >>> self.assertEqual(len(calledUnindex), 2)
+  >>> calledReindex[-1]
+  '<ATFolder at /plone/a-folder>'
+  >>> info(self.portal['a-folder'], 'review_state')
+  'published'
+  >>> sort(catalog(Title='latest', review_state='published'))
+  [<ATFolder at /plone/a-folder>]
+
+Renaming should also work, but let's reset the counters first:
+
+  >>> calledIndex[:] = []
+  >>> calledReindex[:] = []
+  >>> calledUnindex[:] = []
+  >>> portal['a-folder']
+  <ATFolder at /plone/a-folder>
+
+  >>> browser.getLink('Rename').click()
+  >>> browser.getControl('New Short Name').value = 'some-news'
+  >>> browser.getControl('Rename All').click()
+  >>> browser.contents
+  '...Info...Renamed ...a-folder... to ...some-news...'
+
+  >>> portal['a-folder']
+  Traceback (most recent call last):
+  ...
+  KeyError: 'a-folder'
+  >>> portal['some-news']
+  <ATFolder at /plone/some-news>
+
+  >>> sorted(calledIndex)
+  ['<ATFolder at /plone/some-news>', '<ATNewsItem at /plone/some-news/second-news-today>']
+  >>> sorted(calledReindex)
+  ['<ATDocument at /plone/front-page>', '<ATNewsItem at /plone/second-news-today>', '<PloneSite at /plone>']
+  >>> sorted(calledUnindex)
+  ['<PathWrapper at /plone/a-folder/second-news-today>', '<PathWrapper at /plone/a-folder>']
+
+  >>> sort(catalog(getId='a-folder'))
+  []
+  >>> sort(catalog(getId='some-news'))
+  [<ATFolder at /plone/some-news>]
+
+Adding a criterion to a collection shouldn't catalog the criterion:
+
+  >>> browser.getLink('Home').click()
+  >>> browser.getLink(url='createObject?type_name=Topic').click()
+  >>> browser.getControl(name='title').value = 'a collection'
+  >>> browser.getControl('Save').click()
+  >>> browser.getLink('Criteria').click()
+  >>> browser.getForm(name='criteria_select').getControl('Item Type').selected = True
+  >>> browser.getForm(name='criteria_select').getControl('Select content types').selected = True
+  >>> browser.getControl('Add criteria').click()
+
+  >>> portal['a-collection']
+  <ATTopic at /plone/a-collection>
+  >>> portal['a-collection'].objectIds()
+  ['syndication_information', 'crit__Type_ATPortalTypeCriterion']
+  >>> catalog(portal_type='ATPortalTypeCriterion')
+  []
+
+Also the portal site object itself should never be indexed:
+
+  >>> catalog(portal_type='Plone Site')
+  []
+
+The fix for renaming items introduced a wrapper class, which turned out to
+cause problems with objects implementing their own custom version of the
+attribute setter method `__setattr__`.  This prevented skin directories from
+being removed from `portal_skins` for example.  Let's make sure this works
+again now:
+
+  >>> portal.portal_skins.manage_delObjects('plone_styles')
+
+Also, clean up the monkey patches:
+
+  >>> IndexQueue.index = q_index
+  >>> PortalCatalogProcessor.index = p_index
+  >>> PortalCatalogProcessor.reindex = p_reindex
+  >>> PortalCatalogProcessor.unindex = p_unindex
+
