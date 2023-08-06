@@ -1,0 +1,183 @@
+Import of Marshalled ATContentTypes from a GMail Account
+========================================================
+
+Ramon Bartl <ramonski@ramonski.de>
+Copyright (c) 2006-2007 InQuant GmbH
+
+Abstract
+--------
+The GSXML is a Product that generates XML out of Plones ATContent Types and
+implements GenericSetup's Interfaces to walk through folders and export the
+files to e.g. the Filesystem or whatever specific export context we have.
+
+Introduction
+------------
+Since Google increases their Mail storage capacity continuously, the necessity
+to delete mails at all has become obsolete. So why don't use this cheap space
+our purposes? Email has many nice advantages that makes it applicable for an
+export storage::
+
+    1. Email works
+    2. Plone Users have an Email registered
+    3. Email get queued over the internet, so no direct connection is needed
+    4. Receiving Email works almost everywhere
+    5. Users know their MUAs, so they can organize their backups
+
+This sounds nice and that's the reason why GSXML implements an GMail Export
+Context.
+
+NOTE:
+ - You need the libgmail, for information see::
+    http://libgmail.sourceforge.net/
+ - If you don't have an gmail account, you cannot run the test, so here is where
+   you get one::
+    https://www.google.com/accounts/ManageAccount
+ - We try to import the stuff which we exported in the gmailexport doctest, so you
+   have to run this before...obviously;)
+
+Here we go:
+~~~~~~~~~~~
+First of all, you need a Google mail account, surprise;) So before you can use
+this test, fill in your username and password::
+
+    >>> USER = "username@googlemail.com"
+    >>> PASS = "password"
+
+In the gmailexport doctest we exported a datastructure like shown below::
+
+    export
+    |-- doc1
+    |-- doc2
+    `-- subfolder
+        |-- doc3
+        |-- doc4
+        `-- doc5
+
+If the export worked, you should have a bunch of emails with subjects like
+'[GSXML] 1234'. These Emails contain 2 Attachments::
+
+    1. A XML file which contains the marshalled data. This file should have the
+       same name as the marshalled object, e.g doc1.xml.
+
+            <?xml version="1.0" ?>
+            <metadata xmlns="http://plone.org/ns/archetypes/"
+                      xmlns:cmf="http://cmf.zope.org/namespaces/default/"
+                      xmlns:dc="http://purl.org/dc/elements/1.1/"
+                      xmlns:xmp="adobe:ns:meta">
+            <cmf:type>
+                Document
+            </cmf:type>
+            <uid>
+                661aab791a001b474d23bf41550020f4
+            </uid>
+            <field id="id">
+                doc1
+            </field>
+            <dc:title>
+                Test Page 1
+            </dc:title>
+            .
+            .
+            </metadata>
+
+    2. A Windows INI like configuration file called 'metadata'. This file contains
+       among other things the path to the object, e.g 'structure/export/doc
+
+            [info]
+            exportid = 1234
+            export_date = 2007-03-08T14:33:23.227142
+            filename = structure/export/doc1.xml
+
+Now we need to do some setup to prepare the export::
+
+    >>> from zope.interface import implements
+    >>> from zope.interface.verify import verifyObject
+    >>> from Products.GenericSetup.interfaces import IImportContext
+
+    >>> from collective.plone.gsxml.content import XMLContentFSImporter
+    >>> from collective.plone.gsxml.context import GmailImportContext
+    >>> from collective.plone.gsxml.interfaces import *
+
+Let's create a folder where we import our data::
+
+    >>> self.setRoles(('Manager'),)
+    >>> self.portal.invokeFactory("Folder", "import")
+    'import'
+    >>> f = self.portal["import"]
+
+As the XMLContentFSImporter takes the context to specify the corrext xml file,
+we need to create a folder called 'export'. Sounds funny, but the GS guys are
+doing it the same way::
+
+    id = self.context.getId()
+    filename = "%s.xml" % id
+    xml = import_context.readDataFile( filename, subdir )
+
+So lets create this folder below our import folder::
+
+    >>> f.invokeFactory("Folder", "export")
+    'export'
+    >>> f = f["export"]
+
+We wrote an adapter which adapts the functionality of the Marhaller, to
+demarshall the xml back to ATContentTypes, and GenericSetup, to create a fs
+like file strucure and read the data for import from a given context . In our
+case we want to read from our Gmail Account::
+
+    >>> im = XMLContentFSImporter( f )
+
+    >>> IGSXMLFilesystemImporter.providedBy( im )
+    True
+
+    >>> IFilesystemImporter.providedBy( im )
+    True
+
+    >>> verifyObject( IFilesystemImporter, im )
+    True
+
+Now we need to tell our importer 'im' where to import from. Therefore we create
+an import context which provides the Gmail functionality. Here we need the
+account access data which you hopefully filled in above. We provide an import
+id. To find the data we want to import, we specified at the export the
+exportid. Now we need this to initialize our gmail import context::
+
+    >>> ic = GmailImportContext(USER, PASS, exportid="1234")
+
+XXX: When this is run twice, there will be a lot of mails with the same
+exportid! This will cause a uid clash
+
+Our import context provides GenericSetup's IImportContext interface::
+
+    >>> IImportContext.providedBy( ic )
+    True
+
+The final step. This can take a while and you need internet connection,
+surprise:) again::
+
+    >>> im.import_(ic, "structure", False)
+    >>> f.objectIds()
+    ['doc1', 'doc2', 'subfolder']
+
+Let's see what we have imported::
+
+    >>> f.doc1.getText()
+    ' a test page '
+    >>> f.doc1.Title()
+    'Test Page 1'
+
+    >>> f.doc2.getText()
+    ' another test page '
+    >>> f.doc2.Title()
+    'Test Page 2'
+
+    >>> f.subfolder.objectIds()
+    ['doc3', 'doc4', 'doc5']
+    >>> sf = f.subfolder
+    >>> sf.doc3.getText()
+    ' a test page in a subfolder '
+    >>> sf.doc3.Title()
+    'Test Page 3'
+
+::
+
+  vim: set ts=4 sw=4 expandtab filetype=rst:
