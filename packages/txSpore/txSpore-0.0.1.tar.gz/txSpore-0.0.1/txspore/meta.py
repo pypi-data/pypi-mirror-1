@@ -1,0 +1,8 @@
+display_name = "txSpore"
+library_name = "txspore"
+version = "0.0.1"
+author = "Duncan McGreggor"
+author_email = "oubiwann@adytum.us"
+license = "MIT"
+url = "http://launchpad.net/txspore"
+description = """An asynchronous Spore Python API using Twisted."""
