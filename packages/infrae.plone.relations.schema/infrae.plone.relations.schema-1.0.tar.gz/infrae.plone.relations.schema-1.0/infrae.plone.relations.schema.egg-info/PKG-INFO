@@ -1,0 +1,598 @@
+Metadata-Version: 1.0
+Name: infrae.plone.relations.schema
+Version: 1.0
+Summary: Zope 3 schema for plone.app.relations items.
+Home-page: http://svn.infrae.com/PloneComponent/infrae.plone.relations.schema/trunk
+Author: Sylvain Viollon
+Author-email: sylvain@infrae.com
+License: GPL
+Description: *******************************************
+        Zope 3 schema field for plone.app.relations
+        *******************************************
+        
+        .. contents::
+        
+        
+        The purpose of this extension is to provide a Zope 3 schema for plone
+        relations. This has been tested with Plone 2.5 and Plone 3.
+        
+        Interface definition
+        ====================
+        
+        A new field::
+        
+        >>> from infrae.plone.relations.schema import PloneRelation
+        
+        A simple interface with an field::
+        
+        >>> from zope.interface import Interface, implements
+        >>> class IContent(Interface):
+        ...    """Sample interface."""
+        ...    relation = PloneRelation(relation="my relation")
+        
+        I can get the field from the interface::
+        
+        >>> r_field = IContent.get('relation')
+        
+        And this is a field::
+        
+        >>> from zope.interface.verify import verifyObject
+        >>> from zope.schema.interfaces import IField
+        >>> verifyObject(IField, r_field)
+        True
+        
+        Now, a field to look up reverse relations::
+        
+        >>> class IBackContent(Interface):
+        ...    """Sample interface."""
+        ...    relation = PloneRelation(relation="my relation",
+        ...                             reverse=True)
+        
+        
+        Create a simple content for test purpose
+        ========================================
+        
+        And a simple implementation::
+        
+        >>> from OFS.Folder import Folder
+        >>> class BaseContent(Folder):
+        ...    def __init__(self, id):
+        ...       super(BaseContent, self).__init__()
+        ...       self.id = id
+        ...    def UID(self):
+        ...       return 'uid-%s' % self.id
+        
+        UID are used by the context factory.
+        
+        Standard base class::
+        
+        >>> class MyContent(BaseContent):
+        ...    implements(IContent)
+        
+        And::
+        
+        >>> class MyBackContent(BaseContent):
+        ...    implements(IBackContent)
+        
+        
+        Now, create some items::
+        
+        >>> for id in range(1, 5):
+        ...    name = 'it%d' % id
+        ...    item = MyContent(name)
+        ...    self.portal._setObject(name, item)
+        'it1'
+        'it2'
+        'it3'
+        'it4'
+        >>> it1 = self.portal.it1
+        >>> it2 = self.portal.it2
+        >>> it3 = self.portal.it3
+        >>> it4 = self.portal.it4
+        
+        >>> itb1 = MyBackContent('itb1')
+        >>> self.portal._setObject('itb1', itb1)
+        'itb1'
+        >>> itb1 = self.portal.itb1
+        
+        
+        Utility to display relation
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        
+        An helper to display a relation::
+        
+        >>> def display(rels):
+        ...     for rel in rels:
+        ...        print "Objects: %s" % list(rel['objects'])
+        ...        if rel.has_key("context"):
+        ...            print "Context: %s" % rel['context']
+        ...     if not rels:
+        ...        print "Empty"
+        
+        
+        Simple field use
+        ================
+        
+        Direct set, and reverse access
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        
+        And try some validation on data. Data is a list of dictionary,
+        representing all relations of the field. In the dictionary:
+        
+        - ``objects``: represent a list of object for the relation;
+        
+        - ``context``: may be an object stored as context of the relation.
+        
+        Example::
+        
+        >>> bad_relation1 = [{'bad': None},]
+        >>> r_field.validate(bad_relation1)
+        Traceback (most recent call last):
+        ...
+        ValidationError: Invalid structure
+        >>> good_relation = [{'objects': [it2, itb1]},]
+        >>> r_field.validate(good_relation)
+        
+        And set the field::
+        
+        >>> r_field.set(it1, good_relation)
+        
+        And get data from the field::
+        
+        >>> relation = r_field.get(it1)
+        >>> relation
+        [{'objects': <plone.relations.relationships.IntIdSubObjectWrapper object at ...>}]
+        >>> display(relation)
+        Objects: [<MyContent at /plone/it2>, <MyBackContent at /plone/itb1>]
+        
+        Now, we can ask from ``itb1`` content, which has a reverse field::
+        
+        >>> rb_field = IBackContent.get('relation')
+        >>> relation = rb_field.get(itb1)
+        >>> relation
+        [{'objects': <plone.relations.relationships.IntIdSubObjectWrapper object at ...>}]
+        >>> display(relation)
+        Objects: [<MyContent at /plone/it1>]
+        
+        We update the relation::
+        
+        >>> good_relation = [{'objects': [it2, it3]},]
+        >>> r_field.set(it1, good_relation)
+        
+        So change is reflected::
+        
+        >>> display(r_field.get(it1))
+        Objects: [<MyContent at /plone/it2>, <MyContent at /plone/it3>]
+        
+        
+        And there is no more relation in the reverse field::
+        
+        >>> rb_field = IBackContent.get('relation')
+        >>> rb_field.get(itb1)
+        []
+        
+        Now, set on reverse field::
+        
+        >>> good_relation = [{'objects': [it1, it2]}]
+        >>> rb_field.set(itb1, good_relation)
+        >>> display(rb_field.get(itb1))
+        Objects: [<MyContent at /plone/it1>, <MyContent at /plone/it2>]
+        
+        And on the normal::
+        
+        >>> display(r_field.get(it1))
+        Objects: [<MyContent at /plone/it2>, <MyContent at /plone/it3>]
+        Objects: [<MyBackContent at /plone/itb1>]
+        
+        
+        Deletion
+        ~~~~~~~~
+        
+        You can delete value by setting the relation to an empty list ``[]``::
+        
+        >>> display(r_field.get(it2))
+        Objects: [<MyBackContent at /plone/itb1>]
+        >>> r_field.set(it2, [])
+        >>> display(r_field.get(it2))
+        Empty
+        >>> display(rb_field.get(itb1))
+        Objects: [<MyContent at /plone/it1>]
+        
+        And::
+        
+        >>> display(r_field.get(it1))
+        Objects: [<MyContent at /plone/it2>, <MyContent at /plone/it3>]
+        Objects: [<MyBackContent at /plone/itb1>]
+        >>> r_field.set(it1, [])
+        >>> display(r_field.get(it1))
+        Empty
+        >>> display(rb_field.get(itb1))
+        Empty
+        
+        
+        Field independence
+        ~~~~~~~~~~~~~~~~~~
+        
+        One other relation schema::
+        
+        >>> class IComplexContent(Interface):
+        ...    """A content with two relation."""
+        ...    relation1 = PloneRelation(relation="relation1")
+        ...    relation2 = PloneRelation(relation="relation2")
+        
+        And the related content::
+        
+        >>> class MyComplexContent(BaseContent):
+        ...    implements(IComplexContent)
+        
+        Create three objects like this::
+        
+        >>> itcx1 = MyComplexContent("itcx1")
+        >>> self.portal._setObject("itcx1", itcx1)
+        'itcx1'
+        >>> itcx1 = self.portal.itcx1
+        >>> itcx2 = MyComplexContent("itcx2")
+        >>> self.portal._setObject("itcx2", itcx2)
+        'itcx2'
+        >>> itcx2 = self.portal.itcx2
+        >>> itcx3 = MyComplexContent("itcx3")
+        >>> self.portal._setObject("itcx3", itcx3)
+        'itcx3'
+        >>> itcx3 = self.portal.itcx3
+        
+        Now, add relation::
+        
+        >>> r1_field = IComplexContent.get("relation1")
+        >>> r1_field.set(itcx1, [{'objects': [itcx2,]}])
+        >>> display(r1_field.get(itcx1))
+        Objects: [<MyComplexContent at /plone/itcx2>]
+        >>> r2_field = IComplexContent.get("relation2")
+        >>> r2_field.set(itcx1, [{'objects': [itcx3,]}])
+        >>> display(r2_field.get(itcx1))
+        Objects: [<MyComplexContent at /plone/itcx3>]
+        
+        And delete one::
+        
+        >>> r2_field.set(itcx1, [])
+        >>> display(r2_field.get(itcx1))
+        Empty
+        >>> display(r1_field.get(itcx1))
+        Objects: [<MyComplexContent at /plone/itcx2>]
+        
+        
+        More Constraints
+        ================
+        
+        Now, you have to give at least 1 value, and no more than 3::
+        
+        >>> class ILengthContent(Interface):
+        ...    """Sample interface with length control."""
+        ...    relation = PloneRelation(relation="my relation",
+        ...                             min_length=1,
+        ...                             max_length=3)
+        
+        
+        The field implements ``IMinMaxLen``::
+        
+        >>> from zope.schema.interfaces import IMinMaxLen
+        >>> rl_field = ILengthContent.get('relation')
+        >>> verifyObject(IMinMaxLen, rl_field)
+        True
+        
+        Ok, now some bad tries::
+        
+        >>> bad_relation = []
+        >>> rl_field.validate(bad_relation)
+        Traceback (most recent call last):
+        ...
+        TooSmall: Less than 1 values
+        
+        >>> bad_relation = [{'objects': [it2,]},
+        ...                 {'objects': [it3,]},
+        ...                 {'objects': [it4,]},
+        ...                 {'objects': [itb1,]},]
+        >>> rl_field.validate(bad_relation)
+        Traceback (most recent call last):
+        ...
+        TooBig: More than 3 values
+        
+        And now, one correct::
+        
+        >>> good_relation = [{'objects': [it2,]},]
+        >>> rl_field.validate(good_relation)
+        
+        But we want also to have uniques objects in the relation::
+        
+        >>> class IUniqueContent(Interface):
+        ...    """Sample interface only one item per relation."""
+        ...    relation = PloneRelation(relation="my relation",
+        ...                             unique=True)
+        >>> ru_field = IUniqueContent.get('relation')
+        
+        Some tries now::
+        
+        >>> bad_relation = [{'objects': [it2, it3,]}]
+        >>> ru_field.validate(bad_relation)
+        Traceback (most recent call last):
+        ...
+        ValidationError: Not uniques values in relation
+        
+        >>> good_relation = [{'objects': [it2,]}]
+        >>> ru_field.validate(good_relation)
+        
+        We want that every object in the relation implements a particular
+        interface::
+        
+        >>> class IConstraintContent(Interface):
+        ...    """Sample interface with constraint on relation."""
+        ...    relation = PloneRelation(relation="my relation",
+        ...                             relation_schema=IUniqueContent)
+        >>> rs_field = IConstraintContent.get('relation')
+        
+        
+        Use of context object
+        =====================
+        
+        Two interfaces let you work with context objects::
+        
+        >>> from infrae.plone.relations.schema import IPloneRelationContext
+        >>> from infrae.plone.relations.schema import IPloneRelationContextFactory
+        
+        This two next import are helpers, but you can use them since it's good
+        content start::
+        
+        >>> from infrae.plone.relations.schema import BasePloneRelationContext
+        >>> from infrae.plone.relations.schema import BasePloneRelationContextFactory
+        
+        The following context interface::
+        
+        >>> class IContextObject(IPloneRelationContext):
+        ...    """Simple context object."""
+        
+        And its corresponding object::
+        
+        >>> class MyContextObject(BasePloneRelationContext):
+        ...    implements(IContextObject)
+        
+        We will declare the field like this::
+        
+        >>> class IContentWithContext(Interface):
+        ...    """Simple content with a context."""
+        ...    relation = PloneRelation(relation="context relation",
+        ...                             context_schema=IContextObject)
+        
+        We want an object with this schema::
+        
+        >>> class MyContentWithContext(BaseContent):
+        ...    implements(IContentWithContext)
+        
+        Create the object::
+        
+        >>> itc1 = MyContentWithContext('itc1')
+        >>> self.portal._setObject('itc1', itc1)
+        'itc1'
+        >>> itc1 = self.portal.itc1
+        
+        Prepare one context object::
+        
+        >>> ctxt_fac = BasePloneRelationContextFactory(MyContextObject, IContextObject)
+        >>> verifyObject(IPloneRelationContextFactory, ctxt_fac)
+        True
+        >>> ctxt1 = ctxt_fac(itc1, it1, dict())
+        >>> ctxt1
+        <MyContextObject at /plone/itc1/uid-it1>
+        >>> verifyObject(IContextObject, ctxt1)
+        True
+        
+        Get the field::
+        
+        >>> rc_field = IContentWithContext.get('relation')
+        
+        Now we can try this relation::
+        
+        >>> bad_relation = [{'objects': [it2, itb1,], 'context': it3,}]
+        >>> rc_field.validate(bad_relation)
+        Traceback (most recent call last):
+        ...
+        ValidationError: Invalid context
+        >>> good_relation = [{'objects': [it2, itb1,], 'context': ctxt1,}]
+        >>> rc_field.validate(good_relation)
+        >>> rc_field.set(itc1, good_relation)
+        
+        If we consult the relation::
+        
+        >>> display(rc_field.get(itc1))
+        Objects: [<MyContent at /plone/it2>, <MyBackContent at /plone/itb1>]
+        Context: <MyContextObject at uid-it1>
+        
+        
+        Many to Many Relation Interface
+        ===============================
+        
+        This interface provides a more generic way to edit relations than the
+        one provided by ``plone.app.relations``, to let the Zope 3 schema work
+        in both way (normal access to the relation, and reverse access).
+        
+        Create simple content::
+        
+        >>> from OFS.SimpleItem import SimpleItem
+        >>> class BaseContent(SimpleItem):
+        ...    def __init__(self, id):
+        ...       super(BaseContent, self).__init__()
+        ...       self.id = id
+        
+        
+        >>> for num in range(1, 20):
+        ...    id = 'it%02d' % num
+        ...    it = BaseContent(id)
+        ...    _ = self.portal._setObject(id, it)
+        
+        >>> self.portal.it01
+        <BaseContent at /plone/it01>
+        
+        Contents must be ``IPersistent``::
+        
+        >>> from persistent import IPersistent
+        >>> from zope.interface.verify import verifyObject
+        >>> verifyObject(IPersistent, self.portal.it01)
+        True
+        
+        
+        Simple test of the interface
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        
+        We have a new adapter to work on your relation::
+        
+        >>> from infrae.plone.relations.schema import IManyToManyRelationship
+        >>> manager = IManyToManyRelationship(self.portal.it01)
+        >>> verifyObject(IManyToManyRelationship, manager)
+        True
+        
+        Ok, try to add relation::
+        
+        >>> rel = manager.createRelationship((self.portal.it11, self.portal.it12,),
+        ...                                  sources=(self.portal.it02,),
+        ...                                  relation='test')
+        >>> list(rel.sources)
+        [<BaseContent at /plone/it01>, <BaseContent at /plone/it02>]
+        >>> list(rel.targets)
+        [<BaseContent at /plone/it11>, <BaseContent at /plone/it12>]
+        
+        Now, we can retrieve a list of relation::
+        
+        >>> list(manager.getRelationships())
+        [<Relationship 'test' from (<BaseContent at /plone/it01>, <BaseContent at /plone/it02>) to (<BaseContent at /plone/it11>, <BaseContent at /plone/it12>)>]
+        
+        
+        Direction
+        ~~~~~~~~~
+        
+        You can reverse the way a relation works, with the ``setDirection``
+        method::
+        
+        >>> rel = manager.createRelationship(self.portal.it05, relation='reverse')
+        >>> list(rel.targets)
+        [<BaseContent at /plone/it05>]
+        >>> manager.setDirection(False)
+        >>> rel = manager.createRelationship(self.portal.it04, relation='reverse')
+        >>> list(rel.targets)
+        [<BaseContent at /plone/it01>]
+        
+        You have also the transitivity for search::
+        
+        >>> manager = IManyToManyRelationship(self.portal.it04)
+        >>> list(manager.getRelationshipChains(relation='reverse',
+        ...                                    target=self.portal.it05,
+        ...                                    maxDepth=2))
+        [(<Relationship 'reverse' from (<BaseContent at /plone/it04>,) to (<BaseContent at /plone/it01>,)>, <Relationship 'reverse' from (<BaseContent at /plone/it01>,) to (<BaseContent at /plone/it05>,)>)]
+        
+        
+        But relation are always followed from source to target. So if we
+        reverse the search, we won't found a result::
+        
+        >>> manager.setDirection(False)
+        >>> list(manager.getRelationshipChains(relation='reverse',
+        ...                                    target=self.portal.it05,
+        ...                                    maxDepth=2))
+        []
+        
+        Direction just change the meaning of source or target on the relation
+        object. It's doesn't change the relation itself.
+        
+        
+        Bigger example with transitivity
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        
+        Taking back the first test, and add a suite::
+        
+        >>> manager = IManyToManyRelationship(self.portal.it16)
+        >>> manager.setDirection(False)
+        >>> rel = manager.createRelationship((self.portal.it12, self.portal.it14),
+        ...                                  relation='test')
+        >>> manager.setDirection(True)
+        >>> rel = manager.createRelationship((self.portal.it17, self.portal.it18),
+        ...                                  sources=(self.portal.it19,),
+        ...                                  relation='test')
+        
+        New chain try::
+        
+        >>> manager = IManyToManyRelationship(self.portal.it02)
+        >>> list(manager.getRelationshipChains(relation='test',
+        ...                                    target=self.portal.it18,
+        ...                                    maxDepth=3))
+        [(<Relationship 'test' from (<BaseContent at /plone/it01>, <BaseContent at /plone/it02>) to (<BaseContent at /plone/it11>, <BaseContent at /plone/it12>)>, <Relationship 'test' from (<BaseContent at /plone/it12>, <BaseContent at /plone/it14>) to (<BaseContent at /plone/it16>,)>, <Relationship 'test' from (<BaseContent at /plone/it16>, <BaseContent at /plone/it19>) to (<BaseContent at /plone/it17>, <BaseContent at /plone/it18>)>)]
+        
+        
+        Accessor
+        ~~~~~~~~
+        
+        ``getTargets`` returns a lazy list of objects having a relation with
+        the given object as source, and ``getSources`` returns a lazy list of
+        objects having a relation with the given object as target::
+        
+        >>> manager = IManyToManyRelationship(self.portal.it16)
+        >>> list(manager.getTargets())
+        [<BaseContent at /plone/it17>, <BaseContent at /plone/it18>]
+        >>> list(manager.getSources())
+        [<BaseContent at /plone/it12>, <BaseContent at /plone/it14>]
+        
+        If we reverse the direction::
+        
+        >>> manager.setDirection(False)
+        >>> list(manager.getTargets())
+        [<BaseContent at /plone/it12>, <BaseContent at /plone/it14>]
+        >>> list(manager.getSources())
+        [<BaseContent at /plone/it17>, <BaseContent at /plone/it18>]
+        
+        
+        Deletion
+        ~~~~~~~~
+        
+        Delete relation::
+        
+        >>> manager.setDirection(True)
+        >>> manager.deleteRelationship()
+        >>> list(manager.getRelationships())
+        []
+        
+        >>> manager = IManyToManyRelationship(self.portal.it19)
+        >>> list(manager.getRelationships())
+        [<Relationship 'test' from (<BaseContent at /plone/it19>,) to (<BaseContent at /plone/it17>, <BaseContent at /plone/it18>)>]
+        
+        >>> manager.deleteRelationship(target=self.portal.it17)
+        >>> list(manager.getRelationships())
+        [<Relationship 'test' from (<BaseContent at /plone/it19>,) to (<BaseContent at /plone/it18>,)>]
+        
+        >>> manager.deleteRelationship()
+        >>> list(manager.getRelationships())
+        []
+        
+        >>> manager = IManyToManyRelationship(self.portal.it01)
+        >>> manager.deleteRelationship(remove_all_sources=True, multiple=True)
+        >>> manager = IManyToManyRelationship(self.portal.it02)
+        >>> list(manager.getRelationships())
+        []
+        
+        
+        
+        Changes
+        =======
+        
+        1.0
+        ~~~
+        
+        - First release.
+        
+        
+        Credits
+        =======
+        
+        Powered by the Flemish government of Belgium, for the application
+        <http://www.zonderisgezonder.be>.
+        
+Keywords: relationships plone schema
+Platform: UNKNOWN
+Classifier: Framework :: Plone
+Classifier: Framework :: Zope2
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
