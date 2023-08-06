@@ -1,0 +1,1 @@
+from collective.gtags.browser.widget import TagsWidget
