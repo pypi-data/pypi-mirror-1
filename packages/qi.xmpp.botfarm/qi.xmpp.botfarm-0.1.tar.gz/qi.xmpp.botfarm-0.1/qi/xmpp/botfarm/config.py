@@ -1,0 +1,9 @@
+app_name = "myapp"
+server="example.com"
+admin_id = "admin"
+admin_pass = "adminpass"
+xmlrpc_port = 6667
+xmlrpc_admin_accept_ips = []
+defaultAvatar = "defaultAvatar.png"
+debugLevel = 3
+connection_timeout = 5
