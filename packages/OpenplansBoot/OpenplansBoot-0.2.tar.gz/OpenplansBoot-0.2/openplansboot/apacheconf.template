@@ -1,0 +1,87 @@
+#########################################
+## These are sample Apache VirtualHost declarations for an OpenPlans
+## site.  They are set up to talk to a caching server listening on
+## port 81, to support SSL, and to provide a separate vhost for ZMI
+## access, which skips the cache, is SSL only, and goes directly to
+## the Zope port.
+#########################################
+
+## $site_fqdn
+<VirtualHost ${ip}:80>
+ServerName $site_fqdn
+ServerAlias *.$site_fqdn
+RewriteEngine on
+ProxyPreserveHost on
+RewriteRule ^/(.*)$ http://127.0.0.1:81/$1 [L,P]
+CustomLog logs/${site_fqdn}-access_log common
+ErrorLog logs/${site_fqdn}-error_log
+</VirtualHost>
+
+## $site_fqdn ssl
+<VirtualHost ${ip}:443>
+ServerName $site_fqdn
+ServerAlias *.$site_fqdn
+RewriteEngine on
+ProxyPreserveHost On
+RewriteRule ^/(.*)$ http://127.0.0.1:81/$1 [L,P]
+RequestHeader set X-Forwarded-Scheme "https"
+RequestHeader set X-Forwarded-Port "443"
+ErrorLog logs/${site_fqdn}-error_log
+CustomLog logs/${site_fqdn}-access_log common
+
+SSLEngine on
+SSLCipherSuite ALL:!ADH:!EXPORT56:RC4+RSA:+HIGH:+MEDIUM:+LOW:+SSLv2:+EXP:+eNULL
+SSLCertificateFile /usr/local/apache2/conf/certs/wildcard.openplans.org.crt
+SSLCertificateKeyFile /usr/local/apache2/conf/certs/wildcard.openplans.org.key
+SSLCertificateChainFile /usr/local/apache2/conf/certs/gd_intermediate_bundle.crt
+
+<FilesMatch "\.(cgi|shtml|phtml|php)$">
+    SSLOptions +StdEnvVars
+</FilesMatch>
+<Directory "/usr/local/apache2/cgi-bin">
+    SSLOptions +StdEnvVars
+</Directory>
+
+BrowserMatch ".*MSIE.*" \
+         nokeepalive ssl-unclean-shutdown \
+         downgrade-1.0 force-response-1.0
+
+CustomLog /usr/local/apache2/logs/ssl_request_log \
+           "%t %h %{SSL_PROTOCOL}x %{SSL_CIPHER}x \"%r\" %b"
+</VirtualHost>
+
+## $siteroot_fqdn
+<VirtualHost ${ip}:80>
+ServerName $siteroot_fqdn
+Redirect / https://${siteroot_fqdn}/
+</VirtualHost>
+
+## $siteroot_fqdn ssl
+<VirtualHost ${ip}:443>
+ServerName $siteroot_fqdn
+ProxyPass / http://127.0.0.1:${zope_port}/VirtualHostBase/https/${siteroot_fqdn}:443/VirtualHostRoot/
+ProxyPassReverse / http://127.0.0.1:${zope_port}/VirtualHostBase/https/${siteroot_fqdn}:443/VirtualHostRoot/
+ErrorLog logs/${siteroot_fqdn}-error_log
+CustomLog logs/${siteroot_fqdn}-access_log common
+
+SSLEngine on
+SSLCipherSuite ALL:!ADH:!EXPORT56:RC4+RSA:+HIGH:+MEDIUM:+LOW:+SSLv2:+EXP:+eNULL
+SSLCertificateFile /usr/local/apache2/conf/certs/wildcard.openplans.org.crt
+SSLCertificateKeyFile /usr/local/apache2/conf/certs/wildcard.openplans.org.key
+SSLCertificateChainFile /usr/local/apache2/conf/certs/gd_intermediate_bundle.crt
+
+<FilesMatch "\.(cgi|shtml|phtml|php)$">
+    SSLOptions +StdEnvVars
+</FilesMatch>
+<Directory "/usr/local/apache2/cgi-bin">
+    SSLOptions +StdEnvVars
+</Directory>
+
+BrowserMatch ".*MSIE.*" \
+         nokeepalive ssl-unclean-shutdown \
+         downgrade-1.0 force-response-1.0
+
+CustomLog /usr/local/apache2/logs/ssl_request_log \
+           "%t %h %{SSL_PROTOCOL}x %{SSL_CIPHER}x \"%r\" %b"
+      
+</VirtualHost>
