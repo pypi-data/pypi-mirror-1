@@ -1,0 +1,193 @@
+This file demonstrates the use of galleries.
+
+    >>> from collective.plonetruegallery.utils import getGalleryAdapter
+    >>> from Products.Five.testbrowser import Browser
+	>>> from zope.testbrowser import interfaces
+	>>> from zope.interface.verify import verifyObject
+	>>> self.setRoles(("Manager",))
+	
+    >>> browser = Browser()
+    >>> browser.handleErrors = False
+    >>> portal_url = self.portal.absolute_url()
+    >>> from Products.PloneTestCase.setup import portal_owner, default_password
+    
+    >>> browser.open(portal_url + '/login_form?came_from=' + portal_url)
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+
+    >>> browser.open(self.portal.absolute_url())
+    >>> "Gallery" in browser.contents
+    True
+    >>> """<a href="http://nohost/plone/createObject?type_name=Gallery""" in browser.contents
+    True
+    
+Let's create a basic gallery
+    >>> browser.getLink(text="Gallery").click()
+    >>> browser.getControl("Gallery Name").value = "test"
+    >>> browser.getControl(name='form_submit').click()
+    >>> "There are no images in this gallery" in browser.contents
+    True
+    
+    >>> browser.getLink(text="Edit").click()
+    >>> browser.getControl("slideshow: Slideshow 2 javascript gallery").selected = True
+    >>> browser.getControl(name='form_submit').click()    
+    >>> "There are no images in this gallery" in browser.contents
+    True
+    
+    >>> browser.getLink(text="Edit").click()
+    >>> browser.getControl("classic: The original slideshow for plonetruegallery").selected = True
+    >>> browser.getControl(name='form_submit').click()
+    
+Let's add some images(have to do it through code since it won't let you add
+an image object without actually having an image)
+    >>> self.portal['test'].invokeFactory(id='1', type_name="Image")
+    '1'
+    >>> self.portal['test']['1'].setDescription("My Description 1")
+    >>> self.portal['test']['1'].setTitle("My Title 1")
+    >>> self.portal['test'].invokeFactory(id='2', type_name="Image")
+    '2'
+    >>> self.portal['test']['2'].setDescription("My Description 2")
+    >>> self.portal['test']['2'].setTitle("My Title 2")
+    >>> self.portal['test'].invokeFactory(id='3', type_name="Image")
+    '3'
+    >>> self.portal['test']['3'].setDescription("My Description 3")
+    >>> self.portal['test']['3'].setTitle("My Title 3")
+    
+We have to force the cooking of the images because we never actually set a 
+real image on the image object.
+    
+    >>> getGalleryAdapter(self.portal['test']).cook()
+    
+    >>> getGalleryAdapter(self.portal['test']).number_of_images()
+    3
+    
+    >>> browser.open(self.portal['test'].absolute_url())
+    >>> "click here to view full sized image" in browser.contents
+    True
+    
+There should be 2 images in the gallery
+    >>> "kssattr-numberOfImages-3" in browser.contents
+    True
+    
+Let's try the Slideshow 2 display which defaults with Ken Burns effect
+    >>> browser.getLink(text="Edit").click()
+    >>> browser.getControl("slideshow: Slideshow 2 javascript gallery").selected = True
+    >>> browser.getControl(name='form_submit').click()
+    
+    >>> "new Slideshow.KenBurns(" in browser.contents
+    True
+    >>> "My Description 1" in browser.contents
+    True
+    >>> "My Description 2" in browser.contents
+    True
+    >>> "My Description 3" in browser.contents
+    True
+    
+Change the slideshow 2 effect and make sure it generates the correct code.
+    >>> browser.getLink(text="Edit").click()
+    >>> browser.getControl("Slideshow Effect").value = ["flash:Slideshow.Flash"]
+    >>> browser.getControl(name='form_submit').click()
+    
+    >>> "new Slideshow.Flash(" in browser.contents
+    True
+    
+    >>> browser.getLink(text="Edit").click()
+    >>> browser.getControl("Slideshow Effect").value = ["fold:Slideshow.Fold"]
+    >>> browser.getControl(name='form_submit').click()
+
+    >>> "new Slideshow.Fold(" in browser.contents
+    True
+        
+    >>> browser.getLink(text="Edit").click()
+    >>> browser.getControl("Slideshow Effect").value = ["push:Slideshow.Push"]
+    >>> browser.getControl(name='form_submit').click()
+
+    >>> "new Slideshow.Push(" in browser.contents
+    True
+    
+    >>> browser.getLink(text="Edit").click()
+    >>> browser.getControl("Slideshow Effect").value = [":Slideshow"]
+    >>> browser.getControl(name='form_submit').click()
+
+    >>> "new Slideshow(" in browser.contents
+    True
+    
+Remove an image and make sure the gallery updates the cooked images
+
+    >>> browser.open(self.portal['test']['3'].absolute_url() + "/delete_confirmation")
+    >>> browser.getControl("Delete").click()
+    
+    >>> getGalleryAdapter(self.portal['test']).number_of_images()
+    2
+    
+    >>> "My Description 1" in browser.contents
+    True
+    >>> "My Description 2" in browser.contents
+    True
+    >>> "My Description 3" in browser.contents
+    False
+    
+Right now there are not any sub-galleries, so there shouldn't be a header showing...
+    >>> "<h3 class=\"centered-title\">sub-galleries</h3>" in browser.contents
+    False
+    
+Let's add a sub-gallery
+    >>> browser.getLink(text="Gallery").click()
+    >>> browser.getControl("Gallery Name").value = "sub-gallery"
+    >>> browser.getControl(name='form_submit').click()
+    
+    >>> self.portal['test']['sub-gallery'].invokeFactory(id='1', type_name="Image")
+    '1'
+    >>> self.portal['test']['sub-gallery']['1'].setDescription("Sub-gallery Description 1")
+    >>> self.portal['test']['sub-gallery']['1'].setTitle("Sub-gallery Title 1")
+    >>> self.portal['test']['sub-gallery'].invokeFactory(id='2', type_name="Image")
+    '2'
+    >>> self.portal['test']['sub-gallery']['2'].setDescription("Sub-gallery Description 2")
+    >>> self.portal['test']['sub-gallery']['2'].setTitle("Sub-gallery Title 2")
+    >>> self.portal['test']['sub-gallery'].invokeFactory(id='3', type_name="Image")
+    '3'
+    >>> self.portal['test']['sub-gallery']['3'].setDescription("Sub-gallery Description 3")
+    >>> self.portal['test']['sub-gallery']['3'].setTitle("Sub-gallery Title 3")
+    
+Force a cook and make sure they show
+    >>> getGalleryAdapter(self.portal['test']['sub-gallery']).cook()
+    >>> browser.open(self.portal['test']['sub-gallery'].absolute_url())
+    
+    >>> "Sub-gallery Description 1" in browser.contents
+    True
+    >>> "Sub-gallery Description 2" in browser.contents
+    True
+    >>> "Sub-gallery Description 3" in browser.contents
+    True
+    
+make sure the sub-gallery shows up in the base gallery
+    >>> browser.open(self.portal['test'].absolute_url())        
+    
+    >>> "<h3 class=\"centered-title\">sub-galleries</h3>" in browser.contents
+    True
+    >>> "<dt>sub-gallery</dt>" in browser.contents
+    True
+    
+The base gallery still has two images in it right?
+
+    >>> "My Description 1" in browser.contents
+    True
+    >>> "My Description 2" in browser.contents
+    True
+    >>> "My Description 3" in browser.contents
+    False
+    
+Now remove the sub-gallery and make sure everything still behaves
+    >>> browser.open(self.portal['test']['sub-gallery'].absolute_url() + "/delete_confirmation")
+    >>> browser.getControl("Delete").click()
+    
+    >>> "<h3 class=\"centered-title\">sub-galleries</h3>" in browser.contents
+    False
+    
+    >>> "My Description 1" in browser.contents
+    True
+    >>> "My Description 2" in browser.contents
+    True
+    >>> "My Description 3" in browser.contents
+    False
