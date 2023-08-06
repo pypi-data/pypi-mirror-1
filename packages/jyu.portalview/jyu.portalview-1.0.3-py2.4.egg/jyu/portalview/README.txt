@@ -1,0 +1,609 @@
+Detailed Documentation
+======================
+
+Public resources
+----------------
+
+**Portal View** installs the following public resources:
+
+- ``++resource++jyu.portalview.styles/portalview.css``::
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser(); portal_url = self.portal.absolute_url()
+    >>> browser.open(portal_url + '/++resource++jyu.portalview.styles/portalview.css')
+
+- ``++resource++jyu.portalview.images/portalview_icon.png``::
+
+    >>> browser.open(portal_url + '/++resource++jyu.portalview.images/portalview_icon.png')
+
+- ``++resource++jyu.portalview.images/column_icon.png``::
+ 
+    >>> browser.open(portal_url + '/++resource++jyu.portalview.images/column_icon.png')
+
+- ``++resource++jyu.portalview.images/box_feed_icon.gif``::
+
+    >>> browser.open(portal_url + '/++resource++jyu.portalview.images/box_feed_icon.gif')
+
+- ``++resource++jyu.portalview.images/box_bullet.gif``::
+
+    >>> browser.open(portal_url + '/++resource++jyu.portalview.images/box_bullet.gif')
+
+Creating content
+----------------
+
+By default, **Portal View** is addable by any *contributor*. Let's
+
+1. open the front page::
+
+    >>> browser.open(portal_url)
+
+2. enter the log in details::
+
+    >>> browser.getControl(name='__ac_name').value = 'contributor'
+    >>> browser.getControl(name='__ac_password').value = 'secret'
+
+3. and log in::
+
+    >>> browser.getControl(name='submit').click()
+    >>> 'You are now logged in' in browser.contents
+    True
+
+Now there is a **Portal View** in the *add item* menu::
+
+    >>> browser.getLink(id='portal-view').url.endswith('createObject?type_name=Portal+View')
+    True
+
+Yet, we wont't see **Portal View Column Folder** in the *add item* menu, because it's only addable under **Portal View**::
+
+    >>> browser.getLink(id='portal-view-column-folder')
+    Traceback (most recent call last):
+    ...
+    LinkNotFoundError
+
+To add a single **Portal View**
+
+1. click it from the *add item* menu::
+
+    >>> browser.getLink(id='portal-view').click()
+
+2. enter some information::
+
+    >>> browser.getControl(name='title').value = 'frontpage'
+    >>> browser.getControl(name='css').value = """
+    ... /* This is a test style */
+    ... .portalViewColumn, .portalViewBox { border: thin solid blue; }
+    ... """
+
+3. and submit the form::
+
+    >>> browser.getControl("Save").click()
+
+A new **Portal View** has been created::
+
+    >>> 'frontpage' in self.portal.objectIds()
+    True
+
+Default settings
+----------------
+
+By default, a new **Portal View** is created with both left and right portlets disable. That's why
+
+1. **Portal View** implements *ILocalPortletAssignable* interface to enable local portlet management::
+
+    >>> from plone.portlets.interfaces import ILocalPortletAssignable
+    >>> ILocalPortletAssignable.providedBy(self.portal.frontpage)
+    True
+
+2. and comes with all portlet managers disabled::
+
+    >>> from zope.component import getUtility, getMultiAdapter
+    >>> from plone.portlets.interfaces import IPortletManager, ILocalPortletAssignmentManager
+    >>> from plone.portlets.constants import CONTEXT_CATEGORY, GROUP_CATEGORY, CONTENT_TYPE_CATEGORY
+    >>> left = getMultiAdapter((self.portal.frontpage, getUtility(IPortletManager, name = u'plone.leftcolumn')), ILocalPortletAssignmentManager)
+    >>> right = getMultiAdapter((self.portal.frontpage, getUtility(IPortletManager, name = u'plone.leftcolumn')), ILocalPortletAssignmentManager)
+    >>>
+    >>> # Verifies that left context portlets are blacklisted correctly.
+    ... left.getBlacklistStatus(CONTEXT_CATEGORY)
+    True
+
+    >>> # Verifies that left group portlets are blacklisted correctly.
+    ... left.getBlacklistStatus(GROUP_CATEGORY)
+    True
+
+    >>> # Verifies that left content type portlets are blacklisted correctly.
+    ... left.getBlacklistStatus(CONTENT_TYPE_CATEGORY)
+    True
+
+    >>> # Verifies that right context portlets are blacklisted correctly.
+    ... right.getBlacklistStatus(CONTEXT_CATEGORY)
+    True
+
+    >>> # Verifies that right group portlets are blacklisted correctly.
+    ... right.getBlacklistStatus(GROUP_CATEGORY)
+    True
+
+    >>> # Verifies that right content type portlets are blacklisted correctly.
+    ... right.getBlacklistStatus(CONTENT_TYPE_CATEGORY)
+    True
+
+For a fast start, a new **Portal View** is always created with four initial columns (**Portal View Column Folders**) to contain boxed content::
+
+    >>> from jyu.portalview.config import COLUMNS
+    >>> # This doctest asserts 4 columns to be created by default.
+    ... COLUMNS
+    4
+
+    >>> self.portal.frontpage.objectIds()
+    ['left', 'center-left', 'center-right', 'right']
+
+The four automatically created **Portal View Column Folders** are set to be *25%* wide::
+
+    >>> self.portal.frontpage.get('left').get('width')
+    '25'
+
+    >>> self.portal.frontpage.get('center-left').get('width')
+    '25'
+
+    >>> self.portal.frontpage.get('center-right').get('width')
+    '25'
+
+    >>> self.portal.frontpage.get('right').get('width')
+    '25'
+
+
+Now, of course, it's posssible to create more columns by clicking **Portal View Column Folder** from the add item menu on **Portal View**:
+
+    >>> browser.open(portal_url + '/frontpage')
+    >>> browser.getLink('Add Portal View Column Folder').url.endswith('createObject?type_name=Portal+View+Column+Folder')
+    True
+
+Adding subcontent
+-----------------
+
+The subcontent to be boxed, must be created below **Portal View Column Folders**, also known as columns::
+
+    >>> columns = ['left', 'center-left', 'center-right', 'right']
+    >>> for i in range(4):
+    ...     for j in range(4):
+    ...         browser.open(portal_url + '/frontpage/%s' % columns[i])
+    ...         browser.getLink(id='document').click()
+    ...         browser.getControl(name='title').value = 'Title %s.%s' % (str(i+1), str(j+1))
+    ...         browser.getControl(name='description').value = 'Description %s.%s' % (str(i+1), str(j+1))
+    ...         browser.getControl(name='text').value = 'Text %s.%s' % (str(i+1), str(j+1))
+    ...         browser.getControl("Save").click()
+
+
+The default view of **Portal View** renders all the available subcontent within the **Portal View** visible for the current user::
+
+    >>> browser.open(portal_url + '/frontpage')
+    >>> 'Text 1.1' in browser.contents
+    True
+
+    >>> 'Text 4.4' in browser.contents
+    True
+
+Publishing content
+------------------
+
+By default, **Portal View** can be published by any *reviewer*. Let's
+
+1. log out::
+
+    >>> browser.getLink('Log out').click()
+
+2. open the front page::
+
+    >>> browser.open(portal_url)
+
+3. enter the log in details::
+
+    >>> browser.getControl(name='__ac_name').value = 'reviewer'
+    >>> browser.getControl(name='__ac_password').value = 'secret'
+
+4. and log in::
+
+    >>> browser.getControl(name='submit').click()
+    >>> 'You are now logged in' in browser.contents
+    True
+
+To publish the complete **Portal View** with all its subcontent
+
+1. navigate to the `folder_contents` of the parent folder of the content::
+ 
+    >>> browser.open(portal_url + '/folder_contents')
+
+2. check the content::
+
+    >>> browser.getControl('frontpage').selected = True
+    >>> browser.getControl(name='paths:list').value
+    ['/plone/frontpage']
+
+3. click *Change state*::
+
+    >>> browser.getControl(name='content_status_history:method').click()
+ 
+4. check to *Include children*::
+
+    >>> browser.getControl('Include contained items').selected = True
+    >>> browser.getControl(name='include_children').value
+    True
+
+5. select *Publish*::
+
+    >>> browser.getControl('Publish').selected = True
+    >>> browser.getControl(name='workflow_action').value
+    ['publish']
+
+6. click *Save*::
+
+    >>> browser.getControl(name='form.button.FolderPublish').click()
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 404: Not Found
+
+Now the **Portal View** and all it's contents are published::
+
+    >>> from Products.CMFCore.utils import getToolByName
+    >>> workflow = getToolByName(self.portal, 'portal_workflow')
+    >>> workflow.getInfoFor(self.portal.frontpage, 'review_state')
+    'published'
+
+    >>> workflow.getInfoFor(self.portal.frontpage.get('left'), 'review_state')
+    'published'
+
+    >>> workflow.getInfoFor(self.portal.frontpage.get('left').get('title-1.1'), 'review_state')
+    'published'
+
+    >>> workflow.getInfoFor(self.portal.frontpage.get('right'), 'review_state')
+    'published'
+
+    >>> workflow.getInfoFor(self.portal.frontpage.get('right').get('title-4.4'), 'review_state')
+    'published'
+
+Altough, to reject a single page for testing purposes, let's
+
+1. navigate directly to the content::
+
+    >>> browser.open(portal_url + '/frontpage/right/title-4.3')
+
+2. reject the content::
+
+    >>> browser.getLink('Send back').click()
+
+The results
+-----------
+
+Working **Portal View** shows all its subcontent on a single page. Let's
+
+1. log out::
+
+    >>> browser.getLink('Log out').click()
+
+2. open the front page::
+
+    >>> browser.open(portal_url + '/frontpage')
+
+3. verify that we see all but the rejected content::
+
+    >>> "Text 1.1" in browser.contents
+    True
+
+    >>> "Text 1.2" in browser.contents
+    True
+
+    >>> "Text 1.3" in browser.contents
+    True
+
+    >>> "Text 1.4" in browser.contents
+    True
+
+    >>> "Text 2.1" in browser.contents
+    True
+
+    >>> "Text 2.2" in browser.contents
+    True
+
+    >>> "Text 2.3" in browser.contents
+    True
+
+    >>> "Text 2.4" in browser.contents
+    True
+
+    >>> "Text 3.1" in browser.contents
+    True
+
+    >>> "Text 3.2" in browser.contents
+    True
+
+    >>> "Text 3.4" in browser.contents
+    True
+
+    >>> "Text 3.4" in browser.contents
+    True
+
+    >>> "Text 4.1" in browser.contents
+    True
+
+    >>> "Text 4.2" in browser.contents
+    True
+
+    >>> "Text 4.3" in browser.contents
+    False
+
+    >>> "Text 4.4" in browser.contents
+    True
+
+Internals
+---------
+
+**Portal View** renders itself through *PortalView*::
+
+    >>> self.portal.frontpage.restrictedTraverse('@@view')
+    <Products.Five.metaclass.PortalView object at ...>
+
+The internals of the **Portal View** do a plenty of things. It
+
+1. builds safe CSS-declarations from the CSS-field::
+
+    >>> view = self.portal.frontpage.restrictedTraverse('@@view')
+    >>> view.prefixedStyles
+    '#portalview .portalViewColumn,\n#portalview .portalViewBox { border: thin solid blue; }'
+
+2. queries for all contents within the **Portal View**::
+
+    >>> len(view.testQueryContents())
+    24
+
+3. splits them into columns (**Portal View Column Folders**)::
+
+    >>> columns, objects = view.testExtractResults(view.testQueryContents())
+    >>> len(columns)
+    4
+
+    >>> [c.getPath() for c in columns]
+    ['/plone/frontpage/left', '/plone/frontpage/center-left', '/plone/frontpage/center-right', '/plone/frontpage/right']
+
+4. and other objects, which are categorized after their parents::
+
+    >>> len(objects)
+    6
+
+    >>> keys = objects.keys()
+    >>> keys.sort()
+    >>> keys
+    ['/plone', '/plone/frontpage', '/plone/frontpage/center-left', '/plone/frontpage/center-right', '/plone/frontpage/left', '/plone/frontpage/right']
+
+Finally, **Portal View** returns a list, which includes all the necessary information to build the view. That consists of
+
+1. list of columns, in which::
+
+    >>> columns = view.columns
+    >>> len(columns)
+    4
+
+2. there is *id* and *class* attributes for the column and its wrapper::
+
+    >>> columns[3]['wrapper']['class']
+    'portalViewColumnWrapper portalViewColumnWrapper-25'
+
+    >>> columns[3]['wrapper']['id']
+    'portalview-column-wrapper-right'
+
+    >>> columns[3]['class']
+    'portalViewColumn'
+
+    >>> columns[3]['id']
+    'portalview-column-right'
+
+3. list of boxes for every column::
+
+    >>> len(columns[0]['boxes'])
+    5
+
+    >>> len(columns[3]['boxes'])
+    4
+
+4. including *id* and *class* attributes for every box and their wrappers::
+
+    >>> columns[3]['boxes'][3]['wrapper']['class']
+    'portletWrapper portalViewBoxWrapper state-published'
+
+    >>> columns[3]['boxes'][3]['wrapper']['id']
+    'portalview-box-wrapper-right-title-4.4'
+
+    >>> columns[3]['boxes'][3]['class']
+    'portlet portalViewBox portalViewBox-title-4.4'
+
+    >>> columns[3]['boxes'][3]['id']
+    'portalview-box-right-title-4.4'
+
+5. not to forget the object of the box itself::
+
+    >>> columns[3]['boxes'][3]['object']
+    <ATDocument at /plone/frontpage/right/title-4.4>
+
+It's good to know that every column and box has both a general *class* and an unique *id* to it easy to manipulate them with CSS.
+
+Columns within columns
+----------------------
+
+With **Portal View** it's also possible to build more complex layouts. For example, start with a 20% width left column, 60% width middle column and 20% right column, and continue by adding a 100% top column, 50% left column and 50% right column *inside* the middle column.
+
+The following should be enough to test this feature:
+
+1. open the front page::
+
+    >>> browser.open(portal_url)
+
+2. enter the log in details::
+
+    >>> browser.getControl(name='__ac_name').value = 'reviewer'
+    >>> browser.getControl(name='__ac_password').value = 'secret'
+
+3. and log in::
+
+    >>> browser.getControl(name='submit').click()
+    >>> 'You are now logged in' in browser.contents
+    True
+
+Now, let's cut an existing column and paste it inside an another column:
+
+1. open the third column::
+
+    >>> browser.open(portal_url + '/frontpage/center-right')
+
+2. cut it::
+
+    >>> browser.getLink(id='cut').click()
+
+3. open the fourth column::
+
+    >>> browser.open(portal_url + '/frontpage/center-left/folder_contents')
+
+4. paste the copied column into it::
+
+    >>> browser.getLink(id='paste').click()
+
+**Portal View** still shows all of our content on a single page. Let's
+
+1. log out::
+
+    >>> browser.getLink('Log out').click()
+
+2. open the front page::
+
+    >>> browser.open(portal_url + '/frontpage')
+
+3. and verify that we see all but the rejected content::
+
+    >>> "Text 1.1" in browser.contents
+    True
+
+    >>> "Text 2.1" in browser.contents
+    True
+
+    >>> "Text 3.1" in browser.contents
+    True
+
+    >>> "Text 4.1" in browser.contents
+    True
+
+    >>> "Text 4.3" in browser.contents
+    False
+
+4. and that subcolumn ids are created correctly::
+
+    >>> "portalview-column-wrapper-center-left-center-right" in browser.contents
+    True
+
+Dropdown menu bar
+-----------------
+
+**Portal View** also comes with a dropdown menu bar, which is disabled by
+default. The menu bar adds a couple of new public resource:
+
+- ``++resource++jyu.portalview.styles/menubar.css``::
+
+    >>> browser.open(portal_url + '/++resource++jyu.portalview.styles/menubar.css')
+
+- ``++resource++jyu.portalview.images/menubar_bullet.gif``::
+ 
+    >>> browser.open(portal_url + '/++resource++jyu.portalview.images/menubar_bullet.gif')
+
+The menu bar can be enabled by the following steps:
+
+1. open the front page::
+
+    >>> browser.open(portal_url)
+
+2. enter the log in details::
+
+    >>> browser.getControl(name='__ac_name').value = 'reviewer'
+    >>> browser.getControl(name='__ac_password').value = 'secret'
+
+3. and log in::
+
+    >>> browser.getControl(name='submit').click()
+    >>> 'You are now logged in' in browser.contents
+    True
+
+4. edit the **Portal View**::
+
+    >>> browser.open(portal_url + '/frontpage/edit')
+
+5. enable *menu bar*::
+
+    >>> browser.getControl(name='menuBarEnabled:boolean').value = True
+    >>> browser.getControl(name='breadCrumbsHidden:boolean').value = True
+    >>> browser.getControl(name='menuBarContents').value = """
+    ... <ul>
+    ...   <li><a href="">1. Menu</a>
+    ...     <ul>
+    ...       <li><a href="">1.1 Menu Item</a></li>
+    ...       <li><a href="">1.2 Menu Item</a></li>
+    ...       <li></li>
+    ...       <li><a href="">1.3 Menu Item</a></li>
+    ...     </ul>
+    ...   </li>
+    ...   <li><a href="">2. Menu</a>
+    ...     <ul>
+    ...       <li><a href="">2.1 Menu Item</a></li>
+    ...       <li><a href="">2.2 Menu Item</a></li>
+    ...       <li></li>
+    ...       <li><a href="">2.3 Menu Item</a></li>
+    ...     </ul>
+    ...   </li>
+    ... </ul>
+    ... """
+
+6. and submit the form::
+
+    >>> browser.getControl("Save").click()
+
+Now **Portal View** is shown with a menu bar:
+
+1. log out::
+
+    >>> browser.getLink('Log out').click()
+
+2. open the front page::
+
+    >>> browser.open(portal_url + '/frontpage')
+
+3. and verify that we see the menu bar::
+
+    >>> "1. Menu" in browser.contents
+    True
+
+    >>> "1.1 Menu Item" in browser.contents
+    True
+
+    >>> "1.2 Menu Item" in browser.contents
+    True
+
+    >>> "1.3 Menu Item" in browser.contents
+    True
+
+    >>> "2. Menu" in browser.contents
+    True
+
+    >>> "2.1 Menu Item" in browser.contents
+    True
+
+    >>> "2.2 Menu Item" in browser.contents
+    True
+
+    >>> "2.3 Menu Item" in browser.contents
+    True
+
+4. and there exists stylesheet to hide the bread crumbs::
+
+    >>> "#portal-breadcrumbs {" in browser.contents
+    True
+
+5. and the menu bar is hidden on regular pages::
+
+    >>> browser.open(portal_url + '/')
+
+    >>> "portalViewMenuBar" in browser.contents
+    False
