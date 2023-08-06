@@ -1,0 +1,65 @@
+============================================
+Functional doctest
+author: Juan Pablo Gimenez <jpg@rcom.com.ar>
+
+Probando problemas con los tests funcionales
+en el control panel de plone encontre que
+hay problemas con el HTTP_REFERER que setea
+el testbrowser. Por lo que todos los forms
+que de alguna manera dependen de eso para
+volver a la pagina original fallan.
+Tambien encontre que Martin Aspeli lo habia
+documentado en,
+https://bugs.launchpad.net/zope3/+bug/98437
+Y estoy pensando si un monkeypatch podria
+servirnos para no sufrir esto en todos lados.
+Por el momento la solucion es ignorar la
+excepcion.
+---
+Si lo arregle con mi patch este test tiene
+que pasar sin los try blocks...
+============================================
+
+First some useful defines and includes...
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> from Products.CMFCore.utils import getToolByName
+    >>> from Products.PloneTestCase.setup import portal_owner, \
+    ...                                          default_user, \
+    ...                                          default_password
+    >>> from icsemantic.langfallback.config import HAS_PLONE3
+
+    >>> portal = self.portal
+    >>> portal
+    <PloneSite at /plone>
+
+    >>> browser = Browser()
+    >>> portal_url = portal.absolute_url()
+    >>> login_url = portal_url + '/login_form'
+	>>> portal.error_log._ignored_exceptions = ()
+    >>> browser.handleErrors = False
+
+Now, we must login...
+    >>> browser.open(login_url)
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+
+	>>> try:
+	...		browser.getLink('Site Setup').click()
+	... except:
+	...		print portal.error_log.getLogEntries()[0]['tb_text']
+	...		from pdb import set_trace; set_trace()
+
+    >>> if HAS_PLONE3:
+    ...     lang_settings_label = 'Language'
+    ... else:
+    ...     lang_settings_label = 'Language Settings'
+
+	>>> browser.getLink(lang_settings_label).click()
+	>>> try:
+	...		browser.getControl('Save').click()
+	... except:
+	...		print portal.error_log.getLogEntries()[0]['tb_text']
+	...		pass
