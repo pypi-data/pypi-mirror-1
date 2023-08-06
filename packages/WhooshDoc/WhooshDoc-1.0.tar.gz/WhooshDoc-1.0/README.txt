@@ -1,0 +1,121 @@
+WhooshDoc
+=========
+
+WhooshDoc is an indexed, full-text search tool for Python docstrings. It uses
+Whoosh_ to do the indexing and searching, hence the name. It includes tools for
+collecting docstrings to index them and for searching the index.
+
+Prerequisites
+-------------
+
+For searching a prepared index, all you need is Whoosh_. WhooshDoc uses epydoc_
+to traverse packages and collect their docstrings in order to build a search
+index. However, epydoc is not required; you can add to a WhooshDoc index using
+the Whoosh_ API (see whooshdoc/util.py for the schema), without using epydoc.
+
+This package uses setuptools_ for installation and for locating a default 
+WhooshDoc index. WhooshDoc uses argparse_ for command line arguments.
+
+Installation
+------------
+
+You can install WhooshDoc, along with its dependencies, using with setuptools'
+easy_install::
+
+    $ easy_install WhooshDoc
+
+or via the normal setup.py mechanism after downloading and unpacking the
+tarball::
+
+    $ cd WhooshDoc-1.0
+    $ python setup.py install
+
+To use the wxPython_ search GUI, you must install Enthought's Traits_ and
+TraitsBackendWX_ packages. To do this, use the following easy_install command::
+
+    $ easy_install 'WhooshDoc[ui]'
+
+The development source may be checked out via Subversion::
+
+    $ svn co https://svn.enthought.com/svn/enthought/WhooshDoc/trunk WhooshDoc
+
+
+wdoc
+----
+
+WhooshDoc comes with one script, wdoc. It has several sub-commands. Use
+"wdoc --help" and "wdoc <sub-command> --help" to see detailed help.
+
+To index a package using epydoc to collect docstrings, use "wdoc index". For
+example::
+
+    $ wdoc index numpy
+
+To use the console search utility, use "wdoc search". For example::
+
+    $ wdoc search --help   # For an explanation of the query syntax.
+    $ wdoc search bessel or airy not filter
+    $ wdoc search '"phrase searches need weird quoting"'
+                  # because shells also interpret quote characters.
+
+To use the wxPython_ GUI, use "wdoc ui". For example::
+
+    $ wdoc ui
+    $ wdoc ui bessel or airy not filter
+
+To explicitly specify the WhooshDoc index directory, use the -i/--index option
+before any of these sub-commands. For example::
+
+    $ wdoc --index ~/Library/WhooshDoc search bessel
+
+To remove certain docstrings (e.g., because you updated a package and want to
+reindex it), use "wdoc delgroups". For example::
+
+    # First, index a couple of scipy packages with the group name "scipy"
+    $ wdoc index --group scipy scipy.linalg scipy.optimize
+    # Now delete them.
+    $ wdoc delgroups scipy
+
+
+IPython
+-------
+
+WhooshDoc includes an IPython "magic" command, %whoosh, which performs a
+WhooshDoc query and presents the results in the console, like the "wdoc search"
+command. The %whoosh command integrates with IPython's help mechanisms to
+display the help for the individual items. To enable it, add the following to
+your `ipy_user_conf.py` file::
+
+    from whooshdoc.ipython import enable
+    enable('/path/to/whooshdoc/index')
+
+Now, you can search using %whoosh in IPython. For example::
+
+    In [10]: %whoosh bessel or airy not filter
+
+
+Bugs
+----
+
+Please make a ticket on the Enthought Tool Suite (ETS) Trac instance:
+
+    https://svn.enthought.com/enthought
+
+Or send an email to the enthought-dev mailing list:
+
+    https://mail.enthought.com/mailman/listinfo/enthought-dev
+
+
+To Do
+-----
+
+* Simple web app using wsgiref.
+
+
+.. _Whoosh: http://whoosh.ca
+.. _epydoc: http://epydoc.sourceforge.net
+.. _setuptools: http://pypi.python.org/pypi/setuptools
+.. _argparse: http://pypi.python.org/pypi/argparse
+.. _wxPython: http://www.wxpython.org
+.. _Traits: http://pypi.python.org/pypi/Traits
+.. _TraitsBackendWX: http://pypi.python.org/pypi/TraitsBackendWX
