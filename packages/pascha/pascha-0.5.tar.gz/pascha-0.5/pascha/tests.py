@@ -1,0 +1,240 @@
+#!/usr/bin/env python
+
+#------------------------------------------------------------------------------#
+#   tests.py                                                                   #
+#                                                                              #
+#   Copyright (c) 2008, Enfold Systems, Inc.                                   #
+#   All rights reserved.                                                       #
+#                                                                              #
+#   Redistribution and use in source and binary forms, with or without         #
+#   modification, are permitted provided that the following conditions are     #
+#   met:                                                                       #
+#                                                                              #
+#   - Redistributions of source code must retain the above copyright notice,   #
+#     this list of conditions and the following disclaimer.                    #
+#                                                                              #
+#   - Redistributions in binary form must reproduce the above copyright        #
+#     notice, this list of conditions and the following disclaimer in the      #
+#     documentation and/or other materials provided with the distribution.     #
+#                                                                              #
+#   - Neither the name of Enfold Systems, Inc. nor the names of its            #
+#     contributors may be used to endorse or promote products derived from     #
+#     this software without specific prior written permission.                 #
+#                                                                              #
+#   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS    #
+#   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,  #
+#   THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR     #
+#   PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR           #
+#   CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,      #
+#   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,        #
+#   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR         #
+#   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF     #
+#   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING       #
+#   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS         #
+#   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.               #
+#------------------------------------------------------------------------------#
+
+# vim: tabstop=4 expandtab shiftwidth=4
+
+
+from datetime import datetime
+from unittest import TestCase, main
+
+from pascha.computus import western, eastern
+from pascha.traditions import Western, Eastern
+from pascha.feasts import Feasts
+
+
+class Tests(TestCase, object):
+
+    answers_western = [
+        datetime(1875, 3, 28), datetime(1876, 4, 16), datetime(1877, 4,  1),
+        datetime(1878, 4, 21), datetime(1879, 4, 13), datetime(1880, 3, 28),
+        datetime(1881, 4, 17), datetime(1882, 4,  9), datetime(1883, 3, 25),
+        datetime(1884, 4, 13), datetime(1885, 4,  5), datetime(1886, 4, 25),
+        datetime(1887, 4, 10), datetime(1888, 4,  1), datetime(1889, 4, 21),
+        datetime(1890, 4,  6), datetime(1891, 3, 29), datetime(1892, 4, 17),
+        datetime(1893, 4,  2), datetime(1894, 3, 25), datetime(1895, 4, 14),
+        datetime(1896, 4,  5), datetime(1897, 4, 18), datetime(1898, 4, 10),
+        datetime(1899, 4,  2), datetime(1900, 4, 15), datetime(1901, 4,  7),
+        datetime(1902, 3, 30), datetime(1903, 4, 12), datetime(1904, 4,  3),
+        datetime(1905, 4, 23), datetime(1906, 4, 15), datetime(1907, 3, 31),
+        datetime(1908, 4, 19), datetime(1909, 4, 11), datetime(1910, 3, 27),
+        datetime(1911, 4, 16), datetime(1912, 4,  7), datetime(1913, 3, 23),
+        datetime(1914, 4, 12), datetime(1915, 4,  4), datetime(1916, 4, 23),
+        datetime(1917, 4,  8), datetime(1918, 3, 31), datetime(1919, 4, 20),
+        datetime(1920, 4,  4), datetime(1921, 3, 27), datetime(1922, 4, 16),
+        datetime(1923, 4,  1), datetime(1924, 4, 20), datetime(1925, 4, 12),
+        datetime(1926, 4,  4), datetime(1927, 4, 17), datetime(1928, 4,  8),
+        datetime(1929, 3, 31), datetime(1930, 4, 20), datetime(1931, 4,  5),
+        datetime(1932, 3, 27), datetime(1933, 4, 16), datetime(1934, 4,  1),
+        datetime(1935, 4, 21), datetime(1936, 4, 12), datetime(1937, 3, 28),
+        datetime(1938, 4, 17), datetime(1939, 4,  9), datetime(1940, 3, 24),
+        datetime(1941, 4, 13), datetime(1942, 4,  5), datetime(1943, 4, 25),
+        datetime(1944, 4,  9), datetime(1945, 4,  1), datetime(1946, 4, 21),
+        datetime(1947, 4,  6), datetime(1948, 3, 28), datetime(1949, 4, 17),
+        datetime(1950, 4,  9), datetime(1951, 3, 25), datetime(1952, 4, 13),
+        datetime(1953, 4,  5), datetime(1954, 4, 18), datetime(1955, 4, 10),
+        datetime(1956, 4,  1), datetime(1957, 4, 21), datetime(1958, 4,  6),
+        datetime(1959, 3, 29), datetime(1960, 4, 17), datetime(1961, 4,  2),
+        datetime(1962, 4, 22), datetime(1963, 4, 14), datetime(1964, 3, 29),
+        datetime(1965, 4, 18), datetime(1966, 4, 10), datetime(1967, 3, 26),
+        datetime(1968, 4, 14), datetime(1969, 4,  6), datetime(1970, 3, 29),
+        datetime(1971, 4, 11), datetime(1972, 4,  2), datetime(1973, 4, 22),
+        datetime(1974, 4, 14), datetime(1975, 3, 30), datetime(1976, 4, 18),
+        datetime(1977, 4, 10), datetime(1978, 3, 26), datetime(1979, 4, 15),
+        datetime(1980, 4,  6), datetime(1981, 4, 19), datetime(1982, 4, 11),
+        datetime(1983, 4,  3), datetime(1984, 4, 22), datetime(1985, 4,  7),
+        datetime(1986, 3, 30), datetime(1987, 4, 19), datetime(1988, 4,  3),
+        datetime(1989, 3, 26), datetime(1990, 4, 15), datetime(1991, 3, 31),
+        datetime(1992, 4, 19), datetime(1993, 4, 11), datetime(1994, 4,  3),
+        datetime(1995, 4, 16), datetime(1996, 4,  7), datetime(1997, 3, 30),
+        datetime(1998, 4, 12), datetime(1999, 4,  4), datetime(2000, 4, 23),
+        datetime(2001, 4, 15), datetime(2002, 3, 31), datetime(2003, 4, 20),
+        datetime(2004, 4, 11), datetime(2005, 3, 27), datetime(2006, 4, 16),
+        datetime(2007, 4,  8), datetime(2008, 3, 23), datetime(2009, 4, 12),
+        datetime(2010, 4,  4), datetime(2011, 4, 24), datetime(2012, 4,  8),
+        datetime(2013, 3, 31), datetime(2014, 4, 20), datetime(2015, 4,  5),
+        datetime(2016, 3, 27), datetime(2017, 4, 16), datetime(2018, 4,  1),
+        datetime(2019, 4, 21), datetime(2020, 4, 12), datetime(2021, 4,  4),
+        datetime(2022, 4, 17), datetime(2023, 4,  9), datetime(2024, 3, 31),
+        datetime(2025, 4, 20), datetime(2026, 4,  5), datetime(2027, 3, 28),
+        datetime(2028, 4, 16), datetime(2029, 4,  1), datetime(2030, 4, 21),
+        datetime(2031, 4, 13), datetime(2032, 3, 28), datetime(2033, 4, 17),
+        datetime(2034, 4,  9), datetime(2035, 3, 25), datetime(2036, 4, 13),
+        datetime(2037, 4,  5), datetime(2038, 4, 25), datetime(2039, 4, 10),
+        datetime(2040, 4,  1), datetime(2041, 4, 21), datetime(2042, 4,  6),
+        datetime(2043, 3, 29), datetime(2044, 4, 17), datetime(2045, 4,  9),
+        datetime(2046, 3, 25), datetime(2047, 4, 14), datetime(2048, 4,  5),
+        datetime(2049, 4, 18), datetime(2050, 4, 10), datetime(2051, 4,  2),
+        datetime(2052, 4, 21), datetime(2053, 4,  6), datetime(2054, 3, 29),
+        datetime(2055, 4, 18), datetime(2056, 4,  2), datetime(2057, 4, 22),
+        datetime(2058, 4, 14), datetime(2059, 3, 30), datetime(2060, 4, 18),
+        datetime(2061, 4, 10), datetime(2062, 3, 26), datetime(2063, 4, 15),
+        datetime(2064, 4,  6), datetime(2065, 3, 29), datetime(2066, 4, 11),
+        datetime(2067, 4,  3), datetime(2068, 4, 22), datetime(2069, 4, 14),
+        datetime(2070, 3, 30), datetime(2071, 4, 19), datetime(2072, 4, 10),
+        datetime(2073, 3, 26), datetime(2074, 4, 15), datetime(2075, 4,  7),
+        datetime(2076, 4, 19), datetime(2077, 4, 11), datetime(2078, 4,  3),
+        datetime(2079, 4, 23), datetime(2080, 4,  7), datetime(2081, 3, 30),
+        datetime(2082, 4, 19), datetime(2083, 4,  4), datetime(2084, 3, 26),
+        datetime(2085, 4, 15), datetime(2086, 3, 31), datetime(2087, 4, 20),
+        datetime(2088, 4, 11), datetime(2089, 4,  3), datetime(2090, 4, 16),
+        datetime(2091, 4,  8), datetime(2092, 3, 30), datetime(2093, 4, 12),
+        datetime(2094, 4,  4), datetime(2095, 4, 24), datetime(2096, 4, 15),
+        datetime(2097, 3, 31), datetime(2098, 4, 20), datetime(2099, 4, 12),
+        datetime(2100, 3, 28), datetime(2101, 4, 17), datetime(2102, 4,  9),
+        datetime(2103, 3, 25), datetime(2104, 4, 13), datetime(2105, 4,  5),
+        datetime(2106, 4, 18), datetime(2107, 4, 10), datetime(2108, 4,  1),
+        datetime(2109, 4, 21), datetime(2110, 4,  6), datetime(2111, 3, 29),
+        datetime(2112, 4, 17), datetime(2113, 4,  2), datetime(2114, 4, 22),
+        datetime(2115, 4, 14), datetime(2116, 3, 29), datetime(2117, 4, 18),
+        datetime(2118, 4, 10), datetime(2119, 3, 26), datetime(2120, 4, 14),
+        datetime(2121, 4,  6), datetime(2122, 3, 29), datetime(2123, 4, 11),
+        datetime(2124, 4,  2),
+        ]
+
+    answers_eastern = [
+        datetime(1875, 4, 25), datetime(1876, 4, 16), datetime(1877, 4,  8),
+        datetime(1878, 4, 28), datetime(1879, 4, 13), datetime(1880, 5,  2),
+        datetime(1881, 4, 24), datetime(1882, 4,  9), datetime(1883, 4, 29),
+        datetime(1884, 4, 20), datetime(1885, 4,  5), datetime(1886, 4, 25),
+        datetime(1887, 4, 17), datetime(1888, 5,  6), datetime(1889, 4, 21),
+        datetime(1890, 4, 13), datetime(1891, 5,  3), datetime(1892, 4, 17),
+        datetime(1893, 4,  9), datetime(1894, 4, 29), datetime(1895, 4, 14),
+        datetime(1896, 4,  5), datetime(1897, 4, 25), datetime(1898, 4, 17),
+        datetime(1899, 4, 30), datetime(1900, 4, 22), datetime(1901, 4, 14),
+        datetime(1902, 4, 27), datetime(1903, 4, 19), datetime(1904, 4, 10),
+        datetime(1905, 4, 30), datetime(1906, 4, 15), datetime(1907, 5,  5),
+        datetime(1908, 4, 26), datetime(1909, 4, 11), datetime(1910, 5,  1),
+        datetime(1911, 4, 23), datetime(1912, 4,  7), datetime(1913, 4, 27),
+        datetime(1914, 4, 19), datetime(1915, 4,  4), datetime(1916, 4, 23),
+        datetime(1917, 4, 15), datetime(1918, 5,  5), datetime(1919, 4, 20),
+        datetime(1920, 4, 11), datetime(1921, 5,  1), datetime(1922, 4, 16),
+        datetime(1923, 4,  8), datetime(1924, 4, 27), datetime(1925, 4, 19),
+        datetime(1926, 5,  2), datetime(1927, 4, 24), datetime(1928, 4, 15),
+        datetime(1929, 5,  5), datetime(1930, 4, 20), datetime(1931, 4, 12),
+        datetime(1932, 5,  1), datetime(1933, 4, 16), datetime(1934, 4,  8),
+        datetime(1935, 4, 28), datetime(1936, 4, 12), datetime(1937, 5,  2),
+        datetime(1938, 4, 24), datetime(1939, 4,  9), datetime(1940, 4, 28),
+        datetime(1941, 4, 20), datetime(1942, 4,  5), datetime(1943, 4, 25),
+        datetime(1944, 4, 16), datetime(1945, 5,  6), datetime(1946, 4, 21),
+        datetime(1947, 4, 13), datetime(1948, 5,  2), datetime(1949, 4, 24),
+        datetime(1950, 4,  9), datetime(1951, 4, 29), datetime(1952, 4, 20),
+        datetime(1953, 4,  5), datetime(1954, 4, 25), datetime(1955, 4, 17),
+        datetime(1956, 5,  6), datetime(1957, 4, 21), datetime(1958, 4, 13),
+        datetime(1959, 5,  3), datetime(1960, 4, 17), datetime(1961, 4,  9),
+        datetime(1962, 4, 29), datetime(1963, 4, 14), datetime(1964, 5,  3),
+        datetime(1965, 4, 25), datetime(1966, 4, 10), datetime(1967, 4, 30),
+        datetime(1968, 4, 21), datetime(1969, 4, 13), datetime(1970, 4, 26),
+        datetime(1971, 4, 18), datetime(1972, 4,  9), datetime(1973, 4, 29),
+        datetime(1974, 4, 14), datetime(1975, 5,  4), datetime(1976, 4, 25),
+        datetime(1977, 4, 10), datetime(1978, 4, 30), datetime(1979, 4, 22),
+        datetime(1980, 4,  6), datetime(1981, 4, 26), datetime(1982, 4, 18),
+        datetime(1983, 5,  8), datetime(1984, 4, 22), datetime(1985, 4, 14),
+        datetime(1986, 5,  4), datetime(1987, 4, 19), datetime(1988, 4, 10),
+        datetime(1989, 4, 30), datetime(1990, 4, 15), datetime(1991, 4,  7),
+        datetime(1992, 4, 26), datetime(1993, 4, 18), datetime(1994, 5,  1),
+        datetime(1995, 4, 23), datetime(1996, 4, 14), datetime(1997, 4, 27),
+        datetime(1998, 4, 19), datetime(1999, 4, 11), datetime(2000, 4, 30),
+        datetime(2001, 4, 15), datetime(2002, 5,  5), datetime(2003, 4, 27),
+        datetime(2004, 4, 11), datetime(2005, 5,  1), datetime(2006, 4, 23),
+        datetime(2007, 4,  8), datetime(2008, 4, 27), datetime(2009, 4, 19),
+        datetime(2010, 4,  4), datetime(2011, 4, 24), datetime(2012, 4, 15),
+        datetime(2013, 5,  5), datetime(2014, 4, 20), datetime(2015, 4, 12),
+        datetime(2016, 5,  1), datetime(2017, 4, 16), datetime(2018, 4,  8),
+        datetime(2019, 4, 28), datetime(2020, 4, 19), datetime(2021, 5,  2),
+        datetime(2022, 4, 24), datetime(2023, 4, 16), datetime(2024, 5,  5),
+        datetime(2025, 4, 20), datetime(2026, 4, 12), datetime(2027, 5,  2),
+        datetime(2028, 4, 16), datetime(2029, 4,  8), datetime(2030, 4, 28),
+        datetime(2031, 4, 13), datetime(2032, 5,  2), datetime(2033, 4, 24),
+        datetime(2034, 4,  9), datetime(2035, 4, 29), datetime(2036, 4, 20),
+        datetime(2037, 4,  5), datetime(2038, 4, 25), datetime(2039, 4, 17),
+        datetime(2040, 5,  6), datetime(2041, 4, 21), datetime(2042, 4, 13),
+        datetime(2043, 5,  3), datetime(2044, 4, 24), datetime(2045, 4,  9),
+        datetime(2046, 4, 29), datetime(2047, 4, 21), datetime(2048, 4,  5),
+        datetime(2049, 4, 25), datetime(2050, 4, 17), datetime(2051, 5,  7),
+        datetime(2052, 4, 21), datetime(2053, 4, 13), datetime(2054, 5,  3),
+        datetime(2055, 4, 18), datetime(2056, 4,  9), datetime(2057, 4, 29),
+        datetime(2058, 4, 14), datetime(2059, 5,  4), datetime(2060, 4, 25),
+        datetime(2061, 4, 10), datetime(2062, 4, 30), datetime(2063, 4, 22),
+        datetime(2064, 4, 13), datetime(2065, 4, 26), datetime(2066, 4, 18),
+        datetime(2067, 4, 10), datetime(2068, 4, 29), datetime(2069, 4, 14),
+        datetime(2070, 5,  4), datetime(2071, 4, 19), datetime(2072, 4, 10),
+        datetime(2073, 4, 30), datetime(2074, 4, 22), datetime(2075, 4,  7),
+        datetime(2076, 4, 26), datetime(2077, 4, 18), datetime(2078, 5,  8),
+        datetime(2079, 4, 23), datetime(2080, 4, 14), datetime(2081, 5,  4),
+        datetime(2082, 4, 19), datetime(2083, 4, 11), datetime(2084, 4, 30),
+        datetime(2085, 4, 15), datetime(2086, 4,  7), datetime(2087, 4, 27),
+        datetime(2088, 4, 18), datetime(2089, 5,  1), datetime(2090, 4, 23),
+        datetime(2091, 4,  8), datetime(2092, 4, 27), datetime(2093, 4, 19),
+        datetime(2094, 4, 11), datetime(2095, 4, 24), datetime(2096, 4, 15),
+        datetime(2097, 5,  5), datetime(2098, 4, 27), datetime(2099, 4, 12),
+        datetime(2100, 5,  2), datetime(2101, 4, 24), datetime(2102, 4,  9),
+        datetime(2103, 4, 29), datetime(2104, 4, 20), datetime(2105, 4,  5),
+        datetime(2106, 4, 25), datetime(2107, 4, 17), datetime(2108, 5,  6),
+        datetime(2109, 4, 21), datetime(2110, 4, 13), datetime(2111, 5,  3),
+        datetime(2112, 4, 17), datetime(2113, 4,  9), datetime(2114, 4, 29),
+        datetime(2115, 4, 14), datetime(2116, 5,  3), datetime(2117, 4, 25),
+        datetime(2118, 4, 17), datetime(2119, 4, 30), datetime(2120, 4, 21),
+        datetime(2121, 4, 13), datetime(2122, 5,  3), datetime(2123, 4, 18),
+        datetime(2124, 4,  9),
+    ]
+
+    def test_computus(self):
+        for computus, answers in [(western, self.answers_western),
+                                  (eastern, self.answers_eastern)]:
+            for answer in answers:
+                self.assertEqual(computus(None, answer.year), answer)
+
+    def test_feasts(self):
+        for tradition, pascha, answers in [(Western, 'Easter', self.answers_western),
+                                           (Eastern, 'Pascha', self.answers_eastern)]:
+            f = Feasts(tradition)
+            for answer in answers:
+                f.change_year(answer.year)
+                self.assertEqual(f.feast_to_date(pascha), answer)
+
+
+if __name__ == '__main__':
+    main()
