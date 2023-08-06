@@ -1,0 +1,37 @@
+Introduction
+============
+
+Collective alertview allows site administrator and developers to quickly put a global alert on the site.
+
+
+It is expecially userful to:
+
+- mark the difference between a demo/stage/training site and the production site
+- spread maintainance warnings to all users on the site
+- make any important message immediately visible sitewide 
+
+
+Usage:
+========
+
+From the plone control panel, select "Alert message settings".
+Write the message in the text area (html is allowed) and toggle message visibility using 
+the checkbox.
+
+
+Versions:
+=========
+
+Collective.alertviewlet has been tested on Plone 3.2.x and 3.3
+
+
+Credits:
+========
+
+Author:
+Antonio Tirabasso <antonio.tirabasso@reflab.it>
+Francesco Merlo <francesco.merlo@reflab.it>
+
+Contributions:
+Eleonora Borelli <eleonora@reflab.com>
+
