@@ -1,0 +1,253 @@
+Webification
+
+20091228, http://hakmatak.org/dev
+
+This is a short note about Webification (w10n).
+For a full description of w10n, please visit http://w10n.org.
+
+1. Introduction
+
+W10n defines a common way to expose data stores (composite files,
+databases, etc.) on the web. The core idea of webification is to make
+inner components of a data store directly addressable and accessible
+via well-defined and meaningful URLs.
+
+2. Abstract Tree View
+
+W10n holds a simple abstract tree view for a data store.
+In this tree, there are two types of entities (inner components):
+(1) node, which can contain sub-nodes and leaves.
+(2) leaf, which can only belong to one parent node and can hold data.
+Both node and leaf may have attributes. An attribute is not considered
+as either leaf or node for simplicity. The tree root is a node.
+
+Furthermore a node or leaf must have a name.
+The name of the tree root is "", namely, an empty string.
+
+The full name of a node or leaf is constructed by concatenating
+names of all ancestral nodes and its name using forward slash "/"
+as the separator. Thus the full name of the root is "", an empty string, too.
+And the full name of a non-root entity x, node or leaf, is
+
+""/x1/x2/.../xn/x
+
+or equivalently
+
+/x1/x2/.../xn/x
+
+in which "", x1, x2, ..., xn are names of its ancestral nodes.
+
+For a node, meta information is available. It contains node name,
+attributes, list of leaves and list of sub-nodes.
+
+For a leaf, both meta and data information are available.
+The meta information contains leaf name and attributes. The data information
+can be all or part of data the leaf holds.
+
+3. URL Syntax
+
+A data store on an HTTP server has a URL like
+
+http://host:port/path
+
+To address its inner components directly, an extended URL syntax
+can be introduced
+
+http://host:port/path""identifier?query_string
+                     ^^\_____________________/
+                     ||          |
+                     ||          |
+                     ||      URL extension
+                empty string
+
+in which an empty string "" separates the "standard" resource URL from
+the extension. Within the extension, the identifier defines what component
+to expose and the query_string dictates how to expose.
+
+3.1 Identifier
+
+3.1.1 Node
+
+The meta information of node x is identified by identifier
+
+/x1/x2/.../xn/x/
+
+which is, in fact, an empty string "" prefixed by the node's full name
+using separator "/", i.e.,
+
+""/x1/x2/.../xn/x/""
+
+The data information of node x is currently undefined.
+
+3.1.2 Leaf
+
+The meta information of leaf x is identified by identifier
+
+/x1/x2/.../xn/x/
+
+which is, in fact, an empty string "" prefixed by the leaf's full name
+using separator "/", i.e.,
+
+""/x1/x2/.../xn/x/""
+
+The data information of leaf x is identified by identifier
+
+/x1/x2/.../xn/x[indexer]
+
+in which the indexer specifies a portion of the data. If the indexer
+is an empty string, it means the entire data.
+
+If a leaf contains a multi-dimensional array, a range indexer is defined:
+
+start0:stop0:step, start1:stop1:step1, ...
+
+For example, the following identifier
+
+/x1/x2/.../xn/x[0:10,10:20]
+
+specifies slice [0:10,10:20] of the data that leaf x holds.
+
+The exact syntax of an indexer depends on the w10n type involved.
+(see Section 5 below for more about w10n type).
+
+3.2 Query String
+
+The query_string contains parameter name-value pairs used to
+direct server actions. The following parameters are currently defined:
+
+(a) output -- value is a string specifying format of HTTP response:
+one of json, html, raw, etc.
+
+(b) callback -- value is a string specifying javascript function name
+used to wrap HTTP response in JSONP form, if output is json.
+
+(c) reCache -- no value. If present, response cache must be refreshed.
+
+(d) flatten -- no value. If present, multi-dimensional array in response
+is flattened.
+
+(e) traverse -- no value. If present, all sub-nodes are traversed.
+
+Please note neither parameter name nor its value is case-sensitive.
+
+4. HTTP Request
+
+Depending on the HTTP method used, an HTTP request with a w10n URL
+as defined in Section 3 above can be a "w10n read" or a "w10n write".
+
+4.1 GET Request (w10n read API)
+
+In a GET request, URL is
+
+http://host:port/path""identifier?query_string
+
+and no message body. Such a request retrieves (reads)
+meta or data information for a node or leaf identified by the URL.
+
+4.2 PUT Request (w10n write API)
+
+In a PUT request, URL is
+
+http://host:port/path""identifier?query_string
+
+and message body contains data. Such a request saves data (writes) to
+a leaf identified by the URL.
+
+5. HTTP Response
+
+At minimum, a w10n service must be able to respond in JSON format
+for any valid URL containing a meta information identifier,
+which always ends with a "/".
+
+5.1 Response For Node
+
+As stated in Section 3 above, currently only meta information identifier
+is defined for a node.
+
+If the output parameter is absent or set to json, response of
+a URL with meta information identifier is a JSON object:
+
+{
+"name": string,
+"attributes": [...],
+"nodes": [...],
+"leaves": [...],
+"w10n": [...]
+}
+
+in which
+the value of "name" is name of the node;
+the value of "attributes" is an array of objects with name-value pairs;
+the value of "nodes" is an array of objects, each of which defines a sub-node;
+the value of "leaves" is an array of objects, each of which defines a leaf;
+the value of "w10n" is an array of objects containing information such as
+version of w10n specification, name and version of implementation,
+w10n type, date store path and node identifier.
+
+Please note JSON array type is used to preserve order of entries.
+
+5.2 Response For Leaf
+
+As stated in Section 3 above, both meta and data information identifiers
+are defined for a leaf.
+
+5.2.1 Response For Meta
+
+If the output parameter is absent or set to json, response of
+a URL with meta information identifier is a JSON object:
+
+{
+"name": string,
+"attributes": [...],
+......,
+"w10n": [...]
+}
+
+in which
+the value of "name" is name of the leaf;
+the value of "attributes" is an array of objects with name-value pairs;
+the value of "w10n" is an array of objects containing information such as
+version of w10n specification, name and version of implementation,
+w10n type, date store path and leaf identifier.
+
+In this object, there can be more properties depending on w10n type.
+
+Please note JSON array type is used to preserve order of entries.
+
+5.2.2 Response For Data
+
+Response of a URL with data information identifier may be
+in different formats: json, raw, etc. depending on w10n type
+and the value of parameter "output" in query_string.
+
+5.2.2.1 JSON Response
+
+A JSON response for leaf data is a JSON object such as
+
+{
+"name": string,
+"type": string,
+"attributes": [...],
+"data": [...],
+......,
+"w10n": [...]
+}
+
+which is similar to that of 5.2.1, but has additional properties
+"type" and "data". The "data" property holds data value as JSON array and
+"type" indicates data type.
+
+6. Webification Type
+
+For a data store, there can be more than one way to webify it.
+Each can be designated with a string, called w10n type.
+
+To avoid potential conflict, the w10n spec uses the following
+convention to assign w10n type:
+
+major.minor
+
+where major is a string about store type and minor a string about
+the particular way of webification. The separator is ".", a period.
+
+W10n type is returned as the value of property w10n.type in a JSON response.
