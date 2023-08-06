@@ -1,0 +1,187 @@
+Testing replies
+===============
+
+Before we can test replies, we need to set some things up, such as the test
+SMTP server and the replybot configuration file.  First, create a temporary
+directory to house all of our test files.
+
+    >>> import os
+    >>> import tempfile
+    >>> testdir = tempfile.mkdtemp()
+
+    >>> from botlib.testing.smtpctl import Controller
+    >>> controller = Controller()
+    >>> controller.start()
+
+And write test configuration file.  Note that the port number, while
+hard coded, will be used to rendezvous with the SMTP server.
+
+    >>> cfgfile = os.path.join(testdir, 'test.cfg')
+    >>> fp = open(cfgfile, 'w')
+
+    >>> print >> fp, """\
+    ... [DEFAULT]
+    ... replybot_from: noreply@localhost
+    ... replybot_mailfrom: <>
+    ... replybot_who: The Python Replybot
+    ... grace_period: 1m
+    ... cache_period: 1m
+    ... cache_directory: %(testdir)s/cache
+    ... reply_url: file://%(testdir)s/notice.txt
+    ... content_type: text/plain; charset=us-ascii
+    ... reply_context: all
+    ... [SYSTEM]
+    ... database_url: sqlite:///%(testdir)s/replybot.db
+    ... log_file: %(testdir)s/replybot.log
+    ... log_level: Info
+    ... mail_server: localhost
+    ... mail_port: %(port)s
+    ... mail_user: None
+    ... mail_password: None
+    ... """ % {
+    ...     'testdir': testdir,
+    ...     'port': controller.port,
+    ...     }
+    >>> fp.close()
+
+Create the cache directory and write a notices file.
+
+    >>> os.mkdir(os.path.join(testdir, 'cache'))
+    >>> notice_path = os.path.join(testdir, 'notice.txt')
+    >>> fp = open(notice_path, 'w')
+    >>> print >> fp, """\
+    ... You have reached the Python Replybot.  Here is some information
+    ... you might be interested in.
+    ...
+    ... blah blah blah."""
+    >>> fp.close()
+
+Now load the configuration we just wrote.
+
+    >>> from botlib.configuration import config
+    >>> config.load(cfgfile, 'DEFAULT')
+
+Fake command line options that do_reply() will look for.
+
+    >>> class Options: pass
+    >>> config.options = Options()
+    >>> config.options.debug = False
+    >>> config.keywords = {}
+    >>> from botlib.database import Database
+    >>> config.db = Database(config.database_url)
+
+Simulate an incoming message.
+
+    >>> from email import message_from_string
+    >>> from botlib.reply import do_reply
+    >>> msg = message_from_string("""\
+    ... From: nobody@example.com
+    ... To: somebody@example.com
+    ... Subject: test 1
+    ...
+    ... blah blah blah.
+    ... """)
+    >>> do_reply(msg, 'nobody@example.com')
+
+Now, open the mailbox, read the first message, and check the various values.
+
+    >>> messages = controller.messages
+    >>> len(messages)
+    1
+    >>> reply = controller.messages[0]
+    >>> reply['to']
+    'nobody@example.com'
+    >>> reply['from']
+    'The Python Replybot <noreply@localhost>'
+    >>> reply['subject']
+    'Re: test 1'
+    >>> reply['precedence']
+    'bulk'
+    >>> reply['x-no-archive']
+    'Yes'
+    >>> reply['x-mailer']
+    ... # doctest: +ELLIPSIS
+    'The Python Replybot 5...'
+    >>> reply['x-ack']
+    'No'
+    >>> reply.is_multipart()
+    True
+
+The first multipart should be the response text.
+
+    >>> response = reply.get_payload(0)
+    >>> response.get_content_type()
+    'text/plain'
+    >>> response.get_content_charset()
+    'us-ascii'
+    >>> response.get_payload()
+    ... # doctest: +ELLIPSIS
+    'You have reached the Python Replybot...'
+
+The second multipart is the wrapped original message.
+
+    >>> wrapper = reply.get_payload(1)
+    >>> wrapper.get_content_type()
+    'message/rfc822'
+    >>> orig = wrapper.get_payload(0)
+    >>> orig['from']
+    'nobody@example.com'
+    >>> orig['to']
+    'somebody@example.com'
+    >>> orig['subject']
+    'test 1'
+    >>> orig.get_payload()
+    'blah blah blah.\n'
+
+
+Cached notices
+--------------
+
+When another sender requires a unique reply with the same notice, a cached
+copy will be used.  Thus, removing the original message makes no difference.
+
+    >>> controller.reset()
+    >>> os.remove(notice_path)
+
+    >>> do_reply(msg, 'somebody@example.com')
+    >>> messages = controller.messages
+    >>> len(messages)
+    1
+    >>> print messages[0].as_string()
+    ... # doctest: +ELLIPSIS
+    Content-Type: multipart/mixed; boundary="===============...=="
+    ...
+    You have reached the Python Replybot.  Here is some information
+    you might be interested in.
+    ...
+
+Once the cache period expires, the notice will be retrieved again.
+
+    >>> fp = open(notice_path, 'w')
+    >>> print >> fp, """\
+    ... Hi!  I'm the Python Replybot and I'm here to help you.
+    ... """
+    >>> fp.close()
+
+    >>> from datetime import timedelta
+    >>> config.cache_period = timedelta(seconds=-10)
+    >>> controller.reset()
+
+    >>> do_reply(msg, 'another@example.com')
+    >>> messages = controller.messages
+    >>> len(messages)
+    1
+    >>> print messages[0].as_string()
+    ... # doctest: +ELLIPSIS
+    Content-Type: multipart/mixed; boundary="===============...=="
+    ...
+    Hi!  I'm the Python Replybot and I'm here to help you.
+    ...
+
+
+Clean up
+--------
+
+We're done so clean up.
+
+    >>> controller.stop()
