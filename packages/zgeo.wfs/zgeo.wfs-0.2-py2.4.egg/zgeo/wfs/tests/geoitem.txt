@@ -1,0 +1,93 @@
+zgeo.wfs.geoitem Readme
+=========================
+
+Overview
+--------
+GeoItem is an adapter class to provide a Georeferenceable behaviour to an AT class and
+allow it to be handle in a IWebFeatureServiceable folder
+
+
+Your tests here
+---------------
+
+IGeoreferenceable (from zgeo.geographer) is a marker interface for objects contained
+in a IWebFeatureServiceable object (they can be immediate children or not), they are supposed to be AT
+
+    >>> from zope.interface import implements
+    >>> from Products.ATContentTypes.content.folder import ATFolder
+    >>> from zgeo.wfs.interfaces import IWebFeatureServiceable
+    >>> class MyGeoFolder(ATFolder):
+    ...    implements(IWebFeatureServiceable)
+    
+    >>> from Products.ATContentTypes.content.document import ATDocument
+    >>> from zgeo.geographer.interfaces import IGeoreferenceable
+    
+    >>> class MyGeoObject(ATDocument):
+    ...    implements(IGeoreferenceable)
+    
+IGeoreferenceable objects can be adapted as a WFSGeoItem
+    >>> from zgeo.wfs.interfaces import IWFSGeoItem
+    >>> f=MyGeoFolder('f')
+    >>> f.item1=MyGeoObject('o')
+    >>> f.item1.setTitle('My title')
+    >>> o=f.item1
+    >>> geoitem=IWFSGeoItem(o)
+    >>> type(geoitem)
+    <class 'zgeo.wfs.geoitem.WFSGeoItem'>
+    >>> o.Title()
+    'My title'
+    >>> geoitem.name
+    'My title'
+    
+The geoitem's feature type is set to 'default'
+    >>> geoitem.featureType
+    'default'
+
+unless it defined its own feature type
+    >>> class MyCityGeoObject(ATDocument):
+    ...    implements(IGeoreferenceable)
+    ...    @property
+    ...    def featureType(self):
+    ...       return 'Cities'
+    >>> from zgeo.wfs.interfaces import IWebFeatureService
+    >>> wfs=IWebFeatureService(f)
+    >>> wfs.addFeatureType('Cities')
+    >>> f.item2=MyCityGeoObject('o2')
+    >>> f.item2.setTitle('Bamako')
+    >>> o2=f.item2
+    >>> geoitem2=IWFSGeoItem(o2)
+    >>> geoitem2.featureType
+    'Cities'
+    
+GeoItem can store a Geometry in its context
+    >>> geoitem.setGeoInterface('Point', (10, 10))
+    >>> type(geoitem.getGeometry())
+    <class 'shapely.geometry.point.PointAdapter'>
+    >>> #geoitem2.setGeoInterface('LineString', ((20, 20), (30, 60), (100, 80), (20, 20)))
+
+Geometry can be initialized from WKT
+    >>> geoitem2.setGeometryFromWKT("LINESTRING (20 20, 30 60, 100 80, 20 20)")
+    >>> type(geoitem2.getGeometry())
+    <class 'shapely.geometry.linestring.LineStringAdapter'>
+    
+GeoItem can return its bounding box:
+	>>> from zgeo.wfs.geoitem import bboxAsTuple
+    >>> bboxAsTuple(geoitem2.getGeometry())
+    (20.0, 20.0, 100.0, 80.0)
+    
+A GeoItem can find its IWebFeatureServiceable nearest ancestor:
+    >>> geoitem2.getWFSParent().context.id
+    'f'
+    >>> f.subfolder=ATFolder('subfolder')
+    >>> f.subfolder.item3=MyCityGeoObject('o3')
+    >>> geoitem3=IWFSGeoItem(f.subfolder.item3)
+    >>> geoitem3.getWFSParent().context.id
+    'f'
+
+Tear down
+
+  >>> IWebFeatureService(f).getGeoCatalog()._catalog.getIndex('geometry').destroy_spatialindex()
+
+    
+
+ 
