@@ -1,0 +1,2 @@
+APPNAME="GstEditor"
+APPVERSION="0.1.0"
