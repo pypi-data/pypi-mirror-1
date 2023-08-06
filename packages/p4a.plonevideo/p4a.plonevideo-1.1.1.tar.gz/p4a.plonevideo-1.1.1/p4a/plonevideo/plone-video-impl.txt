@@ -1,0 +1,121 @@
+Plone Video (data format specific)
+==================================
+
+The following doctest suite is meant to be run against each available
+video implementation to ensure all features are accounted for.  In
+anticipation of this, ``self.samplefile`` needs to point to a valid
+sample video file of the given type.  Also, ``self.required_mimetype``
+should be the mime type that video implementation is meant to handle.
+
+We begin this process by creating a new instance of a file content
+type.
+
+  >>> samplefilename = self.samplefile.split('/')[-1]
+  >>> id = self.folder.invokeFactory(self.file_content_type, samplefilename)
+  >>> samplefile = self.folder[id]
+
+Keeping the sample video files small it should be no problem loading
+them into memory for testing purposes.  So we proceed to give the
+previous file instance the sample file binary data.
+
+  >>> f = open(self.samplefile, 'rb')
+  >>> data = f.read()
+  >>> f.close()
+  >>> samplefile.getRawFile().update_data(data, self.required_mimetype,
+  ...                                     len(data))
+
+This is all fine and dandy but since we went a little lowlevel to update
+the file, this means IVideo hasn't had a chance to update the video
+metadata and related logic.  So we need to fire IObjectModifiedEvent to
+kick IVideo.
+
+  >>> from zope import event
+  >>> from zope.app.event import objectevent
+  >>> event.notify(objectevent.ObjectModifiedEvent(samplefile))
+
+Make sure ``samplefile`` has the appropriate mime type.
+
+  >>> samplefile.content_type == self.required_mimetype
+  True
+
+Now lets look up IVideo and get the data we expect from importing the
+video file.
+
+  >>> from p4a.video.interfaces import IVideo
+  >>> videofile = IVideo(samplefile)
+
+  >>> videofile.width == self.fields['width']
+  True
+
+  >>> videofile.height == self.fields['height']
+  True
+
+  >>> videofile.duration == self.fields['duration']
+  True
+
+
+# not necessary to test Title?
+# Do a little CMF testing.
+  # >>> samplefile.Title() == self.fields['title']
+  # True
+
+Make sure storing and loading of video metadata works.
+
+#  >>> videofile._save_video_metadata()
+  >>> videofile._load_video_metadata()
+
+Now lets test out the downloading capability of the file.
+
+  >>> download = samplefile.unrestrictedTraverse('@@downloadfile')
+  >>> download.request.form['field'] = 'p4a.video.interfaces:IVideo:file'
+  >>> download() is not None
+  True
+
+Check that the video file is automatically activated.
+
+  >>> from p4a.video.interfaces import IMediaActivator
+  >>> activator = IMediaActivator(samplefile)
+  >>> activator.media_activated
+  True
+
+Make sure copy and paste of the activated file works. Also make sure
+that the copied object is automatically activated.
+
+  >>> copy = self.folder.manage_copyObjects([samplefile.getId()])
+  >>> dummy = self.folder.manage_pasteObjects(copy)
+  >>> new_file = getattr(self.folder, 'copy_of_' + samplefile.getId(), None)
+  >>> activator = IMediaActivator(new_file)
+  >>> activator.media_activated
+  True
+
+Any folder can be a video provider. By default a folder is not video enhanced
+folder.
+
+  >>> from p4a.video.interfaces import IVideoContainerEnhanced
+  >>> video_container = IVideoContainerEnhanced(self.folder)
+  Traceback (most recent call last):
+  ...
+  TypeError: ('Could not adapt'...)
+
+By using a view we activate the folder and make it video enhanced.
+
+  >>> media_config = self.folder.restrictedTraverse('@@video-config.html')
+  >>> media_config.media_activated
+  False
+  >>> media_config.media_activated = True
+  >>> media_config.media_activated
+  True
+
+The folder is now video enhanced.
+
+  >>> IVideoContainerEnhanced.providedBy(self.folder)
+  True
+
+The folder can now be used as a video provider. The provider returns every
+video item it knows about. Right now we only have one video item.
+
+  >>> from p4a.common.formatting import fancy_time_amount
+  >>> video_container = self.folder.restrictedTraverse("@@video-container.html")
+  >>> video_items = video_container.video_items()
+  >>> video_items[0].duration == self.fields['duration']
+  True

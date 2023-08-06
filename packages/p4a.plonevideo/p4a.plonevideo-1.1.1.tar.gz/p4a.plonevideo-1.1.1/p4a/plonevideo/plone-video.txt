@@ -1,0 +1,173 @@
+Plone Video
+===========
+
+Video support in Plone now consists of taking the zope3 video support
+and wrapping it with a Plone integration layer.
+
+We begin this process by creating a new instance of a file content
+type.
+
+  >>> id = self.folder.invokeFactory('File', 'testfile1')
+  >>> testfile1 = self.folder[id]
+
+By default, doing an IVideo adapter lookup on that file should fail since
+its media properties have not yet been activated.
+
+  >>> from p4a.video.interfaces import IVideo
+  >>> IVideo(testfile1)
+  Traceback (most recent call last):
+  ...
+  TypeError: ('Could not adapt'...)
+
+So the next step would be to actually activate the video enhancements on
+this file instance.
+
+  >>> media_config = testfile1.restrictedTraverse('@@video-config.html')
+  >>> media_config.media_activated
+  False
+  >>> media_config.media_activated = True
+  >>> media_config.media_activated
+  True
+    
+This is what the testfile looks like before adaptation to IVideo
+  >>> testfile1
+  <ATFile at /plone/Members/test_user_1_/testfile1>
+
+Now adapting it should work fine.
+
+  >>> IVideo(testfile1)
+  <p4a.video _ATCTFileVideo title=>
+
+Lets do the same thing with a folder.  Since p4a.video allows folders
+to additionally be media enhanced (as video containers).
+
+  >>> id = self.folder.invokeFactory('Folder', 'testfolder1')
+  >>> testfolder1 = self.folder[id]
+
+So the next step would be to actually activate the video enhancements on
+this folder.
+
+  >>> media_config = testfolder1.restrictedTraverse('@@video-config.html')
+  >>> media_config.media_activated
+  False
+  >>> media_config.media_activated = True
+  >>> media_config.media_activated
+  True
+
+Make sure the *IVideoFileProvider* adapter works on the folder.
+
+  >>> from p4a.video.interfaces import IVideoProvider
+  >>> adapted = IVideoProvider(testfolder1)
+  >>> adapted.video_items
+  []
+  
+This was interesting, but the adapted folder has no items.
+Now we'll add something to that folder because we want to explore accessing view
+attributes on the item from the context of the container (and we don't know 
+how to do it!)
+  
+  >>> id = testfolder1.invokeFactory('File', 'testfile2')
+  >>> testfile2 = testfolder1[id]
+
+By default, doing an IVideo adapter lookup on that file should fail since
+its media properties have not yet been activated.
+
+  >>> from p4a.video.interfaces import IVideo, IMediaPlayer, \
+  ... IVideoDataAccessor, IPossibleVideo, IVideoEnhanced
+  >>> IVideo(testfile2)
+  Traceback (most recent call last):
+  ...
+  TypeError: ('Could not adapt'...)
+
+So the next step would be to actually activate the video enhancements on
+this file instance.
+
+  >>> media_config = testfile2.restrictedTraverse('@@video-config.html')
+  >>> media_config.media_activated
+  False
+  >>> media_config.media_activated = True
+  >>> media_config.media_activated
+  True
+    
+This is what the testfile looks like before adaptation to IVideo
+  >>> testfile2
+  <ATFile at /plone/Members/test_user_1_/testfolder1/testfile2>
+
+Now adapting it should work fine.
+
+  >>> IVideo(testfile2)
+  <p4a.video _ATCTFileVideo title=>
+  
+And we can get to the video data - which has no keys, because it was a 
+fake file.
+
+  >>> IVideo(testfile2).video_data.keys()
+  []
+
+We can also get the single musicitem in a 
+folder through the folder and 
+
+(Rocky - this shows a bit of our thinking, last night. Sascha spent a 
+couple of hours helping us get this far. We were not really happy with having
+to find the widget with the path, in the way we did below. And of
+course the doctest comparison line is a real disaster.)
+
+  >>> videos = IVideoProvider(testfolder1).video_items
+  >>> from zope.component import queryAdapter
+  >>> video = videos[0]
+  >>> field = IVideo['file'].bind(video)
+  >>> widget = queryAdapter(field, IMediaPlayer, name='video/x-flv')
+  >>> downloadurl = '/testfolder1/testfile2/file'
+  >>> imageurl = ''
+  >>> 'http://nohost/plone/++resource++flowplayer' in widget(
+  ...     downloadurl, imageurl,None, None)
+  True
+
+We know that Smart Folders are potential video containers as well.  So we
+should test those as well.
+
+Need more permissions first to create smart folders, will adopt ``Manager``
+role.
+
+  >>> self.setRoles('Manager')
+
+  >>> id = self.folder.invokeFactory('Topic', 'testtopic1')
+  >>> testtopic1 = self.folder[id]
+  
+Make sure sure we can activate video enhancements on this smart folder.
+
+  >>> media_config = testtopic1.restrictedTraverse('@@video-config.html')
+  >>> media_config.media_activated
+  False
+  >>> media_config.media_activated = True
+  >>> media_config.media_activated
+  True
+
+Make sure that the catalog was updated when the files were activated.
+testfile2 is activated and should be in the catalog. Also check that it's
+not found in the catalog if it's deactivated.
+
+  >>> catalog = self.portal.portal_catalog
+  >>> videos = catalog(object_provides=IVideoEnhanced.__identifier__)
+  >>> 'testfile2' in [video.getId for video in videos]
+  True
+  >>> media_config = testfile2.restrictedTraverse('@@video-config.html')
+  >>> media_config.media_activated = False
+  >>> videos = catalog(object_provides=IVideoEnhanced.__identifier__)
+  >>> 'testfile2' in [video.getId for video in videos]
+  False
+
+Discussion Support
+------------------
+
+Discussion presentation should not be visible when discussion has been
+disabled for our objects.
+
+  >>> real = video.getObject()
+  >>> portal.portal_discussion.isDiscussionAllowedFor(real)
+  False
+  >>> print real.restrictedTraverse('@@video_listed_single')()
+  <...
+  ...0 comment(s)...
+
+

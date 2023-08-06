@@ -1,0 +1,68 @@
+ATVideo Migration
+=================
+
+Start by adding a new ATVideo instance to the site.
+
+  >>> import Globals
+  >>> import os
+  >>> import transaction
+  
+  >>> self.setRoles(['Manager', 'Member'])
+  
+  >>> id = folder.invokeFactory('ATVideo', 'test-audio')
+  >>> testaudio = folder[id]
+  >>> maindir = Globals.package_home({'__name__': 'p4a.video.tests'})
+  >>> samplesdir = os.path.join(maindir, 'samples')
+  >>> f = open(os.path.join(samplesdir, 'test-full.mp3'))
+  >>> testaudio.setFile(f)
+  >>> f.close()
+  >>> testaudio.processForm()
+  >>> transaction.commit()
+
+Make sure the instance was created properly and we got some valid
+metadata.
+
+  >>> items = folder.getFolderContents(contentFilter={'portal_type': 'ATVideo'})
+  >>> len(items)
+  1
+  
+  >>> testaudio = items[0].getObject()
+  >>> testaudio.Title()
+  'Test of the Emercy Broadcast System'
+
+Now we invoke the migration mechanism via the confliget view (for
+the sake of integration).  By default the configlet should run in *dry
+run* mode so all changes will be rolled back.
+
+  >>> view = portal.restrictedTraverse('@@migrate-atvideo-configlet.html')
+  >>> view.dry_run
+  True
+
+The following tests are no longer run as it appears that ExternalStorage
+cannot roll back the deletion of a file on the filesystem.
+
+  >>> # view.migrate()
+  'Successfully migrated 1 object(s), which were rolled back due to running in "dry run" mode'
+
+We try the migration again, this time not running in dry mode.
+
+  >>> view.request.form['dry_run'] = False
+  >>> view.dry_run
+  False
+  >>> view.migrate()
+  'Successfully migrated 1 object(s)'
+  
+Now that the objects have been migrated, lets check one out to ensure
+all metadata was brought over properly.
+
+  >>> from p4a.video import interfaces
+
+  >>> obj = folder['test-audio']
+  >>> obj.portal_type
+  'File'
+
+  >>> audio = interfaces.IVideo(obj)
+  >>> audio.title
+  u'Test of the Emercy Broadcast System'
+  >>> audio.length
+  3
