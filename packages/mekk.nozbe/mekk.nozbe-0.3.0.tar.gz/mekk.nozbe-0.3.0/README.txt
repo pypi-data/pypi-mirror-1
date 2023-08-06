@@ -1,0 +1,40 @@
+.. -*- mode: rst; coding: utf-8 -*-
+
+===========
+mekk.nozbe
+===========
+
+``mekk.nozbe`` wraps (noticeable parts of) Nozbe_ API as Python
+functions. 
+
+It uses both old, officially published API
+(http://www.nozbe.com/gtd/api) and new (not yet officially docunented)
+"Sync API". Neither of those APIs is fully covered (the module
+supports the functions which were working at early 2009 and which I
+needed), but still I succesfully use the library to extract projects,
+contexts and tasks from Nozbe and to create new (or update existing)
+items.
+
+The code is currently using Twisted network interface (that means
+returning deferreds etc). Well, I like Twisted. *I consider providing
+urllib-based synchronous API as an alternative, just need some
+motivation.*
+
+Apart from the library, nozbetool script is bundled. Run::
+
+    nozbetool --help
+
+for details.
+
+Development is tracked on http://bitbucket.org/Mekk/mekk.nozbe/
+
+.. _Nozbe: http://www.nozbe.com
+
+Example
+========
+
+Some simple example:
+
+.. include:: examples/sample_client_apikey.py 
+   :literal:
+
