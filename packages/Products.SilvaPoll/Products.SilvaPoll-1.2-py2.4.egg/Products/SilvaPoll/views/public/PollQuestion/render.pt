@@ -1,0 +1,190 @@
+<tal:block define="
+  model request/model;
+  has_voted model/has_voted;
+  edit_mode python:request.get('edit_mode', False);
+  has_voted python: has_voted or (edit_mode or
+    (request.get('pollid') == '/'.join(model.getPhysicalPath()) and 
+    model.manage_vote(request)));
+  display_question python:edit_mode or model.display_question();
+  display_results python:edit_mode or model.display_results();
+  display_too_late python: model.display_too_late()"
+  xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+  i18n:domain="silva_poll">
+<!-- Note that nothing is displayed if the user has not voted and neither the
+     question nor the results should be displayed -->
+<div class="poll">
+  <h2 class="heading"
+    tal:define="polltitle request/model/get_title"
+    tal:condition="python:polltitle != ''"
+    tal:content="polltitle">
+    poll title
+  </h2>
+  <span tal:replace="nothing"> _______ Display questions form _______ </span>
+  <tal:block condition="not: display_too_late">
+    <tal:block condition="python: edit_mode or (display_question and not has_voted)">
+      <h3 class="poll_question"
+        tal:content="model/get_question">question</h3>
+      <!-- Display instant error feedback if no radio buttons are selected -->
+      <script type="text/javascript">
+        // <![CDATA[
+
+          function checkRadioSelected(form) {
+            var inputs = form.getElementsByTagName('input');
+            for (var i=0; i < inputs.length; i++) {
+              if (inputs[i].type == 'radio' && inputs[i].checked) {
+                return true;
+              };
+            };
+            var error_message = document.getElementById('error_nothing_selected');
+            error_message.style.display = "block";
+            return false;
+          };
+
+        // ]]>
+      </script>
+      <form method="post" action=""
+        onsubmit="return checkRadioSelected(this)"
+        tal:define="answers model/get_answers">
+        <input type="hidden" name="pollid"
+          tal:attributes="value python:'/'.join(model.getPhysicalPath())" />
+        <p id="error_nothing_selected" style="display:none;"> 
+          <span class="warning" i18n:translate="">Please select an answer.</span>
+        </p>
+        <div class="poll_answers"
+          tal:repeat="i python:xrange(len(answers))">
+          <span tal:attributes="class python: repeat['i'].end and 'poll_radio_last' or 'poll_radio'">
+            <input type="radio" name="answer"
+              tal:attributes="value python:answers[i]; id string:answer_${i}"
+            />
+          </span>
+          <span tal:attributes="class python:repeat['i'].end and 'poll_label_last' or 'poll_label'">
+            <label tal:attributes="for string:answer_${i}">
+              <tal:block replace="python: answers[i]" />
+            </label>
+          </span>
+        </div>
+        <input class="button poll_submit"
+          type="submit"
+          value="Submit"
+          i18n:attributes="value"
+        />
+      </form>
+    </tal:block>
+  </tal:block>
+
+  <span tal:replace="nothing"> _______ Display results _______ </span>
+  <tal:block condition="python: (has_voted or not display_question) and display_results">
+    <tal:block define="
+      answers model/get_answers;
+      votes model/get_votes;
+      total python: sum(votes) * 1.0;
+      ">
+      <h3 class="poll_result" i18n:translate="">Poll Results</h3>
+      <h4 class="poll_result"
+        tal:content="model/get_question">question title</h4>
+      <tal:block repeat="i python:xrange(len(answers))">
+        <div tal:attributes="class python:repeat['i'].end and 'poll_result_label_last' or 'poll_result_label'">
+          <p class="poll_answer"
+            tal:content="python: answers[i]">
+            answer
+          </p>
+        </div>
+        <div tal:attributes="class python:repeat['i'].end and 'poll_result_result_last' or 'poll_result'"
+          tal:define="percentage python: (total and round((votes[i] / total) * 100) or 0)">
+          <div class="poll_bar_outer">
+            <div class="poll_bar"
+              tal:attributes="style string:width: ${percentage}%;">
+            </div>
+          </div>
+          <p>
+            <tal:block content="string:${percentage} %" /> (
+            <tal:block replace="python:votes[i]" />
+            <tal:condition condition="python:int(votes[i]) == 1"
+              i18n:translate="">
+              vote
+            </tal:condition>
+            <tal:condition condition="python:int(votes[i]) == 0 or int(votes[i]) > 1"
+              i18n:translate="">
+              votes
+            </tal:condition>)
+          </p>
+        </div>
+      </tal:block>
+    </tal:block>
+  </tal:block>
+
+  <span tal:replace="nothing"> _______ Poll not available yet _______ </span>
+  <tal:block condition="python:(not has_voted and not display_question) and not display_results">
+    <p i18n:translate="">
+      This poll is available from
+      <tal:block define="sdt model/question_start_datetime"
+        content="python: sdt and '%s.%s.%s' % (sdt.day(), sdt.month(), sdt.year()) or '-'"
+        i18n:name="startdatetime"
+      />.
+    </p>
+  </tal:block>
+
+  <span tal:replace="nothing"> _______ Poll results not available yet _______ </span>
+  <tal:block condition="python: has_voted and not display_results">
+    <h3 class="poll_reply"
+      i18n:translate="">Many thanks for your participation!</h3>
+    <p i18n:translate=""
+      tal:define="
+        sdt model/result_start_datetime;
+        edt model/result_end_datetime;
+        fsdt python: sdt and '%s.%s.%s' % (sdt.day(), sdt.month(), sdt.year()) or '';
+        fedt python: edt and '%s.%s.%s' % (edt.day(), edt.month(), edt.year()) or '';
+      ">
+      The results of the poll will be available on this site
+      <span i18n:name="from-until-or-from">
+        <tal:block condition="edt"
+          i18n:translate="">
+            from
+            <tal:block content="fsdt" i18n:name="startdate" />
+            until
+            <tal:block content="fedt" i18n:name="enddate" />.
+        </tal:block>
+        <tal:block condition="not:edt"
+          i18n:translate="">
+          on
+          <tal:block content="fsdt" i18n:name="startdate"/>.
+        </tal:block>
+      </span>
+    </p>
+    <p tal:define="url python:model.get_silva_object().absolute_url()">
+      Link: <a tal:attributes="href url" tal:content="url">url</a>&nbsp;
+      <em id="bookmark_link_placeholder"
+        tal:attributes="
+          silva:url url;
+          silva:title model/get_title_or_id;
+          "></em>
+      <script type="text/javascript">
+        // <![CDATA[
+        if (window.external) {
+          var ph = document.getElementById('bookmark_link_placeholder');
+          var a = document.createElement('a');
+          a.href = '#';
+          a.onclick = function(evt) {
+            window.external.AddFavorite(ph.getAttribute('silva:url'),
+                                          ph.getAttribute('silva:title'));
+            event.returnValue = false;
+            event.cancelBubble = true;
+          };
+          a.appendChild(document.createTextNode(
+                          '[zu Favoriten hinzuf\xfcgen]'));
+          ph.appendChild(a);
+        };
+        // ]]>
+      </script>
+    </p>
+  </tal:block>
+
+  <span tal:replace="nothing"> _______ Poll no longer available _______ </span>
+  <tal:block condition="display_too_late">
+    <p i18n:translate="">
+      Thank you for your interest, unfortunately the results of this poll are
+      no longer available.
+    </p>
+  </tal:block>
+</div>
+</tal:block>
