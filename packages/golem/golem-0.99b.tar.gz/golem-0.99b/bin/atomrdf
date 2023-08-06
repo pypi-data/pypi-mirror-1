@@ -1,0 +1,164 @@
+#!/usr/bin/env python
+
+# Copyright (c) 2006-2008 Andrew Walkingshaw <andrew@lexical.org.uk>
+# except XSLT components: copyright (c) 2005-2008 Toby White <tow@uszla.me.uk> 
+#                 and (c) 2007-2008 Andrew Walkingshaw <andrew@lexical.org.uk>
+#
+# All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included
+# in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR USE OF OTHER DEALINGS IN
+# THE SOFTWARE.
+
+
+
+
+# installed libraries
+from lxml import etree
+import feedparser, golem
+# standard libraries
+import os, sys, optparse, urllib, urllib2, StringIO, gzip, time
+
+# set warning levels
+golem.setTypeWarning(False)
+golem.setDataWarning(True)
+
+def make_parser():
+    parser = optparse.OptionParser()
+    parser.add_option("-d", "--dictionary", metavar="FILE",
+                      dest="dictionaryfile", help="Dictionary filename")
+    parser.add_option("-n", "--namespace", metavar="URI",
+                      dest="dictionarynamespace", help="Dictionary namespace")
+    parser.add_option("-o", "--outputdirectory", metavar="DIRECTORY",
+                      dest="datadir", help="Output directory (for CML and RDF)")
+    parser.add_option("-a", "--follow-archives", action="store_true",
+                      default=False, dest="archives",
+                      help="Follow archive links backwards from initial feed.")
+
+    return parser
+
+def bind_print_rdf(a):
+    """ Return a custom print_rdf bound to describe a specific URL"""
+
+    def print_rdf(x):
+        return golem.helpers.stream.generics.print_rdf(x, about=a)
+    return print_rdf
+
+def getfile(url):
+    """ Get a remote URI, gzip compressed, and return it as a 
+    StringIO object."""
+    try:
+        print >> sys.stderr, "Getting:", url
+    except UnicodeEncodeError:
+        print >> sys.stderr, "Unprintable URI: abandoning"
+        raise 
+    # be a good netizen
+    time.sleep(0.5)
+    # so we never request more than two files a second regardless of
+    # whatever happens
+    request = urllib2.Request(url)
+    request.add_header('Accept-encoding', 'gzip')
+    op = urllib2.build_opener()
+    try:
+        f = op.open(request)
+        try:
+            print >> sys.stderr, "Getting:", url
+        except UnicodeEncodeError:
+            print >> sys.stderr, "Unprintable URI: abandoning"
+            raise 
+    except urllib2.HTTPError:
+        print >> sys.stderr, "404: ", url
+        raise
+    gzdata = StringIO.StringIO(f.read())
+    decompressor = gzip.GzipFile(fileobj=gzdata)
+    data = decompressor.read()
+    return data
+
+class ConfigError(Exception):
+    pass
+
+def dordf(item, datadir, concepts_to_map, mapping):
+    enclosure_uri = None
+    id = item.id.split(":")[2]
+    
+    for enc in item.enclosures:
+        if enc.type == u"chemical/x-cml":
+            if enclosure_uri == None:
+                enclosure_uri = enc.href
+            else:
+                raise ConfigError("Two CML enclosures in one feed entry!")
+
+        if enclosure_uri:
+            rdffn = os.path.join(datadir, "%s.rdf" % id)
+
+            if not os.path.exists(rdffn):
+                try:
+                    fn = os.path.join(datadir, "%s.xml" % id)
+                    if not os.path.exists(fn):
+                        data = getfile(enclosure_uri)
+                        open(fn, "wb").write(data)
+                    map = {}        
+                    for c in concepts_to_map:
+                        map[c] = bind_print_rdf(enclosure_uri)
+                    mapping.assign(map)
+                    stream = golem.helpers.stream.Stream(mapping)
+                    rdffile = open(rdffn, "w")
+                    print >> rdffile, """<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+"""
+                    print >> rdffile, stream.process(fn)
+                    print >> rdffile, """
+</rdf:RDF>"""
+                except urllib2.HTTPError:
+                    pass
+                except UnicodeEncodeError:
+                    pass
+    return True
+
+
+def processfeed(feed, datadir, concepts, mapping):
+    for item in feed.entries:
+        dordf(item, datadir, concepts, mapping)
+    archivelink = [x.href for x in feed.feed.links 
+                   if x["rel"] == u"prev-archive"][0]
+    return archivelink
+
+def main(options, feedurl):
+    if len(feedurl) != 1:
+        raise ConfigError("%s can only process one feed at a time." % sys.argv[0])
+
+    mapping = golem.helpers.stream.Mapping(options.dictionaryfile,
+                                           options.dictionarynamespace)
+    concepts_to_map = [x.id for x in
+                       mapping.dictionary.concept("absolute")\
+                           .getAllImplementations() if x.id!="absolute"]
+
+    archivelink = feedurl[0]
+    if options.archives:
+        while True:
+            feed = feedparser.parse(archivelink)
+            archivelink = processfeed(feed, options.datadir, 
+                                      concepts_to_map, mapping)
+    else:        
+        feed = feedparser.parse(archivelink)
+        archivelink = processfeed(feed, options.datadir, 
+                                  concepts_to_map, mapping)
+
+if __name__ == "__main__":
+    parser = make_parser()
+    options, feedurl = parser.parse_args()
+    main(options, feedurl)

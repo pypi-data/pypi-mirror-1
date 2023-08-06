@@ -1,0 +1,89 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+
+import csv
+import sys
+#INSTALLDIR
+
+import golem
+
+
+def parse_options():
+    from optparse import OptionParser
+    usage = "usage: %prog options file1.xml [file2.xml ...]"
+    parser = OptionParser(usage=usage, version="%prog "+golem.version)
+    parser.add_option("-t", "--term", action="append", help="terms to look up")
+    parser.add_option("-d", "--dictionary", help="dictionary to use")
+    parser.add_option("-f", "--final", action="store_true", help="take only last value in file?")
+    parser.add_option("-o", "--outfile", help="dump output to csv file")
+
+    (options, filenames) = parser.parse_args()
+    if len(filenames) == 0:
+        parser.error("No filenames supplied")
+    elif not options.dictionary:
+        parser.error("No dictionary supplied")
+    elif not options.term:
+        parser.error("No terms requested")
+    return (options, filenames)
+
+def grab(entries, f, options):
+    e_l = [entries[t].findin(f) for t in entries]
+    if options.final:
+        values = ([entries[t].findin(f)[-1].getvalue()] for t in entries)
+    else:
+        values = ([ei.getvalue() for ei in entries[t].findin(f)] for t in entries)
+    return values
+        
+if __name__ == "__main__":
+    from tempfile import TemporaryFile
+    (options, filenames) = parse_options()
+    golem.setDataWarning(False)
+    golem.setTypeWarning(False)
+    d = golem.EntryCollection(default=True)
+
+    d.add_entries_from_file(options.dictionary)
+    dnamespace = "http://cmlcomp.org/golem/summon"
+
+    entries = {}
+    for t in options.term:
+        try:
+            entries[t] = d["{%s}%s" % (dnamespace, t)]
+        except:
+            print >> sys.stderr, "No such term defined:", t
+            sys.exit(1)
+
+    if options.outfile:
+        try:
+            fCSV = open(options.outfile, "w")
+        except IOError:
+            print >> sys.stderr, "Couldn't open output file"
+            sys.exit(1)
+        writer = csv.writer(fCSV)
+    else:
+        writer = None
+
+    # stdout should be formatted
+    csvout = csv.writer(sys.stdout)
+
+    if writer: writer.writerow(options.term)
+    csvout.writerow(options.term)
+
+    rows = (grab(entries, f, options) for f in filenames)
+
+    for row in rows:
+        # NB csv module refuses to take generators directly
+        # What should we do with nested sets of values?
+        # if there is only one value (containing a list)
+        # then output that list directly,
+        # rather than a length-1 list of a list.
+        row_ = [r for r in row]
+        if len(row_)==1 and len(row_[0])>1:
+            # there is only one entry, but it itself is a list
+            row_ = [str(r) for r in row_[0]]
+        else:
+            row_ = [",".join([str(r_) for r_ in r]) for r in row_]
+        if writer: writer.writerow(row_)
+        csvout.writerow(row_)
+
+    fCSV.close()

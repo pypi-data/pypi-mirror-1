@@ -1,0 +1,124 @@
+#!/usr/bin/env python
+
+# Copyright (c) 2006-2008 Andrew Walkingshaw <andrew@lexical.org.uk>
+# except XSLT components: copyright (c) 2005-2008 Toby White <tow@uszla.me.uk> 
+#                 and (c) 2007-2008 Andrew Walkingshaw <andrew@lexical.org.uk>
+#
+# All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included
+# in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR USE OF OTHER DEALINGS IN
+# THE SOFTWARE.
+
+import sys
+#INSTALLDIR
+
+
+from lxml import etree
+import golem, optparse, urllib
+
+golem.setTypeWarning(False)
+golem.setDataWarning(True)
+
+def make_parser():
+    parser = optparse.OptionParser()
+    parser.add_option("-d", "--dictionary", metavar="FILE",
+                      dest="dictionaryfile", help="Dictionary filename")
+    parser.add_option("-n", "--namespace", metavar="URI",
+                      dest="dictionarynamespace", 
+                      help="Dictionary namespace")
+    parser.add_option("-c", "--conceptset", metavar="CONCEPTS",
+                      dest="concepts", help="Concept list")
+    parser.add_option("-s", "--all-absolutes", action="store_true", 
+                      default=False, dest="absolutes")
+    parser.add_option("-x", "--XML", action="store_true", default=False,
+                      dest="onXML", help="return results as XML")
+    parser.add_option("-r", "--RDF", action="store_true", default=False,
+                      dest="onRDF", help="return results as RDF")
+    return parser
+
+def print_rdf(x):
+    return golem.helpers.stream.generics.print_rdf(x)
+    
+def print_xml(x):
+    res = ""
+    for y in x:
+        res += etree.tostring(y)
+    return res
+
+def print_json(x):
+    res = ""
+    for y in x:                
+        res += golem.helpers.stream.generics.json_single(y)
+        res += "\n"
+    return res
+
+class ConfigError(Exception):
+    pass
+
+def main(*args, **kwargs):
+    parser = make_parser()
+    options, infiles = parser.parse_args()
+    concepts = options.concepts
+    if options.onXML and options.onRDF:
+        raise ConfigError(
+    "--RDF and --XML are mutually exclusive. Please select one or the other. ")
+    if concepts != None and options.absolutes:
+        raise ConfigError(
+    "--all-absolutes and --conceptset are mutually exclusive. Please pick one "
+    "or the other.")
+
+    mapping = golem.helpers.stream.Mapping(options.dictionaryfile,
+                                           options.dictionarynamespace)
+    
+    map = {}
+    concepts_to_map = []
+    
+    if options.absolutes:
+        concepts_to_map = [x.id for x in
+            mapping.dictionary.concept("absolute").getAllImplementations()
+            if x.id != "absolute"]
+    else:
+        concepts_to_map = [concepts]
+        
+    if options.onXML:
+        func_to_map = print_xml
+    elif options.onRDF:
+        func_to_map = print_rdf
+        print """<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+"""
+
+    else:
+        # JSON output
+        func_to_map = print_json
+    
+    for c in concepts_to_map:
+        map[c] = func_to_map
+
+    mapping.assign(map)
+    stream = golem.helpers.stream.Stream(mapping)
+
+    for f in infiles:
+        print stream.process(f, onXML=options.onXML)
+        
+    if options.onRDF:
+        print """
+</rdf:RDF>"""
+
+if __name__ == "__main__":
+    main()
