@@ -1,0 +1,343 @@
+Metadata-Version: 1.0
+Name: pythoscope
+Version: 0.4.1
+Summary: unit test generator for Python
+Home-page: http://pythoscope.org
+Author: Michal Kwiatkowski
+Author-email: constant.beta@gmail.com
+License: MIT
+Description: Installation
+        ------------
+        
+        Easiest way to get Pythoscope is via setuptools::
+        
+        $ easy_install pythoscope
+        
+        You can also download a source package from
+        http://pythoscope.org/local--files/download/pythoscope-0.4.1.tar.gz
+        or get a copy of a development branch using `bazaar <http://bazaar-vcs.org/>`_::
+        
+        $ bzr branch lp:pythoscope
+        
+        To install the package from the source directory do::
+        
+        $ python setup.py install
+        
+        Since you have source code available, you may also consider running the whole
+        test suite of Pythoscope::
+        
+        $ python setup.py test
+        
+        Usage
+        -----
+        
+        You can use the tool through a single **pythoscope** command. To prepare
+        your project for use with Pythoscope, type::
+        
+        $ pythoscope --init path/to/your/project/
+        
+        It's only doing static analysis, and doesn't import your modules or
+        execute your code in any way, so you're perfectly safe to run it on
+        anything you want. After that, a directory named **.pythoscope** will be
+        created in the current directory. To generate test stubs based on your
+        project, select files you want to generate tests for::
+        
+        $ pythoscope  path/to/your/project/specific/file.py  path/to/your/project/other/*.py
+        
+        Test files will be saved to your test directory, if you have one, or
+        into a new **tests/** directory otherwise. Test cases are aggregated
+        into TestCase classes. Currently each production class and each
+        production function gets its own TestCase class.
+        
+        Some of the classes and functions are ignored by the generator - all
+        which name begins with an underscore, exception classes, and some
+        others.
+        
+        Generator itself is configurable to some extent, see::
+        
+        $ pythoscope --help
+        
+        for more information on available options.
+        
+        Tutorial
+        --------
+        
+        Let's say you're working on this old Python project. It's ugly and
+        unpredictable, but you have no choice but to keep it alive. Luckily
+        you've heard about this new tool called Pythoscope, which can help
+        you cure the old guy.
+        
+        You start by descending to the project directory::
+        
+        $ cd wild_pythons/
+        
+        and initializing Pythoscope internal structures::
+        
+        $ pythoscope --init
+        
+        This command creates **.pythoscope/** subdirectory, which will hold all
+        information related to Pythoscope. You look at the poor snake::
+        
+        # old_python.py
+        class OldPython(object):
+        def __init__(self, age):
+        pass # more code...
+        
+        def hiss(self):
+        pass # even more code...
+        
+        and decide that it requires immediate attention. So you run Pythoscope
+        on it::
+        
+        $ pythoscope old_python.py
+        
+        and see a test module generated in the **tests/** directory::
+        
+        # tests/test_old_python.py
+        import unittest
+        
+        class TestOldPython(unittest.TestCase):
+        def test_hiss(self):
+        # old_python = OldPython(age)
+        # self.assertEqual(expected, old_python.hiss())
+        assert False # TODO: implement your test here
+        
+        def test_object_initialization(self):
+        # old_python = OldPython(age)
+        assert False # TODO: implement your test here
+        
+        if __name__ == '__main__':
+        unittest.main()
+        
+        That's a starting point for your testing struggle, but there's much more
+        Pythoscope can help you with. All you have to do is give it some more
+        information about your project.
+        
+        Since Python is a very dynamic language it's no surprise that most
+        information about the application can be gathered during runtime. But legacy
+        applications can be tricky and dangerous, so Pythoscope won't run any code
+        at all unless you explicitly tell it to do so. You can specify which code
+        is safe to run through, so called, points of entry.
+        
+        Point of entry is a plain Python module that executes some parts of your code.
+        You should keep each point of entry in a separate file in the
+        **.pythoscope/points-of-entry/** directory. Let's look closer at our old friend::
+        
+        # old_python.py
+        class OldPython(object):
+        def __init__(self, age):
+        if age < 50:
+        raise ValueError("%d isn't old" % age)
+        self.age = age
+        
+        def hiss(self):
+        if self.age < 60:
+        return "sss sss"
+        elif self.age < 70:
+        return "SSss SSss"
+        else:
+        return "sss... *cough* *cough*"
+        
+        Based on that definition we come up with the following point of entry::
+        
+        # .pythoscope/points-of-entry/123_years_old_python.py
+        from old_python import OldPython
+        OldPython(123).hiss()
+        
+        Once we have that we may try to generate new test cases. Simply call pythoscope
+        on the old python again::
+        
+        $ pythoscope old_python.py
+        
+        Pythoscope will execute our new point of entry, gathering as much dynamic
+        information as possible. If you look at your test module now you'll notice
+        that a new test case has been added::
+        
+        # tests/test_old_python.py
+        from old_python import OldPython
+        import unittest
+        
+        class TestOldPython(unittest.TestCase):
+        def test_hiss(self):
+        # old_python = OldPython(age)
+        # self.assertEqual(expected, old_python.hiss())
+        assert False # TODO: implement your test here
+        
+        def test_object_initialization(self):
+        # old_python = OldPython(age)
+        assert False # TODO: implement your test here
+        
+        def test_hiss_returns_sss_cough_cough_after_creation_with_123(self):
+        old_python = OldPython(age=123)
+        self.assertEqual('sss... *cough* *cough*', old_python.hiss())
+        
+        if __name__ == '__main__':
+        unittest.main()
+        
+        Pythoscope correctly captured creation of the **OldPython** object and call to
+        its **hiss()** method. Congratulations, you have a first working test case without
+        doing much work! But Pythoscope can generate more than just invdividual test
+        cases. It all depends on the points of entry you define. More high-level they
+        are, the more information Pythoscope will be able to gather, which directly
+        translates to the number of generated test cases.
+        
+        So let's try writing another point of entry. But first look at another module
+        we have in our project::
+        
+        # old_nest.py
+        from old_python import OldPython
+        
+        class OldNest(object):
+        def __init__(self, ages):
+        self.pythons = []
+        for age in ages:
+        try:
+        self.pythons.append(OldPython(age))
+        except ValueError:
+        pass # Ignore the youngsters.
+        def put_hand(self):
+        return '\n'.join([python.hiss() for python in self.pythons])
+        
+        This module seems a bit higher-level than **old_python.py**. Yet, writing a point
+        of entry for it is also straightforward::
+        
+        # .pythoscope/points-of-entry/old_nest_with_four_pythons.py
+        from old_nest import OldNest
+        OldNest([45, 55, 65, 75]).put_hand()
+        
+        Don't hesitate and run Pythoscope right away. Note that you can provide many
+        modules as arguments - all of them will be handled at once::
+        
+        $ pythoscope old_python.py old_nest.py
+        
+        This new point of entry not only allowed to create a test case for **OldNest**::
+        
+        # tests/test_old_nest.py
+        import unittest
+        from old_nest import OldNest
+        
+        class TestOldNest(unittest.TestCase):
+        def test_put_hand_returns_sss_sss_SSss_SSss_sss_cough_cough_after_creation_with_45_55_65_75(self):
+        old_nest = OldNest(ages=[45, 55, 65, 75])
+        self.assertEqual('sss sss\nSSss SSss\nsss... *cough* *cough*', old_nest.put_hand())
+        
+        if __name__ == '__main__':
+        unittest.main()
+        
+        but also added 4 new test cases for **OldPython**::
+        
+        def test_creation_with_45_raises_value_error(self):
+        self.assertRaises(ValueError, lambda: OldPython(age=45))
+        
+        def test_hiss_returns_SSss_SSss_after_creation_with_65(self):
+        old_python = OldPython(age=65)
+        self.assertEqual('SSss SSss', old_python.hiss())
+        
+        def test_hiss_returns_sss_cough_cough_after_creation_with_75(self):
+        old_python = OldPython(age=75)
+        self.assertEqual('sss... *cough* *cough*', old_python.hiss())
+        
+        def test_hiss_returns_sss_sss_after_creation_with_55(self):
+        old_python = OldPython(age=55)
+        self.assertEqual('sss sss', old_python.hiss())
+        
+        You got all of that for mere 2 additional lines of code. What's even better
+        is the fact that you can safely modify and extend test cases generated by
+        Pythoscope. Once you write another point of entry or add new behavior to your
+        system you can run Pythoscope again and it will only append new test cases
+        to existing test modules, preserving any modifications you could have made
+        to them.
+        
+        That sums up this basic tutorial. If you have any questions feel free to
+        ask them on the `pythoscope google group <http://groups.google.com/group/pythoscope>`_.
+        
+        License
+        -------
+        
+        All Pythoscope source code is licensed under an MIT license (see LICENSE file).
+        All files under lib2to3/ are licensed under PSF license.
+        
+        Changelog
+        =========
+        
+        0.4.1
+        -----
+        
+        * Greatly improved `information storage performance <https://blueprints.launchpad.net/pythoscope/+spec/improve-information-storage-performance>`_.
+        * Added Pythoscope module for Emacs to the misc/ directory in the source tree.
+        * Unittests can now be used as points of entry (`#275059 <https://bugs.launchpad.net/bugs/275059>`_).
+        * Pythoscope now ignores source control files (`#284568 <https://bugs.launchpad.net/bugs/284568>`_).
+        * Static inspection happens on --init, as it should be (`#325928 <https://bugs.launchpad.net/bugs/325928>`_).
+        * Ported itertive pattern matcher for lib2to3 from Python trunk (`#304541 <https://bugs.launchpad.net/bugs/304541>`_).
+        * Fixed test generation bug related to nested function arguments (`#344220 <https://bugs.launchpad.net/bugs/344220>`_).
+        * Fixed point of entry cleanup bug (`#324522 <https://bugs.launchpad.net/bugs/324522>`_).
+        * Fixed some more Windows-specific bugs (`#348136 <https://bugs.launchpad.net/bugs/348136>`_).
+        
+        0.4
+        ---
+        
+        * Stopped `using pickle for object serialization <https://blueprints.launchpad.net/pythoscope/+spec/dont-use-pickle-for-object-serialization>`_ and implemented our own mechanism that carefully captures changing state of objects during dynamic inspection.
+        * Implemented `preserve objects identity <https://blueprints.launchpad.net/pythoscope/+spec/preserve-objects-identity>`_ blueprint.
+        * Fixed bug related to multiple generator calls (`#295340 <https://bugs.launchpad.net/pythoscope/+bug/295340>`_).
+        * Made handling of special method names (like __init__ or __eq__) consistent with handling of normal method names.
+        * Made `test stubs more useful <https://blueprints.launchpad.net/pythoscope/+spec/better-test-stubs>`_.
+        
+        0.3.2
+        -----
+        
+        * Made Pythoscope `more verbose <https://blueprints.launchpad.net/pythoscope/+spec/more-verbose-output>`_.
+        * Added `support for user-defined exceptions <https://blueprints.launchpad.net/pythoscope/+spec/user-defined-exceptions>`_.
+        * Fixed unicode handling bug (`#284585 <https://bugs.launchpad.net/bugs/284585>`_).
+        * Improved performance of the internal information storage.
+        
+        0.3.1
+        -----
+        
+        * Added implementation of samefile function for Windows (`#271882 <https://bugs.launchpad.net/pythoscope/+bug/271882>`_).
+        * Fixed wrong indentation bug (`#271892 <https://bugs.launchpad.net/pythoscope/+bug/271892>`_).
+        * Made lib2to3.pgen2.parse.ParseError pickable (`#271904 <https://bugs.launchpad.net/pythoscope/+bug/271904>`_).
+        * Added `support for Python generators <https://blueprints.launchpad.net/pythoscope/+spec/handle-python-generators>`_.
+        * Fixed static inspection of functions having attributes with default values (`#275459 <https://bugs.launchpad.net/pythoscope/+bug/275459>`_).
+        
+        0.3
+        ---
+        
+        * Fixed generate bug for test modules (`#264449 <https://bugs.launchpad.net/pythoscope/+bug/264449>`_).
+        * .pythoscope became a directory.
+        * Introduced --init option for initializing .pythoscope/ directory.
+        * Added a notion of points of entry introducing dynamic analysis.
+        * Pythoscope can now generate assert_equal and assert_raises type of assertions.
+        * Implemented `no more inspect command blueprint <https://blueprints.launchpad.net/pythoscope/+spec/remove-inspect-command>`_.
+        * Changed the default test directory from pythoscope-tests/ to tests/.
+        * Added a tutorial to the README file.
+        
+        0.2.2
+        -----
+        
+        * Fixed the inner classes bug (`#260924 <https://bugs.launchpad.net/pythoscope/+bug/260924>`_).
+        * Collector appends new data to .pythoscope file instead of overwriting it.
+        * Test modules are being analyzed as well.
+        * Using lib2to3 for static code analysis instead of stdlib's compiler module.
+        * Generator can append test cases to existing test modules. Preserves comments and original whitespace.
+        * Cheetah is no longer a dependency.
+        * Renamed 'collect' command to 'inspect'.
+        
+        0.2.1
+        -----
+        
+        Contains a packaging bug fix, which prevented users from using the tests
+        cases generator and running internal pythoscope tests.
+        
+        0.2
+        ---
+        
+        First release, featuring static code analysis and generation of test
+        stubs.
+        
+Platform: UNKNOWN
+Classifier: Development Status :: 2 - Pre-Alpha
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Code Generators
+Classifier: Topic :: Software Development :: Testing
