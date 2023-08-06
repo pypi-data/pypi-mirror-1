@@ -1,0 +1,104 @@
+Description
+===========
+
+This program can be used to manage the public keys on multiple servers.
+Specify in a configuration file which users with their public keys have
+permission to login to which server with a specific username.
+
+Publickeymanager is usefull if you have multiple users logging in to
+shared accounts on multiple servers.
+
+Config File
+===========
+
+The config file has the following options::
+
+  [keys]
+    Specify one public key per user.
+
+  [group:`user`]
+    Use this if you want to bundle multiple users to one group. Say for example
+    a sysadmin group.
+
+  [group:`name`]
+    Specify a group of servers. `name` is the name of the group.
+    A config file can hold multiple [group:`name`]
+    directives.
+
+Options for [group:`name`]
+--------------------------
+
+The options for the group::
+
+  user_groups
+    A reference to groups defined in [group:`user`].
+    All users in the group have
+    access to the servers in this group.
+
+  access
+    Which individual users have access to servers in this group.
+
+  servers
+    A list of servers which belong to this group.
+
+  [server:`name`]
+    Specify a server. A config file can hold multiple [server:`name`]
+    directives.
+    The name is the name of the server. A name can be referenced in a server
+    group.
+
+Options for [server:`name`]
+---------------------------
+
+The options for the server::
+
+  hostname
+    The hostname of the server.
+
+  user
+    The username that is used to login to the server.
+
+  groups
+    Define which groups have access to this server. Groups need to exist in
+    [group:`name`]
+
+  access
+    Define which users have access to this server.
+    Users need have a key file mentioned in [keys].
+
+Example Config File
+===================
+
+An example config file which shows all options::
+
+  [keys]
+  roland=rvanlaar.pub
+  example_user=example.pub
+  example_user2=example2.pub
+
+  [group:user]
+  sysadmin =
+    roland
+
+  [group:remote]
+  user_groups =
+    sysadmin
+  access =
+    example_user1
+  servers =
+    example_server1
+    example_server2
+
+  [server:localhost]
+  hostname = 127.0.0.1
+  user = roland
+  groups = sysadmin
+  access = example
+
+  [server:example_server1]
+  hostname = example.com
+  user = example
+
+  [server:example_server2]
+  hostname = example.org
+  user = example
