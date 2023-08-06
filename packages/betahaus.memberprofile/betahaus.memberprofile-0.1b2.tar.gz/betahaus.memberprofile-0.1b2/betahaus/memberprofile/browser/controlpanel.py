@@ -1,0 +1,104 @@
+from AccessControl import getSecurityManager
+from AccessControl.Permissions import view_management_screens
+from Acquisition import aq_inner
+from plone.app.controlpanel.form import ControlPanelForm
+from plone.app.controlpanel.events import ConfigurationChangedEvent
+from plone.app.form.validators import null_validator
+from plone.fieldsets.fieldsets import FormFieldsets
+from plone.protect import CheckAuthenticator
+from Products.CMFCore.utils import getToolByName
+from Products.CMFDefault.formlib.schema import SchemaAdapterBase
+from Products.CMFPlone.interfaces import IPloneSiteRoot
+from Products.statusmessages.interfaces import IStatusMessage
+from zope.component import adapts, getMultiAdapter
+from zope.event import notify
+from zope.formlib import form
+from zope.interface import implements
+
+
+from betahaus.memberprofile.browser.interfaces import IMemberProfileConfigSchema
+from betahaus.memberprofile.interfaces import IMemberProfileSettingsAdapter
+from betahaus.memberprofile import MemberProfileMessageFactory as _
+
+
+base = FormFieldsets(IMemberProfileConfigSchema)
+#base.id = 'memberprofile_config'
+#base.label = _(u'Member Profile Configuration')
+
+class MemberProfileControlPanel(ControlPanelForm):
+    implements(IMemberProfileConfigSchema)
+    form_fields = FormFieldsets(base)
+
+    label = _(u"Member Profile Configuration")
+    description = _(u"")
+    form_name = _(u"Member Profile Configuration")
+
+    def available(self):
+        root = aq_inner(self.context).getPhysicalRoot()
+        sm = getSecurityManager()
+        return sm.checkPermission(view_management_screens, root)
+
+    @form.action(_(u'label_save', default=u'Save'), name=u'save')
+    def handle_edit_action(self, action, data):
+        CheckAuthenticator(self.request)
+        if form.applyChanges(self.context, self.form_fields, data,
+                             self.adapters):
+            self.status = _(u"Changes saved. You may need to reindex Member Profiles.")
+            notify(ConfigurationChangedEvent(self, data))
+        else:
+            self.status = _(u"No changes made.")
+
+    @form.action(_(u'label_cancel', default=u'Cancel'), validator=null_validator, name=u'cancel')
+    def handle_cancel_action(self, action, data):
+        IStatusMessage(self.request).addStatusMessage(_("Changes canceled."),
+                                                      type="info")
+        url = getMultiAdapter((self.context, self.request),
+                              name='absolute_url')()
+        self.request.response.redirect(url + '/plone_control_panel')
+        return ''
+
+    @form.action(_(u'Quick reindex'), name=u'quick_reindex')
+    def handle_quick_reindex_action(self, action, data):
+        CheckAuthenticator(self.request)
+        if not self.available():
+            self.status = _(u'text_not_allowed_manage_server',
+                            default=u'You are not allowed to manage the Zope server.')
+            return
+        
+        #Quick-reindex member profiles
+        catalog = getToolByName(self.context, 'portal_catalog')
+        brains = catalog(portal_type='MemberProfile')
+        for brain in brains:
+            obj = brain.getObject()
+            obj.reindexObject()
+        
+        self.status = _(u'Preformed quick reindex of Member Profiles')
+
+class MemberProfileControlPanelAdapter(SchemaAdapterBase):
+
+    adapts(IPloneSiteRoot)
+    implements(IMemberProfileConfigSchema)
+
+    def __init__(self, context):
+        self.portal = context
+        self.settings = IMemberProfileSettingsAdapter(context)
+        self.portal_registration = self.portal.portal_registration
+        
+    def get_title_as(self):
+        return self.settings.get('title_as')
+    
+    def set_title_as(self, value):
+        self.settings.set('title_as', value)
+    
+    title_as = property(get_title_as, set_title_as)
+
+    def get_id_pattern(self):
+        return self.portal_registration.getIDPattern()
+    
+    def set_id_pattern(self, value):
+        #Registration tool doesn't like None-type as value
+        if value is None:
+            value = ''
+        self.portal_registration.manage_editIDPattern(value)
+
+    id_pattern = property(get_id_pattern, set_id_pattern)

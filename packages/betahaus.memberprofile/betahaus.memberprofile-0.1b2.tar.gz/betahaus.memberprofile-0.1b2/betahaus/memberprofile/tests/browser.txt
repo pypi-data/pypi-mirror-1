@@ -1,0 +1,138 @@
+Browser tests for betahaus.memberprofile
+========================================
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> from Products.PloneTestCase.setup import portal_owner, default_password
+    >>> browser = Browser()
+    >>> browser.handleErrors = False
+    >>> portal_url = self.portal.absolute_url()
+ 
+ For this test, we're going to use the firstname_lastname convention for member profiles. (See the controlpanel)
+ 
+    >>> from betahaus.memberprofile.interfaces import IMemberProfileSettingsAdapter
+    >>> settings = IMemberProfileSettingsAdapter(self.portal)
+    >>> settings.set('title_as','firstname_lastname')
+    >>> settings.get('title_as')
+    'firstname_lastname'
+  
+Set up a test user with a email that can login.
+
+    >>> test_username = 'user1'
+    >>> test_user_fullname = 'Bing van Bong'
+    >>> test_user_pass = 'secret'
+    >>> test_user_email = 'user1@host.com'
+  
+    >>> self.portal.portal_membership.addMember(test_username, test_user_pass, ['Member'], [], {'email': test_user_email, 'fullname': test_user_fullname})
+
+Login the user
+
+    >>> browser.open('http://nohost/plone')
+    >>> browser.getLink('Log in').click()
+    >>> browser.url
+    'http://nohost/plone/login_form'
+    >>> browser.getControl('Login Name').value = test_username
+    >>> browser.getControl('Password').value = test_user_pass
+    >>> browser.getControl('Log in').click()
+    >>> "You are now logged in" in browser.contents
+    True
+    >>> browser.url
+    'http://nohost/plone'
+
+Go to member area
+
+    >>> browser.open('http://nohost/plone/Members/user1')
+    >>> browser.url
+    'http://nohost/plone/Members/user1'
+
+Check that some content exist
+
+    >>> pm = self.portal.portal_membership
+    >>> home = pm.getHomeFolder(test_username)
+
+    >>> home.getFirstname()
+    'Bing'
+    >>> home.getLastname()
+    'van Bong'
+    >>> home.Title()
+    'Bing van Bong'
+    
+    >>> "van Bong" in browser.contents
+    True
+    >>> test_user_email in browser.contents
+    True
+
+Change firstname and lastname
+
+    >>> browser.getLink('Edit').click()
+    >>> browser.getControl(name='firstname').value = 'A New'
+    >>> browser.getControl(name='lastname').value = 'Long Name'
+    >>> browser.getControl('Save').click()
+    >>> browser.url
+    'http://nohost/plone/Members/user1/'
+
+Check that change worked
+
+    >>> home.getLastname()
+    'Long Name'
+    >>> "Long Name" in browser.contents
+    True
+    >>> home.Title()
+    'A New Long Name'
+
+Let's try out the control panel.
+We need to login as owner first.
+
+    >>> browser.getLink('Log out').click()
+    >>> browser.getLink('Log in').click()
+    >>> browser.url
+    'http://nohost/plone/login_form'
+    >>> browser.getControl('Login Name').value = portal_owner
+    >>> browser.getControl('Password').value = default_password
+    >>> browser.getControl('Log in').click()
+    >>> "You are now logged in" in browser.contents
+    True
+
+Going to the control panel, we should be able to change the default content of Title.
+If we change this to username, the username will be used as title value instead of firstname lastname
+
+    >>> browser.open('http://nohost/plone/memberprofile-controlpanel')
+    >>> browser.getControl(name='form.title_as').value
+    ['firstname_lastname']
+
+So the home folder should return firstname lastname as before
+
+    >>> home = pm.getHomeFolder(test_username)
+    >>> home.Title()
+    'A New Long Name'
+
+Let's change it
+
+    >>> browser.getControl(name='form.title_as').value = ['username']
+    >>> browser.getControl('Save').click()
+    >>> browser.getControl(name='form.title_as').value
+    ['username']
+    >>> home.Title()
+    'user1'
+
+We can also talk to the registration tool to this control panel.
+This is used to set a custom validator for member id.
+By default it's empty, which means that the default pattern is used.
+
+    >>> regtool = self.portal.portal_registration
+    >>> regtool.getIDPattern()
+    ''
+
+Now it should only allow lowercase ids
+
+    >>> browser.getControl(name='form.id_pattern').value = '^[a-z][a-z0-9_]*$'
+    >>> browser.getControl('Save').click()
+    >>> regtool.getIDPattern()
+    u'^[a-z][a-z0-9_]*$'
+
+When we submit this form with an empty value, the custom id should go back to '',
+which means that the Plone default will be used.
+
+    >>> browser.getControl(name='form.id_pattern').value = ''
+    >>> browser.getControl('Save').click()
+    >>> regtool.getIDPattern()
+    ''
