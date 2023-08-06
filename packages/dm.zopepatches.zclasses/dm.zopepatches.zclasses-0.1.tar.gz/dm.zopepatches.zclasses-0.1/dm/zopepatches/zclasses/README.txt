@@ -1,0 +1,106 @@
+This functionality used to be in the Zope core as ``ZClasses``.
+It allows the menu driven construction of Web applications.
+Due to the menu support, only limited programming skills are necessary.
+
+More precisely: the ``ZClasses`` functionality allowed to define classes
+(in the object oriented sense of the word)
+via the Zope Management Interface (``ZMI``), so called ``ZClasses``.
+A ``ZClass`` could inherit from base classes and other ``ZClasses`` (multiple
+inheritance), manage data in a set of associated property sheets, define
+methods to operate on its instances (present, modify) via arbitrary
+other Zope objects
+(e.g. templates, scripts), define permissions appropriate for the class
+and map class relevant permissions to the standard permissions used by
+the objects implementing the class methods.
+Classes could then be instantiated and the instances used in the
+Web application, to hold data, to provide fundamental services, to glue
+things together.
+Quite impressive....
+
+It has been a valuable selling point in the past. In fact, back
+in 2000, I used ``ZClasses`` to build a large multilingual Web
+application comprising about half a dozen ``ZClasses`` and allowing
+to perform queries against a European tender database and subscribe
+to email notifications for changed query results.
+
+Unfortunately, some influential Zope developers (especially
+the Zope 2 release manager) did not like ``ZClasses``
+and started to fight them. Finally (with Zope 2.12), they removed
+the functionality from the Zope core -- originally claiming the
+high maintenance burden (although since 2.8 nothing was done with
+``ZClasses``) but finally conceeding that the removal happened
+because they did not want ``ZClasses``.
+
+True, ``ZClasses`` had some problems:
+
+ * ``ZClasses`` are Zope objects, stored and maintained in the ZODB
+   (the Zope Object Database). There is no version control system
+   documenting who changed what for what reason. Such documentation
+   can be vital for large projects with a long lifetime.
+
+ * ``ZClasses`` provided a vast functionality but there have been
+   no tests to verify all this functionality. As a consequence,
+   ``ZClassess`` broke once partially and this was only detected
+   by Zope users and not during the development by the tests.
+
+ * For Zope 2.8, ``ZClasses`` needed an overhaul and only Jim Fulton
+   (the initial author of Zope and ``ZClasses``) was able to do this
+   work. The developers feared that a future Zope version might need
+   a similar effort with the resources missing.
+
+ * ``ZClasses`` do not play well with storage mounting.
+
+
+It is right to caution users against such deficiencies but in my view
+it was wrong to break backward compatibility by removing the
+functionality. Fortunately, Zope is open source which somewhat limits
+the power of developers and release managers.
+This package uses so called monkey patching (runtime code modifications)
+to reinsert into Zope again the ``ZClasses`` functionality
+the Zope developers had ripped off.
+
+Some **warning notes**: monkey patching is potentially
+dangerous. Partially, it replaces core functionality by a slightly
+modified one. I have tried hard that these replacements should
+be okay for Zope 2.12 but future Zope versions might need other
+replacements. The breakage might occur not in ``ZClasses`` itself
+but in the core functionality. Moreover, the Zope developers hostility
+towards ``ZClasses`` may be large enough that they remove further parts
+required by ``ZClasses``. While in principle, these parts can also
+be put back, the costs increase and may finally get too large (such
+that I abandon the project). Therefore, it is probably wise not
+to rely on this package for long living new projects but restrict
+its use to get some additional time to reimplement ``ZClasses`` based
+projects or for short living prototypes.
+
+``ZClasses`` used to be documented at
+"http://www.plope.com/Books/2_7Edition/CustomZopeObjects.stx".
+The Zope developers did not forget to rip this documentation off as well.
+But, I have anticipated the step and have saved a copy. You find
+it in the package's ``doc`` subdirectory. It still presents the "plope"
+look&feel and links will not to work. Screenshots are lost but you
+can use your Zope to get them.
+
+Activation
+==========
+
+This package does nothing until it is imported. On import,
+it performs its monkey patching.
+
+``ZClasses`` require a special class factory for
+the root ZODB. To this end, the root ZODB configuration
+must use the configuration option (in the Zope configuration file)::
+
+  class-factory dm.zopepatches.zclasses.ClassFactory
+
+Usually, the import (mentioned in the first paragraph)
+is performed when this option is processed.
+
+Limitations
+===========
+
+ * This version does not yet reinstate the ``ZClasses`` help pages.
+
+ * This version does not yet reinstate the distibution tab of products.
+   Likewise, distribution import is likely not to work.
+
