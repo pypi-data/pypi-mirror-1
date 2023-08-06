@@ -1,0 +1,457 @@
+============================
+tl.rename core functionality
+============================
+
+The ``tl.rename.core`` module defines those parts of the package's
+functionality that are not concerned with the user interface or specific file
+name transformation algorithms. These include reading the new file names from
+a file or standard input, applying all transformations to the original file
+names and renaming the files accordingly.
+
+
+Reading new file names
+======================
+
+While the ``read_names_from_file`` function is counted among tl.rename's core
+functionality, it is really just another file name transformation. It is
+passed a sequence of old file names and returns a sequence of new ones. If no
+further options are passed, the returned names are just the original ones:
+
+>>> from tl.rename.core import read_names_from_file
+>>> read_names_from_file(['foo', 'bar/baz'])
+['foo', 'bar/baz']
+
+The function accepts an optional ``names_file`` parameter which is assumed to
+be a file like object with each new name listed on a separate line:
+
+>>> from StringIO import StringIO
+>>> new_names = """\
+... as/df
+... fdsa
+... """
+>>> read_names_from_file(['foo', 'bar/baz'], names_file=StringIO(new_names))
+['as/df', 'fdsa']
+
+Whether the multi-line string read from the file-like object ends with a line
+break makes no difference:
+
+>>> new_names = """\
+... as/df
+... fdsa"""
+>>> read_names_from_file(['foo', 'bar/baz'], names_file=StringIO(new_names))
+['as/df', 'fdsa']
+
+Other whitespace including empty lines is passed through, however:
+
+>>> new_names = """\
+...
+...   as/df
+... fdsa  """
+>>> read_names_from_file(['foo', 'bar/baz'], names_file=StringIO(new_names))
+['', '  as/df', 'fdsa  ']
+
+
+Applying all registered transformations
+=======================================
+
+How it works
+------------
+
+The ``core`` module keeps a list of all known file name transformations the
+first of which is ``read_names_from_file``:
+
+>>> from tl.rename.core import transformations
+>>> transformations
+[<function read_names_from_file at 0x...>, ...]
+
+It also defines a function ``transform`` that applies the transformations to a
+list of file names, in order. This function works just like any of the
+individual transformations, taking a sequence of old names and any number of
+optional keyword arguments and returning a list of new names. Without any
+options, it also returns the original file names:
+
+>>> from tl.rename.core import transform
+>>> transform(['foo', 'bar/baz'])
+['foo', 'bar/baz']
+
+Options given to ``transform`` are passed to all transformations so each of
+them can pick whichever options are of interest to it. We stick with
+``read_names_from_file`` in this example:
+
+>>> new_names = """\
+... as/df
+... fdsa
+... """
+>>> transform(['foo', 'bar/baz'], names_file=StringIO(new_names))
+['as/df', 'fdsa']
+
+Note that it is possible and allowed to change the whole file path, not just
+the part after the last path separator.
+
+What it guards against
+----------------------
+
+In contrast to the individual transformations, ``transform`` makes sure that
+no ambiguities arise. To begin with, old file names passed to ``transform``
+must be unique:
+
+>>> transform(['foo', 'foo'])
+Traceback (most recent call last):
+AssertionError: Original names are not unique.
+
+An exception is also raised if any of the transformations introduces an
+ambiguity:
+
+>>> new_names = """\
+... as/df
+... as/df
+... """
+>>> transform(['foo', 'bar/baz'], names_file=StringIO(new_names))
+Traceback (most recent call last):
+AssertionError:
+Result of transformation <tl.rename.core.read_names_from_file> is not unique.
+
+Ambiguities are noticed even when mixing absolute and relative file paths:
+
+>>> import os
+>>> new_names = """\
+... as/df
+... %s/as/df
+... """ % os.getcwd()
+>>> transform(['foo', 'bar/baz'], names_file=StringIO(new_names))
+Traceback (most recent call last):
+AssertionError:
+Result of transformation <tl.rename.core.read_names_from_file> is not unique.
+
+Another mistake ``transform`` guards against is for a transformation to return
+a different number of file names than it was passed:
+
+>>> new_names = """\
+... as/df
+... """
+>>> transform(['foo', 'bar/baz'], names_file=StringIO(new_names))
+Traceback (most recent call last):
+AssertionError:
+Transformation <tl.rename.core.read_names_from_file> changed number of names.
+
+>>> new_names = """\
+... as/df
+... fdsa
+... asdf
+... """
+>>> transform(['foo', 'bar/baz'], names_file=StringIO(new_names))
+Traceback (most recent call last):
+AssertionError:
+Transformation <tl.rename.core.read_names_from_file> changed number of names.
+
+
+Renaming files
+==============
+
+Dry-run mode
+------------
+
+The ``rename```function finally applies the changes made by the ``transform``
+run. It accepts as arguments the lists of old and new file paths, as well as
+an option to turn on dry-run mode. In dry-run mode, it just prints the changes
+that would be applied:
+
+>>> from tl.rename.core import rename
+>>> rename(['foo', 'bar/baz'], ['as/df', 'fdsa'], dry_run=True)
+foo -> as/df
+bar/baz -> fdsa
+
+Notice how unchanged paths are discarded:
+
+>>> rename(['foo', 'bar/baz'], ['foo', 'fdsa'], dry_run=True)
+bar/baz -> fdsa
+
+Basic usage
+-----------
+
+In order to demonstrate the ``rename`` function's actions on the file system,
+we create and list sandboxes containing sample directories and files:
+
+>>> from tl.testing.fs import new_sandbox, ls
+>>> new_sandbox("""\
+... d bar
+... f bar/baz some content
+... f foo other content
+... """)
+>>> ls()
+d bar
+f bar/baz some content
+f foo other content
+
+>>> rename(['foo', 'bar'], ['asdf', 'fdsa'])
+>>> ls()
+f asdf other content
+d fdsa
+f fdsa/baz some content
+
+A file path may be almost any string including whitespace and non-printable
+characters:
+
+>>> rename(['asdf'], [' bar\tbaz\n\xff '])
+>>> sorted(os.listdir('.'))
+[' bar\tbaz\n\xff ', 'fdsa']
+>>> rename([' bar\tbaz\n\xff '], ['asdf'])
+>>> ls()
+f asdf other content
+d fdsa
+f fdsa/baz some content
+
+However, a file path must not contain a null byte or have a non-empty base
+name. The latter means that if the path is that of a directory, it must not
+contain the trailing separator:
+
+>>> rename(['fdsa'], ['foo\x00bar'])
+Traceback (most recent call last):
+AssertionError: 'foo...bar' is not a valid file name.
+
+>>> rename(['fdsa/'], ['foobar/'])
+Traceback (most recent call last):
+AssertionError: 'foobar/' is not a valid file name.
+
+Moving between directories
+--------------------------
+
+Files may be moved between directories by renaming:
+
+>>> rename(['asdf'], ['fdsa/bar'])
+>>> ls()
+d fdsa
+f fdsa/bar other content
+f fdsa/baz some content
+
+Renaming a directory with some content works as expected:
+
+>>> rename(['fdsa'], ['foo'])
+>>> ls()
+d foo
+f foo/bar other content
+f foo/baz some content
+
+Moving a file to a directory that does not yet exist will create directories
+as needed along the new path:
+
+>>> rename(['foo/bar'], ['as/df/bar'])
+>>> ls()
+d as
+d as/df
+f as/df/bar other content
+d foo
+f foo/baz some content
+
+On the other hand, moving the last file out of a directory results in that
+directories and any empty parents of it to be removed:
+
+>>> rename(['as/df/bar'], ['bar'])
+>>> ls()
+f bar other content
+d foo
+f foo/baz some content
+
+An existing empty directory can be moved and renamed without being deleted:
+
+>>> new_sandbox("""\
+... d foo
+... d foo/bar
+... """)
+>>> rename(['foo/bar'], ['baz'])
+>>> ls()
+d baz
+
+Renaming to existing paths
+--------------------------
+
+If a file is renamed to a path that is already used by a file, that other file
+is replaced. The same goes for two directories if the target is empty:
+
+>>> new_sandbox("""\
+... f foo first file
+... f bar second file
+... """)
+>>> rename(['foo'], ['bar'])
+>>> ls()
+f bar first file
+
+>>> new_sandbox("""\
+... d foo
+... f foo/baz
+... d bar
+... """)
+>>> rename(['foo'], ['bar'])
+>>> ls()
+d bar
+f bar/baz
+
+If the target directory is not empty, renaming is not possible lest the
+directory's content be lost:
+
+>>> new_sandbox("""\
+... d foo
+... d bar
+... f bar/baz
+... """)
+>>> rename(['foo'], ['bar'])
+Traceback (most recent call last):
+OSError: [Errno 39] Directory not empty
+
+Renaming a file to an existing directory or a directory to an existing file
+does not work either:
+
+>>> new_sandbox("""\
+... f foo
+... d bar
+... """)
+>>> rename(['foo'], ['bar'])
+Traceback (most recent call last):
+OSError: [Errno 21] Is a directory
+
+>>> rename(['bar'], ['foo'])
+Traceback (most recent call last):
+OSError: [Errno 20] Not a directory
+
+Renaming to paths renamed in turn
+---------------------------------
+
+In contrast to the above, it is possible to rename an item to an existing one
+without the latter being removed if it is renamed by the same ``rename`` call:
+
+>>> new_sandbox("""\
+... f asdf first
+... f bar second
+... f baz third
+... f foo fourth
+... """)
+>>> rename(['asdf', 'bar'], ['bar', 'baz'])
+>>> ls()
+f bar first
+f baz second
+f foo fourth
+
+This also works in circles and between two items:
+
+>>> rename(['bar', 'baz', 'foo'], ['foo', 'bar', 'baz'])
+>>> ls()
+f bar second
+f baz fourth
+f foo first
+
+>>> rename(['bar', 'foo'], ['foo', 'bar'])
+>>> ls()
+f bar first
+f baz fourth
+f foo second
+
+Handling of symbolic links
+--------------------------
+
+Symbolic links are never followed. Renaming a symbolic link gives a new name
+to the link, not its target:
+
+>>> new_sandbox("""\
+... l bar -> baz
+... f foo FOO
+... l loo -> foo
+... f xyz XYZ
+... """)
+>>> rename(['loo'], ['goo'])
+>>> ls()
+l bar -> baz
+f foo FOO
+l goo -> foo
+f xyz XYZ
+
+Renaming a broken link works just fine:
+
+>>> rename(['bar'], ['barr'])
+>>> ls()
+l barr -> baz
+f foo FOO
+l goo -> foo
+f xyz XYZ
+
+Renaming a file to the name of an existing symbolic link replaces the link,
+not its target:
+
+>>> rename(['xyz'], ['goo'])
+>>> ls()
+l barr -> baz
+f foo FOO
+f goo XYZ
+
+A directory cannot be renamed to the name of a symbolic link, regardless of
+whether the link target is a directory:
+
+>>> new_sandbox("""\
+... d bar
+... f foo
+... l l_bar -> bar
+... l l_baz -> baz
+... l l_foo -> foo
+... d xyz
+... """)
+
+>>> rename(['xyz'], ['l_bar'])
+Traceback (most recent call last):
+OSError: [Errno 20] Not a directory
+
+>>> rename(['xyz'], ['l_baz'])
+Traceback (most recent call last):
+OSError: [Errno 20] Not a directory
+
+>>> rename(['xyz'], ['l_foo'])
+Traceback (most recent call last):
+OSError: [Errno 20] Not a directory
+
+On the other hand, renaming a file to the name of a symbolic link to an
+existing directory replaces the link (while it would not be possible to
+replace a directory):
+
+>>> rename(['foo'], ['l_bar'])
+>>> ls()
+d bar
+f l_bar
+l l_baz -> baz
+l l_foo -> foo
+d xyz
+
+
+The combined runner
+===================
+
+A simple ``run`` function ties all the things demonstrated above together. Its
+signature is basically that of ``transform``, with the ``dry_run`` option
+passed to ``rename``:
+
+>>> from tl.rename.core import run
+>>> new_sandbox("""\
+... f bar BAR
+... f baz BAZ
+... f foo FOO
+... """)
+>>> new_names = """\
+... foo
+... asdf/bsdf
+... """
+
+>>> run(['bar', 'baz'], names_file=StringIO(new_names), dry_run=True)
+bar -> foo
+baz -> asdf/bsdf
+>>> ls()
+f bar BAR
+f baz BAZ
+f foo FOO
+
+>>> run(['bar', 'baz'], names_file=StringIO(new_names))
+>>> ls()
+d asdf
+f asdf/bsdf BAZ
+f foo BAR
+
+
+.. Local Variables:
+.. mode: rst
+.. End:
