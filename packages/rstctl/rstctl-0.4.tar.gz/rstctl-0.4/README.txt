@@ -1,0 +1,85 @@
+.. contents::
+
+Description
+===========
+
+``rstctl`` is a script to help you with reStructuredText_
+
+Usage
+=====
+
+HTML preview
+------------
+
+You can preview a file::
+
+  $ rstctl -w path/to/file.rst
+
+Or the long description of a package::
+
+  $ ls setup.py
+  setup.py
+
+  $ rstctl -w
+
+This will open the result in your favorite browser.
+
+Check links
+-----------
+
+You can use the `-l` option to add unknown references to the end of a document.
+Example::
+
+  $ cat README.txt 
+  Title
+  =====
+
+  `incomplete ref`_
+
+  $ ./bin/rstctl -l README.txt 
+  <string>:4: (ERROR/3) Unknown target name: "incomplete ref".
+
+
+  .. _incomplete ref: 
+
+
+  1 links append to README.txt
+  $ cat README.txt 
+  Title
+  =====
+
+  `incomplete ref`_
+
+
+  .. _incomplete ref: 
+
+Then you can add the correct links.
+
+Generating Sphinx documentation
+--------------------------------
+
+Go to the package root then use the ``--sphinx`` option::
+
+  $ rstctl --sphinx docs/conf.py 
+  Using /Users/gawel/py/rstctl/rstctl/module.tmpl
+  Writing docs/modules/rstctl.txt
+  Skipping rstctl.pdf excluded by conf.py
+  Skipping rstctl.rst_directive excluded by conf.py
+  Using /Users/gawel/py/rstctl/rstctl/module.tmpl
+  Writing docs/modules/rstctl.serve.txt
+  Using /Users/gawel/py/rstctl/rstctl/module.tmpl
+  Writing docs/modules/rstctl.template.txt
+  Using /Users/gawel/py/rstctl/rstctl/module.tmpl
+  Writing docs/modules/rstctl.utils.txt
+  Writing index
+
+Add ``modules/index`` in a ``toctree`` 
+
+If you want to exclude some modules add this to your ``conf.py``::
+
+  rstctl_exclude = ['rstctl.rst_directive', 'rstctl.pdf']
+
+You can also add ``rstctl.sphinx`` in conf.py's extensions
+
+.. _reStructuredText: http://docutils.sourceforge.net/rst.html
+
