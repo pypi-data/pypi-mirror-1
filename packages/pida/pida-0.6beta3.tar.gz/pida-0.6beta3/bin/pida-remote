@@ -1,0 +1,102 @@
+#! /usr/bin/env python
+
+import os, sys
+
+import pida
+
+from dbus.mainloop.glib import DBusGMainLoop
+DBusGMainLoop(set_as_default=True)
+
+os.environ['PIDA_PATH'] = os.path.dirname(os.path.abspath(pida.__file__))
+
+from pida.utils.pdbus import BUS_NAME, DBUS_NS, DBUS_PATH_PREFIX, \
+                            list_pida_instances, PidaRemote
+from pida.core import environment
+import dbus
+import dbus.service
+import re
+
+session = dbus.SessionBus()
+
+# check if pida is running
+lst = list_pida_instances(block=True)
+
+
+environment.parse_args(sys.argv)
+
+file_names = []
+
+for i in environment.get_args()[1:]:
+    file_names.append(os.path.abspath(i))
+
+
+def spawn(workspace=None):
+    #XXX: this seems somehow ugly. but i have no idea how to spawn this correctly
+    import subprocess
+    nargs = [sys.argv[0]] + file_names
+    for i in xrange(len(nargs)):
+        v = nargs[i]
+        if v[-11:] == "pida-remote":
+            nargs[i] = v[:-7]
+    if workspace:
+        nargs += ['-w', workspace]
+    subprocess.Popen(nargs, env=os.environ.copy()).pid
+
+def call_open(pid):
+    from pida.utils.pdbus import PidaRemote
+
+    pr = PidaRemote(pid)
+    if file_names:
+        pr.call('buffer', 'open_files', file_names)
+
+    pr.call('appcontroller', 'focus_window')
+
+    sys.exit(0)
+
+def command(sw, row=None):
+    # the command dispatcher
+    if sw.user_action == "quit":
+        sys.exit(0)
+    elif sw.user_action == "new" and sw.new_workspace:
+        spawn(sw.new_workspace)
+        sys.exit(0)
+    elif sw.user_action == "select":
+        if row.id:
+            call_open(row.id)
+        else:
+            spawn(row.workspace)
+            sys.exit(0)
+
+def open_workspace():
+    from pida.ui.window import WorkspaceWindow
+    import gtk
+
+    view = WorkspaceWindow(command=command)
+    view.show_all()
+    gtk.main()
+    sys.exit(0)
+
+from pida.core.options import OptionsManager
+om = OptionsManager(workspace="default")
+
+if environment.workspace_manager() or om.open_workspace_manager():
+    open_workspace()
+
+elif environment.workspace_set():
+    for i in lst:
+        pr = PidaRemote(i[0])
+        try:    name = pr.call('appcontroller', 'get_workspace_name')
+        except: name = "default"
+        if name == environment.workspace_name():
+            pr.call('buffer', 'open_files', file_names)
+            sys.exit(0)
+    spawn(None, session=environment.workspace_name()) 
+
+elif len(lst) == 0:
+    spawn(None)
+
+elif len(lst) == 1:
+    call_open(lst[0][0])
+
+else:
+    open_session()
