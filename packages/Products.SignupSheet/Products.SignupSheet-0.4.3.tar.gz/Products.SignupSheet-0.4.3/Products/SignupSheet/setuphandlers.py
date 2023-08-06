@@ -1,0 +1,46 @@
+from Products.CMFCore.utils import getToolByName
+
+def setupVarious(context):
+    """  """
+    portal = context.getSite()
+    
+    
+    # Add a form controller that traverse to the post page so the proper state can be set
+    # on the registrant.  Should be part of Generic Setup but examples for CMFFormController are missings   
+    controller = getToolByName(portal, 'portal_form_controller')
+    controller.addFormAction('validate_integrity','success','Registrant', None, 'traverse_to', 'string:registrant_post')
+                                 
+    # Remove from use_folder_tabs
+    properties = getToolByName(portal, 'portal_properties')
+    siteProperties = properties.site_properties
+    
+    useFolderTabs = list(siteProperties.getProperty('use_folder_tabs'))
+    if 'SignupSheet' in useFolderTabs:
+        useFolderTabs.remove('SignupSheet')
+    siteProperties.manage_changeProperties(use_folder_tabs = useFolderTabs)
+
+    # Remove from typesLinkToFolderContentsInFC 
+    typesLinkToFolderContentsInFC = list(siteProperties.getProperty('typesLinkToFolderContentsInFC'))
+    if 'SignupSheet' in typesLinkToFolderContentsInFC:
+        typesLinkToFolderContentsInFC.remove('SignupSheet')
+    siteProperties.manage_changeProperties(typesLinkToFolderContentsInFC = typesLinkToFolderContentsInFC)
+
+    # Add SignupSheet to kupu's linkable and media
+    # types
+    kupuTool = getToolByName(portal, 'kupu_library_tool', None)
+    if kupuTool is not None:
+        linkable = list(kupuTool.getPortalTypesForResourceType('linkable'))
+        mediaobject = list(kupuTool.getPortalTypesForResourceType('mediaobject'))
+        if 'SignupSheet' not in linkable:
+            linkable.append('SignupSheet')
+        # kupu_library_tool has an idiotic interface, basically written purely to
+        # work with its configuration page. :-(
+        kupuTool.updateResourceTypes(({'resource_type' : 'linkable',
+                                       'old_type'      : 'linkable',
+                                       'portal_types'  :  linkable},
+                                      {'resource_type' : 'mediaobject',
+                                       'old_type'      : 'mediaobject',
+                                       'portal_types'  :  mediaobject},))
+                                       
+                                       
+    
