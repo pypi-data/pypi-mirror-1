@@ -1,0 +1,144 @@
+#!/usr/bin/env python
+#
+# GETBULK command generator
+#
+# Copyright 1999-2005 by Ilya Etingof <ilya@glas.net>.
+#
+import string, sys
+from pysnmp_apps.cli import main, msgmod, secmod, target, pdu, mibview, base
+from pysnmp.entity import engine
+from pysnmp.entity.rfc3413 import cmdgen
+from pysnmp.proto import rfc1902
+from pysnmp import error
+
+def getUsage():
+    return "Usage: %s [OPTIONS] <AGENT> <PARAMETERS>\n\
+%s%s%s%s\
+GETBULK options:\n\
+   -C BULKOPTS:   set various application specific behaviours:\n\
+              n<NUM>   set non-repeaters to <NUM>\n\
+              r<NUM>   set max-repeaters to <NUM>\n\
+%s%s" % (
+        sys.argv[0],
+        main.getUsage(),
+        msgmod.getUsage(),
+        secmod.getUsage(),
+        mibview.getUsage(),
+        target.getUsage(),
+        pdu.getReadUsage()
+        )
+
+# Construct c/l interpreter for this app
+
+class Scanner(
+    msgmod.MPScannerMixIn,
+    secmod.SMScannerMixIn,
+    mibview.MibViewScannerMixIn,
+    target.TargetScannerMixIn,
+    pdu.ReadPduScannerMixIn,
+    main.MainScannerMixIn,
+    base.ScannerTemplate
+    ):
+    def t_appopts(self, s):
+        r' -C '
+        self.rv.append(base.ConfigToken('appopts'))
+
+class Parser(
+    msgmod.MPParserMixIn,
+    secmod.SMParserMixIn,
+    mibview.MibViewParserMixIn,
+    target.TargetParserMixIn,
+    pdu.ReadPduParserMixIn,
+    main.MainParserMixIn,
+    base.ParserTemplate
+    ):
+    def p_appOptions(self, args):
+        '''
+        Option ::= ApplicationOption
+
+        ApplicationOption ::= appopts whitespace string
+        ApplicationOption ::= appopts string
+        '''
+
+class __Generator(base.GeneratorTemplate):
+    def n_ApplicationOption(self, (snmpEngine, ctx), node):
+        if len(node) > 2:
+            opt = node[2].attr
+        else:
+            opt = node[1].attr
+        n = r = None
+        for c in map(None, opt):
+            if c == 'n':
+                p = n = []
+            elif c == 'r':
+                p = r = []
+            else:
+                p.append(c)
+        if n is not None:
+            ctx['nonRepeaters'] = string.atoi(string.join(n, ''))
+        if r is not None:
+            ctx['maxRepetitions'] = string.atoi(string.join(r, ''))
+        
+def generator((snmpEngine, ctx), ast):
+    return __Generator().preorder((snmpEngine, ctx), ast)
+    
+snmpEngine = engine.SnmpEngine()
+
+try:
+    # Parse c/l into AST
+    ast = Parser().parse(
+        Scanner().tokenize(string.join(sys.argv[1:], ' '))
+        )
+
+    ctx = {}
+
+    # Apply configuration to SNMP entity
+    main.generator((snmpEngine, ctx), ast)
+    msgmod.generator((snmpEngine, ctx), ast)
+    secmod.generator((snmpEngine, ctx), ast)    
+    mibview.generator((snmpEngine, ctx), ast)
+    target.generator((snmpEngine, ctx), ast)
+    pdu.readPduGenerator((snmpEngine, ctx), ast)
+    generator((snmpEngine, ctx), ast)
+
+except error.PySnmpError, why:
+    sys.stderr.write('Error: %s\n%s' % (why, getUsage()))
+    sys.exit(-1)
+
+ctx['myHeadVars'] = map(lambda x: rfc1902.ObjectName(x[0]), ctx['varBinds'])
+    
+# Run SNMP engine
+
+def cbFun(sendRequestHandle, errorIndication, errorStatus, errorIndex,
+          varBindTable, cbCtx):
+    if errorIndication:
+        sys.stderr.write('%s\n' % errorIndication)
+        return
+    if errorStatus:
+        sys.stderr.write('%s\n' % errorStatus.prettyOut(errorStatus))
+        return
+    for varBindRow in varBindTable:
+        colIdx = -1; inTableFlag = 0
+        for oid, val in varBindRow:
+            colIdx = colIdx + 1
+            if val is None or not cbCtx['myHeadVars'][colIdx].isPrefixOf(oid):
+                continue
+            sys.stdout.write('%s\n' % cbCtx['mibViewProxy'].getPrettyOidVal(
+                cbCtx['mibViewController'], oid, val
+                ))
+            inTableFlag = 1
+        if not inTableFlag:
+            return # stop on end-of-table
+    return 1 # continue walking
+
+cmdgen.BulkCommandGenerator().sendReq(
+    snmpEngine, ctx['addrName'],
+    ctx.get('nonRepeaters', 0), ctx.get('maxRepetitions', 25),
+    ctx['varBinds'], cbFun, ctx
+    )
+
+try:
+    snmpEngine.transportDispatcher.runDispatcher()
+except error.PySnmpError, why:
+    sys.stderr.write('Error: %s\n' % why)
+    sys.exit(-1)
