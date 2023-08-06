@@ -1,0 +1,138 @@
+=====
+Usage
+=====
+
+Interactive Prompt
+------------------
+
+Sometimes it's not very practical to run Twisted code from the Python
+interpreter (timeouts can be a problem and accessing results from callbacks can
+be awkward). Regardless, there is one below showing the use of both the REST
+service API as well as the static data service provided at spore.com.
+
+The achivement data for a user that's available via the REST service only has
+IDs associated with it, no text data. The Spore data service does have the
+text. We're going to need to get both. First, though, let's do some initial
+imports and setup some callbacks::
+
+    >>> from cStringIO import StringIO
+    >>> from twisted.internet import reactor
+    >>> from twisted.internet.defer import DeferredList
+    >>> from txspore.client import AsyncClient
+    >>>
+    >>> results = []
+    >>> data = StringIO()
+    >>>
+    >>> def setResults(callback_results, results):
+    ...     results.append(callback_results)
+    ...
+    >>> def printError(error):
+    ...     print error.getErrorMessage()
+    ...
+    >>> def finish(ignored):
+    ...     reactor.stop()
+    ...
+
+With our callbacks and errback defined, as well as some global objects for
+holding result data, we're ready to make the client calls::
+
+    >>> client = AsyncClient()
+    >>> d1 = client.rest.getAchievementsForUser("oubiwann", 0, 20)
+    >>> d1.addCallback(setResults, results)
+    <Deferred at 0x...
+    >>> d1.addErrback(printError)
+    <Deferred at 0x...
+    >>>
+    >>> d2 = client.data.getAchievementDataXML(fd=data)
+    >>> d2.addErrback(printError)
+    <Deferred at 0x...
+    >>>
+    >>> d = DeferredList([d1, d2])
+    >>> d.addCallback(finish)
+    <DeferredList at 0x...
+    >>> reactor.run()
+
+Let's make sure we get the number of achievements we expected and then take a
+quick peek at some of the achiements associated with this user::
+
+    >>> achievements = results.pop()
+    >>> len(achievements)
+    20
+    >>> for achievement in sorted(achievements)[0:4]:
+    ...     print achievement.guid
+    ...
+    0xaec66642!0x0770b845
+    0x0cc8b2c9!0xb9ff8f07
+    0x0cc8b2c9!0x19988ceb
+    0x0cc8b2c9!0xe1f5cf25
+
+We now have the IDs, but not the text. Let's get the latter::
+
+    >>> from txspore import util
+    >>> from txspore import model
+    >>>
+    >>> xmlTree = util.XML(data.getvalue())
+    >>> achievementsModel = model.RecursiveDataModel(xmlTree)
+    >>> len(achievementsModel.achievements)
+    124
+    >>> achievementsLookup = {}
+    >>> for achievement in achievementsModel.achievements:
+    ...     achievementsLookup[achievement.id] = (
+    ...         achievement.name, achievement.description)
+    ...
+
+With the lookup dictionary populated, we can re-print our user results with
+friendlier output::
+
+    >>> for achievement in sorted(achievements):
+    ...     try:
+    ...         print "%s: %s" % achievementsLookup[achievement.guid]
+    ...     except KeyError:
+    ...         print "Couldn't find key '%s' ..." % achievement.guid
+    ...
+    Couldn't find key '0xaec66642!0x0770b845' ...
+    Wanderer Passion: Play as a Wanderer
+    Quest Master: Complete 150 missions in the Space stage
+    Gunner: Destroy at least 500 other space vessels
+    Relentless: Complete the Civilization stage 10 times
+    Tribal: Complete the Tribal stage 10 times
+    Maxis Scout: Earn 100 badges in the Space stage
+    Shaman Hero: Achieve Master Badge Level 10 as a Shaman
+    Universe In A Box: Play in every stage and every creator
+    Slugger: Finish Creature stage without legs
+    Bestial: Play the Creature stage 10 times
+    Max Power: Build a creature with maximum stats in at least 4 abilities...
+    Spore Fan: Spend 50 hours in your Spore galaxy
+    Biologist: Make and publish 100 creatures
+    Bard Passion: Play as a Bard
+    General Custer: Lead 30 posse members to their death
+    Spice Hoarder: Control every resource node on the planet simultaneously
+    Rolling Thunder: Complete the Civilization stage in less than an hour
+    Missionary: Finish the Civilization stage with more than 8 religious cities
+    Speed Demon: Finish Creature stage within an hour
+
+
+Demo
+----
+
+In the top-level source directory for txSpore, there is an examples directory.
+This contains a demo web application that shows:
+
+* one simple way of integrating txSpore into a web app
+
+* how to use the client to get user data and assets
+
+* how to use callbacks to process results
+
+
+Unit Tests
+----------
+
+The unit tests are actually one of the best places to look for details about
+usage. There're two test modules that could provide very enlightening when
+figuring out how to use the txSpore API:
+
+* txspore/tests/test_client.py - basic client usage, and how to handle results
+
+* txspore/tests/test_model.py - detailed view of available attributes on
+  returned model objects.

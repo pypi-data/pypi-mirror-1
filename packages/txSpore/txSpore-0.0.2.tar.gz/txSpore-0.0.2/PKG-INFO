@@ -1,0 +1,492 @@
+Metadata-Version: 1.0
+Name: txSpore
+Version: 0.0.2
+Summary: An asynchronous Spore Python API using Twisted.
+Home-page: http://launchpad.net/txspore
+Author: Duncan McGreggor
+Author-email: oubiwann@adytum.us
+License: MIT
+Description: ~~~~~~~
+        txSpore
+        ~~~~~~~
+        
+        .. contents::
+        :depth: 1
+        
+        
+        =======
+        History
+        =======
+        
+        The Twisted Spore API was created more for fun than anything else. There's
+        really nothing special about it; all resource fetching is done with a Twisted
+        web client (twisted.web.client.getPage).
+        
+        When possible (given the async nature of the Twisted Spore API), code from the
+        blocking Python API was reused. This was done in an effort to maintain
+        functional compatibility with the synchronous Spore Python API. However, as it
+        turned out, there were several features missing from the other API as well as
+        some REST resources that don't work anymore as originally written in that API.
+        
+        
+        ============
+        Dependencies
+        ============
+        
+        To use this API as-is, you will need to have Twisted (Python) installed.
+        Downlowds for the latest release are always linked on the main page:
+        
+        http://twistedmatrix.com/
+        
+        
+        ===================
+        Further Development
+        ===================
+        
+        If there is interest in having a synchronous Python API updated to the latest
+        functionality as released by spore.com, I would be more than willing to add
+        explicit support for a non-Twisted API in this source code such that that it
+        could be used even when Twisted is not installed.
+        
+        For more details on coming changes, be sure to read the TODO section.
+        
+        
+        ============
+        Installation
+        ============
+        
+        Development
+        -----------
+        
+        If you want to develop for txSpore or use the latest code we're working on, you
+        can install from the sources. You'll need bzr installed, and then just do the
+        following::
+        
+        $ bzr branch lp:txspore
+        $ cd txspore
+        $ sudo python setup.py install
+        
+        
+        Easy Install
+        ------------
+        
+        You can use the setuptools easy_install script to get txSpore on your system::
+        
+        $ sudo easy_install txSpore
+        
+        
+        Manual Download
+        ---------------
+        
+        You can manually download the source tarball from the Python Package Index by
+        visiting the following URL:
+        
+        http://pypi.python.org/pypi/txSpore/
+        
+        You'll need to untar and gunzip the source, cd into the source directory, and
+        then you can do the usual::
+        
+        $ sudo python setup.py install
+        
+        
+        Checking the Source
+        -------------------
+        
+        Once installed, as long as you have Twisted installed on your system and the
+        trial script in your PATH, you can test the source code by executing this
+        anywhere::
+        
+        $ trial txspore
+        
+        That will run the test suite and report on the success and failure of any unit
+        tests.
+        
+        
+        =====
+        Usage
+        =====
+        
+        Interactive Prompt
+        ------------------
+        
+        Sometimes it's not very practical to run Twisted code from the Python
+        interpreter (timeouts can be a problem and accessing results from callbacks can
+        be awkward). Regardless, there is one below showing the use of both the REST
+        service API as well as the static data service provided at spore.com.
+        
+        The achivement data for a user that's available via the REST service only has
+        IDs associated with it, no text data. The Spore data service does have the
+        text. We're going to need to get both. First, though, let's do some initial
+        imports and setup some callbacks::
+        
+        >>> from cStringIO import StringIO
+        >>> from twisted.internet import reactor
+        >>> from twisted.internet.defer import DeferredList
+        >>> from txspore.client import AsyncClient
+        >>>
+        >>> results = []
+        >>> data = StringIO()
+        >>>
+        >>> def setResults(callback_results, results):
+        ...     results.append(callback_results)
+        ...
+        >>> def printError(error):
+        ...     print error.getErrorMessage()
+        ...
+        >>> def finish(ignored):
+        ...     reactor.stop()
+        ...
+        
+        With our callbacks and errback defined, as well as some global objects for
+        holding result data, we're ready to make the client calls::
+        
+        >>> client = AsyncClient()
+        >>> d1 = client.rest.getAchievementsForUser("oubiwann", 0, 20)
+        >>> d1.addCallback(setResults, results)
+        <Deferred at 0x...
+        >>> d1.addErrback(printError)
+        <Deferred at 0x...
+        >>>
+        >>> d2 = client.data.getAchievementDataXML(fd=data)
+        >>> d2.addErrback(printError)
+        <Deferred at 0x...
+        >>>
+        >>> d = DeferredList([d1, d2])
+        >>> d.addCallback(finish)
+        <DeferredList at 0x...
+        >>> reactor.run()
+        
+        Let's make sure we get the number of achievements we expected and then take a
+        quick peek at some of the achiements associated with this user::
+        
+        >>> achievements = results.pop()
+        >>> len(achievements)
+        20
+        >>> for achievement in sorted(achievements)[0:4]:
+        ...     print achievement.guid
+        ...
+        0xaec66642!0x0770b845
+        0x0cc8b2c9!0xb9ff8f07
+        0x0cc8b2c9!0x19988ceb
+        0x0cc8b2c9!0xe1f5cf25
+        
+        We now have the IDs, but not the text. Let's get the latter::
+        
+        >>> from txspore import util
+        >>> from txspore import model
+        >>>
+        >>> xmlTree = util.XML(data.getvalue())
+        >>> achievementsModel = model.RecursiveDataModel(xmlTree)
+        >>> len(achievementsModel.achievements)
+        124
+        >>> achievementsLookup = {}
+        >>> for achievement in achievementsModel.achievements:
+        ...     achievementsLookup[achievement.id] = (
+        ...         achievement.name, achievement.description)
+        ...
+        
+        With the lookup dictionary populated, we can re-print our user results with
+        friendlier output::
+        
+        >>> for achievement in sorted(achievements):
+        ...     try:
+        ...         print "%s: %s" % achievementsLookup[achievement.guid]
+        ...     except KeyError:
+        ...         print "Couldn't find key '%s' ..." % achievement.guid
+        ...
+        Couldn't find key '0xaec66642!0x0770b845' ...
+        Wanderer Passion: Play as a Wanderer
+        Quest Master: Complete 150 missions in the Space stage
+        Gunner: Destroy at least 500 other space vessels
+        Relentless: Complete the Civilization stage 10 times
+        Tribal: Complete the Tribal stage 10 times
+        Maxis Scout: Earn 100 badges in the Space stage
+        Shaman Hero: Achieve Master Badge Level 10 as a Shaman
+        Universe In A Box: Play in every stage and every creator
+        Slugger: Finish Creature stage without legs
+        Bestial: Play the Creature stage 10 times
+        Max Power: Build a creature with maximum stats in at least 4 abilities...
+        Spore Fan: Spend 50 hours in your Spore galaxy
+        Biologist: Make and publish 100 creatures
+        Bard Passion: Play as a Bard
+        General Custer: Lead 30 posse members to their death
+        Spice Hoarder: Control every resource node on the planet simultaneously
+        Rolling Thunder: Complete the Civilization stage in less than an hour
+        Missionary: Finish the Civilization stage with more than 8 religious cities
+        Speed Demon: Finish Creature stage within an hour
+        
+        
+        Demo
+        ----
+        
+        In the top-level source directory for txSpore, there is an examples directory.
+        This contains a demo web application that shows:
+        
+        * one simple way of integrating txSpore into a web app
+        
+        * how to use the client to get user data and assets
+        
+        * how to use callbacks to process results
+        
+        
+        Unit Tests
+        ----------
+        
+        The unit tests are actually one of the best places to look for details about
+        usage. There're two test modules that could provide very enlightening when
+        figuring out how to use the txSpore API:
+        
+        * txspore/tests/test_client.py - basic client usage, and how to handle results
+        
+        * txspore/tests/test_model.py - detailed view of available attributes on
+        returned model objects.
+        
+        
+        ===================
+        API Quick Reference
+        ===================
+        
+        Below are listed the objects and the methods that are available on the txSpore
+        client class.
+        
+        
+        txspore.client.AsyncClient.rest
+        -------------------------------
+        
+        * __init__
+        
+        * parameter: parent
+        
+        * getAchievementsForUser
+        
+        * parameters: username, start, length
+        
+        * getAssetsForSporeCast
+        
+        * parameters: sporeCastID, start, length
+        
+        * getAssetsForUser
+        
+        * parameters: username, start, length
+        
+        * getBuddiesForUser
+        
+        * parameters: username, start, length
+        
+        * getCommentsForAsset
+        
+        * parameters: assetID, start, length
+        
+        * getDailyStats (takes no parameters)
+        
+        * getInfoForAsset
+        
+        * parameter: assetID
+        
+        * getProfileInfo
+        
+        * parameter: username
+        
+        * getSporeCastsForUser
+        
+        * parameter: username
+        
+        * getStatsForCreature
+        
+        * parameter: creatureID
+        
+        * searchAssets
+        
+        * parameters: searchType, start, length, assetType
+        
+        
+        txspore.client.AsyncClient.data
+        -------------------------------
+        
+        * __init__
+        
+        * parameter: parent
+        
+        * getAchievementDataXML
+        
+        * parameters: path, fd
+        
+        * getAchievementIcon
+        
+        * parameters: achievementID, path, fd
+        
+        * getAchievementText
+        
+        * parameters: path, fd
+        
+        * getAssetDataLargePNG
+        
+        * parameters: assetID, path, fd
+        
+        * getAssetDataSmallPNG
+        
+        * parameters: assetID, path, fd
+        
+        * getAssetDataXML
+        
+        * parameters: assetID, path, fd
+        
+        * getLargeCard
+        
+        * parameters: assetID, path, fd
+        
+        * getPaintIcon
+        
+        * parameters: remoteFilename, path, fd
+        
+        * getPaintInfo
+        
+        * parameters: path, fd
+        
+        * getPartIcon
+        
+        * parameters: remoteFilename, path, fd
+        
+        * getPartInfo
+        
+        * parameters: blockType, path, fd
+        
+        
+        txspore.client.AsyncClient.atom
+        -------------------------------
+        
+        * __init__
+        
+        * parameter: parent
+        
+        * getAssetsForUser
+        
+        * parameter: username
+        
+        * getEventsForAsset
+        
+        * parameter: assetID
+        
+        * getEventsForUser
+        
+        * parameter: username
+        
+        * getSporeCastFeed
+        
+        * parameter: sporeCastID
+        
+        * searchAssets
+        
+        * parameters: searchType, start, length
+        
+        
+        txspore.client.AsyncClient.cache
+        --------------------------------
+        
+        * __init__ (takes no parameters)
+        
+        * get
+        
+        * parameter: key
+        
+        * purge (takes no parameters)
+        
+        * remove
+        
+        * parameter: key
+        
+        * set
+        
+        * parameters: key, object
+        
+        
+        ==========
+        Known Bugs
+        ==========
+        
+        * None so far
+        
+        ====
+        TODO
+        ====
+        
+        * Update all methods with epydoc-parsable docstrings.
+        
+        * Create an aspect for non-spore API methods... something like CustomAspect.
+        
+        * Add support for using a complete, up-to-date sync API without the need to
+        have Twisted installed.
+        
+        * Fix the threading/logging stuff in test_saveFileWithError.
+        
+        * Add search functions to client.
+        
+        * Add code for everything below line 244 in txspore.original.SporeAPICoreUtils.
+        
+        * Add mode code to the demo and/or add more demos/examples.
+        
+        * Encode results as utf-8
+        
+        
+        AsyncClient.custom
+        ------------------
+        
+        * Get useful achievement data with secondary query in
+        client.getAchievementsForUser.
+        
+        * Most popular creation by archetype/category with name and .png (suggested by
+        MrAlex92; more details: http://forum.spore.com/jforum/posts/list/27693.page).
+        
+        * Order/filter creations by limb count, complexity, specific traits, size
+        (suggested by Technodude12).
+        
+        * Order/filter by flying/swimming patterns (suggested by docpippo).
+        
+        * Add methods for the following user data (suggested by Eochaid1701):
+        
+        - creation count
+        
+        - latest creation (name)
+        
+        - latest creation (.png)
+        
+        - a tuple-result: username, creation count, latest creation (name), latest
+        creation (.png)
+        
+        - might want to add user icon, latest achiemvement, tagline, joined date
+        
+        
+        =======
+        Changes
+        =======
+        
+        0.0.1 to 0.0.2
+        --------------
+        
+        * Added a new client object; calls are made with methods now, instead of
+        module-level functions.
+        
+        * Added support for caching method results.
+        
+        * Moved the REST service API methods into their own object and instantiated
+        it on a ".rest" attribute of the client class.
+        
+        * Moved the static data service API methods into their own object and
+        instantiated it on a ".data" attribute of the client class.
+        
+        * Added support for Spore Atom ("RSS") data, available on the ".atom" attribute
+        of the client object.
+        
+        * Implemented the last remaining Spore API method that hadn't been added.
+        
+        Version 0.0.1
+        -------------
+        
+        * Initial release of txSpore, supporting most of the REST and static data APIs.
+        
+        
+        
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python
