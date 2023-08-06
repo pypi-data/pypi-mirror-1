@@ -1,0 +1,56 @@
+collective.saoraclefixes
+========================
+
+Fix SQLAlchemy 0.4 and 0.5 Oracle quoting and offset/limit problems.
+
+This package monkeypatches the SQLAlchemy Oracle driver with backports from
+the SQLAlchemy 0.6 branch. Fixes included are:
+
+- Reserved words. Before 0.6 no Oracle-specific reserved words were included,
+  requiring you to rename columns and labels, making it difficult to code
+  in a database-neutral fashion.
+
+  Note that the oracle reserved words list in this package is a superset of
+  the list in SQLAlchemy 0.6 (at least until SQLAlchemy branches/rel_0_6
+  r6245). This package includes semi-reserved identifiers as defined by the
+  `Oracle V$RESERVED_WORDS view`_
+
+- Bindparameter quoting. Using a reserved word as a bind parameter requires
+  quoting as well. Parameters are quoted in the generated SQL code, and all
+  use of the parameters during execution correctly uses the quoted versions.
+
+- Limit/offset handling. 0.6 introduces a (much) better method of implementing
+  query limits and offsets in Oracle, following recommended Oracle practice.
+  The 0.4/0.5 method could result in incorrect ordering, or would completely
+  fail when sorting on a aliased column.
+
+  The backport includes support for the optimize_limits=False dialect flag.
+  For more information on the change, see `SQLAlchemy ticket #536`_.
+
+To use, simply add an import to this package::
+
+    import collective.saoraclefixes # apply oracle fixes
+
+Note that the patches will only apply when SQLAlchemy versions 0.4 and 0.5 are
+used. All patching activity will be logged via python's logger module with
+loglevel DEBUG.
+
+
+License
+-------
+
+collective.saoraclefixes is distributed under the `MIT license
+<http://www.opensource.org/licenses/mit-license.php>`_, just like SQLAlchemy.
+
+Credits
+-------
+
+Backporting work
+    `Martijn Pieters`_ at Jarn_
+
+
+.. _Oracle V$RESERVED_WORDS view: http://bit.ly/nZkeD
+.. _SQLAlchemy ticket #536: http://www.sqlalchemy.org/trac/ticket/536
+.. _Martijn Pieters: mailto:mj@jarn.com
+.. _Jarn: http://www.jarn.com/
+
