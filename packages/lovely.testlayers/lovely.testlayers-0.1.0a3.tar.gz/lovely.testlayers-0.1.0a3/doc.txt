@@ -1,0 +1,301 @@
+Lovely Testing Layers for use with zope.testing
+***********************************************
+
+====================================
+Test layers with working directories
+====================================
+
+There is a mixin class that provides usefull methods to generate a
+working directory and make snapshots thereof.
+
+    >>> from lovely.testlayers.layer import WorkDirectoryLayer
+
+Let us create a sample layer.
+
+    >>> class MyLayer(WorkDirectoryLayer):
+    ...     def __init__(self, name):
+    ...         self.__name__ = name
+
+    >>> myLayer = MyLayer('mylayer')
+
+To initialize the directories we need to create the directory structure.
+
+    >>> myLayer.setUpWD()
+
+We can get relative paths by using the os.path join syntax.
+
+    >>> myLayer.wdPath('a', 'b')
+    '.../__builtin__.MyLayer.mylayer/work/a/b'
+
+Let us create a directory.
+
+    >>> import os
+    >>> os.mkdir(myLayer.wdPath('firstDirectory'))
+
+And make a snapshot.
+
+    >>> myLayer.makeSnapshot('first')
+
+We can check if we have a snapshot.
+
+    >>> myLayer.hasSnapshot('first')
+    True
+
+And now we make a second directory and another snapshot.
+
+    >>> os.mkdir(myLayer.wdPath('secondDirectory'))
+    >>> myLayer.makeSnapshot('second')
+
+We now have 2 directories.
+
+    >>> sorted(os.listdir(myLayer.wdPath()))
+    ['firstDirectory', 'secondDirectory']
+
+We now restore the "first" snapshot
+
+    >>> myLayer.restoreSnapshot('first')
+    >>> sorted(os.listdir(myLayer.wdPath()))
+    ['firstDirectory']
+
+We can also restore the "second" snapshot.
+
+    >>> myLayer.restoreSnapshot('second')
+    >>> sorted(os.listdir(myLayer.wdPath()))
+    ['firstDirectory', 'secondDirectory']
+
+We can also override snapshots.
+
+    >>> os.mkdir(myLayer.wdPath('thirdDirectory'))
+    >>> myLayer.makeSnapshot('first')
+    >>> myLayer.restoreSnapshot('first')
+    >>> sorted(os.listdir(myLayer.wdPath()))
+    ['firstDirectory', 'secondDirectory', 'thirdDirectory']
+
+====================
+memcached test layer
+====================
+
+This layer starts and stops a memcached daemon on given port (default
+is 11222)
+
+    >>> from lovely.testlayers import memcached
+
+    >>> ml = memcached.MemcachedLayer('ml')
+
+So let us setup the server.
+
+    >>> ml.setUp()
+
+Now we can acces memcached on port 11222.
+
+    >>> import telnetlib
+    >>> tn =  telnetlib.Telnet('localhost', 11222)
+    >>> tn.close()
+
+No more after teardown.
+
+    >>> ml.tearDown()
+    >>> tn =  telnetlib.Telnet('localhost', 11222)
+    Traceback (most recent call last):
+    ...
+    error:...Connection refused...
+
+
+================
+Nginx test layer
+================
+
+This test layer starts and stops an nginx server.
+
+The layer is constructed with the optional path to the nginx command
+and a prefix directory for nginx to run. To demonstrate this, we
+create a temporary nginx home, where nginx should run.
+
+    >>> import tempfile, shutil, os
+    >>> tmp = tempfile.mkdtemp()
+    >>> nginx_prefix = os.path.join(tmp, 'nginx_home')
+    >>> os.mkdir(nginx_prefix)
+
+We have to add a config file at the default location. Let us define a
+minimal configuration file.
+
+    >>> os.mkdir(os.path.join(nginx_prefix, 'conf'))
+    >>> cfg = file(os.path.join(nginx_prefix, 'conf', 'nginx.conf'), 'w')
+    >>> cfg.write("""
+    ... events {
+    ...     worker_connections  10;
+    ... }
+    ... http {
+    ...     server {
+    ...       listen 127.0.0.1:12345;
+    ...     }
+    ... }""")
+    >>> cfg.close()
+
+And the log directory.
+
+    >>> os.mkdir(os.path.join(nginx_prefix, 'logs'))
+
+Let us also define the nginx executable. There is already one
+installed via buildout in the root directory of this package, so we
+get the path to this executable. Using a special nginx that is built
+via buildout is the common way to use this layer. This way the same
+nginx might be used for local development with the configuration
+defined by the buildout.
+
+    >>> nginx_cmd = os.path.join(os.path.dirname(os.path.dirname(
+    ...     os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+    ...                          'parts', 'nginx', 'sbin', 'nginx')
+
+
+Now we can instantiate the layer.
+
+    >>> from lovely.testlayers import nginx
+    >>> nl = nginx.NginxLayer('nl', nginx_prefix, nginx_cmd=nginx_cmd)
+
+Upon layer setup the server gets started.
+
+    >>> nl.setUp()
+
+We can now issue requests, we will get a 404 because we didn't setup
+any urls, but for testing this is ok.
+
+    >>> import urllib2
+    >>> urllib2.urlopen('http://localhost:12345/', None, 1)
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 404: Not Found
+
+Upon layer tearDown the server gets stopped.
+
+    >>> nl.tearDown()
+
+We cannot connect to the server anymore now.
+
+    >>> urllib2.urlopen('http://localhost:12345/', None, 1)
+    Traceback (most recent call last):
+    ...
+    URLError: <urlopen error [Errno 61] Connection refused>
+
+Failures
+========
+
+Startup and shutdown failures are also catched. For example if we try
+to tear down the layer twice.
+
+    >>> nl.tearDown()
+    Traceback (most recent call last):
+    ...
+    RuntimeError: Nginx stop failed ...nginx.pid" failed
+     (2: No such file or directory)
+
+Or if we try to start the server twice.
+
+    >>> nl.setUp()
+    >>> nl.setUp()
+    Traceback (most recent call last):
+    ...
+    RuntimeError: Nginx start failed [emerg]:
+     bind() to 127.0.0.1:12345 failed (48: Address already in use)
+    ...
+    [emerg]: still could not bind()
+
+    >>> nl.tearDown()
+
+Cleanup the temporary directory, we don't need it for testing from
+this point.
+
+    >>> shutil.rmtree(tmp)
+
+Nearly all failures should be catched upon initialization, because the
+layer does a config check then.
+
+Let us provide a non existing prefix path.
+
+    >>> nginx.NginxLayer('nl', 'something')
+    Traceback (most recent call last):
+    ...
+    AssertionError: prefix not a directory '.../something/'
+
+Or a not existing nginx_cmd.
+
+    >>> nginx.NginxLayer('nl', '.', 'not-an-nginx')
+    Traceback (most recent call last):
+    ...
+    RuntimeError: Nginx check failed /bin/sh: not-an-nginx: command not found
+
+Or some missing aka broken configuration. We just provide our working
+directory as the prefix, which actually does not contain any configs.
+
+    >>> nginx.NginxLayer('nl', '.', nginx_cmd)
+    Traceback (most recent call last):
+    RuntimeError: Nginx check failed nginx version: nginx/...
+    [alert]: could not open error log file...
+    ... [emerg] ...
+    configuration file .../conf/nginx.conf test failed
+
+
+====================
+Cassandra test layer
+====================
+
+This layer starts and stops a cassandra instance with a given storage
+configuration template. For information about cassandra see:
+http://en.wikipedia.org/wiki/Cassandra_(database)
+
+    >>> from lovely.testlayers import cass
+
+An example template exists in this directory which we now use for this
+example.
+
+    >>> import os
+    >>> storage_conf_tmpl = os.path.join(os.path.dirname(__file__),
+    ...                                  'storage-conf.xml.in')
+
+The following keys are provided when the template gets evaluated. Let
+us look them up in the example file.
+
+    >>> import re
+    >>> tmpl_pat = re.compile(r'.*\%\(([^ \)]+)\)s.*')
+    >>> conf_keys = set()
+    >>> for l in file(storage_conf_tmpl).readlines():
+    ...     m = tmpl_pat.match(l)
+    ...     if m:
+    ...         conf_keys.add(m.group(1))
+
+
+    >>> sorted(conf_keys)
+    ['control_port', 'storage_port', 'thrift_port', 'var']
+
+With the storage configuration path we can instantiate a new cassandra
+layer. The thrift_port, storage_port, and control_port are optional
+keyword arguments for the constructor and default to the standard port
++10000.
+
+    >>> l = cass.CassandraLayer('l', storage_conf=storage_conf_tmpl)
+    >>> l.thrift_port
+    19160
+
+So let us setup the server.
+
+    >>> l.setUp()
+
+Now the cassandra server is up and running. We test this by connecting
+to the thrift port via telnet.
+
+    >>> import telnetlib
+    >>> tn = telnetlib.Telnet('localhost', l.thrift_port)
+    >>> tn.close()
+
+The connection is refused after teardown.
+
+    >>> l.tearDown()
+
+    >>> telnetlib.Telnet('localhost', l.thrift_port)
+    Traceback (most recent call last):
+    ...
+    error:...Connection refused
+
+
+
+
