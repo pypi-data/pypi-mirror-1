@@ -1,0 +1,87 @@
+Pyjamas-Desktop
+---------------
+
+Pyjamas-Desktop is a cross-platform framework and applications widget set,
+based on WebKit.  PyWebkitGtk is currently the basis for Pyjamas-Desktop,
+and it is conceivable that there will exist a PyWebkitQt4, and Pyjamas-Desktop
+will run on top of that, as well.
+
+Pyjamas-Desktop is similar to KiWi in that it provides an easy-to-use API,
+where you need not know - at all - that you are running PyGTK underneath.
+
+Pyjamas-Desktop is actually a port of Pyjamas which is a web toolkit, so you
+also have the option of running PyjamasDesktop applications as web
+applications - unmodified.
+
+The Pyjamas Widget set is exceptionally comprehensive and yet is easy to use,
+providing:
+
+    * Simple, Horizontal, Vertical, Docking, Decking, Popup, Stack, Tab,
+      Grid, Flow, Table and HTML Panels
+    * Text Labels and HTML including full CSS Stylesheet support and
+      full CSS properties
+    * Input, Password and Textarea input boxes
+    * List drop-downs including Multi-selection
+    * Buttons, Checkboxes and Radio-Buttons including groups.
+    * Form Submit Panel (providing file upload).
+    * Treeview, Menu and Menubar (vertical and horizontal). 
+
+Additional features, thanks to the underlying use of webkit, include:
+
+    * Full CSS Stylesheet functionality, both local, remote and direct
+      and simple API manipulation.
+    * Option of executing javascript, for full and complete manipulation
+      of the application.
+    * Loading of complete HTML Pages, both local and remote; full URL support.
+    * Plugin support for multimedia plugins such as Flash
+      (obsoleting the need for gtk-mozplugin)
+    * Access to XML, XSLT and AJAX.
+    * (Future: full SVG Canvas support, like HippoCanvas) 
+
+It's specifically worth noting that due to Pyjamas-Desktop's history, it purely
+provides the "V" in "MVC" applications design, and that one option presently
+in use is the JSONRPC proxy client included, for communicating with the "MC"
+in the back-end of your application. In this way, the same application
+front-end source code can be compiled with PyJamas (into Javascript/AJAX) -
+with no modifications - to run with exactly the same back-end HTTP server that
+your Pyjamas-Desktop application uses.
+
+
+Requirements
+------------
+
+Currently, Pyjamas-Desktop requires patched versions of both Webkit and
+PyWebkitGtk, as of 01-Sep-2008.  The patches are here:
+
+    * https://bugs.webkit.org/show_bug.cgi?id=16401
+    * http://code.google.com/p/pywebkitgtk/issues/detail?id=13
+
+Documentation
+-------------
+
+The Pyjamas api is documented here:
+
+    * http://pyjd.sf.net/api/
+    
+Also, as Pyjamas is based on Google's WebKit, the documentation for GWT 1.5
+may prove useful:
+
+    * http://google-web-toolkit.googlecode.com/svn/javadoc/1.5/index.html
+
+
+Source Code
+-----------
+
+Pyjamas-Desktop is available as a git repository:
+
+    * git://github.com/lkcl/pyjamas-desktop.git
+
+
+More information
+----------------
+
+    * http://advogato.org/article/981.html 
+    * http://code.google.com/p/pyjamas
+    * http://sf.net/projects/pyjd
+    * http://lkcl.net/pyjamas-desktop
+
