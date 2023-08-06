@@ -1,0 +1,76 @@
+#!/usr/bin/python
+"""
+:author:    Logilab
+:copyright: 2008 LOGILAB S.A. (Paris, FRANCE)
+:contact:   http://www.logilab.fr/ -- mailto:python-projects@logilab.org
+"""
+
+from ovcs.package import ODFPackage, ZippedODFPackage, UnzippedODFPackage, NotAnOdf
+from ovcs.vc import Repository
+
+# Actions
+
+def unzip(src_path, dest_path, options):
+    src = ZippedODFPackage(src_path)
+    dest = src.unzipped(dest_path, overwrite=options.overwrite)
+    repo = Repository.frompath(dest_path)
+    if repo is not None:
+        tkey, tvalue = options.tag.split(':')
+        repo.add_or_update(dest, {tkey : tvalue})
+        print  '%s is handled by %s and tagged with %s : %s' % (dest.path, repo.kind,
+                                                                tkey, tvalue)
+
+def zip(src_path, dest_path, options):
+    src = UnzippedODFPackage(src_path)
+    dest = src.zipped(dest_path, overwrite=options.overwrite)
+
+def diff(one, two, options):
+    if not options.short:
+        odf1 = ODFPackage.frompath(one)
+        odf2 = ODFPackage.frompath(two)
+        print '\n'.join(odf1.diff(odf2))
+    else:
+        odf1 = ODFPackage.frompath(one)
+        odf2 = ODFPackage.frompath(two)
+        chlist = odf1.changelist(odf2)
+        for cat, catlist in chlist.items():
+            if catlist:
+                print '%s : ' % cat.capitalize()
+                for elt in catlist: print '  ', elt
+
+def show(src_path, elt, options):
+    odf = ODFPackage.frompath(src_path)
+    print odf.data(elt)
+
+ACTIONS = ('zip', 'unzip', 'diff', 'show')
+
+def main():
+    from optparse import OptionParser
+    parser = OptionParser()
+    parser.add_option('-o', '--overwrite', dest='overwrite',
+                      action='store_true', default=False,
+                      help='uncarefully overwrite the destination if it already exists')
+    parser.add_option('-t', '--tag', dest='tag',
+                      action='store', default='mimetype:application/vnd.oasis.opendocument.text',
+                      help='specify the tag key:value for repositories')
+    parser.add_option('-s', '--short', dest='short',
+                      action='store_true', default=False,
+                      help='show only the list of added/deleted/changed files, not content diff')
+    parser.set_usage("ovcs %s <source path> <dest path>" % '|'.join(ACTIONS))
+    (options, args) = parser.parse_args()
+    nbargs = len(args)
+    if nbargs != 3:
+        parser.error('three arguments are expected')
+    action = args[0]
+    arguments = args[1:]
+    if action not in ACTIONS:
+        parser.error('action must be one of %s' % ', '.join(ACTIONS))
+    try:
+        globals().get(action)(*arguments+[options])
+    except Exception, e:
+        import traceback as tb; tb.print_exc()
+        parser.error(e.args and e.args[0] or 'something fishy happened')
+
+if __name__=="__main__":
+    main()
+
