@@ -1,0 +1,226 @@
+Metadata-Version: 1.0
+Name: imgserve
+Version: 0.2
+Summary: Imgserve is a daemon program to provide common image processing service
+Home-page: http://github.com/wuzhe/imgserve
+Author: Wu Zhe
+Author-email: wu@madk.org
+License: GPL
+Download-URL: http://pypi.python.org/pypi/imgserve
+Description: ===================
+        The Imgserve Server
+        ===================
+        
+        .. contents:: **Table of Contents**
+        
+        Introduction
+        ============
+        
+        Imgserve is a python image processing server designed to provide image
+        processing service, currently supporting only image rescaling, and svg
+        rasterization.  It can utilize modern multicore CPU to achieve higher
+        throughput and possibly better performance.
+        
+        User applications send requests in JSON format over HTTP to a running
+        imgserve, which downloads source image from URL specified in the
+        request object, performs the requested operation on the source image,
+        uploads the result image to the specified destination.
+        
+        Features
+        ========
+        
+        * Using a multi-process architecture
+        
+        * Communication with user applications using JSON object over HTTP
+        
+        * Image processing operations currently supported: rescaling, svg
+        rasterization
+        
+        * Image downloading with FTP, FTPS, HTTP, HTTPS and local FILE
+        
+        * Image uploading with HTTP POST, HTTP PUT (not implemented yet), FTP
+        and local FILE
+        
+        Installing
+        ==========
+        
+        Pre-requisit:
+        -------------
+        
+        * Python >= 2.5, (in Debian, ``sudo aptitude install python``)
+        
+        * Multiprocessing, (Only if python version <= 2.5.  In Debian, ``sudo
+        aptitude install python-multiprocessing``)
+        
+        * PIL, (in Debian, ``sudo aptitude install python-imaging``)
+        
+        * python-rsvg, (in Debian, ``sudo aptitude install python-rsvg``)
+        
+        * python-pycurl, (in Debian, ``sudo aptitude install python-pycurl``)
+        
+        To run tests, additional packages are required:
+        
+        * nose, (in Debian, ``sudo easy_install python-nose``)
+        
+        * pyftpdlib, (in Debian, ``sudo easy_install pyftpdlib``)
+        
+        Install
+        -------
+        
+        ``sudo easy_install imgserve``
+        
+        Usage & Server API
+        ==================
+        
+        Start imgserve daemon with ``imgserve start``, you can run imgserve
+        under root but root privilege is not required, the only difference of
+        running imgserve with root user or a non-root user is where log and
+        pid files are placed:
+        
+        * When imgserve is run with root user, log files are put into
+        ``/var/log/imgserve`` directory, pid file is put into ``/var/run/``
+        directory.
+        
+        * When imgserve is run with a non-root user, log and pid files are put
+        into ``~/.imgserve`` directory.
+        
+        You can tell imgserve to which IP interface to bind and on which port
+        to listen using ``imgserve start -host IP_ADDRESS -port PORT``, note
+        low number ports require root privilege to use.  If host and port are
+        not specified, their default values are used, ``0.0.0.0`` (all IP
+        interfaces on the host) for host and 8602 for port.
+        
+        When imgserve is running, we can send it requests, let's see an
+        example of a JSON request:
+        
+        ::
+        
+        {
+        "operationType": "resize",
+        "srcURL": "http://upload.wikimedia.org/wikipedia/en/7/70/Ex.png",
+        "dstURL": "ftp://upload.wikimedia.org/wikipedia/en/7/70/{$width}-{$basename}.{$ext}",
+        "args": {
+        "width": 200,
+        "height": 120
+        }
+        }
+        
+        This request instructs imgserve to download the image file from
+        ``srcURL``, resize it to a 200 x 120 thumbnail cropping the sides (top
+        and bottom, or left and right) if necessary, and upload the thumbnail
+        image to ``dstURL`` under a new file name which can be set dynamically
+        with special tags in ``dstURL`` value.  Here are some rules that
+        should be followed for the request to be valid:
+        
+        * Must be valid JSON object.
+        
+        * Four keys (``operationType``, ``args``, ``srcURL``, ``dstURL``) are
+        required.
+        
+        * ``operationType`` currently can only be ``resize`` or ``rasterize``.
+        
+        * ``args`` value must be a collection of key/value pairs (aka JSON
+        object), passing extra arguments to the operation.
+        
+        * ``srcURL`` is a valid URL of an image, using whatever protocol
+        imgserve supports;
+        
+        * ``dstURL`` is a URL using whatever protocol imgserve supports along
+        with file name of result image.
+        
+        - The value of ``dstURL`` can contain following special tags that
+        will be substituted with real values by imgserve, the result
+        string will be the final file name for the result image file that
+        is uploaded to the destination.
+        
+        + ``{$width}`` is replaced with the width of the result image.
+        
+        + ``{$height}`` is replaced with the height of the result image.
+        
+        + ``{$basename}`` is replaced with the basename of the original
+        file name from ``srcURL``.
+        
+        + ``{$extension}`` is replaced with the extension name of the
+        original file name from ``srcURL``.
+        
+        - ``dstURL`` looks like a normal URL for FTP and local FILE, but not
+        for HTTP POST, because besides a normal HTML page on which a
+        upload form resides imgserve has to know the field name of the
+        HTML upload form so that imgserve can upload the result image file
+        with that specific field.
+        
+        A new syntax of ``dstURL`` is invented for HTTP POST: ``dstURL``
+        is the result of concatenation of the URL of HTML page on which an
+        upload form resides, a colon ``:`` and the result image file name
+        used when uploading (can also contain special tags that will be
+        substituded with real values), the field name of the upload form
+        to which the result file is uploaded is specified in ``args`` with
+        a new key/value pair, 'field_name' is used as the key name.  Let's
+        see an example:
+        
+        ::
+        
+        {
+        "operationType": "resize",
+        "srcURL": "http://upload.wikimedia.org/wikipedia/en/7/70/Ex.png",
+        "dstURL": "http://example.com/upload.html:{$width}-{$basename}.{$ext}",
+        "args": {
+        "width": 200,
+        "height": 120,
+        "field_name": 'image_file'
+        }
+        }
+        
+        This request instructs imgserve to download an image from
+        ``upload.wikimedia.org``, resize it to 200 x 120, rename the
+        resized image file to ``200-Ex.png``, and upload ``200-Ex.png`` to
+        a remote web site using an upload form on page
+        ``http://example.com/upload.html``, the field name used for file
+        uploading is ``image_file``.
+        
+        A reply JSON object is replied as soon as a quick validation on the
+        request JSON object has been performed.  In the process of validation,
+        a placeholder image that has the same dimenstion with the result image
+        is produced and uploaded to the destination URL.
+        
+        If the request passes the validation process, a JSON object:
+        
+        ::
+        
+        {'dstURL': <destination URL with special tags substituted>}
+        
+        is returned, otherwise either
+        
+        ::
+        
+        {'msg': 'request parse error'}
+        
+        is returned if the request sent is not a valid JSON object or
+        
+        ::
+        
+        {'msg', 'request invalid', 'code': <error code>}
+        
+        is returned if the request is JSON syntax correct, but some other
+        things go wrong.
+        
+        After the reply JSON object is returned, imgserve would start the real
+        image processing work and uploads the result image to ``dstURL``,
+        silently overwriting the placeholder file previously uploaded.
+        
+        Contact
+        =======
+        
+        email: wu at madk.org
+        
+Keywords: image-processing daemon networking imgserve
+Platform: UNKNOWN
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: GNU General Public License (GPL)
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Topic :: Internet
+Classifier: Topic :: Multimedia :: Graphics :: Graphics Conversion
+Classifier: Topic :: Utilities
