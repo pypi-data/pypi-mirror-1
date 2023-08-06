@@ -1,0 +1,334 @@
+Metadata-Version: 1.0
+Name: rpatterson.mailsync
+Version: 0.3
+Summary: Integration between mswatch, OfflineIMAP, and Gnus for realtime mail
+Home-page: http://pypi.python.org/pypi/rpatterson.mailsync
+Author: Ross Patterson
+Author-email: me@rpatterson.net
+License: GPL
+Description: ===================
+        rpatterson.mailsync
+        ===================
+        
+        Integration between mswatch, OfflineIMAP, and Gnus for realtime mail
+        
+        .. contents::
+        
+        This package provides some scripts that wrap parts of mswatch and
+        OfflineIMAP and integrate with Gnus to provide a local maildir that
+        is synchronized with a remote maildir as changes occur, instead of
+        polling on a regular basis.  This provides for near instant delivery
+        of new mail while also reducing resource utilization.  Integration
+        with the Emacs mail and newsreader, Gnus, is also provided in such a
+        way that your single threaded Emacs process is blocked much less as
+        changes occur to the maildirs.
+        
+        Requirements
+        ============
+        
+        * `mswatch <http://mswatch.sourceforge.net>`_
+        * `OfflineIMAP <http://software.complete.org/software/projects/show/offlineimap>`_
+        * `Gnus <http://gnus.org>`_
+        
+        Actually, they're all kinda optional.  The OfflineIMAP sync wrapper
+        script can be used with mswatch without Gnus.  The Gnus checkers can
+        be used without OfflineIMAP.  For that matter, the OfflineIMAP sync
+        wrapper script can be used without mswatch, but why would you?  :)
+        
+        Installation
+        ============
+        
+        All you need is easy_install_::
+        
+        $ easy_install rpatterson.mailsync
+        
+        The mailsync-gnus.el library will be installed in the site-lisp
+        directory in the egg.  To use the library, you'll need to add this
+        path to your emacs load-path.  It should be something like the
+        following but be sure to substitute the question marks with the
+        appropriate values for your version of Python, the version of
+        rpatterson.mailsync, and your easy_install site-dirs::
+        
+        /usr/lib/python?.?/site-packages/rpatterson.mailsync-?-py?.?.egg/site-lisp/
+        
+        Alternatively, if you have a /usr/local/emacs/site-lisp directory, the
+        mailsync-gnus.el library can be installed into that directory if you
+        install rpatterson.mailsync from a source distribution.  You can still
+        use easy_install to get the source distribution::
+        
+        $ easy_install --editable --build-directory=/usr/local/src rpatterson.mailsync
+        $ cd /usr/local/src/rpatterson.mailsync/
+        $ python setup.py install
+        
+        Once the library is on Emacs' load-path, to use the
+        mailsync/gnus-check function, you'll need to make sure it's loaded in
+        your Emacs.  You can do this by adding the following to your .gnus.el::
+        
+        (load-library "mailsync-gnus")
+        
+        If you'll be using mailsync_offlineimap to synchronize your mail,
+        start by configuring OfflineIMAP as per the OfflineIMAP
+        documentation.  Once OfflineIMAP is verified working, verify
+        mailsync_offlineimap by running it from the console.
+        
+        On any machine where you'll be using the maildir watchers, either with
+        or without mswatch, see the mswatch documentation and verify that
+        watch_maildirs works.  Install rpatterson.mailsync wherever you want
+        to use mailsync_gnus_watch.  Run it from the console to test it.  It
+        should check all groups in Gnus and output a blank line when it's
+        started up and then it should check any changed maildir folder groups
+        in Gnus when changed and then omit the folder name. Use
+        "mailsync_gnus_watch --help" to see what options are available to
+        modifying the watcher behavior.
+        
+        To use mswatch, see the mswatch documentation but base your
+        ~/.mswatchrc on the following and see the "MAILSYNC:" comments for
+        what to change::
+        
+        # minimum time after first queued mailbox change to synchronization (default: 10s)
+        #base_delay 10
+        
+        # minimum time between two syncs or failed attempts (default: 60s)
+        #inter_delay 60
+        
+        # minimum time between two syncs or failed attempts for specific lists
+        #inter_delay 30 important_list
+        #inter_delay 600 high_volume_list another_list
+        
+        # maximum waiting time between failed attempts (default: 600s)
+        #max_delay 600
+        
+        # program (and arguments) to run to sync the mail stores (required)
+        # sync mswatch-sync
+        
+        # MAILSYNC: use the following to have mswatch use your OfflineIMAP
+        # setup to sync folders on change.
+        sync mailsync_offlineimap
+        
+        # prefix this string to sync's mailboxes;
+        #     useful as mbsync channel or OfflineIMAP account.
+        # the first string ("mydomain") is always prefixed
+        # the second string (":") is prefixed only when syncing a particular mailbox
+        mailbox_prefix foo :
+        
+        # a store to watch, call it "local" (required)
+        store local
+        {
+        # program (and args) that will monitor this store for changes (required)
+        # see 'man watch_maildirs' to tell watch_maildirs where to find mail
+        # watch watch_maildirs
+        
+        # MAILSYNC: use the following to have your local Gnus check
+        # folders as they change, otherwise, just use the above.
+        watch mailsync_gnus_watch
+        }
+        
+        # the other store to watch, call it "mydomain" (required)
+        store foo.com
+        {
+        # program (and args) that will monitor this store for changes (required).
+        #
+        # Uses ssh private/public keys to login without password prompting.
+        # Uses ssh BatchMode so that 'mswatch' promptly detects disconnects.
+        # Uses 'inputkill' to run 'watch_maildirs' so that 'watch_maildirs'
+        # promptly exits if the connection dies.
+        # watch ssh -o BatchMode=yes foo.com inputkill watch_maildirs
+        
+        # MAILSYNC: use the following to have your remote Gnus check
+        # folders as they change, otherwise, just use the above.
+        watch ssh -o BatchMode=yes foo.com inputkill mailsync_gnus_watch
+        }
+        
+        .. _easy_install: http://peak.telecommunity.com/DevCenter/EasyInstall#installing-easy-install
+        
+        
+        TODO
+        ====
+        
+        * Use optparse for syncers
+        
+        Add built-in help and clearer option and argument handling for the
+        syncers using optparse.
+        
+        * Use delay in watchers/checkers
+        
+        Currently, the checkers run every time the watcher emits a folder
+        name.  Most maildir changes emit the same folder multiple times
+        resulting in the checker running reduntantly.  With mswatch, the
+        logic for coalescing events using a delay is in the mswatch process.
+        To address this problem, that logic would have to be extended to the
+        watchers.  This is another reason among many for reimplementing
+        mswatch.
+        
+        * Invoke OfflineIMAP in the same process
+        
+        Currently, mailsync invokes OfflineIMAP as a subprocess which is a
+        little wasteful given how heavy launching a python app can be.  I
+        briefly looked at the OfflineIMAP code to see if it could be easily
+        done but was disappointed.
+        
+        It would be great if any OfflineIMAP people want to show me how I
+        can do this.
+        
+        * Long running syncers
+        
+        Currently, mswatch invokes the sync process anew every time.  Pretty
+        much any sync process establishes one or more network connections.
+        There's no need to do this every time.  Better to have a long
+        running sync process that mswatch can feed the folders to sync as
+        they require syncing.  Implementing this would require modifying or
+        reimplementing mswatch itself.  It would also require support in the
+        sync process.  Perhaps OfflineIMAP could be used as a library to
+        accomplish this.
+        
+        * Ignore duplicate maildir notifications
+        
+        As described_ on the mswatch page, every sync is redundantly issued
+        twice.  To address this would require modifying or reimplementing
+        mswatch itself.
+        
+        .. _described: http://mswatch.sourceforge.net/#limitations
+        
+        * maildrop and gnus splitting?
+        
+        Maybe have maildrop directly invoke Gnus splitting and feed
+        incomming messages to be split at time of delivery.  This would
+        eliminate redundant syncs on the INBOX where gnus would otherwise
+        just immediately move the message into another folder.  This
+        approach is, however, probably way to heavy for a maildrop pipeline.
+        
+        An alternative approach would be to use a maildir (~/Incomming)
+        separate from the real INBOX maildir (~/Maildir) where mails would
+        first be delivered.  This incomming maildir could be monitored using
+        a checker/watcher whose only real purpose is to get gnus to check
+        the incomming maildir and split messages.  The split would then move
+        the message to the destination or fallback to the real INBOX maildir
+        which would in turn trigger any real watchers/checkers used by
+        mswatch.
+        
+        This approach requires no additional mailsync support.  It also
+        keeps maildrop job small and light, decoupling the gnus splitting
+        work from delivery.
+        
+        An advantage of either approach is that mail would be split on the
+        server even when the local mswatch wasn't connected.  As it is now,
+        mail is only split when mswatch is running or if the Gnus running on
+        the server checks all mail periodically.
+        
+        * Use Gamin
+        
+        Use Gamin to provide compatibility across the file modification
+        services available.
+        
+        
+        Changelog
+        =========
+        
+        0.3 - 2008-05-13
+        ----------------
+        
+        * Clarify and correct documentation
+        
+        0.2 - 2008-05-07
+        ----------------
+        
+        * Fix handling of site-lisp for easy_install
+        
+        0.1 - 2008-05-01
+        ----------------
+        
+        * Initial release
+        
+        0.0 - Backstory
+        ---------------
+        
+        It is amazing that `MUAs do indeed still suck`_.  In my case this is
+        exacerbated by a strong preference to use Gnus as my MUA.  Thunderbird
+        may be great, but since it lacks good integration with Emacs (and no,
+        emacsclient external editor is not enoug), it really doesn't matter.
+        
+        I began by using nnimap to access dovecot on my server.  I was still a
+        Gnus newbie at that time and I ran into many problems with nnimap.  I
+        tried using the Gnus agent to address these but then my head and my
+        Emacs exploded in unison.
+        
+        As many others have before, I moved on to sync the ~/Maildir on my
+        server with a full local copy using OfflineIMAP.  Then I setup gnus on
+        my laptop to use nnimap talking to Dovecot running locally on my
+        laptop.  This worked fabulously with one exception, I had to choose
+        between how quickly new mail would show up and how much bandwidth
+        OfflineIMAP would use.  I'm pretty impatient about my email, so with a
+        sync frequency of every minute, I found that OfflineIMAP could easily
+        saturate what little bandwidth was available at a cafe or somesuch.
+        Lengthening the frequency only improved things slightly since every 5
+        minutes or what have you, my web browsing would still slow to a crawl.
+        I assume I was also slowing down everyone else, please don't tell
+        them.  Still I used this approach for a year or more since I could
+        think of nothing better.
+        
+        Time went on and I used more and more of Gnus' features.  I have a
+        beautiful BBDB fancy splitting setup.  I use automatic scoring which
+        is just a delight.  I agree that Gnus is much too hard to learn and
+        configure, but in all honesty, it could be even harder and I'd still
+        use Gnus.
+        
+        Later, with much more Gnus experience under my belt, I blew away my
+        .emacs and .gnus.el determined to use nnimap and the agent now that I
+        was more proficient.  I set it all up and it all seemed to work but as
+        time went on I kept running into more and more problems.  Over and
+        over again, the Group buffer would show inaccurate counts of new
+        messages or not show new messages at all.  I'd find that articles
+        hadn't been downloaded after all so I wasn't able to read them
+        offline.  I came to resemble a Skinarian pigeon, genuflecting before
+        Gnus in the face of chaos with mysterious combinations of "C-u g" and
+        "M-x gnus-agent-regenerate".  In addition to those and many other
+        small annoyances, there was still the bandwidth vs check frequency
+        issue, only this time every time the mail would be checked my emacs
+        would block as well.
+        
+        Then I learned about IMAP IDLE and was beside myself with excitement.
+        Then I learned that neither OfflineIMAP nor Gnus nnimap supported it
+        and that Thunderbird did and I found myself seriously considering
+        switching.  Reluctance to leave Gnus, however, kept me googling for
+        some time and eventually I found mswatch.  Really a trio of three
+        utilities, mswatch uses Linux's file modification notification system
+        (inotify or dnotify) to synchronize maildirs as needed.
+        
+        Initially, I tried mswatch with its intended sync program, mbsync, but
+        mbsync cannot sync nested IMAP folders.  The author of mswatch was
+        kind enough to document clearly the interfaces used for the separate
+        processes, so I set about writing a script that wraps OfflineIMAP to
+        provide the mswatch interface.  For the first time, I finally had a
+        mail setup that delivered new mail quickly and didn't consume obscene
+        amounts of bandwidth.
+        
+        But wait, I use Gnus splitting with BBDB, so whenever mail arrived in
+        the INBOX on my server, it would be synced to my laptop which Gnus
+        would then split into its destination and then it would be synced back
+        to the server.  This little dance doubles the bandwidth consumption.
+        Furthermore, I've always wanted my BBDB splitting to be done on my
+        server for those times when I use Gnus in an SSH session or when I
+        access my mail from another IMAP client.  So I also wanted to notify
+        my gnus runnong on my server when when mail arrived.
+        
+        So then I set about writing a checker script that wraps the mswatch's
+        watcher processes and uses "emacsclient --eval" to tell Gnus to check
+        the folder where a change has occurred.  On my server, this means the
+        mail will be split before notifying the mswatch process that a change
+        has occurred which means that mswatch will also synchronize the folder
+        the message was moved to.  No more round trip.  This also has the
+        added benefit of keeping Gnus up to date on all of my mail folders
+        without having to use gnus-demon to periodically check all folders.
+        All in all, *much* faster, very current information, and much less
+        interruptions.
+        
+        There are many things about this solution that are hackish and
+        inefficient so I'd say it's somewhere between %75 and %80 there, as it
+        were.  Given, however, that no previous solution has even broken %50
+        I'm happy as a clam for now.
+        
+        .. _`MUAs do indeed still suck`: http://groups.google.com/group/linux.debian.user/msg/7594165a2b6d1c49
+        
+Platform: UNKNOWN
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
