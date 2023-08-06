@@ -1,0 +1,226 @@
+Template classes
+================
+
+The ``chameleon.zpt`` package provides the ``PageTemplate`` and
+``PageTemplateFile`` classes which allow easy usage of templates in
+your application.
+
+Usage
+-----
+
+  >>> from chameleon.zpt.template import PageTemplate
+  
+  >>> print PageTemplate("""\
+  ... <div xmlns="http://www.w3.org/1999/xhtml">
+  ...   Hello World!
+  ... </div>""")()
+  <div xmlns="http://www.w3.org/1999/xhtml">
+    Hello World!
+  </div>
+
+  >>> from chameleon.zpt.template import PageTemplateFile
+  >>> from chameleon.zpt import tests
+  
+  >>> path = tests.__path__[0]
+  >>> t = PageTemplateFile(path+'/helloworld.pt')
+  >>> print t()
+  <div xmlns="http://www.w3.org/1999/xhtml">
+    Hello World!
+  </div>
+
+  >>> import os
+  >>> t.filename.startswith(os.sep)
+  True
+
+METAL template integration
+--------------------------
+
+Page templates expose macros in their ``macros`` attribute. A
+``macros`` global variable exposes the original (ie, source) template
+macros, while ``template`` is always the template being executed.
+
+  >>> main = PageTemplate("""\
+  ... <html xmlns="http://www.w3.org/1999/xhtml"
+  ...       xmlns:tal="http://xml.zope.org/namespaces/tal"
+  ...       xmlns:metal="http://xml.zope.org/namespaces/metal"
+  ...       metal:define-macro="master"
+  ...       template-macros="${' '.join(template.macros.names)}"
+  ...       macros="${' '.join(macros.names)}">
+  ...     <metal:block tal:define="foo 'foo'">
+  ...       Who are you, ${foo}?
+  ...       <div metal:define-slot="content" tal:replace="None">
+  ...          I will be replaced
+  ...       </div>
+  ...     </metal:block>
+  ... </html>""")
+
+  >>> print main()
+  <html xmlns="http://www.w3.org/1999/xhtml" template-macros="master" macros="master">
+  <BLANKLINE>
+        Who are you, foo?
+  <BLANKLINE>
+  <BLANKLINE>
+  </html>
+
+A template provides access to its macros through the ``macros``
+dictionary.
+  
+  >>> main.macros['master']
+  <chameleon.core.template.Macro object at ...>
+
+Only macros which exist in the template may be accessed.
+  
+  >>> main.macros['bad_macro']
+  Traceback (most recent call last):
+   ...
+  KeyError: 'bad_macro'
+  
+  >>> content = PageTemplate("""\
+  ... <div xmlns="http://www.w3.org/1999/xhtml"
+  ...      xmlns:tal="http://xml.zope.org/namespaces/tal"
+  ...      xmlns:metal="http://xml.zope.org/namespaces/metal"
+  ...      metal:use-macro="main.macros['master']">
+  ...     <div template-macros="${' '.join(template.macros.names)}"
+  ...          macros="${' '.join(macros.names)}"
+  ...          metal:fill-slot="content">
+  ...         <tal:block tal:define="bar 'boo'" i18n:domain="bar">
+  ...           I replace you: ${dummy|foo} (${bar}).
+  ...         </tal:block>
+  ...     </div>
+  ...     <metal:block metal:define-macro="content" />
+  ... </div>""")
+
+  >>> print content(main=main, bar='bar')
+  <html xmlns="http://www.w3.org/1999/xhtml"
+        template-macros="content" macros="master">
+    Who are you, foo?
+    <div template-macros="content" macros="content">
+       I replace you: foo (boo).
+    </div>
+  </html>  
+
+It is possible to extend a macro, re-use a macro from a different
+template in the extended macro, and re-define a slot within a
+fill-slot, using the same name as the filled slot:
+
+  >>> form = PageTemplate("""\
+  ... <html xmlns="http://www.w3.org/1999/xhtml"
+  ...       xmlns:tal="http://xml.zope.org/namespaces/tal"
+  ...       xmlns:metal="http://xml.zope.org/namespaces/metal">
+  ...   <div metal:define-macro="form">
+  ...      <metal:block define-slot="extra_info" />
+  ...   </div>
+  ... </html>""")
+
+  >>> another = PageTemplate("""\
+  ... <html xmlns="http://www.w3.org/1999/xhtml"
+  ...       xmlns:tal="http://xml.zope.org/namespaces/tal"
+  ...       xmlns:metal="http://xml.zope.org/namespaces/metal"
+  ...       metal:define-macro="body">
+  ...       <metal:block use-macro="form.macros['form']">
+  ...         <metal:block fill-slot="extra_info">
+  ...            <metal:block define-slot="extra_info" />
+  ...         </metal:block>
+  ...      </metal:block>
+  ... </html>""")
+
+  >>> content = PageTemplate("""\
+  ... <div xmlns="http://www.w3.org/1999/xhtml"
+  ...      xmlns:tal="http://xml.zope.org/namespaces/tal"
+  ...      xmlns:metal="http://xml.zope.org/namespaces/metal"
+  ...      metal:use-macro="another.macros['body']">
+  ...     <span metal:fill-slot="extra_info">
+  ...        Baz, you?
+  ...     </span>
+  ... </div>""")
+
+  >>> print content(another=another, form=form)
+  <html xmlns="http://www.w3.org/1999/xhtml">
+    <div>
+      <span>
+         Baz, you?
+      </span>
+    </div>
+  </html>
+
+Error handling
+--------------
+
+When an exception is raised which does not expose a bug in the TAL
+translation machinery, we expect the exception to contain the part of
+the template source that caused the exception.
+
+Exception while evaluating expression:
+
+  >>> PageTemplate("""\
+  ... <div xmlns="http://www.w3.org/1999/xhtml"
+  ...      xmlns:tal="http://xml.zope.org/namespaces/tal">
+  ...   <span tal:content="range()" />
+  ... </div>""").render()
+  Traceback (most recent call last):
+    ...
+  RuntimeError: Caught exception rendering template.
+    ...
+  TypeError: range expected at least 1 arguments, got 0
+
+Exception while evaluating definition:
+
+  >>> PageTemplate("""\
+  ... <div xmlns="http://www.w3.org/1999/xhtml"
+  ...      xmlns:tal="http://xml.zope.org/namespaces/tal">
+  ...   <span tal:define="dummy range()" />
+  ... </div>""").render()
+  Traceback (most recent call last):
+    ...
+  RuntimeError: Caught exception rendering template.
+    ...
+  TypeError: range expected at least 1 arguments, got 0
+
+Exception while evaluating interpolation:
+
+  >>> PageTemplate("""\
+  ... <div xmlns="http://www.w3.org/1999/xhtml"
+  ...      xmlns:tal="http://xml.zope.org/namespaces/tal">
+  ...   <span>${range()}</span>
+  ... </div>""").render()
+  Traceback (most recent call last):
+    ...
+  RuntimeError: Caught exception rendering template.
+    ...
+  TypeError: range expected at least 1 arguments, got 0
+
+
+Output Encoding Handling
+------------------------
+
+When a character can't be output in the requested output encoding, it
+should be encoded to the numeric character reference:
+
+  >>> print PageTemplate(u"""\
+  ... <html xmlns="http://www.w3.org/1999/xhtml">
+  ...   <body class="U Can\u2019t Touch This.">
+  ...      U Can\u2019t Touch This.
+  ...      <span tal:replace="test" />
+  ...      <span tal:attributes="test test" tal:content="test" />
+  ...      <span tal:content="string:U Can&#8217;t Touch This." />
+  ...  </body>
+  ... </html>""".encode("utf-8"), encoding="latin-1")(
+  ...     test=u"U Can\u2019t Touch This.")
+  <html xmlns="http://www.w3.org/1999/xhtml">
+   <body class="U Can&rsquo;t Touch This.">
+       U Can&#8217;t Touch This.
+       U Can&#8217;t Touch This.
+       <span test="U Can&#8217;t Touch This.">U Can&#8217;t Touch This.</span>
+       <span>U Can&#8217;t Touch This.</span>
+   </body>
+  </html>
+
+Otherwise, it is output as-is:
+
+  >>> print PageTemplate(u"""\
+  ... <html xmlns="http://www.w3.org/1999/xhtml">
+  ...   <body>U Can\u2019t Touch This.</body>
+  ... </html>""".encode("utf-8"))()
+  <html xmlns="http://www.w3.org/1999/xhtml">
+    <body>U Can’t Touch This.</body>
+  </html>
