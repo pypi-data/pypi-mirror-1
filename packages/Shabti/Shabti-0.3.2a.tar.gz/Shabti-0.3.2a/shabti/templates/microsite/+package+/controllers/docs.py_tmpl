@@ -1,0 +1,87 @@
+# -*- coding: utf-8 -*-
+import logging
+
+from pylons import tmpl_context as c
+from pylons.controllers.util import redirect_to
+
+from {{package}}.lib.base import BaseController, render
+
+log = logging.getLogger(__name__)
+
+import os
+from {{package}}.lib.base import *
+from {{package}}.lib.helpers import dcmeta
+from {{package}}.lib.decorators import authorize
+from {{package}}.lib.auth.permissions import SignedIn
+
+import pickle
+
+def unpickle(fname):
+    # @@FIXME: Temporary solution, could be stored in the SQLite db.
+    pkl_base = '{{package}}/public/web'
+    pkl_ext = 'fpickle'
+    try:
+        d = pickle.load(open('%s/%s.%s' % (pkl_base, fname, pkl_ext), 'rb'))
+    except IOError:
+        d = pickle.load(open('%s/%s/index.%s' % (pkl_base, fname, pkl_ext), 'rb'))
+    return d
+
+notpresent = """
+<h1>Alternate Pylons documentation</h1>
+<p>
+A small, convenient facility for browsing the Pylons documentation.
+</p>
+<p>
+Pylons docs don't include Shabti. In order for this doco browsing facility
+to function it is necessary to copy the fpickle files (produced by Sphinx' 
+"make web" command) into <span style="color:#f00">coastal/public/web</span>.
+</p>
+
+<p>If you are connected to the net you can have Shabti do this for you. 
+Clicking the link below will download a tar.bz2 file from my server 
+(<a href="http://bel-epa.com/area51/library/pylonsdocs.tar.bz2">here</a>, 
+if you'd rather handle this personally) and extract the files into a 
+subdirectory called "web" in this project's "public" folder.</p>
+<p>You may want to make a copy of this new folder because you will  
+probably later delete this throwaway project along with its contents.</p>
+<p><a href="/docs/install">Yes, install docs</a></p> 
+"""
+
+class DocsController(BaseController):
+
+    # Need to protect an entire controller?
+    # Decorating __before__ protect all actions
+    # @authorize(SignedIn())
+    def __before__(self):
+        # pass
+        c.dcmeta = dcmeta(title="Alternative Pylons Refence Documentation")
+    
+
+    def show(self, uri='index'):
+        c.title = 'Index'
+        if os.path.exists('./{{package}}/public/web/index.fpickle'):
+            if uri.endswith('/'): uri = uri[:-1]
+            c.dcmeta.title  = dcmeta.title + ' :: ' + c.title
+            c.page = unpickle(uri)
+        else:
+            c.page = dict(body=notpresent)
+        return render('docs.mak')
+    
+
+    def servimg(self, uri=''):
+        return redirect_to(str('/web/_images/%s' % uri))
+    
+
+    def install(self):
+        if not os.path.exists('./{{package}}/public/web'):
+            import urllib2
+            import tarfile
+            import bz2
+            from StringIO import StringIO
+            uri = 'http://bel-epa.com/area51/library/pylonsdocs.tar.bz2'
+            response = urllib2.urlopen(uri)
+            tardocs = tarfile.TarFile(fileobj=StringIO(bz2.decompress(response.read())))
+            dest = os.getcwd()+'/{{package}}/public'
+            tardocs.extractall(path=dest)
+        return redirect_to('/docs/index')
+    

@@ -1,0 +1,84 @@
+from pylons import config
+from rdfalchemy import *
+from rdfalchemy.orm import mapper
+from {{package}}.model import meta
+from rdflib import ConjunctiveGraph, URIRef
+from elixir import events
+import hashlib
+
+class NotAuthenticated(Exception):pass
+
+import logging
+log=logging.getLogger('rdfalchemy')
+
+def encrypt_value(value):
+    return hashlib.sha1(value).hexdigest()
+
+# try:
+#     rdfSubject.db = config['rdfalchemy.ra_engine']
+# except KeyError:
+#     rdfSubject.db = ConjunctiveGraph()
+
+foaf = Namespace("http://xmlns.com/foaf/0.1/")
+usr = Namespace("http://islab.hanyang.ac.kr/damls/User.daml#")
+purl = Namespace("http://purl.org/dc/terms/")
+dc = Namespace("http://purl.org/dc/elements/1.1/")
+cc = Namespace("http://web.resource.org/cc/")
+icalh = Namespace("http://ilrt.org/discovery/2001/06/schemas/ical-full/hybrid.rdf#")
+
+class User(rdfSubject):
+    rdf_type = foaf.Agent
+    username = rdfSingle(foaf.name)
+    password = rdfSingle(usr.Password)
+    password_check = rdfSingle(usr.Password)
+    email = rdfSingle(foaf.mbox)
+    created = rdfSingle(purl.created)
+    active = rdfSingle(icalh.BOOLEAN)
+
+    @classmethod
+    def authenticate(cls, username, password):
+        try:
+            user=cls.get_by(username=username)
+            if user and encrypt_value(password) == user.password:
+                return user
+        except Exception:
+            raise NotAuthenticated
+        raise NotAuthenticated
+
+    @events.before_insert
+    @events.before_update
+    def encrypt_password(self):
+        if self.password and self.password != self.password_check:
+            self.password = encrypt_value(self.password)
+            self.password_check = self.password
+
+    @property
+    def permissions(self):
+        permissions = set()
+        for g in self.groups:
+            permissions = permissions | set(g.permissions)
+        return permissions        
+
+    @property
+    def permission_names(self):
+        return [p.name for p in self.permissions]
+
+    def has_permission(self, perm):
+        return (perm in self.permission_names)
+
+class Group(rdfSubject):
+    rdf_type = foaf.Group
+    name = rdfSingle(dc.title)
+    description = rdfSingle(dc.description)
+    created = rdfSingle(purl.created)
+    active = rdfSingle(icalh.BOOLEAN)
+    users = rdfMultiple(foaf.Person)
+    permissions = rdfMultiple(cc.Permission)
+
+class Permission(rdfSubject):
+    rdf_type = cc.Permission
+    name = rdfSingle(dc.title)
+    description = rdfSingle(dc.description)
+    groups = rdfMultiple(foaf.Group)
+
+mapper()

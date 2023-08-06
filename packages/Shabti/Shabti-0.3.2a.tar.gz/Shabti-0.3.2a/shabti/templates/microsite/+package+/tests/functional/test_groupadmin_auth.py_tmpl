@@ -1,0 +1,101 @@
+from datetime import datetime, timedelta
+import time
+import hashlib
+from pylons import url, config
+from {{package}}.model import *
+from {{package}}.tests import *
+
+class TestGroupAdminController(TestAuthenticatedController):
+
+    def setUp(self):
+        TestModel.setUp(self)
+    
+
+    def tearDown(self):
+        TestModel.tearDown(self)
+        Session.close()
+    
+
+    def test_authorised_group_GET_allowed(self):
+        """Authorised group GET requests are permitted"""
+        response = self.app.get(url=url(controller='groups', action='show', id=1))
+        
+        assert response.status_int == 200
+    
+
+    def test_authorised_group_GET_nonexistent_prohibited(self):
+        """Authorised but improper page GET requests are prohibited"""
+        response = self.app.get(url=url(controller='groups', action='show', id=20),
+                                status=404,
+                                expect_errors=True)
+        
+        assert response.status_int == 404
+    
+
+    def test_authorised_group_GET_update_prohibited(self):
+        """Authorised group GET update requests are prohibited"""
+        response = self.app.get(url=url(controller='groups', action='update', id='1'),
+                                params={'name': 'Fake Name'},
+                                status=404,
+                                expect_errors=True)
+
+        assert response.status_int == 404
+    
+
+    def test_authorised_group_GET_delete_prohibited(self):
+        """Authorised group GET delete requests are prohibited"""
+        response = self.app.get(url=url('delete_group',id=1),
+                                status=404,
+                                expect_errors=True)
+        
+        assert Session.query(Group).get(1) != None
+    
+
+    def test_authorised_group_DELETE_nonexistent_prohibited(self):
+        """Authorised deletions of non-existent groups are prohibited"""
+        response = self.app.delete(url=url(controller='groups', action='delete', id='4'),
+                                   status=404,
+                                   expect_errors=True)
+        
+        assert response.status_int == 404
+    
+
+    def test_authorised_group_PUT_update_allowed(self):
+        """Authorised group POST updated requests are permitted"""
+
+        d = dict(name=u"Fake Name",description=u"Fake description", _method="PUT")
+        
+        response = self.app.post(url=url(controller='groups', action='update', id=1),
+                                 params=d)
+        
+        newresponse = response.follow()
+        
+        name1 = newresponse.forms.get('group_form').fields.get('name', '')[0].value
+            
+        assert name1 == 'Fake Name'
+    
+
+    def test_authorised_group_POST_create_allowed(self):
+        """Authorised group PUT(POST) create requests are permitted"""
+        # Step one, retrieve the resource from /user/new ..
+        response = self.app.get(url=url(controller='groups', action='new'))
+        
+        form = response.forms.get('new_group_form')
+
+        d = dict(name=u"Fake Name",
+                 description=u"Fake description")
+        
+        # Step two, insert the new values
+        for k in d.keys():
+            form.set(k, d[k])
+        
+        # Step 4, submit the form and test the database for
+        # the expected addition
+        res = form.submit()
+        
+        newgroups = Session.query(Group).filter_by(name=u'Fake Name').all()
+        
+        assert len(newgroups) == 1
+        
+        assert newgroups[0].name == u'Fake Name'
+    
