@@ -1,0 +1,302 @@
+Creating own feeds and syndicating your own content types
+=========================================================
+
+Creating your own feeds and enabling your own content types for outbound syndication is quite easy, you only need to provide adapters which map your attributes to the ones required by the IFeed and IFeedItem interfaces. 
+This document will show you how to do that.
+
+Some useful imports go first:
+
+    >>> from vice.outbound.interfaces import IFeed, IFeedItem, IFeedConfigs, IFeedable, IFeedUUID, IItemUUID, IFeedSettings
+    >>> from vice.outbound.feedformats.interfaces import IFeedFormats
+    >>> from vice.outbound.feedconfig import FeedConfig
+    >>> from DateTime import DateTime
+    >>> from zope.component import provideAdapter, adapts, queryMultiAdapter, getMultiAdapter, getUtility
+    >>> from zope.interface import implements, Interface, Attribute, classImplements
+    >>> from zope.interface.verify import verifyClass
+    >>> from vice.zope2.outbound.utils import RFC3339
+    >>> from zope.annotation.interfaces import IAnnotatable
+    >>> from zope.publisher.browser import TestRequest
+
+As the first and most important task we will generally enable syndication withing the global FeedSettings.
+
+    >>> getUtility(IFeedSettings).enabled = True
+
+Now we will start with a simple container type which can store objects and provide a feed of them. 
+
+    >>> class IArticleContainer(Interface):
+    ...     title = Attribute(u"The Title of the Article Container")
+    ...     articles = Attribute(u"Articles stored in a very simple way")
+    ...     modified = Attribute(u"The last modification date")
+
+    >>> class ArticleContainer:
+    ...     implements(IArticleContainer)
+    ...     title = ""
+    ...     def __init__(self, id, title):
+    ...         self.id = id
+    ...         self.title = title
+    ...         self.articles = {}
+    ...         self.last_modified = DateTime()
+    ...     def modified(self):
+    ...         return self.last_modified
+    ...     def add(self, article):
+    ...         self.articles[article.id] = article
+    ...         self.last_modified = DateTime()
+    ...     def values(self):
+    ...         return self.articles.values()
+                
+    
+Now we flag the container as IFeedable to declare that it can be turned into a feed. Also we need IAnnotatable to store the feed config. This will probably be  done using zcml for a real product.
+    
+    >>> classImplements(ArticleContainer, IFeedable)
+    >>> classImplements(ArticleContainer, IAnnotatable)
+
+
+Next we create an adapter for the container to adapt it to IFeed. Besides some typical feed properties it defines the way how the items for the feed should be retrieved using its __iter__ and feed_items methods.
+Look at vice.plone.outbound.browser.atct for a more complex example.
+
+    >>> class ArticleContainerFeed(object):
+    ...     """ Class for article feeds.  
+    ...     """
+    ...     implements(IFeed)
+    ...     adapts(IArticleContainer, str, str)
+    ...     description = u'Articles'
+    ...
+    ...     def __init__(self, context, feed_id, item_adapter_name):
+    ...         self.context = context
+    ...         self.feed_id = feed_id
+    ...         self.item_adapter_name = item_adapter_name
+    ... 
+    ...     def __iter__(self):
+    ...         """Iterator for all syndicated items in this feed.  This returns
+    ...         all items (ordered descending by their modified date) marked with
+    ...         the IFeedItem interface, up to the max items for the feed.
+    ...         """
+    ...         max_items = IFeedConfigs(self.context).max_items
+    ...         return self.feed_items(max_items, False)
+    ... 
+    ...     def feed_items(self, max_items, recurse=False):
+    ...         """ fetching the articles from the current folder"""
+    ...         elems = self.context.values()
+    ...         # sort the elems by modification date
+    ...         elems.sort(lambda x,y: cmp(x.modified, y.modified))
+    ...         elems.reverse()
+    ... 
+    ...         for elem in elems:
+    ...             item = queryMultiAdapter((elem, self), IFeedItem, 
+    ...                                      name=self.item_adapter_name)
+    ...             if item is not None:
+    ...                 yield item
+    ...                 max_items = max_items - 1
+    ...                 if max_items == 0:
+    ...                     return
+    ...     @property
+    ...     def modified(self):
+    ...         return self.context.modified()
+    ...     @property
+    ...     def modifiedString(self):
+    ...         return RFC3339(self.modified)
+    ...     @property
+    ...     def name(self):
+    ...         return self.context.__name__
+    ...     @property
+    ...     def title(self):
+    ...         return self.context.title
+    ...     @property
+    ...     def UID(self):
+    ...         u = IFeedUUID(self)
+    ...         return u.UUID
+    ...     @property
+    ...     def config(self):
+    ...         s = IFeedConfigs(self.context)
+    ...         return s.findConfigByID(self.feed_id)
+    ...     @property
+    ...     def alternate_url(self):
+    ...         return "/%s" % self.context.id
+    ...     @property
+    ...     def self_url(self):
+    ...         return ('%s/%s/%s' 
+    ...                 % (self.alternate_url, self.config.format, self.config.id()) )
+    
+Next, we need to provide that adapter under the name 'vice-default' as this name is used by the vice machinery. You would usually do that in zcml (An example can be found at vice.plone.outbound:adapters/configure.zcml).
+
+    >>> provideAdapter(ArticleContainerFeed, name='vice-default')
+    >>> verifyClass(IFeed, ArticleContainerFeed)
+    True
+    >>> IFeed.implementedBy(ArticleContainerFeed)
+    True
+    
+Now we create the article container object which we will use to generate a feed from. To do that we need to configure the feed first. This is done using the IFeedConfigs adapter.
+
+    >>> article_container = ArticleContainer("my_container", "Container for Articles")
+    >>> config = FeedConfig()
+    >>> config.name = 'vice-default'
+    >>> config.format = 'atom'
+    >>> config.enabled = True
+    >>> IFeedConfigs(article_container).configs = (config,)
+
+All the preparation is done, we can now retrieve the feed from the container. Even though it does not contain any objects yet, the container is able to act as a feed.
+
+    >>> format_info =  getUtility(IFeedFormats).getFormatInfo(config.format)
+    >>> feed_adapter_name = format_info['feed_adapter_name']
+    >>> item_adapter_name = format_info['item_adapter_name']
+    >>> feed = getMultiAdapter((article_container, feed_adapter_name, item_adapter_name), 
+    ...                         IFeed, name=feed_adapter_name)
+    
+'feed' now represents the feed we can render. It contains all items to syndicate from within the container. As we have not yet added any articles, the feed should be empty.
+    
+    >>> feed_items = [x for x in feed]
+    >>> len(feed_items)
+    0
+
+We now want some articles to sow up in the feed. Again we first create a simple content type to represent an article with some fields. The title of the article will serve as the title of the feed item, the abstract and the author will go into the description part of the feed and the published date will be used as the last modified attribute.
+
+First we setup a class for the article containing those attributes:
+
+    >>> class IArticle(Interface):
+    ...     title = Attribute(u'Title of the Article')
+    ...     author = Attribute(u'Author of the Article')
+    ...     abstract = Attribute(u'Abstract of the Article')
+    ...     published = Attribute(u'Publication Date of the Article')
+    
+    >>> class Article:
+    ...     implements(IArticle)
+    ...     title = ""
+    ...     author = ""
+    ...     abstract = ""
+    ...     published = None
+    ...     def __init__(self, id, title, author='', abstract='', published=None):
+    ...         self.id = id
+    ...         self.title = title
+    ...         self.author = author
+    ...         self.abstract = abstract
+    ...         self.published = published
+
+The Article class needs to implement IKeyReference so a UUID can be generated
+
+    >>> from zope.app.keyreference.interfaces import IKeyReference
+    >>> classImplements(Article, IKeyReference)
+
+And then we create an article object and add it to the article container:
+    
+    >>> my_article = Article(id='my_article', 
+    ...                      title = u"Creating FeedItem adapters", 
+    ...                      author = u"Vice Development Team",
+    ...                      abstract = u"This article will teach you all you need to know \
+    ...                                   about how to create your own adapters.",
+    ...                      published = DateTime('2008/10/10')
+    ...             )
+    >>> article_container.add(my_article)
+    >>> len(article_container.values())
+    1
+
+Let's look at the feed again. As we don't have an adapter for the article yet which adapts it to IFeedItem, the feed still does not contain any items.
+
+    >>> feed_items = [x for x in feed]
+    >>> len(feed_items)
+    0
+
+So now we add that adapter to make Article a FeedItem.
+
+    >>> class ArticleFeedItem(object):
+    ...     """Adapter from IArticle to IFeedItem.
+    ...     """
+    ...     implements(IFeedItem)
+    ...     adapts(IArticle, IFeed)
+    ...
+    ...     def __init__(self, context, feed):
+    ...         self.context = context
+    ...         self.feed = feed
+    ...     @property
+    ...     def title(self):
+    ...         return self.context.title
+    ...     @property
+    ...     def description(self):
+    ...         return self.context.abstract
+    ...     @property
+    ...     def url(self):
+    ...         return self.context.id
+    ...     @property
+    ...     def relatedUrls(self):
+    ...         return []
+    ...     @property
+    ...     def body(self):
+    ...         """ The syndicated body for articles should contain the abstract 
+    ...             and the authors name together """
+    ...         return "%s by %s" % (self.context.abstract, self.context.author)
+    ...     @property
+    ...     def XHTML(self):
+    ...         return None
+    ...     @property
+    ...     def UID(self):
+    ...         u = getMultiAdapter((self.feed, self), IItemUUID)
+    ...         return u.UUID
+    ...     @property
+    ...     def author(self):
+    ...         return self.context.author
+    ...     @property
+    ...     def effective(self):
+    ...         """ We want the article effective from its publishing date """
+    ...         return self.context.published
+    ...     @property
+    ...     def effectiveString(self):
+    ...         return RFC3339(self.effective)
+    ...     @property
+    ...     def modified(self):
+    ...         """ We want articles to stay in the order of their publishing date, 
+    ...             so we return that for the modified date as well """
+    ...         return self.context.published
+    ...     @property
+    ...     def modifiedString(self):
+    ...         return RFC3339(self.modified)
+    ...     @property
+    ...     def tags(self):
+    ...         """ We don't support that for articles :) """
+    ...         return []
+    ...     @property
+    ...     def rights(self):
+    ...         """ We don't support that for articles :) """
+    ...         return []
+    ...     @property
+    ...     def enclosure(self):
+    ...         return None
+
+Provide that adapter under the name 'vice-default' as this name is used by the vice machinery. You would usually do that in zcml (An example can be found at vice.plone.outbound:adapters/configure.zcml).
+
+    >>> provideAdapter(ArticleFeedItem, name='vice-default')
+    >>> verifyClass(IFeedItem, ArticleFeedItem)
+    True
+    >>> IFeedItem.implementedBy(ArticleFeedItem)
+    True
+
+
+Now read the feed from the container again, exactly as we did above. Now we expect the feed to contain one item. 
+
+    >>> feed_items = [x for x in feed]
+    >>> len(feed_items)
+    1
+
+Also the first item of the feed_items is the representation of the article:
+    
+    >>> feed_items[0].description == my_article.abstract
+    True
+    >>> feed_items[0].context.id
+    'my_article'
+
+Now that we have a feed with an item in it, we will also generate the feed representation from it.
+
+    >>> FakeRequest = TestRequest(TraversalRequestNameStack=['vice-default'])
+    >>> ATOM = getMultiAdapter((article_container, FakeRequest), name="atom")
+    >>> xml = ATOM()
+    
+'xml' now contains the Atom feed representation in xml and it has our container and the article item in it.
+ 
+    >>> article_container.title in xml
+    True
+    >>> my_article.title in xml
+    True
+
+For more examples please take a look at vice.plone.outbound:adapters/atct.py for the plone style versions to adapt the ATContentTypes.
+
+
+
+
