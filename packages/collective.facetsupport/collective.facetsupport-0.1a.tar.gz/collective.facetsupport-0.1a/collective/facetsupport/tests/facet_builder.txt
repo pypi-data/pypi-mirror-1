@@ -1,0 +1,90 @@
+Doctests for the FacetBuilder adapter
+=====================================
+
+    >>> from collective.facetsupport.interfaces import IFacetBuilder
+
+We use a collection called 'collection' as context
+
+    >>> context = self.portal.collection
+    >>> context.portal_type
+    'Topic'
+
+The collection is setup with the following query:
+
+    >>> context.buildQuery()
+    {'sort_order': 'reverse', 'sort_on': 'created', 'Type': ('News Item', 'Page')}
+
+If we use this context for the facet builder, these parts will always be part of the query.
+
+Currently, there should be 11 items as a result. The front-page + 5 dummy news items and 5 dummy pages
+
+    >>> [x.Title for x in context.queryCatalog() if x.portal_type == 'Document']
+    ['doc1', 'doc2', 'doc3', 'doc4', 'doc5', 'Welcome to Plone']
+    
+    >>> [x.Title for x in context.queryCatalog() if x.portal_type == 'News Item']
+    ['news1', 'news2', 'news3', 'news4', 'news5']
+
+Some of these content types have Subject set. All of them have portal_type of course.
+
+Let's add the adapter to this context:
+
+    >>> fb = IFacetBuilder(context)
+
+The adapter works by checking the context.REQUEST object and then populating context.REQUEST.facetbuilder. This isn't done automatically.
+For this to work, we need to know which facets to work with. Facets are always catalog indexes.
+
+    >>> use_indexes = ['portal_type','Subject']
+    >>> data = fb.facet_data(use_indexes)
+
+The result is a dictionary with the following layout:
+
+    >>> type(data)
+    <type 'dict'>
+    >>> data.keys()
+    ['query', 'facets']
+
+Query contains the original query string sent to the queryCatalog method.
+
+    >>> data['query']
+    {}
+
+Facets are the facets in this context and their items
+
+    >>> [x.facet for x in data['facets']]
+    ['portal_type', 'Subject']
+
+To achieve that and as a convenience, we store the returned data in the request
+
+    >>> request = context.REQUEST
+    >>> request.facetsupport = data
+
+Once the request is stored, we can use more of the adapters functionality.
+For convenience and convention, we store the weight (count) for each facet item in the request as well.
+We need to pass along the facets we want to calculate for here as well.
+
+    >>> fb.add_weight_data(request.facetsupport['facets'])
+    >>> request.facetsupport['facets'][0].weight
+    {'Topic': 0, 'Large Plone Folder': 0, 'Folder': 0, 'Document': 6, 'News Item': 5}
+
+
+We also need to construct suitable queries for the different selections.
+To do this, we use Zopes make_query
+
+    >>> from ZTUtils.Zope import make_query
+    >>> query = fb.facet_query(Subject='Apple',portal_type='Topic')
+    >>> query
+    {'portal_type': 'Topic', 'Subject': 'Apple'}
+    >>> make_query(query)
+    'portal_type=Topic&Subject=Apple'
+
+Remember that you're getting the actual request, so if you want to remove things you better copy the query first.
+
+Weight is a part of each facet object
+    
+    >>> facetobj = request.facetsupport['facets'][0]
+    >>> facetobj.facet
+    'portal_type'
+    >>> facetobj.weight.get('Document')
+    6
+
+    

@@ -1,0 +1,97 @@
+Browser tests
+=============
+
+Setup and login:
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> from Products.PloneTestCase.setup import portal_owner, default_password
+    >>> browser = Browser()
+    >>> browser.handleErrors = False
+    >>> portal_url = self.portal.absolute_url()
+    >>> browser.open(portal_url)
+    >>> browser.getLink('Log in').click()
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+    >>> "You are now logged in" in browser.contents
+    True
+ 
+The collection should now display some of the stuff we've added.
+ 
+    >>> context = self.portal.collection
+    >>> browser.open(context.absolute_url())
+    >>> "doc1" in browser.contents
+    True
+    >>> "news5" in browser.contents
+    True
+
+Let's add the facet nav portlet
+
+    >>> browser.open(context.absolute_url() + '/++contextportlets++plone.leftcolumn/+/portlets.Classic')
+    >>> browser.getControl(name='form.template').value = 'inline_facet_menu'
+    >>> browser.getControl('Save').click()
+    >>> browser.open(portal_url + '/collection')
+    >>> '<dl class="portlet portletFacetNavigation">' in browser.contents
+    True
+
+And let's select two facets
+
+    >>> browser.getLink(id='facet-Subject--Apple').click()
+    >>> browser.getLink(id='facet-portal_type--Document').click()
+    >>> browser.url
+    'http://nohost/plone/collection/?portal_type=Document&Subject=Apple'
+
+Let's see what that got us.
+doc1 is a Document with the Subject Apple so it should be here.
+
+    >>> 'doc1' in browser.contents
+    True
+    >>> 'doc2' in browser.contents
+    True
+
+news3 is a News Item so it shouldn't be listed
+
+    >>> 'news3' in browser.contents
+    False
+
+Clicking 'Lemon' should change the available facets
+
+    >>> browser.getLink(id='facet-Subject--Lemon').click()    
+    >>> browser.url
+    'http://nohost/plone/collection/?portal_type=Document&Subject=Lemon'
+
+Apple was deselected, doc2 should not be in content since it doesn't have Lemon as keyword. doc1 and doc4 should.
+
+    >>> 'doc1' in browser.contents
+    True
+    >>> 'doc2' in browser.contents
+    False
+    >>> 'doc4' in browser.contents
+    True
+
+Searching currently removes all selected facets
+
+    >>> browser.getControl(name='SearchableText', index=1).value = 'doc*'
+    >>> browser.getControl('Facet search').click()
+    >>> browser.url
+    'http://nohost/plone/collection?SearchableText=doc%2A'
+
+So that should give us all documents...
+
+    >>> 'doc4' in browser.contents
+    True
+    >>> 'news4' in browser.contents
+    False
+
+Selecting a facet should preserve the search. We're now drilling down in the search results
+
+    >>> browser.getLink(id='facet-Subject--Banana').click()
+    >>> browser.url
+    'http://nohost/plone/collection/?SearchableText=doc%2A&Subject=Banana'
+
+doc5 doesn't have Banana as Subject
+
+    >>> 'doc5' in browser.contents
+    False
+
+    
