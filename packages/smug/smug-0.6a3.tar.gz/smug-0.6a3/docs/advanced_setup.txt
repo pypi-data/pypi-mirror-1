@@ -1,0 +1,125 @@
+============================
+Smug: Installation and Setup
+============================
+
+Prerequisites
+=============
+
+Git
+    Any reasonably recent version of Git should work fine. If your repository has submodules, you will obviously need a version of Git that supports them (1.5.3 or later), but that shouldn't affect most people.
+
+Python
+    Smug works best with Python 2.5. If you use Python 2.4 or earlier, you will need to install hashlib_. Python 2.3 may or may not work; it hasn't been tested.
+
+Django
+    Smug requires at least version 1.0 of Django_. As of writing (16 Sep 2008), the development version of Django should also do quite well.
+
+.. _hashlib: http://code.krypto.org/python/hashlib/
+.. _Django: http://www.djangoproject.com/
+
+Setting up Django
+=================
+
+Smug is built in the Django framework. If you aren't familiar with Django, I highly recommend that you familiarize yourself with the `Django documentation`_. I'll repeat some of the steps here, but it's really best if you're already familiar with the process.
+
+Smug is a Django app and will need to be installed somewhere on your ``PYTHONPATH``. If you don't know what this means, create a "python" directory in your home directory. This python directory will contain both Smug and your Django project module.
+
+To create a Django project module, go to the python directory and run "``django-admin.py startproject mysite``", where "``mysite``" can be replaced by whatever name you wish to call your project (just don't call it "django" or "smug"). This will create a directory with a few configuration files. Edit the basic settings in the ``settings.py`` file. The Django documentation contains instructions about modifying this file.
+
+Next, check out Smug. Go to the python directory and run "``git clone git://mcnabbs.org/smug.git``". This will create a directory called ``smug`` that has all of the Smug source code.
+
+.. _Django documentation: http://docs.djangoproject.com/
+
+Django Development Server
+=========================
+
+If you're using the Django development server, you must make sure that your ``PYTHONPATH`` is set appropriately before proceeding further. Otherwise, Python wouldn't be able to find either "mysite" or "smug".
+
+If you're using the Django development server, just add "``export PYTHONPATH=$HOME/python``" to your ``bashrc`` (and load your changes). You can then cd to "mysite", run "``python manage.py runserver``", and go to "http://localhost:8000/" in a web browser. Note that the Django documentation has a lot of information about setting this up.
+
+Django in Apache
+================
+
+If you're using Apache, you will need to set Python as the handler. You might have something like the following in ``httpd.conf`` (and if you want authenticated sessions to go over SSL, as I recommend, it should also go in ``ssl.conf``).
+
+::
+
+    <Location "/you/pick/the/location/">
+        SetHandler python-program
+        PythonPath "['/path/to/pythonpath/directory'] + sys.path"
+        PythonHandler django.core.handlers.modpython
+        SetEnv DJANGO_SETTINGS_MODULE mysite.settings
+        #PythonDebug On
+    </Location>
+
+In this example, it really is important to have both "mysite" and "smug" in "/path/to/pythonpath/directory". Otherwise, Python won't know where to find these modules.
+
+Setting up a Git Repository
+===========================
+
+The Git repository you use for Smug should be a bare repository.
+
+If you are using Apache, you should probably create a system group containing both your username and "apache". To create the repository, you should probably run the following::
+
+    mkdir /path/to/smug_html.git
+    cd /path/to/smug_html.git
+    git --bare init --shared=group
+    chgrp -R shared_group_name .
+
+where ``/path/to/smug_html.git`` and ``shared_group_name`` are replaced by the values you choose. If you don't want a group, then leave off the "``--shared=group``" option.
+
+Before you actually use the repository in Smug or even clone it with Git, it must have an initial commit. To do this, go into some other repository and do::
+
+    git push /path/to/smug_html.git master
+
+Setting up Smug
+===============
+
+Changes to ``settings.py``:
+
+INSTALLED_APPS
+    Add 'smug' to your ``INSTALLED_APPS`` list.
+
+SMUG_REPOSITORIES
+    Add a line like "``SMUG_REPOSITORIES = {'myrepo': '/path/to/smug_html.git'}``", with the path replaced by the actual path of your Git repository.
+
+If you want to use Smug for your whole site, change ``urls.py`` in your project to include::
+
+    (r'', include('smug.urls'))
+
+If you have some sublocation for it, then the line should look like::
+
+    (r'^(?P<basepath>where/smug/goes/)', include('smug.urls'))
+
+Optional Settings:
+
+SESSION_COOKIE_SECURE
+    Set this to True to require SSL for logging in and page editing. I recommend it, but obviously it won't work if SSL is not set up. If you do this, you should also add '``smug.extras.SecureSessionMiddleware``' to ``MIDDLEWARE_CLASSES``.
+
+TEMPLATE_LOADERS, TEMPLATE_DIRS
+    If you want to store your templates in Git, as I do, you should add "``smug.extras.load_template_source``" to your ``TEMPLATE_LOADERS`` and "``smug://myrepo/templates``" to your ``TEMPLATE_DIRS`` in ``settings.py``. The Smug template loader interprets "``smug://myrepo/``" as the Git repository defined by ``myrepo`` in ``SMUG_REPOSITORIES``, so "``smug://myrepo/templates``" refers to a directory called "``templates``" in the ``myrepo`` Git repository.
+
+SMUG_TEMPLATE
+    I set "``SMUG_TEMPLATE = 'template.html'``". This is the template that Smug's templates extend from, and it is the default template for the filters that use Django templates.
+
+HTTP_BASEURL, HTTPS_BASEURL
+    If your secure and non-secure urls differ by more than just "http" vs. "https", you will need to specify these options so that Smug can figure out redirects.
+
+Using Smug
+==========
+
+Smug will need to have some *filters* defined in order to actually serve anything other than flat files. Filters give smug a lot of power. If a content of a particular type is needed, a filter can be designated, and smug can perform the conversions on the fly as needed.
+
+Filters are defined with a ``.smug`` file. The syntax is very basic. This is the filter that I use for presenting ReST as html::
+
+    convert from .rst to .html using rst2html
+
+When smug receives a request for a document with the ``.html`` extension, and the file doesn't exist in the git repository, it looks for a filename with the same name, but the ``.rst`` extension. It reads the ``.rst`` file from the git repo, and runs it through the ``rst2html`` filter, which results in html content.
+
+The ``.smug`` file works in a similar way to ``.htaccess`` files in apache. These filter directives apply to the directory in which they reside, as well as any subdirectories contained in the same parent directory.
+
+The other directive that a ``.smug`` file supports is ``directory_index``. This simply tells smug what file to look for if it receives a request for a path that is a directory. A common ``directory_index`` is ``index.html``. The way to define ``index.html`` with smug is to put the following into your ``.smug`` file::
+
+    directory_index index.html
+
+Currently those are the only two directives that smug supports. Eventually, it may support more complex things like per-directory or per-file permission definitions.

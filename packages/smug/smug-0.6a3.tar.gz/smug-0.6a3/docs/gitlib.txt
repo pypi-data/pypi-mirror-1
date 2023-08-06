@@ -1,0 +1,155 @@
+=============================
+gitlib: Low-level Git Library
+=============================
+
+This document serves multiple purposes.  First, it shows how Git works
+on a low level.  Second, it provides unit testing.  To do unit testing,
+just run "python tests/gitlib_test.py".  To see the output of all of the
+tests, do "python tests/gitlib_test.py -v".
+
+
+Init
+====
+
+Sorry for the noise.  We need to import some modules before we get
+started:
+
+>>> import tempfile, os, subprocess
+>>> import gitlib
+
+
+Repositories
+============
+
+gitlib can create a new Git repository, although this is rarely
+necessary:
+
+>>> path = tempfile.mkdtemp()
+>>> repo = gitlib.Repository(path)
+>>> repo.create()
+
+
+Git Objects
+===========
+
+You can create blobs.
+
+>>> blob = gitlib.Blob()
+>>> blob.text = 'This is a test.\n'
+>>> blob.freeze()
+>>> repo.write(blob)
+
+
+You can add them to trees.
+
+>>> TESTFILE1 = 'test.txt'
+>>> tree = gitlib.Tree()
+>>> tree.add_file(TESTFILE1, blob.name, 'blob')
+True
+>>> tree.freeze()
+>>> repo.write(tree)
+
+
+Which can be added to commits.
+
+>>> commit = gitlib.Commit()
+>>> commit.tree = tree.name
+>>> commit.author = 'Andrew McNabb <amcnabb@mcnabbs.org> 1219616814 -0600'
+>>> commit.message = 'First Commit!\n'
+>>> commit.freeze()
+>>> repo.write(commit)
+
+
+Which can be saved to branches.
+
+>>> repo.save_head(commit.name, None)
+True
+>>>
+
+
+Branches
+========
+
+Our commit created a new tree in the repository, which is now the head
+of the "master" branch.  If we want to look at the tree/commit, we can
+do that:
+
+>>> head = repo.find_head()
+>>> 
+
+The variable head holds a string representing a hexadecimal number.
+This number is the SHA-1 hash of the commit.  It is used as a unique
+identifier.  We can use the id of this commit to find the id of the file
+we just added to the repository, and we can open this file as a
+file-like object:
+
+>>> fileid = repo.getname(TESTFILE1, treename=head)
+>>> blob2 = repo.getblob(fileid)
+>>> print blob2.contents,
+This is a test.
+>>>
+
+We can add a new file to the repository, but until we create a new tree
+with a reference to it, it's just a dangling object.
+
+>>> blob = gitlib.Blob('Second test file.\nTesting.\n')
+>>> repo.write(blob)
+
+
+Indexes
+=======
+
+If we want to change a repository, we need to make our changes in an
+index, and then save the index as a new tree.  Let's walk through the
+process.
+
+>>> TESTFILE2 = 'test2.txt'
+>>> index = repo.readtree(head)
+>>> index.add(TESTFILE2, blob.name)
+>>> newtree = index.write()
+
+
+But now the new tree (whose id is in newtree), is still a dangling
+object.  We still need to make a commit.  In the following commit, we
+specify the id of the tree that we're committing, as well as the parent
+commits for this commit (in this case just head), and the changelog
+string.
+
+>>> newcommit = repo.commit(newtree, [head], 'committing with gitlib')
+
+
+We still have a dangling commit object!  The last step to tie in all of
+these new objects is to save the commit's id to the master head ref.
+
+>>> repo.save_head(newcommit, head)
+True
+>>>
+
+
+Now we can retrieve our new file, which has been properly committed.
+
+>>> fileid = repo.getname(TESTFILE2)
+>>> repo.gettype(fileid)
+'blob'
+>>> f = repo.getblob(fileid)
+>>> print f,
+Second test file.
+Testing.
+>>>
+
+
+Merging
+=======
+
+TODO: Add documentation for merging.
+
+
+Cleanup
+=======
+
+>>> subprocess.check_call(('rm', '-rf', path))
+0
+>>>
+
+
+.. vim: et sw=4 sts=4 tw=72

@@ -1,0 +1,119 @@
+Smug Caching
+============
+
+Smug uses Django's caching mechanisms as efficiently as possible.  This
+document has two purposes.  First, to explain how caching works in Smug,
+and second, to provide tests.  To run the tests, call "python
+tests/caching_test.py".
+
+
+Import Statements
+-----------------
+
+>>> import gitlib
+>>> from smug import load
+>>> import subprocess
+>>> import sys
+>>> import tempfile
+>>>
+
+Trick Django into not being stupid.
+
+>>> from django.conf import settings
+>>> settings.configure()
+>>> from django.core.cache import cache
+>>>
+
+
+Create a Test Repository
+------------------------
+
+First, we create the repository.
+
+>>> repo_path = tempfile.mkdtemp()
+>>> repo = gitlib.Repository(repo_path)
+>>> repo.create()
+>>>
+
+Next, we add a simple file to the repository.
+
+>>> path = 'test.txt'
+>>> content = 'This is a test.\n'
+>>> changelog = 'First commit!\n'
+>>> head = repo.commit_add(path, content, None, changelog)
+>>> repo.save_head(head, None)
+True
+>>>
+
+
+Caching a Branch Head
+---------------------
+
+The HeadCache keeps track of the head commit of a branch.  Before doing
+a lookup, the Django cache is empty for the HeadCache's key.
+Afterwords, the head's commit name is be cached.
+
+>>> head_cache = load.HeadCache(repo)
+>>> cache.get(head_cache.key) == None
+True
+>>> head_cache.get() == head
+True
+>>> cache.get(head_cache.key) == head
+True
+>>>
+
+If we put gibberish into the cache, then the HeadCache should retrieve
+that gibberish.  Forcing an update should get the correct value back.
+
+>>> cache.set(head_cache.key, 'xyz')
+>>> head_cache.get() == 'xyz'
+True
+>>> head_cache.update('abc')
+'abc'
+>>> head_cache.get() == 'abc'
+True
+>>> head_cache.update() == head
+True
+>>> head_cache.get() == head
+True
+>>>
+
+
+Retrieving an Ordinary Blob
+---------------------------
+
+The SourceFile class loads an ordinary blob (file) from the repository
+and stores it in the cache.
+
+>>> cfile = load.SourceFile(path, 'master', repo)
+>>> cfile.content == content
+True
+>>>
+
+If the content is saved and cached, then the cached value should be
+used.
+
+>>> cfile.content = 'aaa'
+>>> cfile.cache_data()
+>>> cfile2 = load.SourceFile(path, 'master', repo)
+>>> cfile2.content == 'aaa'
+True
+>>>
+
+Clearing the cache again should force the correct values back.
+
+>>> cfile.dirty()
+>>> cfile.content == content
+True
+>>>
+
+
+Cleanup
+-------
+
+>>> subprocess.call(('rm', '-rf', repo_path))
+0
+>>>
+
+
+# vim: et sw=4 sts=4 tw=72
