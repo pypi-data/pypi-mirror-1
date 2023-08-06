@@ -1,0 +1,716 @@
+#!/usr/bin/env python
+
+import os
+import os.path as path
+import pipes
+import sys
+import re
+import subprocess
+import time
+import hashlib
+import shutil
+
+
+import btools.common as common
+
+name="blog"
+description="Command line blog tool"
+long_description="""Blog is a minimalist, extendable command line weblog and publishing tool. It is used by adding files to it and by setting up some usuable hooks. \
+
+To start using this tool, begin with an init command in the directory you want to use. This will create a '.blog' directory which contains configuration information, \
+hooks and later the file index itself. Hooks are the bread and butter of this program. The blog tool itself does particurlarly little with the files. It only keeps an index \
+and provides a way to store config and meta information. The hooks provide the functionality and can call out to any program they may need. \
+A hook only works when it's set executable (eg. 'chmod +x hook'); only then the program will execute it. \
+For more information on writing these scripts and the variables that are available see the comments and the README file in .blog/hooks/. \
+
+"""
+usage=["COMMAND [ARGUMENTS]", 
+       ("--debug COMMAND [ARGUMENTS]", "Debug information")]
+commands=[(["-h", "--help"], "", "Help screen"),
+          (["add"], "FILES", "Adds files to the weblog index"),
+          (["config"], "(list [VARIABLE]|set VARIABLE VALUE|unset VARIABLES)",
+           "Resp. lists, sets and unsets configuration variables."),
+          (["export"], "", "Export published files."),
+          (["help"], "COMMANDS", "Output help for the given commands."), 
+          (["info"], "OBJECTS", "Provides same functionality as multiple `meta OBJECT list` commands"),
+          (["init"], "", "Initialize a new blog in the current directory"),
+          (["log"], "[(--verbose|--objects)]", "Outputs the publication log of this index ordered on publication date."),
+          (["meta"], "OBJECT [(list|set VARIABLE VALUE|unset VARIABLES)]", "Shows, sets or unsets meta information on an object."), 
+          (["publish"], "", "Execute the publish hooks"),
+          (["remove", "rm"], "OBJECTS", "Remove objects from the weblog index. Does not remove the file itself."),
+          (["status"], "", "Output the status of the files in the index"),
+         ]
+examples = [("init", "Initialize a new blog"),
+            ("add hello_world.txt", "Add the file hello_world.txt to the index"),
+            ("meta hello_world.txt", "List meta information"),
+            ("meta hello_world.txt set title 'Hello, World!'", "Sets the title to 'Hello, World!'"),
+            ("config set title 'My new blog'", "Change the blog title to 'My new blog'"),
+            ("publish", "Publish the files in the index."),
+            ("export", "Export the published files."), ]
+
+common.loglevel = 2
+
+
+def blog_location(dir = "."):
+    return path.join(path.realpath(dir), ".blog")
+
+def existing_blog_location(base = ".", depth = 3):
+    p = path.realpath(base)
+
+    while depth != 0:
+        loc = blog_location(p)
+        if path.exists(loc):
+            return loc
+
+        p, _ = path.split(p)
+        depth -= 1
+
+    common.error("Not in a weblog directory. Use the init command to start a new one.")
+
+def conf_location(blogloc):
+    return path.join(blogloc, "config")
+
+def get_config(blogloc):
+    confloc = conf_location(blogloc)
+    return read_dict_from_file(confloc)
+
+def get_index_location(blogloc):
+    return path.join(blogloc, "index")
+
+def get_index(blogloc):
+    loc = get_index_location(blogloc)
+    f = open(loc, "r")
+    res1 = {}
+    res2 = {}
+    for x in f.read().splitlines():
+        path, obj = x.split()
+        obj = int(obj)
+        res1[obj] = path
+        res2[path] = obj
+    return res1, res2
+
+def get_object_ids(blogloc):
+    obj = os.listdir(path.join(blogloc, "objects"))
+    return sorted([ int(x) for x in obj ])
+
+def new_object_id(blogloc):
+    obj = get_object_ids(blogloc)
+    return 1 if obj == [] else max(obj) + 1
+ 
+def get_object_id(object, loc):
+    if str.isdigit(object):
+        return get_object_id_by_possible_invalid_id(int(object), loc)
+    else:
+        return get_object_id_by_file(object, loc)
+
+def get_object_id_by_possible_invalid_id(id, loc):
+    if not id in get_object_ids(loc):
+        return -1
+    return id
+
+def get_object_id_by_file(file, loc):
+    file = path.realpath(file)
+    ids, files = get_index(loc)
+    if not files.has_key(file):
+        return -1
+    return files[file]
+
+def execute_hook(blogloc, hook, env = {}):
+    hook = path.join(blogloc, "hooks", hook)
+
+    if not path.exists(hook):
+        common.warning("Hook '%s' does not exist" % hook)
+        return 0
+
+    env["blogdir"] = blogloc
+    if ((os.stat(hook).st_mode & 0777) & 0100) == 64:
+        common.debug("Executing hook %s." % hook)
+        env.update(os.environ)
+        conf = read_dict_from_file(conf_location(blogloc))
+        for x in conf:
+            env["conf_%s" % x] = conf[x]
+        return subprocess.Popen(hook, shell=True, env=env).wait()
+    else:
+        common.debug("Ignoring hook %s. Not executable." % hook)
+        return 0
+
+
+
+def remove_object(object, loc):
+    id = get_object_id(object, loc)
+    if id < 0:
+        common.error("Cannot remove '%s'. Not a valid object" % object)
+
+    env = {"object": object, "id" : str(id) }
+    ret = execute_hook(loc, "pre-remove-hook", env)
+    if ret is not None and ret != 0:
+        common.warning("'%s' object removal blocked by pre-remove-hook." % object)
+        return
+    common.debug("Removing files")
+    os.remove( path.join(loc, "meta", str(id)))
+    os.remove( path.join(loc, "objects", str(id)))
+
+    common.debug("Rewriting index")
+    ids, paths = get_index(loc)
+    f = open( get_index_location(loc), "w")
+    for file, oid in paths.items():
+        if oid != id:
+            f.write("%s %s\n" % (file, oid))
+    f.close()
+    execute_hook(loc, "post-remove-hook", env)
+
+
+def touch(file):
+    open(file, "w").close()
+
+def write_dict(loc, conf):
+    lines = []
+    for var, val in conf.items():
+        lines.append("%s = \"%s\"" % (var, val.replace("\"", "\\\"")))
+    lines.append("")
+
+    f = open(loc, "w")
+    f.write(os.linesep.join(lines))
+    f.close()
+
+def blog_init(title = "Untitled Weblog", authors = "", url="", feed=""):
+    loc = blog_location()
+    if path.exists(loc):
+        print "Blog already exists"
+        return 0
+
+    try:
+        common.debug("Creating %s" % loc)
+        os.mkdir(loc)
+    except:
+        common.error("Couldn't create directory %s" % loc)
+
+    for x in ["objects", "meta", "hooks"]:
+        common.debug("Creating %s" % path.join(loc, x))
+        os.mkdir(path.join(loc, x))
+
+    conf = conf_location(loc)
+    write_dict(conf, {"title": title, "authors": authors,
+                      "url": url, "feed": feed})
+    touch(get_index_location(loc))
+
+    hooks = path.join(common.BLOG_SHARE, "hooks") 
+    for x in os.listdir(hooks):
+        src, dst = path.join(hooks, x), path.join(loc, "hooks", x)
+        common.debug("Copying %s to %s" % (src, dst))
+        shutil.copyfile(src, dst)
+
+    common.info("New blog succesfully created")
+
+def add_file_to_blog(file, blogloc=".blog", title="", authors="", url=""):
+    if not path.isfile(file):
+        common.error("File %s doesn't exist or is not a file." % file)
+
+    id = new_object_id(blogloc)
+
+    file = os.path.realpath(file)
+
+    objd, filed = get_index(blogloc)
+    if filed.has_key(file):
+        common.warning("File %s already in weblog" % file)
+        return -1
+
+
+    if not file.startswith(blogloc[:-5]):
+        common.error("File %s does not live in the blog directory")
+    if file.startswith(blogloc):
+        common.error("Can't add files in .blog to the weblog")
+
+    env = {"file": file, "title": title, "authors": authors, "url": url}
+    ret = execute_hook(blogloc, "pre-add-hook", env)
+    if ret is not None and ret != 0:
+        common.info("pre-add-hook blocked this file")
+        return -1
+
+    dest = file[len(blogloc) - 5:]
+    os.symlink(path.join("..", "..", dest), path.join(blogloc, "objects", str(id)))
+
+    f = open(get_index_location(blogloc), "a")
+    f.write("%s %d\n" % (file, id))
+    f.close()
+
+    meta = path.join(blogloc, "meta", str(id))
+    write_dict(meta, {"title": path.basename(file.replace("-", " ").replace("_", " ").replace(".", " ")),
+                      "pubdate": "", "author": ""})
+    execute_hook(blogloc, "post-add-hook", env)
+    return id
+
+def read_dict_from_file(location):
+    if not path.isfile(location):
+        common.error("File '%s' does not exist" % location)
+    f = open(location, "r")
+    con = f.read()
+    f.close()
+
+    result = {}
+
+    r = re.compile("\ *([a-z]+[a-z0-9]*)\ *=\ *\"(.*)\"", re.IGNORECASE)
+    line = 1
+    for x in con.splitlines():
+        m = r.match(x)
+        if m:
+            var, val = m.groups()
+            result[var] = val
+        else:
+            common.error("'%s': Parse error on line %d" % (location, line))
+        line += 1
+    return result
+
+
+def publish_blog(loc):
+    ids = get_object_ids(loc)
+    if ids == []:
+        common.error("No objects to publish. You can add files to the index with the 'add' command.")
+
+    env = {}
+    ret = execute_hook(loc, "pre-publish-hook", env)
+    if ret != 0:
+        common.error("pre-publish-hook block this publication.")
+
+    conf = get_config(loc)
+    for i in ids:
+        file = path.realpath( path.join(loc, "objects", str(i)))
+        if not path.exists(file):
+            common.error("File %s (object: %d) no longer exists." % (file, i))
+        f = open(file, "r")
+        contents = f.read()
+        f.close()
+
+        meta = get_meta(loc, i)
+       
+        edited = False
+        md5sum = hashlib.md5(contents).hexdigest()
+        prevmd5 = meta.get("md5sum", "")
+        if prevmd5 == "" or md5sum != prevmd5:
+            edited = True
+            update_dict( path.join(loc, "meta", str(i) ), "md5sum", md5sum)
+            if prevmd5 != "":
+                update_dict( path.join(loc, "meta", str(i) ), "lastedit", time.ctime())
+
+
+        pub = meta.get("pubdate", "")
+
+        published = True
+        if pub == "":
+            published = False
+            update_dict( path.join(loc, "meta", str(i) ), "pubdate", time.ctime())
+            common.info("Publishing previously unpublished %s" % file)
+        else:
+            if not edited:
+                common.info("Publishing already published %s" % file)
+            else:
+                common.info("Publishing edited object %s" % file)
+
+
+
+
+        fenv = {"file": file, "object": str(i), "published": str(int(published)),
+                "edited": str(int(edited)), "content": contents, "blogdir": loc }
+
+        for var, val in meta.items():
+            fenv["meta_" + var] = val
+        for var, val in conf.items():
+            fenv["blog_" + var] = val
+        execute_hook(loc, "publish-hook", fenv)
+        if not published:
+            execute_hook(loc, "publish-new-hook", fenv)
+        elif edited:
+            execute_hook(loc, "publish-edited-hook", fenv)
+
+    execute_hook(loc, "post-publish-hook", env)
+
+def cli_export(args):
+    loc = existing_blog_location()
+    execute_hook(loc, "export-hook", {})
+       
+
+
+def get_meta(loc, id):
+    return read_dict_from_file( path.join(loc, "meta", str(id) ))
+
+def output_status(loc):
+    ids = get_object_ids(loc)
+    conf = get_config(loc)
+    meta = {}
+    published = {}
+    names = {}
+    exists = {}
+    edited = {}
+ 
+    maxname = 0
+    for i in ids:
+        meta[i] = get_meta(loc, i)
+        pub = meta[i].get("pubdate", "")
+        if pub == "":
+            published[i] = 0
+        else:
+            published[i] = time.mktime(time.strptime(pub))
+
+
+        file = path.realpath(path.join(loc, "objects", str(i)))
+        exists[i] = True
+        edited[i] = False
+        if not path.exists(file):
+            exists[i] = False
+        else:
+            f = open(file, "r")
+            con = f.read()
+            f.close()
+            md5sum = hashlib.md5(con).hexdigest()
+            prevmd5 = meta[i].get("md5sum", "")
+            if prevmd5 == "" or prevmd5 != md5sum:
+                edited[i] = True
+
+        names[i] = file[len(loc) - 5:]
+        if len(names[i]) > maxname:
+            maxname = len(names[i])
+
+
+    lastpub = 0
+    if ids != []:
+        lastpub = published[max(published, key=lambda x: published[x])]
+
+    title = conf.get("title", "Untitled")
+    print "Location:", loc
+    print "Title:", title
+    if lastpub != 0:
+        print "Last publication:", time.ctime(lastpub)
+    else:
+        print "Unpublished"
+    print "-" * 50, "\n"
+
+    for i in ids:
+        fmt = "%%-%ds" % (maxname + 7)
+        
+        status = "Published on "
+        if not exists[i]:
+            status = "FILE NOT FOUND"
+        elif published[i] == 0:
+            status = "Unpublished"
+        elif edited[i]:
+            status = "Edited since last publication"
+        else:
+            status += time.strftime("%A, %D", time.localtime(published[i]))
+        print fmt % names[i], status
+    if ids == []:
+        print "Empty index. Try adding some files with the add command"
+    print
+
+
+def output_log(loc, outputObjects, verbose):
+    ids = get_object_ids(loc)
+
+    meta = {}
+    published = {}
+    names = {}
+    maxname = 0
+
+    for i in ids:
+        meta[i] = get_meta(loc, i)
+        pub = meta[i].get("pubdate", "")
+        if pub == "":
+            published[i] = 0
+        else:
+            published[i] = time.mktime(time.strptime(pub))
+
+
+        file = path.realpath(path.join(loc, "objects", str(i)))
+        names[i] = file[len(loc) - 5:]
+        if len(names[i]) > maxname:
+            maxname = len(names[i])
+
+    if not outputObjects:
+        print "Location:", loc
+        print "-" * 50
+        print
+
+    s = sorted(published.items(), key=lambda x: x[1], reverse=True)
+
+    if ids == [] and not outputObjects:
+        print "Empty index"
+    for id, pub in s:
+        fmt = "%%-%ds" % (maxname + 7)
+
+        timefmt = "%A, %D" if not verbose else "%c" 
+        pub = time.strftime(timefmt, time.localtime(pub)) if pub != 0 else "Unpublished"
+        if not verbose:
+            if not outputObjects:
+                print fmt % names[id], pub
+            else:
+                print fmt % str(id), pub
+        else:
+            print fmt % names[id], id, "      ", pub
+    if not outputObjects:
+        print
+
+
+def command_line_interface():
+    if len(sys.argv) == 1:
+        return cli_help()
+
+    if sys.argv[1][0] == "-":
+        args, command = parse_and_set_global_options(sys.argv[1:])
+    else:
+        args = sys.argv[2:]
+        command = sys.argv[1]
+    parse_and_exec_command(command, args)
+
+def parse_and_set_global_options(args):
+    argumentPending = False
+    for i, x in enumerate(args):
+        if not argumentPending:
+            if x[0] == "-":
+                if x in ["--debug", "--verbose", "-v"]:
+                    common.loglevel = 4
+                elif x in ["-h", "--help"]:
+                    cli_help()
+                    sys.exit(0)
+                else:
+                    print "Unknown command", x
+            else:
+                return args[i+1:], x
+        else:
+            #set/unset something
+            pass
+    common.error("Expecting commands besides options.")
+
+def parse_and_exec_command(command, args):
+    if command in ["-h", "--help"]:
+        cli_help()
+    elif command in ["add"]:
+        cli_add(args)
+    elif command in ["config"]:
+        cli_config(args)
+    elif command in ["export"]:
+        cli_export(args)
+    elif command in ["help"]:
+        cli_help_cmd(args)
+    elif command in ["init"]:
+        cli_init(args)
+    elif command in ["info"]:
+        cli_info(args)
+    elif command in ["log"]:
+        cli_log(args)
+    elif command in ["meta"]:
+        cli_meta(args)
+    elif command in ["publish"]:
+        cli_publish(args)
+    elif command in ["rm", "remove"]:
+        cli_remove(args)
+    elif command in ["status"]:
+        cli_status(args)
+    else:
+        common.error("Unknown command: %s" % command)
+
+def cli_init(args):
+    argumentPending = False
+    option = ""
+    res = {}
+    for x in args:
+        if not argumentPending:
+            if x in ["--title", "--url", "--feed", "--authors"]:
+                option = x[2:]
+                argumentPending = True
+            elif x[0] == "-":
+                common.error("Unknown option %s" % x)
+            else:
+                common.error("Expecting option, got: %s" % x)
+        else:
+            if option != "":
+                res[option] = x
+                argumentPending = False
+    if argumentPending:
+        common.error("Expecting value for %s" % option)
+    blog_init(title=res.get("title", "Untitled Weblog"), 
+              url=res.get("url", ""),
+              feed=res.get("feed", ""),
+              authors=res.get("authors", ""))
+
+def cli_add(args):
+    if args == []:
+        common.error("Expecting files")
+
+    loc = existing_blog_location()
+    for x in args:
+        id = add_file_to_blog(x, loc)
+        if id != -1:
+            common.debug("Created object id %d for %s" % (id, x))
+
+def cli_config(args):
+    loc = existing_blog_location()
+    confloc = conf_location(loc)
+    conf = read_dict_from_file(confloc)
+
+    if args == []:
+        return cli_config_list_all(conf)
+
+    com = args[0]
+
+    if com in ["list"]:
+        if len(args) == 1:
+            return cli_config_list_all(conf)
+        else:
+            for x in args[1:]:
+                print "%s: %s" % (x, pipes.quote(conf.get(x, '')))
+    elif com in ["set"]:
+        if len(args) >= 3:
+
+            var = args[1]
+            val = " ".join(args[2:])
+            
+            env = {"variable": var, "value": val}
+            ret = execute_hook(loc, "pre-set-config-hook", env)
+            if ret is not None and ret != 0:
+                common.warning("pre-set-config-hook blocked this unset.")
+                return 
+
+            common.info("Setting %s to %s" % (var, val))
+            conf[var] = val
+            write_dict(confloc, conf)
+            execute_hook(loc, "post-set-config-hook", env)
+        else:
+            common.error("Expecting variable and value")
+    elif com in ["unset"]:
+        if len(args) >= 2:
+            env = {"variables": " ".join(args[1:]) }
+            ret = execute_hook(loc, "pre-unset-config-hook", env)
+            if ret is not None and ret != 0:
+                common.warning("pre-unset-config-hook blocked this unset.")
+                return 
+
+            for x in args[1:]:
+                if conf.has_key(x):
+                    del conf[x]
+                else:
+                    common.warning("%s was not set to begin with" % x)
+            write_dict(confloc, conf)
+            execute_hook(loc, "post-unset-config-hook", env)
+        else:
+            common.error("Expecting variable")
+    else:
+        common.error("Unknown config command '%s'" % com)
+
+def cli_log(args):
+    verbose = False
+    outputObjects = False
+    for a in args:
+        if a in ["--verbose", "-v"]:
+            verbose = True
+        elif a in ["--object", "-o"]:
+            outputObjects = True
+    loc = existing_blog_location()
+    output_log(loc, outputObjects, verbose)
+
+def cli_meta(args):
+    if args == []:
+        common.error("Expecting object.")
+
+    loc = existing_blog_location()
+    object = args[0]
+
+    id = get_object_id(object, loc)
+    if id == -1:
+        common.error("Not a valid id: %s" % object)
+
+    metaloc = path.join(loc, "meta", str(id))
+
+    if len(args) == 1:
+        output_dict_file(metaloc)
+    elif args[1] == "list":
+        if len(args) == 2:
+            output_dict_file(metaloc)
+        else:
+            output_dict_file(metaloc, args[2:])
+    elif args[1] == "set":
+        if len(args) <= 3:
+            common.error("Expecting variable and value for meta set command.")
+        var = args[2]
+        val = " ".join(args[3:])
+        env = {"variable": var, "value": val}
+        ret = execute_hook(loc, "pre-set-meta-hook", env)
+        if ret is not None and ret != 0:
+            common.warning("pre-set-meta-hook blocked this unset.")
+            return 
+
+        common.info("Setting %s to %s" % (var, val))
+        update_dict(metaloc, var, val)
+        execute_hook(loc, "post-set-meta-hook", env)
+    elif args[1] == "unset":
+        if len(args) < 3:
+            common.error("Expecting variables to unset")
+
+        env = {"variables": " ".join(args[2:]) }
+        ret = execute_hook(loc, "pre-unset-meta-hook", env)
+        if ret is not None and ret != 0:
+            common.warning("pre-unset-meta-hook blocked this unset.")
+            return 
+
+        meta = read_dict_from_file( metaloc )
+        for x in args[2:]:
+            if meta.has_key(x):
+                del meta[x]
+            else:
+                common.warning("%s was not set to begin with" % x)
+        write_dict(metaloc, meta)
+        execute_hook(loc, "post-unset-meta-hook", env)
+    else:
+        common.error("Unknown command '%s'" % args[1])
+
+def cli_status(args):
+    if args != []:
+        common.warning("status takes no arguments")
+    loc = existing_blog_location()
+    output_status(loc)
+
+def update_dict(loc, var, val):
+    d = read_dict_from_file(loc)
+    d[var] = val
+    write_dict(loc, d)
+
+def cli_info(args):
+    if args == []:
+        common.error("Expecting object arguments")
+
+    for x in args:
+        print "-" * 40
+        print "%s:\n" % x
+        cli_meta([x])
+    print "-" * 40
+
+def output_dict_file(loc, only = None):
+    for var, val in read_dict_from_file( loc ).items():
+        if only is not None:
+            if var in only:
+                print "%s: %s" % (var, val)
+        else:
+            print "%s: %s" % (var, val)
+
+
+def cli_config_list_all(conf):
+    for var, val in conf.items():
+        print "%s: %s" % (var, pipes.quote(val))
+
+def cli_publish(args):
+    loc = existing_blog_location()
+    publish_blog(loc)
+
+def cli_remove(args):
+    loc = existing_blog_location()
+    if args == []:
+        common.error("Expecting objects")
+    for x in args:
+        remove_object(x, loc)
+
+def cli_help():
+    common.cli_module_help(globals())
+
+def cli_help_cmd(args):
+    common.cli_command_help(args, commands)
+
+if __name__ == "__main__":
+    command_line_interface()
