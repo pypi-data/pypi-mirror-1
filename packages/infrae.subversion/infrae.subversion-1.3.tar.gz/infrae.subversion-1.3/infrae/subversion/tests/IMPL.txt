@@ -1,0 +1,291 @@
+Test for infrae.subversion
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This test suite works for both implementations.
+
+
+Checking out SVN links
+----------------------
+
+Create buildout using infrae.subversion::
+
+  >>> cd(sample_buildout)
+  >>> write('buildout.cfg','''
+  ... [buildout]
+  ... parts = svnpart
+  ...
+  ... [svnpart]
+  ... recipe = infrae.subversion
+  ... urls = 
+  ...    %s/my.testing/trunk my.testing
+  ... ''' % repository)
+
+And run buildout::
+
+  >>> print system(buildout)
+  Installing svnpart.
+
+We get a part with a checkout of the SVN::
+
+  >>> ls('parts')
+  d  svnpart
+  >>> ls('parts/svnpart')
+  d  my.testing
+  >>> ls('parts/svnpart/my.testing')
+  d  .svn
+  -  LICENSE
+  d  my
+  -  setup.py
+
+
+Modification
+------------
+
+If we add a file, and run the recipe, this is ok::
+
+  >>> cd(sample_buildout)
+  >>> write('parts/svnpart/my.testing/README.txt', '''
+  ... Sample file
+  ... ''')
+  >>> print system(buildout)
+  Updating svnpart.
+
+But if we change the configuration file, to add a new link for
+example, the part will be reinstalled::
+
+  >>> write('buildout.cfg','''
+  ... [buildout]
+  ... parts = svnpart
+  ...
+  ... [svnpart]
+  ... recipe = infrae.subversion
+  ... ignore_verification = true
+  ... urls = 
+  ...    %s/my.testing/trunk my.testing
+  ...    %s/infrae.subversion/trunk infrae.subversion
+  ... ''' % (repository, repository))
+
+And re-run buildout, you will get an error because of this file:
+
+  >>> print system(buildout)
+  Uninstalling svnpart.
+  Running uninstall recipe.
+  While:
+    Installing.
+    Uninstalling svnpart.
+  An internal error occured due to a bug in either zc.buildout or in a
+  recipe being used:
+  <BLANKLINE>
+  ValueError:
+  In '/.../sample-buildout/parts/svnpart/my.testing':
+  local modifications detected while uninstalling 'svnpart': Uninstall aborted!
+  <BLANKLINE>
+  Please check for local modifications and make sure these are checked in.
+  <BLANKLINE>
+  If you sure that these modifications can be ignored, remove the
+  checkout manually:
+  <BLANKLINE>
+    rm -rf /.../sample-buildout/parts/svnpart/my.testing/README.txt
+  <BLANKLINE>
+  Or if applicable, add the file to the 'svn:ignore' property of the
+  file's container directory.  Alternatively, add an ignore glob pattern
+  to your subversion client's 'global-ignores' configuration variable.
+
+
+You can delete it::
+
+  >>> remove('parts/svnpart/my.testing/README.txt')
+
+And, if you edit a file, you get the same error::
+
+  >>> write('parts/svnpart/my.testing/setup.py', '''
+  ... Very bad edition
+  ... ''')
+  >>> print system(buildout)
+  Uninstalling svnpart.
+  Running uninstall recipe.
+  While:
+    Installing.
+    Uninstalling svnpart.
+  An internal error occured due to a bug in either zc.buildout or in a
+  recipe being used:
+  <BLANKLINE>
+  ValueError:
+  In '/.../sample-buildout/parts/svnpart/my.testing':
+  local modifications detected while uninstalling 'svnpart': Uninstall aborted!
+  <BLANKLINE>
+  Please check for local modifications and make sure these are checked in.
+  <BLANKLINE>
+  If you sure that these modifications can be ignored, remove the
+  checkout manually:
+  <BLANKLINE>
+    rm -rf /.../sample-buildout/parts/svnpart/my.testing/setup.py
+  <BLANKLINE>
+  Or if applicable, add the file to the 'svn:ignore' property of the
+  file's container directory.  Alternatively, add an ignore glob pattern
+  to your subversion client's 'global-ignores' configuration variable.
+
+I remove the checkout, I got a warning, but everything is ok::
+
+  >>> rmdir('parts/svnpart')
+  >>> print system(buildout)
+  Uninstalling svnpart.
+  Running uninstall recipe.
+  -------- WARNING --------
+  Directory /.../sample-buildout/parts/svnpart have been removed.
+  Changes might be lost.
+  -------- WARNING --------
+  Installing svnpart.
+
+There is a new checkout of ``my.testing``, and an for ``infrae.subversion``::
+
+  >>> ls('parts/svnpart')
+  d  infrae.subversion
+  d  my.testing
+  >>> ls('parts/svnpart/my.testing')
+  d  .svn
+  -  LICENSE
+  d  my
+  -  setup.py
+
+Now, if you delete a directory, and do an update, this one is
+re-checkout::
+
+  >>> rmdir('parts/svnpart/infrae.subversion')
+  >>> ls('parts/svnpart')
+  d  my.testing
+  >>> print system(buildout)
+  Updating svnpart.
+  -------- WARNING --------
+  Directory /.../sample-buildout/parts/svnpart/infrae.subversion have been removed.
+  Changes might be lost.
+  -------- WARNING --------
+  >>> ls('parts/svnpart')
+  d  infrae.subversion
+  d  my.testing
+
+
+We can use the ``ignore_verification`` option to prevent
+verification. Note: it have to been used when using the same
+configuration for installation, since it's this one which is used for
+uninstall, and not the new one. So here, we juste remove this option
+to change the configuration::
+
+  >>> write('buildout.cfg','''
+  ... [buildout]
+  ... parts = svnpart
+  ...
+  ... [svnpart]
+  ... recipe = infrae.subversion
+  ... urls = 
+  ...    %s/my.testing/trunk my.testing
+  ...    %s/infrae.subversion/trunk infrae.subversion
+  ... ''' % (repository, repository))
+
+Edit a file, and re-run buildout::
+
+  >>> write('parts/svnpart/my.testing/README.txt', '''
+  ... Sample changed file
+  ... ''')
+  >>> print system(buildout)
+  Uninstalling svnpart.
+  Running uninstall recipe.
+  Installing svnpart.
+
+
+Revision number
+---------------
+
+We're going to create a revision:
+  
+
+  TODO
+   
+
+Exporting revision information via the options
+----------------------------------------------
+
+Recipes for other parts of the buildout may be interested in whether a
+particular checkout was updated during the current buildout run. Therefore
+infrae.subversion exports the current revision numbers of all its checkouts to
+an option whose values after the __init__ and update phases other recipes can
+compare.
+
+To demonstrate this, we create a test recipe and a buildout using both
+infrae.subversion and the test recipe:
+
+  >>> mkdir('recipe')
+  >>> mkdir('recipe/test_export')
+  >>> write('recipe/test_export/__init__.py', '''
+  ... class TestExport(object):
+  ...     def __init__(self, buildout, name, options):
+  ...         self.buildout = buildout
+  ...         print '__init__ phase: ', buildout['svnpart']['revisions']
+  ...     def install(self):
+  ...         print 'install phase: ', self.buildout['svnpart']['revisions']
+  ...         return []
+  ...     def update(self):
+  ...         print 'update phase: ', self.buildout['svnpart']['revisions']
+  ...         return []
+  ... ''')
+
+  >>> write('recipe/setup.py', '''
+  ... from setuptools import setup, find_packages
+  ... setup(name='test_export', version='dev',
+  ...       packages=find_packages(),
+  ...       entry_points={'zc.buildout': ['default=test_export:TestExport']})
+  ... ''')
+
+  >>> write('buildout.cfg', '''
+  ... [buildout]
+  ... develop = recipe
+  ... parts = svnpart testexport
+  ...
+  ... [svnpart]
+  ... recipe = infrae.subversion
+  ... urls =
+  ...    %s/my.testing/trunk my.testing
+  ...    %s/infrae.subversion/trunk infrae.subversion
+  ... export_info = true
+  ...
+  ... [testexport]
+  ... recipe = test_export
+  ... ''' % (repository, repository))
+
+When running this buildout for the first time, the test recipe sees how
+revisions for the two URLs get checked out:
+
+  >>> rmdir('parts/svnpart')
+  >>> print system(buildout)
+  Develop: '.../sample-buildout/recipe'
+  __init__ phase:
+  Uninstalling svnpart.
+  ...
+  Installing svnpart.
+  Installing testexport.
+  install phase:  file:///.../test_repos/infrae.subversion/trunk 2
+                  file:///.../test_repos/my.testing/trunk 2
+
+Running the buildout again immediately, the test recipe will see that the
+current revisions are the same before and after the update:
+
+  >>> print system(buildout)
+  Develop: '.../sample-buildout/recipe'
+  __init__ phase:  file:///.../test_repos/infrae.subversion/trunk 2
+                   file:///.../test_repos/my.testing/trunk 2
+  Uninstalling svnpart.
+  Running uninstall recipe.
+  Installing svnpart.
+  Updating testexport.
+  update phase:  file:///.../test_repos/infrae.subversion/trunk 2
+                 file:///.../test_repos/my.testing/trunk 2
+
+
+Bad SSL certificate
+-------------------
+
+Usually, bad SSL certificate make command using SVN fails. That's a
+good point, since you may be a victim of a spoofing attack. But that's
+boring as well, because a lot of site don't use valid certificate, and
+make fails the program useless you do a checkout in ``/tmp`` before,
+in order to accept the certificate.
