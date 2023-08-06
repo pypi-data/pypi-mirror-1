@@ -1,0 +1,329 @@
+Technical Details for Checklist
+===============================
+
+Content
+=======
+
+Checklist Tool
+--------------
+
+Adding manager items is straight forward.
+
+    >>> self.setRoles(['Manager'])
+    >>> checklisttool = portal.portal_checklist
+    >>> checklisttool.addManagerItem('manageritem', True)
+    <plonehrm.checklist.content.checklist.CheckListItem object at ...>
+    >>> checklisttool.getDefaultItems()
+    ()
+    >>> checklisttool.getDefaultManagerItems()
+    ('manageritem',)
+
+Of course adding the same item again won't duplicate things.
+
+    >>> checklisttool.addManagerItem('manageritem', True)
+    >>> checklisttool.getDefaultItems()
+    ()
+    >>> checklisttool.getDefaultManagerItems()
+    ('manageritem',)
+
+And the same for adding regular items.
+
+    >>> checklisttool.addItem('normalitem', True)
+    <plonehrm.checklist.content.checklist.CheckListItem object at ...>
+    >>> checklisttool.getDefaultItems()
+    ('normalitem',)
+    >>> checklisttool.getDefaultManagerItems()
+    ('manageritem',)
+
+Now let's see if we can edit and delete an item.
+    >>> item = checklisttool.addItem('an item with a folt')
+    >>> item = checklisttool.editItem(item.id, 'an item without a fault')
+    >>> item.text
+    'an item without a fault'
+    >>> checklisttool.getDefaultItems()
+    ('normalitem', 'an item without a fault')
+
+We delete the item.
+    >>> checklisttool.deleteItem(item.id)
+    >>> checklisttool.getDefaultItems()
+    ('normalitem',)
+
+Normally, html special characters are escaped when adding and editing
+an item.
+    >>> item = checklisttool.addItem('this text <will> be escaped.')
+    >>> item.text
+    'this text &lt;will&gt; be escaped.'
+
+Same thing happens when editing the item.
+    >>> item = checklisttool.editItem(item.id,
+    ...                               'the new text will also be <escaped>')
+    >>> item.text
+    'the new text will also be &lt;escaped&gt;'
+
+Now we can delete our escaped item.
+    >>> checklisttool.deleteItem(item.id)
+    >>> checklisttool.getDefaultItems()
+    ('normalitem',)
+
+Checklist
+---------
+
+And then there's the checklist content type.
+
+    >>> from Products.CMFPlone.utils import _createObjectByType
+    >>> portal.portal_types['Checklist'].global_allow = True
+    >>> ignored = portal.invokeFactory('Checklist', id='checklist')
+    >>> obj = portal['checklist']
+    >>> obj
+    <Checklist at /plone/checklist>
+
+At first it will have the default remaining items from the tool.
+
+    >>> obj.remainingItems()
+    ('normalitem',)
+    >>> obj.remainingManagerItems()
+    ('manageritem',)
+
+So we start by adding a new item.
+
+    >>> obj.addItem('testitem1')
+    >>> obj.getAllItems()
+    ('normalitem', 'testitem1')
+
+Adding  the same item twice will enter duplicates, except with a
+special setting.
+
+    >>> obj.addItem('testitem1')
+    >>> obj.getAllItems()
+    ('normalitem', 'testitem1', 'testitem1')
+    >>> obj.deleteItem('testitem1')
+    >>> obj.getAllItems()
+    ('normalitem', 'testitem1')
+    >>> obj.addItem('testitem1', allow_double=False)
+    >>> obj.getAllItems()
+    ('normalitem', 'testitem1')
+
+And then we add manager items.
+
+    >>> obj.addManagerItem('testmanageritem1')
+    >>> obj.getAllManagerItems()
+    ('manageritem', 'testmanageritem1')
+
+And once more we get duplicates, except with the special setting.
+
+    >>> obj.addManagerItem('testmanageritem1')
+    >>> obj.getAllManagerItems()
+    ('manageritem', 'testmanageritem1', 'testmanageritem1')
+    >>> obj.deleteItem('testmanageritem1')
+    >>> obj.getAllManagerItems()
+    ('manageritem', 'testmanageritem1')
+    >>> obj.addManagerItem('testmanageritem1', allow_double=False)
+    >>> obj.getAllManagerItems()
+    ('manageritem', 'testmanageritem1')
+
+
+Browser Views
+=============
+
+There are various views for accessing the content functionality.
+
+Checklist Tool View
+-------------------
+
+We start by ensuring our form_action produces an accurate url.
+
+    >>> from plonehrm.checklist.browser import checklist
+    >>> plone_utils = self.portal.plone_utils
+    >>> from Products.CMFCore.utils import getToolByName
+    >>> mtool = getToolByName(self.portal, 'portal_membership')
+    >>> class Mock(object):
+    ...     def __init__(self, **kwargs):
+    ...         for key, value in kwargs.items(): setattr(self, key, value)
+    >>> class MockDict(Mock, dict): pass
+    >>> redirects = []
+    >>> def redirect(url):
+    ...     redirects.append(url)
+    >>> request = MockDict(response=Mock(redirect=redirect))
+
+    >>> toolview = checklist.ChecklistToolView(portal, request)
+
+And now for the action confirmation.
+
+    >>> toolview.form_action()
+    'http://nohost/plone/@@checklisttool_view/form_handle'
+
+And the employeeUrl.
+
+    >>> toolview.employeeUrl()
+    'http://nohost/plone'
+
+We also have the _uniqueTuple utility method that will return a unique
+tuple from a list of items.
+
+    >>> toolview._uniqueTuple([1,2,3,4,3,2])
+    (1, 2, 3, 4)
+
+And then there is the actual form processing.  This is handled by the
+form_handle() method.  But before we can do that we have to give our
+context a checklist tool.
+
+    >>> toolview.form_handle()
+
+At this point the request doesn't have the submitted attribute so we get
+a simple redirect.
+
+    >>> redirects
+    ['http://nohost/plone']
+
+So we go ahead and set the submitted attribute and try again.
+
+    >>> request['checklistform.submitted'] = 1
+    >>> toolview.form_handle()
+
+Nothing really happens at that point (not even another redirect) due
+to the fact that neither config_normal or config_manager have been set.
+
+    >>> redirects
+    ['http://nohost/plone']
+
+So we first make sure handling config_normal works.
+
+    >>> request['checklistform.config_normal'] = 1
+    >>> redirects[:] = []
+    >>> toolview.form_handle()
+    >>> redirects
+    ['http://nohost/plone/portal_checklist']
+
+Only the initial item is there currently:
+
+    >>> portal.portal_checklist.getDefaultItems()
+    ('normalitem',)
+
+
+Now finally setting an item_add var to the value to get added will work.
+
+    >>> request['item_add'] = 'someitem'
+    >>> redirects[:] = []
+    >>> toolview.form_handle()
+    >>> redirects
+    ['http://nohost/plone/portal_checklist']
+
+    >>> portal.portal_checklist.getDefaultItems()
+    ('normalitem', 'someitem')
+
+A simple thing happens when trying to add manager items.  At first nothing
+gets added and then with the manager_item_add var set, a value is added.
+
+    >>> portal.portal_checklist.getDefaultManagerItems()
+    ('manageritem',)
+    >>> del request['checklistform.config_normal']
+    >>> request['checklistform.config_manager'] = 1
+    >>> toolview.form_handle()
+    >>> redirects[:] = []
+    >>> request['manager_item_add'] = 'somemanageritem'
+    >>> toolview.form_handle()
+    >>> redirects
+    ['http://nohost/plone/portal_checklist']
+    >>> portal.portal_checklist.getDefaultManagerItems()
+    ('manageritem', 'somemanageritem')
+
+Update Checklist View
+---------------------
+
+Once all of the work for the update checklist view is complete it will
+also process redirects so we reset the request, response, and
+redirects info.
+
+    >>> redirects[:] = []
+
+And the rest of the request and view.
+
+    >>> request = MockDict(response=Mock(redirect=redirect))
+    >>> updateview = checklist.UpdateChecklist(portal, request)
+
+The main process for updateview is contained within the ``__call__`` method.
+At first no items will get checked/deleted because the request doesn't have
+any appropriate data.
+
+    >>> portal._delObject('checklist')
+    >>> ignored = portal.invokeFactory('Checklist', id='checklist')
+    >>> updateview()
+    >>> redirects
+    ['http://nohost/plone']
+
+Setting appropriate data is as simple as setting up request vars that
+start with either *hrm* or *hrmmgr*.
+
+
+
+    >>> portal.checklist.addItem('first')
+    >>> portal.checklist.getAllItems()
+    ('normalitem', 'someitem', 'first')
+    >>> portal.checklist.addManagerItem('second')
+    >>> portal.checklist.getAllManagerItems()
+    ('manageritem', 'somemanageritem', 'second')
+    >>> request['hrmfirst'] = 'foo'
+    >>> request['hrmmgrsecond'] = 'bar'
+    >>> redirects[:] = []
+    >>> updateview()
+    >>> portal.checklist.getAllItems()
+    ('normalitem', 'someitem')
+    >>> portal.checklist.getAllManagerItems()
+    ('manageritem', 'somemanageritem')
+
+
+Checklist View
+--------------
+
+The checklist view is a convenience view for pulling out data from the given
+checklist.
+
+    >>> redirects[:] = []
+    >>> request = MockDict(response=Mock(redirect=redirect))
+    >>> checklistview = checklist.ChecklistView(portal, request)
+
+We hve methods to check permissions:
+
+    >>> bool(checklistview.canEditItems())
+    True
+    >>> bool(checklistview.canEditManagerItems())
+    True
+
+The rest just check to see if items are left.
+
+    >>> checklistview.items_left()
+    True
+    >>> checklistview.manager_items_left()
+    True
+    >>> checklistview.any_items_left()
+    True
+
+Notifications
+=============
+
+The ``handlers`` module in the ``notifications`` package is for setting
+up event subscribers.
+
+    >>> from plonehrm.checklist.notifications import handlers
+
+Executing the handler will first have the item added to non-manager
+items.
+
+    >>> portal.checklist.setAllItems([])
+    >>> portal.checklist.setAllManagerItems([])
+    >>> evt = Mock(for_manager=False, message='non-manager-item')
+    >>> handlers.handleHRMModuleEventForEmployee(portal, evt)
+    >>> portal.checklist.getAllItems()
+    ('non-manager-item',)
+    >>> portal.checklist.getAllManagerItems()
+    ()
+
+And then we try adding a manager item.
+
+    >>> evt = Mock(for_manager=True, message='manager-item')
+    >>> handlers.handleHRMModuleEventForEmployee(portal, evt)
+    >>> portal.checklist.getAllItems()
+    ('non-manager-item',)
+    >>> portal.checklist.getAllManagerItems()
+    ('manager-item',)
+
