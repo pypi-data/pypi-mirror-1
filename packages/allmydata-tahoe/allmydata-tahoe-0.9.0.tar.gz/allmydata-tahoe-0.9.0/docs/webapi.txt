@@ -1,0 +1,585 @@
+This document has six sections:
+
+1.  the basic API for how to programmatically control your tahoe node
+2.  convenience methods
+3.  safety and security issues
+4.  features for controlling your tahoe node from a standard web browser
+5.  debugging and testing features
+6.  XML-RPC (coming soon)
+
+
+1. the basic API for how to programmatically control your tahoe node
+
+a. connecting to the tahoe node
+
+Writing "8123" into $NODEDIR/webport causes the node to run a webserver on port
+8123. Writing "tcp:8123:interface=127.0.0.1" into $NODEDIR/webport does the same
+but binds to the loopback interface, ensuring that only the programs on the
+local host can connect.  This is the value that gets written into
+$NODEDIR/webport when a Tahoe node is created.
+
+Using "ssl:8123:privateKey=mykey.pem:certKey=cert.pem" would run an SSL
+server. See twisted.application.strports for more details.
+
+This webport can be set when the node is created by passing a --webport
+option to the 'tahoe create-client' command. By default, the node listens on
+port 8123, on the loopback (127.0.0.1) interface.
+
+b. file names
+
+The node provides some small number of "virtual drives". In the 0.5 release,
+this number is two: the first is the global shared vdrive, the second is the
+private non-shared vdrive. We will call the global one "global", and we will
+refer to the second one by "$PRIVATE_VDRIVE_URI", to show that to use it you
+have to insert the specific URI for that private vdrive.
+
+For the purpose of this document, let us assume that the vdrives currently
+contain the following directories and files:
+
+global/
+global/Documents/
+global/Documents/notes.txt
+
+$PRIVATE_VDRIVE_URI/
+$PRIVATE_VDRIVE_URI/Pictures/
+$PRIVATE_VDRIVE_URI/Pictures/tractors.jpg
+$PRIVATE_VDRIVE_URI/Pictures/family/
+$PRIVATE_VDRIVE_URI/Pictures/family/bobby.jpg
+
+Within the webserver, there is a tree of resources. The top-level "vdrive"
+resource gives access to files and directories in all of the user's virtual
+drives. For example, the URL that corresponds to notes.txt would be:
+
+http://localhost:8123/vdrive/global/Documents/notes.txt
+
+and the URL for tractors.jpg would be:
+
+http://localhost:8123/uri/$PRIVATE_VDRIVE_URI/Pictures/tractors.jpg
+
+In addition, each directory has a corresponding URL. The Pictures URL is:
+
+http://localhost:8123/uri/$PRIVATE_VDRIVE_URI/Pictures
+
+Note that all filenames in URLs are required to be UTF-8 encoded, so
+"resume.doc" (with an acute accent on both E's) would be accessed with:
+
+ http://localhost:8123/uri/$PRIVATE_VDRIVE_URI/r%C3%A9sum%C3%A9.doc
+
+The filenames inside upload POST forms are interpreted using whatever
+character set was provided in the conventional '_charset' field, and defaults
+to UTF-8 if not otherwise specified. The JSON representation of each
+directory contains native unicode strings. Tahoe directories are specified to
+contain unicode filenames, and cannot contain binary strings that are not
+representable as such.
+
+c. URIs
+
+From the "URIs" chapter in architecture.txt, recall that each file and
+directory has a unique "URI". This is a string which provides a secure
+reference to the file or directory: if you know the URI, you can retrieve
+(and possibly modify) the object. If you don't know the URI, you cannot
+access the object.
+
+A separate top-level namespace ("uri/" instead of "vdrive/") is used to
+access to files and directories directly by URI, rather than by going through
+the pathnames in the vdrive.
+
+For example, this identifies a file or directory:
+
+http://localhost:8123/uri/$URI
+
+And this identifies a file or directory named "tractors.jpg" in a
+subdirectory "Pictures" of the identified directory:
+
+http://localhost:8123/uri/$URI/Pictures/tractors.jpg
+
+In the following examples, "$URL" is a shorthand for a URL like the ones
+above, either with "vdrive/" and a vdrive name as the top level and a
+sequence of slash-separated pathnames following, or with "uri/" as the top
+level, followed by a URI, optionally followed by a sequence of
+slash-separated pathnames.
+
+
+Now, what can we do with these URLs? By varying the HTTP method
+(GET/PUT/POST/DELETE) and by appending a type-indicating query argument, we
+control what we want to do with the data and how it should be presented.
+
+d. examining files or directories
+
+  GET $URL?t=json
+
+  out: json description of $URL
+
+  This returns machine-parseable information about the indicated file or
+  directory in the HTTP response body. The JSON always contains a list, and
+  the first element of the list is always a flag that indicates whether the
+  referenced object is a file or a directory.
+
+  If it is a file, then the information includes file size and URI, like
+  this:
+
+   GET $FILEURL?t=json :
+
+    [ "filenode", { "ro_uri": file_uri,
+                    "size": bytes,
+                    "metadata": {"ctime": 1202777696.7564139,
+                                 "mtime": 1202777696.7564139
+                                 }
+                    } ]
+
+  If it is a directory, then it includes information about the children of
+  this directory, as a mapping from child name to a set of data about the
+  child (the same data that would appear in a corresponding GET?t=json of the
+  child itself). The child entries also include metadata about each child,
+  including creation- and modification- timestamps. The output looks like
+  this:
+
+   GET $DIRURL?t=json :
+
+    [ "dirnode", { "rw_uri": read_write_uri,
+                   "ro_uri": read_only_uri,
+                   "children": {
+                     "foo.txt": [ "filenode", { "ro_uri": uri,
+                                                "size": bytes,
+                                                "metadata": {
+                                                  "ctime": 1202777696.7564139,
+                                                  "mtime": 1202777696.7564139
+                                                 }
+                                               } ],
+                     "subdir":  [ "dirnode", { "rw_uri": rwuri,
+                                               "ro_uri": rouri,
+                                                "metadata": {
+                                                  "ctime": 1202778102.7589991,
+                                                  "mtime": 1202778111.2160511,
+                                                 }
+                                              } ]
+                    } } ]
+
+  In the above example, note how 'children' is a dictionary in which the keys
+  are child names and the values depend upon whether the child is a file or a
+  directory. The value is mostly the same as the JSON representation of the
+  child object (except that directories do not recurse -- the "children"
+  entry of the child is omitted, and the directory view includes the metadata
+  that is stored on the directory edge).
+
+  Then the rw_uri field will be present in the information about a directory
+  if and only if you have read-write access to that directory,
+
+e. downloading a file
+
+  GET $URL
+
+  out: file contents or dir metadata
+  options:
+        save=<boolean> - If true add header "Content-Disposition: attachment"
+
+  If the indicated object is a file, then this simply retrieves the contents
+  of the file. The file's contents are provided in the body of the HTTP
+  response.
+
+  If the indicated object a directory, then this returns an HTML page,
+  intended to be displayed to a human by a web browser, which contains HREF
+  links to all files and directories reachable from this directory. These
+  HREF links do not have a t= argument, meaning that a human who follows them
+  will get pages also meant for a human. It also contains forms to upload new
+  files, and to delete files and directories. These forms use POST methods to
+  do their job.
+
+  You can add the "save=true" argument, which adds a 'Content-Disposition:
+  attachment' header to prompt most web browsers to save the file to disk
+  rather than attempting to display it.
+
+  A filename (from which a MIME type can be derived, for use in the
+  Content-Type header) can be specified using a 'filename=' query argument.
+  This is especially useful if the $URL does not end with the name of the
+  file (e.g. if it ends with the URI of the file instead). This filename is
+  also the one used if the 'save=true' argument is set. For example:
+
+   GET http://localhost:8123/uri/$TRACTORS_URI?filename=tractors.jpg
+
+f. uploading a file
+
+  PUT http://localhost:8123/uri
+
+   in: file contents
+   out: file write cap
+
+   Upload a file, using the data from the HTTP request body, and returning
+   the resulting URI as the HTTP response body. This does not make the file
+   visible from the virtual drive -- to do that, see section 1.h. below, or
+   the convenience method in section 2.a..
+
+  POST http://localhost:8123/uri?t=upload
+
+   This action also uploads a file without attaching it to a virtual drive
+   directory, but can be used from an HTML form. The response is an HTML page
+   that describes the results of the upload, including the resulting URI (but
+   also including information about which peers were used, etc). If a
+   when_done=URL argument is provided, the reponse is a redirect to the given
+   URL instead of the upload-results page.
+
+  POST http://localhost:8123/uri?t=upload&mutable=true
+
+   This action also uploads a file without attaching it to a virtual drive
+   directory, but creates a mutable file (SSK) instead of an immutable one.
+   The response contains the new URI that was created.
+
+  PUT http://localhost:8123/uri?mutable=true
+
+   This second form also accepts data from the HTTP request body, but creates
+   a mutable file (SSK) instead of an immutable one (CHK). The response
+   contains the new URI that was created.
+
+
+g. creating a new directory
+
+  PUT http://localhost:8123/uri?t=mkdir
+
+   in: (nothing)
+   out: directory write cap
+
+   Create a new empty directory and return its URI as the HTTP response body.
+   This does not make the newly created directory visible from the virtual
+   drive, but you can use section 1.h. to attach it, or the convenience method
+   in section 2.XXX.
+
+ POST http://localhost:8123/uri?t=mkdir
+
+   in: (nothing)
+   out: directory write cap
+
+   Just like the equivalent PUT form, but this can be called from an HTML
+   form.
+
+ POST http://localhost:8123/uri?t=mkdir&redirect_to_result=true
+
+   in: (nothing)
+   out: redirects to the /uri/$NEWDIRURI page
+
+   This also creates an unlinked directory, but instead of returning the URI
+   as a string, this form will return an HTTP Redirect that takes you to the
+   new directory's HTML page, just as if you had directed your browser to
+   /uri/$NEWDIRURI . If you bookmark this page, you'll be able to get back to
+   the directory again in the future.
+
+   This method is the recommended way to create a new root directory. There
+   is a "Create Directory" button on the Welcome page to invoke this action.
+
+
+h. attaching a file or directory as the child of an extant directory
+
+  PUT $URL?t=uri
+
+  in: child cap
+  out: the same child cap
+  options:
+        replace=<boolean> - If true, overwrite existing contents.
+
+  This attaches a child (either a file or a directory) to the given directory
+  $URL is required to indicate a directory as the second-to-last element and
+  the desired filename as the last element, for example:
+
+   PUT http://localhost:8123/uri/$URI_OF_SOME_DIR/Pictures/tractors.jpg
+   PUT http://localhost:8123/uri/$URI_OF_SOME_DIR/tractors.jpg
+   PUT http://localhost:8123/uri/$PRIVATE_VDRIVE_URI/Pictures/tractors.jpg
+
+  (Note that a URI_OF_SOME_DIR and a PRIVATE_VDRIVE_URI are each just
+  separate URIs, and there is nothing special about the latter except that it
+  is useful to put all of the user's top-level files and directories into one
+  place, so we choose to use that particular directory to be the user's main
+  directory.)
+
+  The URI of the child is provided in the body of the HTTP request,
+  and this same URI is returned in the response body.
+
+  There is an optional "?replace=" param whose value can be "true", "t", "1",
+  "false", "f", or "0" (case-insensitive), and which defaults to "true". If
+  the indicated directory already contains the given child name, then if
+  replace is true then the value of that name is changed to be the new URI.
+  If replace is false then an HTTP 409 "Conflict" error is returned.
+
+  This can be used to attach a shared directory (a directory that other
+  people can read or write) to the vdrive. Intermediate directories, if any,
+  are created on-demand.
+
+i. removing a name from a directory
+
+  DELETE $URL
+
+  This removes the given name from the given directory. $URL is required to
+  indicate a directory as the second-to-last element and the name to remove
+  from that directory as the last element, just as in section 1.g..
+
+  Note that this does not actually delete the resource that the name points
+  to from the tahoe grid -- it only removes this name in this directory. If
+  there are other names in this directory or in other directories that point
+  to the resource, then it will remain accessible through those paths. Even
+  if all names pointing to this resource are removed from their parent
+  directories, then if someone is in possession of the URI of this resource
+  they can continue to access the resource through the URI. Only if a person
+  is not in possession of the URI, and they do not have access to any
+  directories which contain names pointing to this resource, are they
+  prevented from accessing the resource. (This behavior is very similar to
+  the way hardlinks and anonymous files work in traditional unix
+  filesystems).
+
+2. convenience methods
+
+a. uploading a file and attaching it to the vdrive
+
+  PUT $URI
+
+  in: file contents
+  out: file write cap
+
+  statuses:
+  200 - File updated.  [FIXME: Is this true yet?]
+  201 - File created.  [FIXME: Is this true yet?]
+
+  Upload a file and link it into the the vdrive at the location specified by
+  $URI. The last item in the $URI must be a filename, and the second-to-last
+  item must identify a directory.
+
+  It will create intermediate directories as necessary. The file's contents
+  are taken from the body of the HTTP request. For convenience, the HTTP
+  response contains the URI that results from uploading the file, although
+  the client is not obligated to do anything with the URI. According to the
+  HTTP/1.1 specification (rfc2616), this should return a 200 (OK) code when
+  modifying an existing file, and a 201 (Created) code when creating a new
+  file. (TODO: as of 0.5, the web server only returns 200, never 201).
+
+  To use this, run 'curl -T localfile http://localhost:8123/vdrive/global/newfile'
+
+3. safety and security issues -- names vs. URIs
+
+The vdrive provides a mutable filesystem, but the ways that the filesystem
+can change are limited. The only thing that can change is that the mapping
+from child names to child objects that each directory contains can be changed
+by adding a new child name pointing to an object, removing an existing child
+name, or changing an existing child name to point to a different object.
+
+Obviously if you query tahoe for information about the filesystem and then
+act upon the filesystem (such as by getting a listing of the contents of a
+directory and then adding a file to the directory), then the filesystem might
+have been changed after you queried it and before you acted upon it.
+However, if you use the URI instead of the pathname of an object when you act
+upon the object, then the only change that can happen is when the object is a
+directory then the set of child names it has might be different. If, on the
+other hand, you act upon the object using its pathname, then a different
+object might be in that place, which can result in more kinds of surprises.
+
+For example, suppose you are writing code which recursively downloads the
+contents of a directory. The first thing your code does is fetch the listing
+of the contents of the directory. For each child that it fetched, if that
+child is a file then it downloads the file, and if that child is a directory
+then it recurses into that directory. Now, if the download and the recurse
+actions are performed using the child's name, then the results might be
+wrong, because for example a child name that pointed to a sub-directory when
+you listed the directory might have been changed to point to a file (in which
+case your attempt to recurse into it would result in an error and the file
+would be skipped), or a child name that pointed to a file when you listed the
+directory might now point to a sub-directory (in which case your attempt to
+download the child would result in a file containing HTML text describing the
+sub-directory!).
+
+If your recursive algorithm uses the uri of the child instead of the name of
+the child, then those kinds of mistakes just can't happen. Note that both the
+child's name and the child's URI are included in the results of listing the
+parent directory, so it isn't any harder to use the URI for this purpose.
+
+In general, use names if you want "whatever object (whether file or
+directory) is found by following this name (or sequence of names) when my
+request reaches the server". Use URIs if you want "this particular object".
+
+4. features for controlling your tahoe node from a standard web browser
+
+a. uri redirect
+
+  GET http://localhost:8123/uri?uri=$URI
+
+  This causes a redirect to /uri/$URI, and retains any additional query
+  arguments (like filename= or save=). This is for the convenience of web
+  forms which allow the user to paste in a URI (obtained through some
+  out-of-band channel, like IM or email).
+
+  Note that this form merely redirects to the specific file or directory
+  indicated by the URI: unlike the GET /uri/$URI form, you cannot traverse to
+  children by appending additional path segments to the URL.
+
+b. web page offering rename
+
+  GET $URL?t=rename-form&name=$CHILDNAME
+
+  This provides a useful facility to browser-based user interfaces. It
+  returns a page containing a form targetting the "POST $URL t=rename"
+  functionality described below, with the provided $CHILDNAME present in the
+  'from_name' field of that form. I.e. this presents a form offering to
+  rename $CHILDNAME, requesting the new name, and submitting POST rename.
+
+c. POST forms
+
+  POST $URL
+  t=upload
+  name=childname  (optional)
+  file=newfile
+
+  This instructs the node to upload a file into the given directory. We need
+  this because forms are the only way for a web browser to upload a file
+  (browsers do not know how to do PUT or DELETE). The file's contents and the
+  new child name will be included in the form's arguments. This can only be
+  used to upload a single file at a time. To avoid confusion, name= is not
+  allowed to contain a slash (a 400 Bad Request error will result). The
+  response is the file read-cap (URI) of the resulting file.
+
+
+  POST $URL
+  t=upload
+  name=childname  (optional)
+  mutable="true"
+  file=newfile
+
+  This instructs the node to upload a file into the given directory, using a
+  mutable file (SSK) rather than the usual immutable file (CHK). As a result,
+  further operations to the same $URL will not cause the identity of the file
+  to change. The response is the file write-cap (URI) of the resulting
+  mutable file.
+
+
+  POST $URL
+  t=overwrite
+  file=newfile
+
+  This is used to replace the existing (mutable) file's contents with new
+  ones. It may only be used when $URL refers to a mutable file, as created by
+  POST $URL?t=upload&mutable=true, or PUT /uri?t=mutable . The name
+  associated with the uploaded file is ignored. TODO: rethink this, it's kind
+  of weird.
+
+
+  POST $URL
+  t=mkdir
+  name=childname
+
+  This instructs the node to create a new empty directory. The name of the
+  new child directory will be included in the form's arguments.
+
+
+  POST $URL
+  t=uri
+  name=childname
+  uri=newuri
+
+  This instructs the node to attach a child that is referenced by URI (just
+  like the PUT $URL?t=uri method). The name and URI of the new child
+  will be included in the form's arguments.
+
+
+  POST $URL
+  t=delete
+  name=childname
+
+  This instructs the node to delete a file from the given directory. The name
+  of the child to be deleted will be included in the form's arguments.
+
+
+  POST $URL
+  t=rename
+  from_name=oldchildname
+  to_name=newchildname
+
+  This instructs the node to rename a child within the given directory. The
+  child specified by 'from_name' is removed, and reattached as a child named
+  for 'to_name'. This is unconditional and will replace any child already
+  present under 'to_name', akin to 'mv -f' in unix parlance.
+
+
+  POST $URL
+  t=check
+
+  This triggers the FileChecker to determine the current "health" of the
+  given file, by counting how many shares are available. The results will be
+  displayed on the directory page containing this file.
+
+
+5. debugging and testing features
+
+GET $URL?t=download&localfile=$LOCALPATH
+GET $URL?t=download&localdir=$LOCALPATH
+
+  The localfile= form instructs the node to download the given file and write
+  it into the local filesystem at $LOCALPATH. The localdir= form instructs
+  the node to recursively download everything from the given directory and
+  below into the local filesystem. To avoid surprises, the localfile= form
+  will signal an error if $URL actually refers to a directory, likewise if
+  localdir= is used with a $URL that refers to a file.
+
+  This request will only be accepted from an HTTP client connection
+  originating at 127.0.0.1 . This request is most useful when the client node
+  and the HTTP client are operated by the same user. $LOCALPATH should be an
+  absolute pathname.
+
+  This form is only implemented for testing purposes, because of a trivially
+  easy attack: any web server that the local browser visits could serve an
+  IMG tag that causes the local node to modify the local filesystem.
+  Therefore this form is only enabled if you create a file named
+  'webport_allow_localfile' in the node's base directory.
+
+PUT $NEWURL?t=upload&localfile=$LOCALPATH
+PUT $NEWURL?t=upload&localdir=$LOCALPATH
+
+  This uploads a file or directory from the node's local filesystem to the
+  vdrive. As with "GET $URL?t=download&localfile=$LOCALPATH", this request
+  will only be accepted from an HTTP connection originating from 127.0.0.1 .
+
+  The localfile= form expects that $LOCALPATH will point to a file on the
+  node's local filesystem, and causes the node to upload that one file into
+  the vdrive at the given location. Any parent directories will be created in
+  the vdrive as necessary.
+
+  The localdir= form expects that $LOCALPATH will point to a directory on the
+  node's local filesystem, and it causes the node to perform a recursive
+  upload of the directory into the vdrive at the given location, creating
+  parent directories as necessary. When the operation is complete, the
+  directory referenced by $NEWURL will contain all of the files and
+  directories that were present in $LOCALPATH, so this is equivalent to the
+  unix commands:
+
+   mkdir -p $NEWURL; cp -r $LOCALPATH/* $NEWURL/
+
+  Note that the "curl" utility can be used to provoke this sort of recursive
+  upload, since the -T option will make it use an HTTP 'PUT':
+
+   curl -T /dev/null 'http://localhost:8123/vdrive/global/newdir?t=upload&localdir=/home/user/directory-to-upload'
+
+  This form is only implemented for testing purposes, because any attacker's
+  web server that a local browser visits could serve an IMG tag that causes
+  the local node to modify the local filesystem. Therefore this form is only
+  enabled if you create a file named 'webport_allow_localfile' in the node's
+  base directory.
+
+GET $URL?t=manifest
+
+  Return an HTML-formatted manifest of the given directory, for debugging.
+
+6. XMLRPC (coming soon)
+
+  http://localhost:8123/xmlrpc
+
+  This resource provides an XMLRPC server on which all of the previous
+  operations can be expressed as function calls taking a "pathname" argument.
+  This is provided for applications that want to think of everything in terms
+  of XMLRPC.
+
+   listdir(vdrivename, path) -> dict of (childname -> (stuff))
+   put(vdrivename, path, contents) -> URI
+   get(vdrivename, path) -> contents
+   mkdir(vdrivename, path) -> URI
+   put_localfile(vdrivename, path, localfilename) -> URI
+   get_localfile(vdrivename, path, localfilename)
+   put_localdir(vdrivename, path, localdirname)   # recursive
+   get_localdir(vdrivename, path, localdirname)   # recursive
+   put_uri(vdrivename, path, URI)
+
+   etc..
+
+
