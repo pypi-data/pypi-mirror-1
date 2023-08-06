@@ -1,0 +1,1 @@
+#add an empty file to make the directory included in egg distributions
