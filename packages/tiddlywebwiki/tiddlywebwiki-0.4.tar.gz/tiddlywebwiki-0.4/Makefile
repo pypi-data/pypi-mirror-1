@@ -1,0 +1,38 @@
+# Simple Makefile for some common tasks. This will get 
+# fleshed out with time to make things easier on developer
+# and tester types.
+.PHONY: test dist upload
+
+all:
+	@echo "No target"
+
+empty:
+	wget http://tiddlywiki.com/empty.html -O tiddlywebwiki/empty.html
+
+status_plugin:
+	wget http://github.com/tiddlyweb/tiddlyweb-plugins/raw/master/status/status.py -O status.py
+
+wikklytextrender_plugin:
+	wget http://github.com/tiddlyweb/tiddlyweb-plugins/raw/master/wikklytextrender/wikklytextrender.py -O wikklytextrender.py
+
+twebplugins: status_plugin wikklytextrender_plugin
+
+remotes: empty twebplugins
+
+clean:
+	rm -r dist || true
+
+test: 
+	py.test -x test
+
+dist: test
+	python setup.py sdist
+
+upload: clean remotes test pypi peermore
+
+pypi: 
+	python setup.py sdist upload
+
+peermore:
+	scp -P 8022 dist/tiddlywebwiki-*.gz cdent@tiddlyweb.peermore.com:public_html/tlddlyweb.peermore.com//dist
+	scp -P 8022 CHANGES cdent@tiddlyweb.peermore.com:public_html/tiddlyweb.peermore.com/dist/CHANGES.tiddlywebwiki
