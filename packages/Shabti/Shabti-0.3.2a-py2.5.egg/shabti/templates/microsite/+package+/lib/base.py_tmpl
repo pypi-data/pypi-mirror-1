@@ -1,0 +1,104 @@
+# -*- coding: utf-8 -*-
+"""The base Controller API
+
+Provides the BaseController class for subclassing.
+"""
+from pylons.controllers import WSGIController
+{{if template_engine in ('genshi', 'jinja2', 'mako')}}
+from pylons.templating import render_{{template_engine}} as render
+{{endif}}
+
+import logging
+
+from pylons import url, request, session, tmpl_context as c
+# from pylons.i18n import set_lang, get_lang, _, ungettext, N_
+from {{package}} import model as model
+from datetime import datetime
+
+log = logging.getLogger(__name__)
+
+from webhelpers.text import truncate
+def bag_it_and_tag_it(obj, controller, action):
+    # A simple changelog, tracks additions, deletions and
+    # edits of the DB entities. Combines a series of edits 
+    # of one entity into a single logline. Records enough
+    # data to be able to support a simple presentation grid
+    # as demonstrated on the Dashboard index page.
+    user = model.Session.query(model.User).get(c.userid)
+    if action == 'edit':
+        lastedit = model.Session.query(model.ChangelogItem).order_by(
+                                model.ChangelogItem.date.desc()).limit(1)[0]
+        if lastedit.refid == obj.id \
+            and lastedit.item == controller \
+            and lastedit.action != 'delete':
+            lastedit.date = datetime.now()
+        else:
+            lastedit = None
+    try:
+        model.Session.save_or_update(lastedit)
+    except:
+        ce = model.ChangelogItem(content=truncate(str(obj),
+                                            length=30,
+                                            indicator='...',
+                                            whole_word=True),
+                           user=user,
+                           item=controller, 
+                           refid=obj.id, 
+                           action=action,
+                           date=datetime.now())
+        model.Session.add(ce)
+
+class BaseController(WSGIController):
+    
+    def __call__(self, environ, start_response):
+        """Invoke the Controller"""
+        # WSGIController.__call__ dispatches to the Controller method
+        # the request is routed to. This routing information is
+        # available in environ['pylons.routes_dict']
+        c.ref = url(**request.environ['pylons.routes_dict'])
+
+        # Handle session storage of flash status messages, 
+        # retrieve message from session and purge the store
+        try:
+            flash = session.get('flash')
+            if flash:
+                c.flash = flash
+                del session['flash']
+                session.save()
+        except Exception:
+            pass
+
+        # Deal with user signin
+
+        c.user = False
+        c.legend = "Anon"
+        c.userid = 0
+        
+        # Handle testing scenario ...
+        # log.debug("Signin: REMOTEUSER %s AUTHUSERID %s" % \
+        #         (request.environ.get('REMOTE_USER', False),
+        #          session.get('AUTH_USER_ID', False)))
+
+        if request.environ.get('REMOTE_USER', ''):
+            if request.environ.get('paste.testing', False):
+                c.user = model.Session.query(model.User).filter_by(
+                    username=u''+request.environ['REMOTE_USER']).one()
+                c.legend = c.user.username.capitalize()
+                c.userid = session['AUTH_USER_ID'] = c.user.id
+                
+        # Normal running mode ...
+        
+        elif session.get('AUTH_USER_ID', False):
+            c.user = model.Session.query(model.User).get(
+                                            session['AUTH_USER_ID'])
+            c.legend = c.user.username.capitalize()
+            c.userid = session['AUTH_USER_ID']
+            
+        # On with the show ...
+        try:
+            return WSGIController.__call__(self, environ, start_response)
+        finally:
+            # Remove the database model.Session so that there is no possibility
+            # of data leaking into other interactions.
+            model.Session.remove()
+    

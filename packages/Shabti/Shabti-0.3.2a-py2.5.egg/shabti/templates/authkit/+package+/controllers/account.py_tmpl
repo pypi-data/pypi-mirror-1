@@ -1,0 +1,991 @@
+"""
+Account controller
+
+This is responsible for all aspects of account management and is based on the 
+AuthKit example.
+"""
+import cgi
+import datetime
+import formbuild
+import formencode
+import random
+import simplejson
+import time
+# import web
+
+# from pylons.templating import render, render_mako
+from pylons import config, tmpl_context as c, session, request
+from paste.request import construct_url
+from authkit.authorize.pylons_adaptors import authorize, authorize_request
+from authkit.permissions import RemoteUser
+
+#from openid.cryptutil import randomString
+from openid.consumer import consumer
+from openid.store import filestore
+
+import {{package}}.lib.helpers as h
+from {{package}}.lib.helpers import dcmeta
+from {{package}}.lib.base import *
+from {{package}} import model as model
+from {{package}}.model.forms.build import AuthKitForm
+from {{package}}.model.forms.schema import *
+
+import logging
+log = logging.getLogger(__name__)
+
+permissions = RemoteUser()
+
+class PassURLError(Exception):
+    pass
+
+# def _persona_as_dict(persona):
+#     defaults = {}
+#     for field in sreg_fields:
+#         if field == 'dob':
+#             if persona.dob:
+#                 defaults['dob.year'] = persona.dob.year
+#                 defaults['dob.month'] = persona.dob.month
+#                 defaults['dob.day'] = persona.dob.day
+#             else:
+#                 defaults['dob.year'] = ''
+#                 defaults['dob.month'] = ''
+#                 defaults['dob.day'] = ''
+#         else:
+#             defaults[field] = getattr(persona, field)
+#     return defaults
+#     
+
+def _setup(self):
+    """
+    Setup any context variables used in templates etc.
+    """
+    c.dcmeta = dcmeta(title='Account controller', 
+                      description="Account Controller")
+
+    c.template_dir = '/authkit/'
+    c.openid_consumer_template_dir = '/openid/consumer/'
+    c.controller_name = 'account'
+    
+    if config['app_conf'].has_key('base_url'):
+        c.base_url = config['app_conf']['base_url']
+    else:
+        c.base_url = construct_url(
+                        request.environ, 
+                        with_query_string=False, 
+                        with_path_info=False,
+                        script_name=None,
+                        path_info=None,
+                        querystring=None)
+    
+    # BaseURL shouldn't have a trailing '/'
+    c.base_url.strip('/')
+    
+    # This might not be necessary
+    c.model = self.model = model
+    
+    # For the schema
+    c.params = request.params
+    
+    # Set up the user
+    c.session = model.Session
+    
+    if request.environ.has_key('REMOTE_USER') and \
+        request.environ['REMOTE_USER']:
+        user = model.Session.query(model.User).filter_by(
+            username=request.environ['REMOTE_USER'].lower()
+        ).all()
+        if len(user) > 1:
+            raise Exception(
+                'More than one user in database with username %s found.'% \
+                (request.environ['REMOTE_USER'].lower()))
+        elif user:
+            c.user = user[0]
+        else:
+            # @ No such user, remove them from the environment
+            del request.environ['REMOTE_USER']
+    
+    c.sreg_fields = ['nickname', 'email', 'fullname', 'dob', 'gender',
+                     'postcode', 'country', 'language', 'timezone',]
+    
+    c.fields = {'required':[], 'optional': []}
+    
+    for field in c.sreg_fields:
+        if config['app_conf'].has_key('sreg.'+field):
+            field_value = config['app_conf'].get('sreg.'+field).lower().strip()
+            if field_value == 'optional':
+                c.fields['optional'].append(field)
+            elif field_value == 'required':
+                c.fields['required'].append(field)
+            else:
+                raise Exception("Unrecognised value %r for config option %s"%(field_value, field))
+    
+    if not 'email' in c.fields['required']:
+        raise Exception("sreg.email is a required parameter")
+    c.use_passurl = bool(config['app_conf'].get('use_passurl', False))
+    c.cstore = setup_openid_cstore()
+    
+
+
+# OpenID Consumer code ... for when config declares: "use_passurl = true"
+
+def setup_openid_cstore():
+    if config['app_conf'].get('use_passurl','false').lower() == 'true':
+        # If file storage specified, open the file for read/write as ``cstore``
+        if config['app_conf'].get('passurl_store','file') == 'file':
+            cstore = filestore.FileOpenIDStore(config['app_conf']['passurl_config'])
+        # If MySQL storahe is specified, open the DB for read/write as ``cstore``
+        elif config['app_conf'].get('passurl_store','file') == 'mysql':
+            import MySQLdb
+            from DBUtils.PersistentDB import PersistentDB
+            from openid.store.sqlstore import MySQLStore
+            from sqlalchemy.engine.url import make_url
+            def create_conn(dburi):
+                log.debug("DBURI = %s" % dburi)
+                url = make_url(dburi)
+                p={'db':url.database}
+                if url.username:
+                    p['user'] = url.username
+                if url.password:
+                    p['passwd'] = url.password
+                if url.host:
+                    p['host'] = url.host
+                if url.port:
+                    p['port'] = url.port
+                return PersistentDB(MySQLdb, 1, **p).connection()
+            conn = create_conn(config['app_conf']['passurl_config'])
+            cstore = MySQLStore(conn)
+        elif config['app_conf'].get('passurl_store','file') == 'sqlite':
+            import sqlite3
+            from DBUtils.PersistentDB import PersistentDB
+            from openid.store.sqlstore import SQLiteStore
+            from sqlalchemy.engine.url import make_url
+            def create_conn(dburi):
+                log.debug("DBURI = %s" % dburi)
+                url = make_url(dburi)
+                p={'database':url.database}
+                if url.username:
+                    p['user'] = url.username
+                if url.password:
+                    p['passwd'] = url.password
+                if url.host:
+                    p['host'] = url.host
+                if url.port:
+                    p['port'] = url.port
+                return PersistentDB(sqlite3, 1, **p).connection()
+            conn = create_conn(config['app_conf']['passurl_config'])
+            cstore = SQLiteStore(conn)
+            return cstore
+        # Otherwise complain bitterly that OpenID can't work without a store
+        else:
+            raise Exception("Invalid store type %r" % \
+                config['app_conf'].get('passurl_store', None))
+    
+
+
+# setup_openid_cstore()
+
+# End consumer code
+
+class AccountController(BaseController):
+    
+    def __before__(self):
+        
+        _setup(self)
+        
+        # For the consumer
+        if config['app_conf'].get('use_passurl','false').lower() == 'true' \
+                and config['app_conf'].get('passurl_store','file') == 'mysql':
+            global conn
+            try:
+                cur = conn.cursor()
+                cur.execute("SHOW TABLES")
+            except:
+                log.debug("Consumer reconnecting to database...")
+                conn = create_conn(request.environ['paste.config']['app_conf']['db_consumer'])
+        
+        # _setup(self)
+        c.auth_user=request.environ.get('REMOTE_USER', False)
+    
+
+    def __after__(self):
+        Session.commit()
+        session.save()
+    
+        
+#
+# Start consumer code
+#
+
+    def consumer(self):
+        #c.message = message or ''
+        #c.css_class = css_class
+        #c.value = self._oid_quoteattr(form_contents)
+        return render(c.openid_consumer_template_dir+'content.mak')
+    
+
+    def passurl(self):
+        """
+        Process the form submission, initating OpenID verification.
+        """
+        if config['app_conf'].get('use_passurl','false').lower() != 'true':
+            return 'Passurl support is not enabled'
+        
+        mode = request.params.get('mode','signin')
+        #
+        # Passurl Sign in
+        #
+        
+        class State:
+            pass
+        state = State()
+        state.mode = mode
+        state.policy_url = c.base_url + h.url(
+            controller = c.controller_name,
+            action = 'policy',
+        )
+        state.base_url = c.base_url
+        state.controller_name = c.controller_name
+        state.fields = c.fields
+        state.oidconsumer = self._oid_get_consumer()
+        state.url_for = h.url
+        
+        try:
+            redirect_url = PassURLForm().to_python(request.params, state)['passurl']
+        except formencode.Invalid, e:
+            c.form = AuthKitForm({'passurl':request.params.get('passurl')},
+                                 {'passurl':e.error_dict['passurl'].msg})
+            if mode == 'signin':
+                c.mode = 'passurl'
+                return render(c.template_dir+'signin.mak')
+            else:
+                c.mode = 'passurl'
+                return render(c.template_dir+'signup.mak')
+        else:
+            h.redirect_to(redirect_url)
+    
+
+    def policy(self):
+        if config['app_conf'].get('use_passurl','false').lower() != 'true':
+            return 'Passurl support is not enabled'
+        return render(c.template_dir+'/policy.mak')
+    
+
+    def _build_validators(self):
+        if not c.today:
+            c.today = datetime.datetime.now().year
+        if not c.days:
+            c.days = [[x,x] for x in range(1,32)]
+            c.days.insert(0, ['','Day'])
+        if not c.months:
+            months = ['Jan','Feb','Mar','Apr',
+                      'May','Jun','Jul','Aug',
+                      'Sep','Oct','Nov','Dec']
+            c.months = [[x,months[x-1]] for x in range(1,len(months)+1)]
+            c.months.insert(0, ['','Month'])      
+        if not c.years:
+            c.years = [[-x,-x] for x in range(-c.today,-1879)]
+            c.years.insert(0, ['','Year'])
+        if not c.country:
+            c.country = [x for x in countries]
+            c.country.insert(0, ['','Please choose'])
+        if not c.timezone:
+            c.timezone = [x for x in timezones]
+            c.timezone.insert(0, ['','Please choose'])
+        if not c.language:
+            c.language = [x for x in languages]
+            c.language.insert(0, ['','Please choose'])
+        if not c.gender:
+            c.gender=[['','Please choose'],['m','Male'], ['f','Female']]
+        
+        schema_params = {}
+        
+        for field in c.fields['required']:
+            if field in ['fullname', 'postcode', 'nickname']:
+                schema_params[field] = formencode.validators.String(not_empty=True)
+            elif field == 'email':
+                schema_params['email'] = formencode.validators.Email(
+                                                resolve_domain=dns_checking, not_empty=True)
+            elif field == 'dob':
+                schema_params['dob'] = DateRequired()
+            elif field == 'gender':
+                schema_params['gender'] = formencode.validators.OneOf(
+                                                ['m','f'], not_empty=True)
+            elif field == 'country':
+                schema_params['country'] = formencode.validators.OneOf(
+                                                country_codes, not_empty=True)
+            elif field == 'language':
+                schema_params['language'] = formencode.validators.OneOf(
+                                                languages_codes, not_empty=True)
+            elif field == 'timezone':
+                schema_params['timezone'] = formencode.validators.OneOf(
+                                                timezone_codes, not_empty=True)
+        
+        for field in c.fields['optional']:
+            if field in ['fullname', 'postcode', 'nickname']:
+                schema_params[field] = formencode.validators.String()
+            elif field == 'email':
+                schema_params['email'] = formencode.validators.Email(resolve_domain=dns_checking)
+            elif field == 'dob':
+                # XXX This can accept a value != 10 chars.
+                schema_params['dob'] = DateOptional()
+            elif field == 'gender':
+                schema_params['gender'] = formencode.validators.OneOf(['m','f'])
+            elif field == 'country':
+                schema_params['country'] = formencode.validators.OneOf(country_codes)
+            elif field == 'language':
+                schema_params['language'] = formencode.validators.OneOf(languages_codes)
+            elif field == 'timezone':
+                schema_params['timezone'] = formencode.validators.OneOf(timezone_codes)
+        return schema_params
+    
+
+    def process_signin(self):
+        if config['app_conf'].get('use_passurl','false').lower() != 'true':
+            return 'Passurl support is not enabled'
+        
+        oidconsumer = self._oid_get_consumer()
+        passurl = oidconsumer.complete(dict(request.params))
+
+        try:
+            info = passurl
+            if info.status == consumer.SUCCESS:
+                session['passurl'] = info.identity_url
+                user = c.session.query(c.model.User).filter_by( passurl=info.identity_url)
+                # Check this identity is registered:
+                if len(user) > 1:
+                    msg ='<p>More than one user in database with passurl %s found.</p>' % \
+                        (info.identity_url)
+                    raise PassURLError(msg)
+                elif user:
+                    # Set the user to save us having to do it later
+                    c.user = user[0]
+                    #raise Exception("here3")
+                    #return info.identity_url
+                else:
+                    msg ='<p>Passurl <tt>%s</tt> is not registered.</p>' % \
+                        (info.identity_url) + \
+                        '''<p>To register this passurl go to the my account area ''' + \
+                        '''and choose update details.</p>'''
+                    raise PassURLError(msg)
+            elif info.status == consumer.FAILURE:
+                if info.identity_url:
+                    log.debug("Verification of PassURL failed: %s"%info.message)
+                    msg = "Verification of %s failed." % (cgi.escape(info.identity_url),)
+                    raise PassURLError(msg)
+                else:
+                    log.debug("Verification of PassURL failed: %s"%info.message)
+                    msg = "Verification failed, no passurl was returned."
+                    raise PassURLError(msg)
+            elif info.status == consumer.CANCEL:
+                log.debug("Cancelled")
+                msg = "Verification was cancelled for %s." % (cgi.escape(info.identity_url),)
+                raise PassURLError(msg)
+            else:
+                log.debug("Verification of PassURL failed: %s" % info.message)
+                msg = "Verification of %s failed, not known why, please report this " + \
+                      "error to the developers." % (cgi.escape(info.identity_url),)
+                raise PassURLError(msg)
+        except PassURLError, e:
+            #raise Exception("here")
+            c.form = AuthKitForm({'passurl':info.identity_url},{'passurl':str(e)})
+            return render(c.template_dir+'signin.mak')
+        else:
+            #raise Exception("here2")
+            # Set during the verification
+            self._signin(username=c.user.username)
+            # XXX Redirection not written yet
+            return render(
+                c.template_dir+'/redirect.mak', 
+                fragment=True, 
+                url = request.params.get('redirect_to') or \
+                        h.url(controller=c.controller_name, action='index'))
+    
+
+    def register(self):
+        return self.register_manual(c.use_passurl)
+    
+        
+    def register_manual(self, show_passurl=False):
+        c.use_passurl = show_passurl
+        schema_params = self._build_validators()
+        
+        c.show = c.fields['required'][:]
+        for field in c.fields['optional']:
+            c.show.append(field)
+        c.show.append('password')
+        c.show.append('username')
+            
+        # log.debug("Schema params %s" % schema_params)
+        
+        results, errors, response = formbuild.handle(
+                                        schema=ManualRegistration(**schema_params),
+                                        template=c.template_dir+'signup.mak',
+                                        form=AuthKitForm,
+                                        data = {'passurl':'passurl.com/'},
+                                        render_response=render
+        )
+        # log.debug("Results: %s" % results)
+        # log.debug("Errors: %s" % errors)
+        # log.debug("Response: %s" % response)
+        if response:
+            return response
+        # Check for username uniqueness.
+        newuser = c.model.User(username=results['username'].lower(), 
+                               active=False,
+                               password=results['password'],
+                               # New email isn't added until verified.
+                               #email=results['email'],
+                               fullname=results.get('fullname'),
+                               nickname=results.get('nickname'),
+                               dob=results.get('dob'),
+                               gender=results.get('gender'),
+                               postcode=results.get('postcode'),
+                               country=results.get('country'),
+                               language=results.get('language'),
+                               timezone=results.get('timezone'))
+        email = c.model.Email()
+        email.email=results['email']
+        newuser.emails.append(email)
+        # Set when verified
+        #newuser.email = results['email']
+        self._send_verification_email(newuser, email, 'register')
+        c.session.save(newuser)
+        c.session.flush()
+        c.form = AuthKitForm()
+        c.register = True
+        return render(c.template_dir+'registration_sent.mak')
+    
+
+    def register_automatic(self, first=False):
+        c.use_passurl = False
+        c.mode = 'register_automatic'
+        
+        schema_params = self._build_validators()
+        
+        if first:
+            params = {}
+            params['nickname'] = request.params.get('openid.sreg.nickname','')
+            params['email'] = request.params.get('openid.sreg.email','')
+            params['fullname'] = request.params.get('openid.sreg.fullname','')
+            params['dob'] = request.params.get('openid.sreg.dob','')
+            params['gender'] = request.params.get('openid.sreg.gender','')
+            params['postcode'] = request.params.get('openid.sreg.postcode','')
+            params['country'] = request.params.get('openid.sreg.country','')
+            params['language'] = request.params.get('openid.sreg.language','')
+            params['timezone'] = request.params.get('openid.sreg.timezone','')
+            params['username'] = params['nickname'].lower()
+            try:
+                results = PassURLRegistrationFirst(**schema_params).to_python(params,c)
+            except formencode.Invalid, e:
+                for field in e.error_dict.keys():
+                    c.show.append(field)
+                c.show.append('username')
+                c.action = 'register_automatic'
+                c.form=AuthKitForm(params, e.error_dict)
+                return render(c.template_dir+'signup.mak')
+            else:
+                c.show=['username']
+                c.form=AuthKitForm(params)
+                c.action = 'register_automatic'
+                return render(c.template_dir+'signup.mak')
+        else:
+            try:
+                results = PassURLRegistrationSecond.to_python(dict(request.params),c)
+            except formencode.Invalid, e:
+                c.show = ['username']
+                for field in e.error_dict.keys():
+                    c.show.append(field)
+                c.action = 'register_automatic'
+                c.form=AuthKitForm(dict(request.params), e.error_dict)
+                return render(c.template_dir+'signup.mak')
+            else:
+                passurl = None
+                # XXX Is this right?
+                passurl = session.get('passurl')
+                if not passurl:
+                    return "Could not retrieve your passurl, please try again"
+                newuser = c.model.User(
+                    username=results['username'].lower(), 
+                    active=False,
+                    passurl=passurl,
+                    # New email isn't added until verified.
+                    #email=results['email'],
+                    fullname=results.get('fullname'),
+                    nickname=results.get('nickname'),
+                    dob=results.get('dob'),
+                    gender=results.get('gender'),
+                    postcode=results.get('postcode'),
+                    country=results.get('country'),
+                    language=results.get('language'),
+                    timezone=results.get('timezone'),)
+                email = c.model.Email()
+                email.email=results['email']
+                newuser.emails.append(email)
+                # Set when verified
+                #newuser.email = results['email']
+                self._send_verification_email(newuser, email, 'register')
+                c.session.save(newuser)
+                c.session.flush()
+                c.form = AuthKitForm()
+                return render(c.template_dir+'registration_sent.mak')
+        # newuser = c.model.User(
+        #     username=results['username'], 
+        #     active=False,
+        #     password=results['password'],
+        #     # New email isn't added until verified.
+        #     #email=results['email'],
+        # )
+        # email = c.model.Email()
+        # email.email=results['email']
+        # newuser.emails.append(email)
+        # # Set when verified
+        # #newuser.email = results['email']
+        # self._send_verification_email(newuser, email, 'register')
+        # c.session.save(newuser)
+        # c.session.flush()
+        # c.form = AuthKitForm()
+        # return render(c.template_dir+'registration_sent.mak')
+        # 
+        #     schema_params = self._build_validators()
+        #     try:
+        #         values = PassURLRegistrationFirst(**schema_params).to_python(params, c)
+        #     except formencode.Invalid, e:
+        #         c.show = e.error_dict.keys()
+        #     else:
+        #         c.show = []
+        #     c._params = params
+        #     results, errors, response = formbuild.handle(
+        #         schema=PassURLRegistrationSecond(**schema_params),
+        #         template=c.template_dir+'signup.mak',
+        #         form=AuthKitForm,
+        #         params=params
+        #     )
+        #     if response:
+        #         return response
+    
+
+    def process_register(self):
+        """
+        Handle the redirect from the OpenID server.
+        """
+        if config['app_conf'].get('use_passurl','false').lower() != 'true':
+            return 'Passurl support is not enabled'
+
+        oidconsumer = self._oid_get_consumer()
+        passurl = oidconsumer.complete(dict(request.params))
+
+        try:
+            info = passurl
+            if info.status == consumer.SUCCESS:
+                session['passurl'] = info.identity_url
+                user = c.session.query(c.model.User).filter_by(passurl=info.identity_url)
+                if len(user) > 0:
+                    msg = 'This passurl is already registered to another account.' % \
+                        (info.identity_url)
+                    raise PassURLError(msg)
+                #else:
+                #    return info.identity_url
+            elif info.status == consumer.FAILURE:
+                if info.identity_url:
+                    log.debug("Verification of PassURL failed: %s"%info.message)
+                    msg = "Verification of %s failed." % (cgi.escape(info.identity_url),)
+                    raise PassURLError(msg)
+                else:
+                    log.debug("Verification of PassURL failed: %s"%info.message)
+                    msg = "Verification failed, no passurl was returned."
+                    raise PassURLError(msg)
+            elif info.status == consumer.CANCEL:
+                log.debug("Cancelled")
+                msg = "Verification was cancelled."
+                raise PassURLError(msg)
+            else:
+                log.debug("Verification of PassURL failed: %s" % info.message)
+                msg = "Verification of %s failed, not known why, please report " + \
+                      "this error to the developers." % (cgi.escape(info.identity_url))
+                raise PassURLError(msg)
+        except PassURLError, e:
+            c.mode = 'passurl'
+            c.form = AuthKitForm({'passurl':info.identity_url},{'passurl':str(e)})
+            return render(c.template_dir+'signup.mak')
+        else:
+            return self.register_automatic(True)
+    
+
+    def _oid_get_consumer(self):
+        # Return the session in our format
+        session['id'] = session.id
+        session._current_obj()
+        return consumer.Consumer(session._current_obj(), c.cstore)
+    
+
+    def _oid_quoteattr(self, s):
+        if s == None:
+            s = ''
+        qs = cgi.escape(s, 1)
+        return '"%s"' % (qs,)
+    
+
+#
+# End Personas
+#
+
+    def signin(self):
+        redirect_to = request.params.get('redirect_to')
+        if not redirect_to and len(request.params):
+            redirect_to = construct_url(
+                    request.environ['paste.recursive.forward'].original_environ,
+                    with_query_string=True, 
+                    with_path_info=True,
+                    # XXX This hack is required since the path info doesn't
+                    # seem to exist
+                    path_info = '/openid_server/openidserver')
+        params = dict(request.params)
+        if not params.has_key('signin_attempt'):
+            params = {}
+        log.debug(redirect_to)
+        results, errors, response = formbuild.handle(
+                                        SignIn(), 
+                                        c.template_dir+'signin.mak',
+                                        form=AuthKitForm,
+                                        params=params,
+                                        data={'passurl':'passurl.com/','redirect_to':redirect_to},
+                                        render_response=render)
+        if response:
+            return response
+        self._signin(username=results.get('username'))
+        c.url = params.get('redirect_to') or \
+                    h.url(controller=c.controller_name, 
+                              action='index')
+        return render(
+            c.template_dir+'redirect.mak', 
+            #fragment=True, 
+               )
+                              # controller=c.openid_server_controller, 
+                              # action='handle_from_signin'
+    
+
+    @authorize(permissions)
+    def update_details(self):
+        c.emails = []
+        for email in c.user.emails:
+            if email.verified != None:
+                c.emails.append(email.email)
+        log.debug("c.emails now %s" % c.emails)
+        # c.persona_selected = "-"
+        # c.personas = ['-']
+        # for persona in c.user.personas:
+        #     c.personas.append(persona.name)
+        #     if persona.main:
+        #         c.persona_selected = persona.name
+        results, errors, response = \
+            formbuild.handle(
+                    schema=UpdateDetails(), 
+                    template=c.template_dir+'update_details.mak',
+                    data=self._user_to_dict(c.user),
+                    form=AuthKitForm,
+                    render_response=render
+                    )
+        if response: 
+            log.debug("update_details returning response")
+            return response
+        else:
+            # for persona in c.user.personas:
+            #     persona.main = False
+            # for persona in c.user.personas:
+            #     if persona.name == results['persona']:
+            #         persona.main = True
+            # c.persona_selected = results['persona']
+            # c.session.flush()
+            # del results['persona']
+            log.debug("update_details returning render")
+            for k, v in results.items():
+                setattr(c.user, k, v)
+            c.session.flush()
+            return render(c.template_dir+'update_details.mak')
+    
+#
+# Everything from here should be the unmodified account controller
+#
+
+    def _signin(self, username):
+        # @ The validator sets c.user if it exists so we can use it here
+        # users = c.session.query(c.model.User).filter_by(
+        #     username=username.lower()
+        # )
+        users = Session.query(User).filter_by(username=username.lower()).all()
+        if len(users) > 1:
+            raise Exception(
+                'More than one user in database with username %s found.'% (
+                    request.environ['REMOTE_USER'].lower()
+                )
+            )
+        elif not users:
+            raise Exception('No such user %s'%username)
+        user = users[0]
+        now = c.model.now()
+        for history in user.current_sessions:
+            if history.signed_out == None:
+                history.signed_out = now
+        user.histories.append(
+            self.model.History(
+                username=username, 
+                last_accessed=now
+            )
+        )
+        request.environ['paste.auth_tkt.set_user'](username)
+        c.session.flush()
+    
+
+    @authorize(RemoteUser())
+    def index(self):
+        c.users = c.session.query(c.model.User).all()
+        return render(c.template_dir+'/index.mak')
+    
+
+    def signedout(self):
+        return render(c.template_dir+'signedout.mak')
+    
+
+    def signout(self):
+        if request.environ.has_key('REMOTE_USER'):
+            users = c.session.query(c.model.User).filter_by(
+                username=request.environ['REMOTE_USER'].lower()).all()
+            if len(users) == 1:
+                user = users[0]
+                for history in user.current_sessions:
+                    if history.signed_out == None:
+                        history.signed_out = self.model.now()
+                #response.set_cookie('auth_tkt')
+                request.environ['paste.auth_tkt.logout_user']()
+                resp = render(c.template_dir+'redirect.mak', 
+                           fragment=True, 
+                           url=h.url(
+                               controller=c.controller_name, 
+                               action='signedout'))
+            elif not users:
+                resp = render(c.template_dir+'alreadyout.mak')
+            else:
+                raise Exception(
+                    'Two users present in database with the same name')
+        else:
+            resp = render(c.template_dir+'alreadyout.mak')
+        c.session.flush()
+        return resp
+    
+
+    def signout(self):
+        # response = Response()
+        if request.environ.has_key('REMOTE_USER'):
+            users = c.session.query(c.model.User).filter_by(
+                username=request.environ['REMOTE_USER'].lower()).all()
+            if len(users) == 1:
+                user = users[0]
+                for history in user.current_sessions:
+                    if history.signed_out == None:
+                        history.signed_out = self.model.now()
+                #response.set_cookie('auth_tkt')
+                request.environ['paste.auth_tkt.logout_user']()
+                resp = render(c.template_dir+'redirect.mak', 
+                              fragment=True, 
+                              url=h.url(
+                                    controller=c.controller_name, 
+                                    action='signedout'))
+            elif not users:
+                resp = render(c.template_dir+'alreadyout.mak')
+            else:
+                raise Exception(
+                    'Two users present in database with the same name')
+        else:
+            resp = render(c.template_dir+'alreadyout.mak')
+        c.session.flush()
+        return resp
+    
+
+    @authorize(permissions)
+    def change_password(self, id=None):
+        results, errors, response = formbuild.handle(
+            PasswordChange(), 
+            c.template_dir+'change_password.mak',
+            form=AuthKitForm,
+            render_response=render)
+        if response:
+            return response
+        c.user.password=request.params['newpassword']
+        c.session.flush()
+        return render(
+            c.template_dir+'index.mak', 
+            title="Password Changed", 
+            msg="<p>Your password has been successfully changed.</p>")
+    
+
+    def _user_to_dict(self, user):
+        values = {}
+        for k in user._sa_class_manager.keys():
+            values[k] = getattr(user, k)
+        return values
+    
+
+    def password(self):
+        results, errors, response = formbuild.handle(
+            schema=PasswordReminder(), 
+            template=c.template_dir+'password_reminder.mak',
+            form=AuthKitForm,
+            render_response=render
+        )
+        if response:
+            return response
+        # XXX Shouldn't this run the usual checks?
+        c.user = c.session.query(c.model.User).filter_by(
+            username=results['username'].lower()
+        )[0]
+        c.signin_url = c.base_url + h.url(
+            controller=c.controller_name, 
+            action='signin'
+        )
+        app_conf = request.environ['paste.config']['app_conf']
+        global_conf = request.environ['paste.config']['global_conf']
+        h.mail(
+            to = [c.user.email],
+            subject = app_conf['password_reminder_subject'],
+            smtp = global_conf.get('smtp_server'),
+            sendmail = global_conf.get('sendmail'),
+            method = global_conf['method'],
+            reply = app_conf['email_from'],
+            msg = render(
+                c.template_dir+'email_password_reminder_msg.mak', 
+                fragment=True,
+            ),
+            user = global_conf['user'],       
+            password = global_conf['password'],       
+        )
+        return render(
+            c.template_dir+'password_reminder_sent.mak', 
+        )
+    
+
+    def check_username_availability(self, id=None):
+        if not id:
+            return ''
+        try:
+            username_validator.to_python(id, state=c)
+        except formencode.Invalid, e:
+            r = simplejson.dumps('<span class="bad">%s</span>'%e)
+            r.headers['Content-type'] = 'text/json'
+            return r
+        else:
+            r = simplejson.dumps(
+                    '<span class="good">Nice! The username <tt>%s</tt> '
+                    'is available.</span>'%id
+                )
+            r.headers['Content-type'] = 'text/json'
+            return r
+    
+
+    def _send_verification_email(self, user, email, type):
+        email.code = self._gen_verify()
+        c.confirm_url = c.base_url + h.url(
+            controller=c.controller_name, 
+            action='confirm', 
+            username=user.username, 
+            code=email.code, 
+            id=None)
+        c.verify=email.code
+        c.email = email.email
+        c.username = user.username
+        c.email_type=type
+        c.firstname = user.fullname and user.fullname.split(' ')[0] or ''
+        c.username = user.username
+        app_conf = config['app_conf']
+        global_conf = config['global_conf']
+        h.mail(
+            to = [email.email],
+            subject = app_conf['confirm_email_subject'],
+            smtp = global_conf.get('smtp_server'),
+            sendmail = global_conf.get('sendmail'),
+            method = global_conf['method'],
+            reply = app_conf['email_from'],
+            msg = render(
+                c.template_dir+'email_confirm_msg.mak', 
+                fragment=True
+            ),
+            user = global_conf['user'],       
+            password = global_conf['password'])
+    
+
+    def _gen_verify(self):
+        r = random.Random("%s%s" % \
+            (time.time(), config['app_conf']['verify_secret']))
+        return ''.join(r.sample([str(x) for x in range(10)], 6))
+    
+
+    # @ Called by someone confirming their email address
+    def code(self, id=None):
+        results, errors, response = formbuild.handle(
+            RequestVerificationCode(), 
+            c.template_dir+'confirm.mak',
+            form=AuthKitForm,
+            render_response=render)
+        
+        if response: return response
+        
+        users = c.session.query(c.model.User).filter_by(
+            username=results['username'].lower())
+
+        for email in users[0].emails:
+            if email.verified == None:
+                c.session.delete(email)
+        email = c.model.Email()
+        email.email = results['email']
+        users[0].emails.append(email)
+        c.session.flush()
+        self._send_verification_email(users[0], email, 'reminder')
+        return render(c.template_dir+'reminder_sent.mak')
+    
+
+    @authorize(permissions)
+    def register_new_email(self):
+        results, errors, response = formbuild.handle(
+                                        schema=RegisterNewEmail(), 
+                                        template=c.template_dir+'register_new_email.mak',
+                                        form=AuthKitForm,
+                                        render_response=render)
+        if response:
+            return response
+        for email in c.user.emails:
+            if email.verified == None:
+                c.session.delete(email)
+        email = c.model.Email()
+        email.email = results['email']
+        c.user.emails.append(email)
+        self._send_verification_email(c.user, email, 'new_email')
+        # @ Flush after sending email since code is added in above call
+        c.session.flush()
+        return render(c.template_dir+'new_email_sent.mak')
+    
+
+    def confirm(self):
+        results, errors, response = formbuild.handle(
+                                        schema=VerifyEmail(), 
+                                        template=c.template_dir+'verify.mak',
+                                        form=AuthKitForm,
+                                        render_response=render)
+        if response: 
+            return response
+        
+        c.email_match.verified = datetime.datetime.now()
+        user = c.email_match.user
+        user.email = c.email_match.email
+        user.active = True
+        self._signin(username=user.username)
+        c.session.flush()
+        return render(c.template_dir+'redirect.mak', 
+                                fragment=True, 
+                                url=h.url(
+                                    controller=c.controller_name, 
+                                    action='welcome'))
+    
+
+    @authorize(permissions)
+    def welcome(self):
+        return self.index()
+    

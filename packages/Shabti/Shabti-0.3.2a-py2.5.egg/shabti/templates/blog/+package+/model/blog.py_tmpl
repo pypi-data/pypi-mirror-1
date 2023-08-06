@@ -1,0 +1,451 @@
+# -*- mode: python; coding: utf-8 -*-
+"""
+==============
+  Blog Model
+==============
+:Copyright: (c) 2007,2009 Higgins and Macfarlane
+:Author: Graham Higgins
+:Contact: gjh@bel-epa.com
+:Date: <2009-03-14 14:32 gjh>
+:Notes: Further adaptations of TurboBlog
+"""
+from pylons.controllers.util import redirect_to
+from pylons.i18n import get_lang, set_lang, _, ungettext, N_
+from elixir import *
+from sqlalchemy import and_
+from datetime import datetime
+from elementtree import ElementTree
+from webhelpers.markdown import markdown
+from {{package}}.model import User, Session, metadata
+from webhelpers.rails import *
+
+import logging
+log = logging.getLogger(__name__)
+
+def truncate_content(s, l):
+    words = []
+    import string
+    for word in string.split(s, ' '):
+        if len(string.join(words, ' ')) < l:
+            words += [word]
+        else:
+            return string.join(words, ' ') + ' [...]'
+    return string.join(words, ' ')
+
+
+class Blog(Entity):
+    name = Field(Unicode(255),unique=True,nullable=False)
+    tagline = Field(Unicode(255),default="No tag")
+    slug = Field(Unicode(255), default="")
+    theme = Field(Unicode(255), default="default")
+    owner = ManyToOne("{{package}}.model.user.User")
+    created = Field(DateTime) # undocumented
+    
+    # Uncomment later, when User table has been augmented 
+    # with necessary "blogs" inverse relationship field
+    # has_and_belongs_to_many('posters', of_kind='User', inverse='blogs')
+    
+    posts = OneToMany('Post', order_by="-creation_time")
+    using_options(tablename='blog',shortnames=True)
+    
+    def __before__(self):
+        pass
+    
+    def __str__(self):
+        return str(self.name)
+    
+    def untagged_posts(self):
+        return [ p for p in self.get_posts() if not p.tagged() ]
+    
+    def tag_cloud(self, smallest=10, largest=48, unit='pt'):
+        counts = {}
+        for tag in self.tags:
+            counts[tag.name]=len(tag.posts)
+        counts['Untagged'] = len(self.untagged_posts())
+        spread = max(counts.values()) - min(counts.values())
+        if spread <=0: spread = 1
+        fontspread = largest - smallest
+        fontstep = spread / fontspread
+        if fontstep <= 0: fontstep = 1
+        ret = []
+        for k,v in counts.items():
+            if k != 'Untagged': tid = Tag.get_by(k).id
+            else: tid = -1
+            ret += [ (k, "%d%s"%(smallest + (v/fontstep),unit), tid) ]
+        return ret   
+    
+    def get_comments(self):
+        raise  "Migrated to controller"
+    
+    def get_posts(self,published=True,limit=None, month=None):
+        # log.debug("model.blog.get_posts called")
+        #TODO: make this query work!
+        pq = Session.query(Post)
+        try:
+            ret = pq.filter(and_(id==self.id,
+                                 Post.published==published)) \
+                                 .order_by(Post.modification_time)
+        except Exception:
+            ret = []
+        # log.debug("Getting posts for %s\n%s" % (dir(self), self.columns))
+        # ret = [ p for p in self.posts if p.published == published ]
+        # ret.sort(lambda x,y: cmp(x.modification_time,y.modification_time))
+        if month:
+            #log.debug('get_posts: %s %s' % (ret[0].creation_time.month, month))
+            ret = [ p for p in ret if p.creation_time.month == month ]
+        if limit:
+            ret = ret[:limit-1]
+        # log.debug("model.blog.get_posts returning")
+        return ret
+    
+    def archives(self, type='monthly', arg=None):
+       def srt(x,y):
+           return cmp(x.creation_time, y.creation_time)
+       ar = {}
+       pq = Session.query(Post)
+       for p in pq.select(Post.c.id==self.id):
+           if not p.creation_time.year in ar:
+               ar [ p.creation_time.year ] = {}
+           if not  p.creation_time.month in ar [ p.creation_time.year ]:
+               ar [ p.creation_time.year ] [ p.creation_time.month ] = []
+           ar [ p.creation_time.year ] [ p.creation_time.month ] += [ p ]
+       #TODO: implement weekly/yearly
+       if ar:
+           if type == 'monthly':
+               res = []
+               year = max(ar.keys())
+               for mi in range(1,13):
+                   if mi in ar[year]:
+                       res += [ (month_names[mi-1] + " %d (%d)"%(year,len(ar[year][mi])), year, mi) ]
+               return res
+           elif type == 'yearly':
+               raise Exception("Not implemented!")
+           elif type == 'weekly':
+               raise Exception("Not implemented!")
+       return ar
+    
+    def link(self):
+       return "/blog/%s/" % (self.slug)
+    
+    def admin_link(self):
+       return "/blogadmin/%d/" % self.id
+    
+    def feed(self):
+        feed = { 
+            "title": self.name, 
+            "subtitle": self.tagline, 
+            "author":{"name":self.owner.display_name} ,
+            "id": self.id,
+            "link":self.link(),
+            "entrys": []
+            }
+        for post in self.posts:
+            feed["entrys"] += [ post.feed(self.id) ]
+        return feed
+    
+
+
+class Post(Entity):
+    using_options(tablename='post')
+    title = Field(Unicode(255))
+    content = Field(Unicode(14000))
+    published = Field(Boolean, default=False)
+    creation_time = Field(DateTime, default=datetime.now)
+    modification_time = Field(DateTime, default=datetime.now)
+    trackback_urls = Field(Unicode(1200), default="")
+    slug = Field(String(255), default="")
+    author = ManyToOne("{{package}}.model.user.User")
+    blog = ManyToOne("Blog")
+    trackbacks = OneToMany('Trackback')
+    comments = OneToMany("Comment")
+    tags = ManyToMany('Tag', inverse="posts")
+    using_options(tablename='post',shortnames=True)
+    
+    def __str__(self):
+        return str(self.title)
+    
+    # def deleteMe(self):
+    #    self.destroySelf()
+    def deleteMe(self):
+        objectstore.delete(self)
+        objectstore.flush()
+    
+    # 
+    # def _set_title(self, value):
+    #    self._SO_set_modification_time(datetime.now())
+    #    self._SO_set_slug(slugify(value, self))
+    #    self._SO_set_title(value)
+    # 
+    
+    def markup(self):
+        import re
+        desc = re.sub("'", '&#39;', markdown(self.content))
+        return '<div class="entrytext">'+desc+'</div>'
+    
+    def raw_markup(self):
+        import re
+        desc = re.sub("'", '&#39;', markdown(self.content))
+        return desc
+    
+    def author_name(self):
+        return User.get(self.author).display_name
+    author_name = property(author_name)
+    
+    def summary_markup(self):
+        import re
+        desc = re.sub("'", '&#39;', markdown(truncate_content(self.content, 110)))
+        return '<div class="entrytext">'+desc+'</div>'
+    
+    def get_author(self):
+        import {{package}}.model.user as identity
+        uq = Session.query(identity.User)
+        return identity.User.get(self.author).display_name
+    
+    def tagged(self):
+        if hasattr(self, 'tags'):
+            return len(self.tags)>0
+        else:
+            return False
+    
+    @staticmethod
+    def get_last(count):
+       return Post.select(order_by=[desc(Post.c.creation_time)])[:count]
+    
+    # Widget stuff, because in Toscawidgets they have to be field accessors
+    @staticmethod
+    def get_view_link(self):
+        return """<a href="%s">View</a>""" % self.link() 
+    
+    @staticmethod
+    def get_edit_link(self):
+        return """<a href="%s">Edit</a>""" % self.edit_link(self.blog.id, self.id)
+    
+    @staticmethod
+    def edit_link(blogid, postid=None):
+       if postid:
+           return "/blog/blog_admin/write?bid=%d;pid=%d"%(blogid,postid)
+       return "/blog/blog_admin/write?bid=%d"%blogid
+    
+    @staticmethod
+    def get_delete_link(self):
+        return """<a href="%s" onClick="return confirm(\'Are you sure you want to delete this post?\');">Delete</a>'""" % self.delete_link()
+    
+    def delete_link(self):
+       return "/blog/blog_admin/delete_post?bid=%d;pid=%d"%(self.blog.id,self.id)
+    
+    def link(self, blogid=None):
+        blogid = blogid or self.blog.id
+        bq = Session.query(Blog)
+        ret = url_for(controller="blog", action="view", id=None, blogslug=bq.get(blogid).slug)
+        log.debug("Post link url %s" % ret)
+        return ret
+    
+    def trackback_link(self):
+       return url_for(controller="blog", action="trackback", id=None, blogslug=self.blog.slug, id=self.id)
+    
+    def cut_parsed(self, blogid):
+        cut_xml =  ElementTree.fromstring('<span><br/><a href="%s">[ Read More... ]</a></span>'%(self.link(blogid)))
+        et = ElementTree.fromstring("<span>"+self.markup()+"</span>") 
+        for index, element in enumerate(et):
+            if element.tag == 'cut':
+                et[index] = cut_xml
+        return ElementTree.tostring(et)
+    
+    def feed(self, blog_id):
+       ret = dict( 
+       {
+       "title":self.title,
+       "content":self.content,
+       "author":{ "name":self.author.display_name, "email":self.author.email_address},
+       "link": self.link(blog_id),
+       "published": self.creation_time,
+       "id" : self.id
+       })
+       return ret
+    
+    def send_trackbacks(self):
+        params = { 'excerpt': self.content[:100],
+                  'title': self.title,
+                  'url': turbogears.url(self.link()),
+                  'blog_name': self.blog.name
+                  }
+        for tb_url in self.trackback_urls.split(' '):
+            if tb_url:
+                postdata = urllib.unquote(urllib.urlencode(params))
+                # FIXME: What is supposed to happen to trackback URLs??
+                # print tb_url
+                # print urllib2.urlopen(tb_url,postdata)
+    
+    def generate_comments_html(self):
+        def item_html(comment,i):
+            o = """<li  class="%s" id="comment-%d">""" % (i%2 and 'alt' or '',comment.id)
+            alink = comment.author.link()
+            avatar = comment.author.avatar_link()
+            moderator = has_permission('can_moderate')
+            post_owner = has_permission('can_comment') and comment.author == turbogears.identity.current.user
+            o += """<a name="comment-%d"></a><table><tr><td>""" % (comment.id)
+            if avatar:
+                o += """<img width="40" height="40" src="%s" />""" % avatar
+            o += """</td><td>"""
+            o += """<cite><a href="%s">%s</a></cite> Says: """ % (alink,comment.author.display_name) 
+            if not comment.approved : 
+                o += """<div id="comment_%d_approval">""" % comment.id
+                o += """<em>Your comment is awaiting moderation.</em><br/>"""
+                if moderator:
+                    o += """<a href="javascript:approve(%d,'%s')">Approve this post!</a>""" % (comment.id,self.blog.slug)
+                o += """</div><br />"""
+            if post_owner:
+                o += """<small class="commentmetadata">at %s <a href="javascript:makeEditable('comment_%d_text','%s');" > Edit comment </a>""" % (str(comment.creation_time),comment.id,self.blog.slug)
+                o += """</small>"""
+            o += """<small class="commentmetadata"><a id="replylink-%d" href="javascript:reply(%d,'%s');" >Reply</a> </small>""" % (comment.id,comment.id,self.blog.slug)
+            o += """<span id="comment_%d_text">%s</span><span id="comment_%d_text_holder"></span></td></tr></table>""" % (comment.id,comment.content,comment.id)
+            o += """<ol class="commentlist">"""
+            for i,c in enumerate(comment.sub_comments):
+                o += item_html(c,i)
+            o += """</ol>"""
+            o += """</li>"""
+            return o
+        
+        out = """<ol class="commentlist">"""
+        for i,c in enumerate(self.comments):
+            if c.parent_id == -1:
+                out += item_html(c,i)
+        out += """</ol>"""
+        #return ElementTree.XML(out)
+        return out
+    
+
+
+class Trackback(Entity):
+    using_options(tablename='trackback')
+    blog_name = Field(Unicode, default="")
+    title = Field(Unicode, default="")
+    url = Field(String(255))
+    excerpt = Field(Unicode(255))
+    post = ManyToOne("Post")
+    using_options(tablename='trackback',shortnames=True)
+    
+
+
+class Comment(Entity):
+    using_options(tablename='comment')
+    content = Field(Binary(4096))
+    creation_time = Field(DateTime(), default=datetime.now)
+    approved = Field(Boolean(), default=False)
+    author = ManyToOne("{{package}}.model.user.User")
+    post = ManyToOne("Post")
+    parent = OneToMany("Comment", inverse='subcomments')
+    subcomments = ManyToOne("Comment", inverse='parent')
+    using_options(tablename='comment',shortnames=True)
+    allowed_tags = [ ['a',['title','href']], ['abbr',['title']], ['acronym',['title']],['b',[]], ['blockquote',[]], ['code',[]], ['em',[]], ['i',[]], ['strike',[]] , ['strong',[]]]
+    
+    @staticmethod
+    def get_last(count):
+       return Comment.select(order_by=[desc(Comment.c.creation_time)])[:count]
+    
+    @staticmethod
+    def link_add(blogid, postid):
+       return "/%s/comment/add/%s"%(Blog.get(blogid).slug,Post.get(postid).slug)
+    
+    def edit_link(self):
+       return "/blog/blog_admin/edit_comment?bid=%d;cid=%d"%(self.post.blog.id,self.id)
+    
+    def link(self):
+       return self.post.link()+"#comment-%d"%self.id
+    
+    def delete_link(self):
+        return "/blog/blog_admin/delete_comment?bid=%d;cid=%d"%(self.post.blog.id,self.id)
+    
+    @staticmethod
+    def check_attrib(eattrs, attrs):
+       for a in eattrs:
+           if a in attrs:
+               continue
+           else:
+               return False
+       return True
+    
+    @staticmethod
+    def check_element_tags(e,tags):
+       for tag in tags:
+           if e.tag == tag[0] and Comment.check_attrib(e.attrib,tag[1]):
+               for c in e.getchildren():
+                   if not Comment.check_element_tags(e,Comment.allowed_tags):
+                       return False
+               return True
+       return False
+    
+    @staticmethod
+    def check_tags(text):
+        try:
+            e = ElementTree.fromstring("<z>%s</z>"%text)
+        except:
+            return False
+        for el in e.getchildren():
+            if not Comment.check_element_tags(el,Comment.allowed_tags):
+                return False
+        return True
+        
+    
+
+
+class Tag(Entity):
+    using_options(tablename='tag')
+    name = Field(Unicode(255),unique=True,nullable=False)
+    author = ManyToOne("{{package}}.model.user.User")
+    posts = ManyToMany("Post", inverse='tags')
+    using_options(tablename='tag',shortnames=True)
+    
+    def deleteMe(self):
+        for p in self.blog.posts:
+            if self in p.tags:
+                p.removeTag(self)
+        self.blog.removeTag(self)
+        objectstore.delete(self)
+        objectstore.flush()
+    
+
+
+class Settings(Entity):
+    using_options(tablename='settings')
+    default_blog = Field(Integer(), default=-1) 
+    admin = ManyToOne("{{package}}.model.user.User")
+    using_options(tablename='settings',shortnames=True)
+
+
+def slugify(title, table, id=0):
+    """
+    Code taken from Toasty Goat project, these are /their/ notes ...
+    This ugly sack of crap returns a slug from a title. The title and
+    table (Posts, Pages, etc) must be passed to determine if the slug
+    already exists. The id is for editing a sluggable item, making it
+    so that you may replace the item with the same slug without a 
+    problem.
+    """
+    regex = re.compile("[^\w\-\ ]")
+    slug = regex.sub('', title).lower().strip().replace(' ', '-')
+    
+    append = ''
+    while True:
+        new_slug = slug[:(255 - len(str(append)))] + str(append)
+        if not slug_exists(new_slug, table, id):
+            return new_slug
+        else:
+            if append == '':
+                append = 1
+            
+            append = append + 1
+
+
+def slug_exists(slug, table, id):
+    try:
+        a = table.get_by(slug=slug)
+        hub.end()
+        if a.id == id:
+            return False
+        return True
+    #except SQLObjectNotFound:
+    except SQLAlchemyNotFound:
+        hub.end()
+        return False
+
