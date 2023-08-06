@@ -1,0 +1,2 @@
+from flashcookie.middleware import FlashMiddleware
+from flashcookie.context_processors import flash_context
