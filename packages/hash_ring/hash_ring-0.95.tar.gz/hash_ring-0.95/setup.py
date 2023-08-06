@@ -1,0 +1,65 @@
+#!/usr/bin/env python
+# Copyright (c) 2007 Qtrac Ltd. All rights reserved.
+# This module is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or (at
+# your option) any later version.
+
+import ez_setup
+ez_setup.use_setuptools()
+
+from setuptools import setup
+
+setup(name='hash_ring',
+      version = '0.95',
+      author="Amir Salihefendic",
+      author_email="amix@amix.dk",
+      url="http://www.amix.dk/",
+      classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Developers",
+        "License :: OSI Approved :: BSD License",
+        "Operating System :: OS Independent",
+        "Programming Language :: Python",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+      ],
+      py_modules=['hash_ring'],
+      platforms=["Any"],
+      license="BSD",
+      keywords='memcached hashing hash consistent',
+      description="Implements consistent hashing in Python (using md5 as hashing function).",
+      long_description="""\
+About hash_ring
+---------------
+
+Implements consistent hashing that can be used when
+the number of server nodes can increase or decrease (like in memcached).
+
+Consistent hashing is a scheme that provides a hash table functionality
+in a way that the adding or removing of one slot
+does not significantly change the mapping of keys to slots.
+
+More about hash_ring can be read in a blog post (that explains the idea in greater details):
+
+* Consistent hashing implemented simply in python <http://amix.dk/blog/viewEntry/19367>
+
+More information about consistent hashing can be read in these articles:
+
+* Web Caching with Consistent Hashing <http://www8.org/w8-papers/2a-webserver/caching/paper2.html>
+* Consistent hashing and random trees <http://citeseerx.ist.psu.edu/legacymapper?did=38148>
+
+
+Example
+-------
+
+Basic example of usage (for managing memcached instances)::
+
+    memcache_servers = ['192.168.0.246:11212',
+                        '192.168.0.247:11212',
+                        '192.168.0.249:11212']
+
+    ring = HashRing(memcache_servers)
+    server = ring.get_node('my_key')
+
+The code should be clean and simple. Feel free to concat the author if you detect bugs.
+""")
