@@ -1,0 +1,1591 @@
+diff -Naur src/Include/patchlevel.h patched/Include/patchlevel.h
+--- src/Include/patchlevel.h	2008-10-01 14:46:40.000000000 -0700
++++ patched/Include/patchlevel.h	2008-11-19 02:58:09.758040000 -0800
+@@ -27,7 +27,7 @@
+ #define PY_RELEASE_SERIAL	0
+ 
+ /* Version as a string */
+-#define PY_VERSION      	"2.6"
++#define PY_VERSION      	"2.6.py3to2" // py3k
+ /*--end constants--*/
+ 
+ /* Subversion Revision number of this file (not of the repository) */
+diff -Naur src/Lib/py3to2_init.py patched/Lib/py3to2_init.py
+--- src/Lib/py3to2_init.py	1969-12-31 16:00:00.000000000 -0800
++++ patched/Lib/py3to2_init.py	2008-11-19 02:58:09.713907000 -0800
+@@ -0,0 +1,50 @@
++import imp, os, sys
++if "DEBUG" not in globals(): DEBUG = 0 # set to 0 to suppress printing debug info
++
++######## import hook
++class importer(object):
++  py3to2 = None # identifier
++  magic = "\nfrom __future__ import py3k_syntax\n"
++
++  def __init__(self):
++    sys.meta_path[:] = [self] + [x for x in sys.meta_path if not hasattr(x, "py3to2")] # restore sys.meta_path
++    sys.path_importer_cache = {} # reset cache
++
++  def find_module(self, mname, path = None):
++    if DEBUG and 1: print( "py3k find_module(%s, path = %s)" % (mname, path) )
++
++    if mname == "py3to2": return # ignore py3to2 module
++    try: file, fpath, desc = imp.find_module(mname, path if path else sys.path); tp = desc[2]
++    except ImportError: return
++
++    if tp is imp.PY_SOURCE: pass
++    elif tp is imp.PKG_DIRECTORY: fpath += "/__init__.py"; file = open(fpath)
++    else: return
++
++    s = "\n" + file.read() + "\n"; file.close()
++    if self.magic not in s: return # no py3k magic found in file
++    s = s.replace(self.magic, "\nimport builtins; from builtins import *\n")
++    s = s[1:-1] # preserve lineno (for debugging)
++
++    self.found = s, fpath, desc, tp; return self
++
++  def load_module(self, mname):
++    import py3to2
++
++    s, fpath, desc, tp = self.found
++    if DEBUG and 1: print( "py3k load_module(%s, fpath = %s, desc = %s)" % (mname, fpath, desc) )
++
++    if mname in sys.modules: m = sys.modules[mname]; new = None # if exist: use existing module
++    else: m = sys.modules[mname] = imp.new_module(mname); new = True # else: new module
++    try:
++      c = py3to2.py3k_compile(s, fpath, "exec")
++      py3to2.py3k_exec(c, m.__dict__)
++
++      m.__file__ = fpath
++      if tp is imp.PKG_DIRECTORY: m.__path__ = [os.path.dirname(fpath)] # package.__path__
++      m.__loader__ = self.load_module
++      return m
++    except:
++      if new: del sys.modules[mname] # if new module fails loading, del from sys.modules
++      raise
++importer()
+diff -Naur src/Lib/py3to2.py patched/Lib/py3to2.py
+--- src/Lib/py3to2.py	1969-12-31 16:00:00.000000000 -0800
++++ patched/Lib/py3to2.py	2008-11-19 02:58:09.694001000 -0800
+@@ -0,0 +1,375 @@
++import io, imp, re, os, sys, tempfile, time, traceback, types; from itertools import *
++
++ISPY3K = True if sys.version_info[0] == 3 else None
++if "DEBUG" not in globals(): DEBUG = 0 # set to 0 to suppress printing debug info
++def echo(x): return x
++
++
++
++######## builtins
++if ISPY3K:
++  import builtins; builtins.reload = imp.reload
++  
++else:
++  import __builtin__, _py3to2, py3to2, py3to2_init, cStringIO as StringIO; reload(py3to2_init)
++  sys.modules["builtins"] = builtins = _py3to2
++  __builtin__.__build_class__ = builtins.__build_class__
++  py3k_compile = builtins.compile
++  py3k_eval = builtins.eval
++  py3k_exec = builtins.__dict__["exec"]
++  builtins.input = raw_input # PEP3111  Simple input built-in in Python 3000
++
++  def add2builtins(f):
++    f.__name__ = fname = f.__name__.replace("py3k_", "")
++    f.__doc__ = getattr( getattr(__builtin__, fname, None), "__doc__", None )
++    setattr(builtins, fname, f); return f
++
++  @add2builtins
++  def py3k_oct(x): return oct(x).replace("0", "0o", 1)
++
++
++
++######## py3k server
++if ISPY3K:
++  import parser; sys.ps1 = ""
++  def server_compile(*args, **kwds):
++    try:
++      c = builtins.compile(*args, **kwds)
++      t = codetree(c)
++      s = ascii(t)
++    except Exception as e: s = ascii(e)
++    sys.stdout.write(s)
++
++else:
++  import atexit, signal, subprocess
++
++  def py3k_close():
++    try: os.kill(SERVER.pid, signal.SIGTERM) # kill prev server
++    except: pass
++    try: map(os.close, SERVERIO) # close prev io pipe
++    except: pass
++    try: del py3to2.SERVER # prevent annoying error upon SystemExit
++    except: pass
++  if "SERVER" not in globals(): atexit.register(py3k_close) # close server @ exit
++  py3k_close() # close existing server if any
++
++  SERVERIO = os.pipe(); print( "created <read/write pipes %i/%i>" % SERVERIO ) # create io pipes
++
++  try: # start up py3k server
++    print( "py3k server starting..." ); 
++    SERVER = subprocess.Popen(
++      "python3.0 -E -i %s" % py3to2.__file__.replace(".pyc", ".py"),
++      stdin = subprocess.PIPE,
++        stdout = SERVERIO[1],
++      stderr = subprocess.STDOUT,
++      shell = True)
++  except OSError: raise OSERROR("py3to2 could not find or run python3.0.  make sure python3.0 is properly installed & exists in $PATH env variable")
++
++  def py3k_input(s): SERVER.stdin.write(s) # py3k_input
++
++  EOF = "%s\n" % id("eof")
++  def py3k_read(): # py3k_read
++    n = len(EOF)
++    py3k_input("\n" + EOF)
++    arr = io.BytesIO()
++    while True:
++      x = os.read(SERVERIO[0], 4096); arr.write(x)
++      if len(x) < len(EOF): x = arr.getvalue()
++      if x[-n:] == EOF: break
++    return arr.getvalue()[:-n]
++  py3k_input("print( '...py3k server started w/ <pid %i> & <i/o pipes %i/%i>' )\n" % (SERVER.pid, SERVERIO[1], SERVERIO[0])); print( py3k_read() )
++
++  def server_compile(*args, **kwds): # server compile
++    py3k_input("server_compile(*%s, **%s)" % (args, kwds))
++    s = py3k_read()
++    return s
++
++
++
++######## codetree
++import dis, opcode
++class codetree(object):
++  py2x_opname = "STOP_CODE POP_TOP ROT_TWO ROT_THREE DUP_TOP ROT_FOUR <6> <7> <8> NOP UNARY_POSITIVE UNARY_NEGATIVE UNARY_NOT UNARY_CONVERT <14> UNARY_INVERT <16> <17> LIST_APPEND BINARY_POWER BINARY_MULTIPLY BINARY_DIVIDE BINARY_MODULO BINARY_ADD BINARY_SUBTRACT BINARY_SUBSCR BINARY_FLOOR_DIVIDE BINARY_TRUE_DIVIDE INPLACE_FLOOR_DIVIDE INPLACE_TRUE_DIVIDE SLICE+0 SLICE+1 SLICE+2 SLICE+3 <34> <35> <36> <37> <38> <39> STORE_SLICE+0 STORE_SLICE+1 STORE_SLICE+2 STORE_SLICE+3 <44> <45> <46> <47> <48> <49> DELETE_SLICE+0 DELETE_SLICE+1 DELETE_SLICE+2 DELETE_SLICE+3 STORE_MAP INPLACE_ADD INPLACE_SUBTRACT INPLACE_MULTIPLY INPLACE_DIVIDE INPLACE_MODULO STORE_SUBSCR DELETE_SUBSCR BINARY_LSHIFT BINARY_RSHIFT BINARY_AND BINARY_XOR BINARY_OR INPLACE_POWER GET_ITER <69> PRINT_EXPR PRINT_ITEM PRINT_NEWLINE PRINT_ITEM_TO PRINT_NEWLINE_TO INPLACE_LSHIFT INPLACE_RSHIFT INPLACE_AND INPLACE_XOR INPLACE_OR BREAK_LOOP WITH_CLEANUP LOAD_LOCALS RETURN_VALUE IMPORT_STAR EXEC_STMT YIELD_VALUE POP_BLOCK END_FINALLY BUILD_CLASS STORE_NAME DELETE_NAME UNPACK_SEQUENCE FOR_ITER <94> STORE_ATTR DELETE_ATTR STORE_GLOBAL DELETE_GLOBAL DUP_TOPX LOAD_CONST LOAD_NAME BUILD_TUPLE BUILD_LIST BUILD_MAP LOAD_ATTR COMPARE_OP IMPORT_NAME IMPORT_FROM <109> JUMP_FORWARD JUMP_IF_FALSE JUMP_IF_TRUE JUMP_ABSOLUTE <114> <115> LOAD_GLOBAL <117> <118> CONTINUE_LOOP SETUP_LOOP SETUP_EXCEPT SETUP_FINALLY <123> LOAD_FAST STORE_FAST DELETE_FAST <127> <128> <129> RAISE_VARARGS CALL_FUNCTION MAKE_FUNCTION BUILD_SLICE MAKE_CLOSURE LOAD_CLOSURE LOAD_DEREF STORE_DEREF <138> <139> CALL_FUNCTION_VAR CALL_FUNCTION_KW CALL_FUNCTION_VAR_KW EXTENDED_ARG <144> <145> <146> <147> <148> <149> <150> <151> <152> <153> <154> <155> <156> <157> <158> <159> <160> <161> <162> <163> <164> <165> <166> <167> <168> <169> <170> <171> <172> <173> <174> <175> <176> <177> <178> <179> <180> <181> <182> <183> <184> <185> <186> <187> <188> <189> <190> <191> <192> <193> <194> <195> <196> <197> <198> <199> <200> <201> <202> <203> <204> <205> <206> <207> <208> <209> <210> <211> <212> <213> <214> <215> <216> <217> <218> <219> <220> <221> <222> <223> <224> <225> <226> <227> <228> <229> <230> <231> <232> <233> <234> <235> <236> <237> <238> <239> <240> <241> <242> <243> <244> <245> <246> <247> <248> <249> <250> <251> <252> <253> <254> <255>".split(" ")
++  py3k_opname = "STOP_CODE POP_TOP ROT_TWO ROT_THREE DUP_TOP ROT_FOUR <6> <7> <8> NOP UNARY_POSITIVE UNARY_NEGATIVE UNARY_NOT <13> <14> UNARY_INVERT <16> SET_ADD LIST_APPEND BINARY_POWER BINARY_MULTIPLY <21> BINARY_MODULO BINARY_ADD BINARY_SUBTRACT BINARY_SUBSCR BINARY_FLOOR_DIVIDE BINARY_TRUE_DIVIDE INPLACE_FLOOR_DIVIDE INPLACE_TRUE_DIVIDE <30> <31> <32> <33> <34> <35> <36> <37> <38> <39> <40> <41> <42> <43> <44> <45> <46> <47> <48> <49> <50> <51> <52> <53> STORE_MAP INPLACE_ADD INPLACE_SUBTRACT INPLACE_MULTIPLY <58> INPLACE_MODULO STORE_SUBSCR DELETE_SUBSCR BINARY_LSHIFT BINARY_RSHIFT BINARY_AND BINARY_XOR BINARY_OR INPLACE_POWER GET_ITER STORE_LOCALS PRINT_EXPR LOAD_BUILD_CLASS <72> <73> <74> INPLACE_LSHIFT INPLACE_RSHIFT INPLACE_AND INPLACE_XOR INPLACE_OR BREAK_LOOP WITH_CLEANUP <82> RETURN_VALUE IMPORT_STAR <85> YIELD_VALUE POP_BLOCK END_FINALLY POP_EXCEPT STORE_NAME DELETE_NAME UNPACK_SEQUENCE FOR_ITER UNPACK_EX STORE_ATTR DELETE_ATTR STORE_GLOBAL DELETE_GLOBAL DUP_TOPX LOAD_CONST LOAD_NAME BUILD_TUPLE BUILD_LIST BUILD_SET BUILD_MAP LOAD_ATTR COMPARE_OP IMPORT_NAME IMPORT_FROM JUMP_FORWARD JUMP_IF_FALSE JUMP_IF_TRUE JUMP_ABSOLUTE <114> <115> LOAD_GLOBAL <117> <118> CONTINUE_LOOP SETUP_LOOP SETUP_EXCEPT SETUP_FINALLY <123> LOAD_FAST STORE_FAST DELETE_FAST <127> <128> <129> RAISE_VARARGS CALL_FUNCTION MAKE_FUNCTION BUILD_SLICE MAKE_CLOSURE LOAD_CLOSURE LOAD_DEREF STORE_DEREF <138> <139> CALL_FUNCTION_VAR CALL_FUNCTION_KW CALL_FUNCTION_VAR_KW EXTENDED_ARG <144> <145> <146> <147> <148> <149> <150> <151> <152> <153> <154> <155> <156> <157> <158> <159> <160> <161> <162> <163> <164> <165> <166> <167> <168> <169> <170> <171> <172> <173> <174> <175> <176> <177> <178> <179> <180> <181> <182> <183> <184> <185> <186> <187> <188> <189> <190> <191> <192> <193> <194> <195> <196> <197> <198> <199> <200> <201> <202> <203> <204> <205> <206> <207> <208> <209> <210> <211> <212> <213> <214> <215> <216> <217> <218> <219> <220> <221> <222> <223> <224> <225> <226> <227> <228> <229> <230> <231> <232> <233> <234> <235> <236> <237> <238> <239> <240> <241> <242> <243> <244> <245> <246> <247> <248> <249> <250> <251> <252> <253> <254> <255>".split(" ")
++  diff_opname = []
++  for i, a, b in zip(count(), py2x_opname, py3k_opname):
++    if a != b: diff_opname.append([i, a, b])
++
++  #	enum	py2x_opcode	py3k_opcode
++  #	13	UNARY_CONVERT	<13>
++  #	17	<17>	SET_ADD
++  #	21	BINARY_DIVIDE	<21>
++  #	30	SLICE+0	<30>
++  #	31	SLICE+1	<31>
++  #	32	SLICE+2	<32>
++  #	33	SLICE+3	<33>
++  #	40	STORE_SLICE+0	<40>
++  #	41	STORE_SLICE+1	<41>
++  #	42	STORE_SLICE+2	<42>
++  #	43	STORE_SLICE+3	<43>
++  #	50	DELETE_SLICE+0	<50>
++  #	51	DELETE_SLICE+1	<51>
++  #	52	DELETE_SLICE+2	<52>
++  #	53	DELETE_SLICE+3	<53>
++  #	58	INPLACE_DIVIDE	<58>
++  #	69	<69>	STORE_LOCALS
++  #	71	PRINT_ITEM	LOAD_BUILD_CLASS
++  #	72	PRINT_NEWLINE	<72>
++  #	73	PRINT_ITEM_TO	<73>
++  #	74	PRINT_NEWLINE_TO	<74>
++  #	82	LOAD_LOCALS	<82>
++  #	85	EXEC_STMT	<85>
++  #	89	BUILD_CLASS	POP_EXCEPT
++  #	94	<94>	UNPACK_EX
++  #	104	BUILD_MAP	BUILD_SET
++  #	105	LOAD_ATTR	BUILD_MAP
++  #	106	COMPARE_OP	LOAD_ATTR
++  #	107	IMPORT_NAME	COMPARE_OP
++  #	108	IMPORT_FROM	IMPORT_NAME
++  #	109	<109>	IMPORT_FROM
++
++  NOP = py2x_opname.index("NOP")
++  opmap_new = {
++    "SET_ADD":17,
++    "STORE_LOCALS":69,
++    "LOAD_BUILD_CLASS":34,
++    # "MAKE_BYTES":35,
++    "POP_EXCEPT":NOP, # 36
++    "LOAD_BUILD_PSEUDOMETHOD":37,
++    "UNPACK_EX":94,
++    "BUILD_SET":192,
++    "MAKE_FUNCTION":193,
++    }
++
++  for i, a, b in diff_opname:
++    if b[0] != "<" and b not in opmap_new: opmap_new[b] = py2x_opname.index(b)
++  opmap_3to2 = {}
++  for x, i in opmap_new.items():
++    j = py3k_opname.index(x) if x in py3k_opname else i
++    if j != i: opmap_3to2[j] = i
++
++  if ISPY3K:
++    co_args = "co_argcount co_kwonlyargcount co_nlocals co_stacksize co_flags co_code co_consts co_names co_varnames co_filename co_name co_firstlineno co_lnotab co_freevars co_cellvars".split(" ")
++
++  else:
++    co_args = "co_argcount co_nlocals co_stacksize co_flags co_code co_consts co_names co_varnames co_filename co_name co_firstlineno co_lnotab co_freevars co_cellvars".split(" ")
++
++    for x, i in opmap_new.items():
++      if i is not NOP: py2x_opname[i] = x; setattr(opcode, x, i) # update opname
++    opcode.opname = py2x_opname; reload(dis) # update dis
++    for i, x in enumerate(opcode.opname): setattr(opcode, x, i) # populate opcode module w/ opname
++
++    # #### op3to2
++    # def op3to2(self):
++      # self = codetree(**self.__dict__) # copy self
++      # assert 0 <= self.co_argcount < 0x10000; assert 0 <= self.co_kwonlyargcount < 0x100
++      # self.co_argcount |= (self.co_kwonlyargcount << 16) | 0x1000000 # bitshift & then piggyback co_kwonlyargcount to co_argcount
++
++      # s = bytearray(self.co_code); skip = 0; HAVE_ARGUMENT = opcode.HAVE_ARGUMENT; opmap_3to2 = self.opmap_3to2
++      # for i, x in enumerate(s): # map opcodes from 3k to 2x
++        # if skip: skip -= 1; continue
++        # if x >= HAVE_ARGUMENT: skip = 2
++        # if x in opmap_3to2: s[i] = opmap_3to2[x]
++      # self.co_code = bytes(s)
++      # self.co_consts = tuple( x.op3to2() if isinstance(x, codetree) else x for x in self.co_consts ) # recurse
++      # return self
++
++
++
++  #### common
++  co_constsi = co_args.index("co_consts") # co_consts index pos
++
++  def __init__(self, code = None, depth = 0, **kwds):
++    if code: # code object
++      self.__dict__ = dict((x, getattr(code, x)) for x in self.co_args)
++      self.co_consts = tuple(codetree(x, depth = depth + 1) if isinstance(x, types.CodeType) else x for x in code.co_consts) # recurse
++    self.depth = depth; self.__dict__.update(kwds)
++
++  def __eq__(self, x): return type(self) == type(x) and self.__dict__ == x.__dict__
++
++  def __repr__(self): return "codetree(**%r)" % self.__dict__
++
++  def __str__(self):
++    _ =  " " * self.depth
++    hsh = sorted(x for x in self.__dict__.items() if x[0] != "co_consts")
++    hsh = "".join(_ + k + " =" + " " * (0x10 - len(k)) + repr(x) + ",\n" for k, x in hsh)
++    consts = "".join(_ + " " + str(x) + ",\n" for x in self.co_consts)
++    return "codetree(\n" + hsh + "%sco_consts = (\n" % _ + consts + "%s )" % _ + ")"
++
++  def compile(self):
++    args = [getattr(self, x) for x in self.co_args] # create list of args
++    args[self.co_constsi] = tuple(x.compile() if isinstance(x, codetree) else x for x in self.co_consts)  # recurse
++    return types.CodeType(*args)
++
++  def dis(self):
++    def recurse(x, _ = ""):
++      if isinstance(x, types.CodeType):
++        dis.dis(x); f.seek(0); yield _ + f.read().replace("\n", "\n" + _); f.seek(0); f.truncate()
++        for x in x.co_consts:
++          for x in recurse(x, _ + "\t"): yield x
++
++    sys.stdout = f = io.BytesIO()
++    try: s = "\n".join(recurse(self.compile()))
++    finally: sys.stdout = sys.__stdout__; f.close()
++    return s
++
++
++
++if not ISPY3K:
++  ######## compiler
++  import ast, tokenize
++  class compiler(object):
++    def pre_parse(self, s):
++      def printd(tokenized):
++        self.tokenized = tokenized = tuple(self.tokenized)
++        for x in tokenized: sys.stdout.write( "%s %r, " % (tokenize.tok_name[x[0]], x[1]) )
++        print( "" )
++
++      from tokenize import OP, NAME
++
++      src = io.BytesIO(s); src.seek(0); self.tokenized = tokenized = tokenize.generate_tokens(src.readline)
++      arr = io.BytesIO(); i0 = tp0 = tk0 = 0
++      for tp, tk, beg, end, line in tokenized:
++        edit = None
++        if tp is OP:
++          if tk == "." == tk0: edit = "__pseudomethod__." # pseudomethod
++
++        if edit:
++          (brow, bcol), (erow, ecol) = beg, end
++          assert brow == erow, (brow, erow)
++          i = src.tell() - len(line)
++          arr.write(s[i0:i + bcol]); arr.write(edit); i0 = i + ecol
++        tp0, tk0 = tp, tk
++
++      arr.write(s[i0:]); return arr.getvalue()
++
++    def tree_parse(self, tree):
++      tree = codetree(**tree.__dict__) # copy tree
++      co_argcount, co_kwonlyargcount, co_nlocals, co_stacksize, co_flags, co_code, co_consts, co_names, co_varnames, co_filename, co_name, co_firstlineno, co_lnotab, co_freevars, co_cellvars, depth, opmap_3to2 = tree.co_argcount, tree.co_kwonlyargcount, tree.co_nlocals, tree.co_stacksize, tree.co_flags, tree.co_code, tree.co_consts, tree.co_names, tree.co_varnames, tree.co_filename, tree.co_name, tree.co_firstlineno, tree.co_lnotab, tree.co_freevars, tree.co_cellvars, tree.depth, tree.opmap_3to2
++
++      assert 0 <= co_argcount < 0x10000; assert 0 <= co_kwonlyargcount < 0x100
++      tree.co_argcount = co_argcount | (co_kwonlyargcount << 16) | 0x1000000 # bitshift & then piggyback co_kwonlyargcount to co_argcount
++
++      from opcode import EXTENDED_ARG, HAVE_ARGUMENT, LOAD_ATTR, LOAD_BUILD_PSEUDOMETHOD, LOAD_FAST, LOAD_GLOBAL, LOAD_LOCALS, LOAD_NAME, LOAD_DEREF, NOP
++      code = bytearray(co_code); skip = 0
++      for i, x in enumerate(code):
++        if skip: skip -= 1; continue
++        if x >= HAVE_ARGUMENT: skip = 2
++        if x in opmap_3to2: code[i] = x = opmap_3to2[x] # map 3k opcodes -> 2x
++
++      def hack(): # extra opcode hack
++        def argi2s(x, _ = chr(EXTENDED_ARG)):
++          s = ""
++          while True:
++            y = x & 0xffff; x >>= 16; s = chr(y & 0xff) + chr( y >> 8) + _ + s
++            if not x: break
++          return s[:-1]
++
++        _arg = "", 0, None
++        freevars = co_cellvars + co_freevars
++        op0 = NOP; arg0 = _arg; i0 = -1; skip = 0
++        for i, op in enumerate(code):
++          if skip: skip -= 1; continue
++
++          arg = 0; j = i
++          if op >= HAVE_ARGUMENT:
++            skip = 2; arg = code[i + 1] + (code[i + 2] << 8); j += 3 # get arg
++            while code[j] is EXTENDED_ARG: skip += 3; arg = (arg << 16) + code[j + 1] + (code[j + 2] << 8); j += 3 # get extended arg
++          arg = code[i + 1:j], arg, None
++
++          if op is LOAD_ATTR:
++            arg = arg[:2] + (co_names[arg[1]],)
++            if op0 is LOAD_ATTR and arg0[2] == "__pseudomethod__":
++              x = arg[2]
++
++              # module level
++              if depth is 0: op0, arg0 = LOAD_NAME, arg # co_names
++
++              # function / class level
++              elif x in co_varnames: # co_varnames
++                op0 = LOAD_FAST
++                arg0 = co_varnames.index(x)
++                arg0 = argi2s(arg0), arg0, arg[2]
++              elif x in freevars: # co_cellvars / co_freevars
++                op0 = LOAD_DEREF
++                arg0 = freevars.index(x)
++                arg0 = argi2s(arg0), arg0, arg[2]
++              else: op0, arg0 = LOAD_GLOBAL, arg # co_names
++
++              op, arg = LOAD_BUILD_PSEUDOMETHOD, _arg
++
++          if DEBUG and 0: print( opcode.opname[op0], arg0[1] )
++          yield chr(op0) + str(arg0[0]); i0, op0, arg0 = i, op, arg
++        yield chr(op0) + str(arg0[0])
++
++      tree.co_code = "".join(hack())[1:]
++      tree.co_consts = tuple( self.tree_parse(x) if isinstance(x, codetree) else x for x in co_consts ) # recurse
++      return tree
++
++    # class ast_parse(ast.NodeTransformer):
++      # @classmethod
++      # def printd(self, node, depth = ""):
++        # s = node.__dict__.items()
++        # s = "    ".join("%s %r" % x for x in sorted(node.__dict__.items()))
++        # print( "%s%s\t%s" % (depth, str(type(node)), s) )
++        # for x in ast.iter_child_nodes(node): self.printd(x, depth = depth + " ")
++
++      # def visit_Call(self, node):
++        # x = node.func
++        # if type(x) is ast.Attribute:
++          # x = x.value
++          # if type(x) is ast.Attribute and x.attr == "__pseudomethod__": # a..b(...) -> b(a, ...)
++            # node.args.insert(0, node.func.value.value)
++            # node.func = ast.copy_location(
++              # ast.Name(node.func.attr, ast.Load()), # new node
++              # node.func) # old node
++        # for x in ast.iter_child_nodes(node): self.visit(x) # recurse
++        # return node
++
++    def post_parse(self, s):
++      s = s.replace("'__next__'", "'next'") # PEP3114  Renaming iterator.next() to .__next__()
++      return s
++
++    def compile(self, s, fpath, mode, flags = 0, dont_inherit = 0):
++      s = self.pre_parse(s)
++      s = server_compile(s, fpath, mode, flags, dont_inherit)
++      s = self.post_parse(s)
++      self.t = t = eval(s)
++      if isinstance(t, Exception): raise t
++      t = self.tree_parse(t); c = t.compile(); return c
++  compiler = compiler(); __builtin__._compile = compiler.compile
++  
++
++
++######## debugging...
++if DEBUG and ISPY3K and 0:
++  self = compiler
++  s = "ABC ..echo() ..foo()"
++  s = self.pre_parse(s)
++  n = ast.parse(s, "", "exec")
++  self.ast_parse.printd(n)
++  n = self.ast_parse().visit(n)
++  self.ast_parse.printd(n)
++
++elif DEBUG and not ISPY3K and 0:
++  pass
++  # import fail
++  # s = "a ..b() ..c()"
++  s = "(1,2) ..tuple()"
++  s = """
++def foo(a, *b, c = 0): return a, b, c
++print( foo.__kwdefaults__ )
++assert foo(1, 2, 3, c = 4) == (1, (2, 3), 4)
++"""
++  # s = """
++# def foo():
++  # a; b = 1; b
++  # def bar():
++    # nonlocal b
++    # b = 2; b
++# """
++  c = py3k_compile(s, "", "exec"); t = codetree(c)
++  print( t )
++  # print( compiler.t.dis() )
++  # print( t.dis() ); print( s )
++  py3k_exec(c)
+diff -Naur src/Modules/_py3to2module.c patched/Modules/_py3to2module.c
+--- src/Modules/_py3to2module.c	1969-12-31 16:00:00.000000000 -0800
++++ patched/Modules/_py3to2module.c	2008-11-19 02:58:09.770845000 -0800
+@@ -0,0 +1,485 @@
++#include "Python.h"
++#include "Python-ast.h"
++
++#include "node.h"
++#include "code.h"
++#include "eval.h"
++
++#include <ctype.h>
++
++//////////////////////////////////////////////////////////////// py3k beg - header
++#define py3k_PyUnicode_Check(x) PyString_Check(x)
++#define py3k_PyUnicode_AS_UNICODE PyString_AS_STRING
++
++static char *
++source_as_string(PyObject *cmd, char *funcname, char *what)
++{
++	char *str;
++	Py_ssize_t size;
++
++	if (PyUnicode_Check(cmd)) {
++		cmd = _PyUnicode_AsDefaultEncodedString(cmd, NULL);
++		if (cmd == NULL)
++			return NULL;
++	}
++	else if (!PyObject_CheckReadBuffer(cmd)) {
++		PyErr_Format(PyExc_TypeError,
++		  "%s() arg 1 must be a %s object",
++		  funcname, what);
++		return NULL;
++	}
++	if (PyObject_AsReadBuffer(cmd, (const void **)&str, &size) < 0) {
++		return NULL;
++	}
++	if (strlen(str) != size) {
++		PyErr_SetString(PyExc_TypeError,
++				"source code string cannot contain null bytes");
++		return NULL;
++	}
++	return str;
++}
++
++static PyObject *compile(char *str, char *filename, char *mode, int flags, int dont_inherit) {
++	PyObject *func = PyDict_GetItemString(PyEval_GetBuiltins(), "_compile"); // get function
++	if (!(func && PyCallable_Check(func))) {PyErr_SetString(PyExc_NotImplementedError, "py3k_compile"); return NULL;}
++	return PyObject_CallFunction(func, "sssii", str, filename, mode, flags, dont_inherit);
++}
++//////////////////////////////////////////////////////////////// py3k end
++
++static PyObject *
++builtin___build_class__(PyObject *self, PyObject *args, PyObject *kwds)
++{
++	PyObject *func, *name, *bases, *mkw, *meta, *prep, *ns, *cell;
++	PyObject *cls = NULL;
++	Py_ssize_t nargs, nbases;
++
++	assert(args != NULL);
++	if (!PyTuple_Check(args)) {
++		PyErr_SetString(PyExc_TypeError,
++				"__build_class__: args is not a tuple");
++		return NULL;
++	}
++	nargs = PyTuple_GET_SIZE(args);
++	if (nargs < 2) {
++		PyErr_SetString(PyExc_TypeError,
++				"__build_class__: not enough arguments");
++		return NULL;
++	}
++	func = PyTuple_GET_ITEM(args, 0); /* Better be callable */
++	name = PyTuple_GET_ITEM(args, 1);
++	if (!py3k_PyUnicode_Check(name)) {
++		PyErr_SetString(PyExc_TypeError,
++				"__build_class__: name is not a string");
++		return NULL;
++	}
++	bases = PyTuple_GetSlice(args, 2, nargs);
++	if (bases == NULL)
++		return NULL;
++	nbases = nargs - 2;
++
++	if (kwds == NULL) {
++		meta = NULL;
++                mkw = NULL;
++        }
++	else {
++		mkw = PyDict_Copy(kwds); /* Don't modify kwds passed in! */
++		if (mkw == NULL) {
++			Py_DECREF(bases);
++			return NULL;
++		}
++		meta = PyDict_GetItemString(mkw, "metaclass");
++		if (meta != NULL) {
++			Py_INCREF(meta);
++			if (PyDict_DelItemString(mkw, "metaclass") < 0) {
++				Py_DECREF(meta);
++				Py_DECREF(mkw);
++				Py_DECREF(bases);
++				return NULL;
++			}
++		}
++	}
++	if (meta == NULL) {
++		if (PyTuple_GET_SIZE(bases) == 0)
++			meta = (PyObject *) (&PyType_Type);
++		else {
++			PyObject *base0 = PyTuple_GET_ITEM(bases, 0);
++			meta = (PyObject *) (base0->ob_type);
++		}
++		Py_INCREF(meta);
++	}
++	prep = PyObject_GetAttrString(meta, "__prepare__");
++	if (prep == NULL) {
++		PyErr_Clear();
++		ns = PyDict_New();
++	}
++	else {
++		PyObject *pargs = Py_BuildValue("OO", name, bases);
++		if (pargs == NULL) {
++			Py_DECREF(prep);
++			Py_DECREF(meta);
++			Py_XDECREF(mkw);
++			Py_DECREF(bases);
++			return NULL;
++		}
++		ns = PyEval_CallObjectWithKeywords(prep, pargs, mkw);
++		Py_DECREF(pargs);
++		Py_DECREF(prep);
++		if (ns == NULL) {
++			Py_DECREF(meta);
++			Py_XDECREF(mkw);
++			Py_DECREF(bases);
++			return NULL;
++		}
++	}
++	cell = PyObject_CallFunctionObjArgs(func, ns, NULL);
++	if (cell != NULL) {
++		PyObject *margs;
++		margs = Py_BuildValue("OOO", name, bases, ns);
++		if (margs != NULL) {
++			cls = PyEval_CallObjectWithKeywords(meta, margs, mkw);
++			Py_DECREF(margs);
++		}
++		if (cls != NULL && PyCell_Check(cell)) {
++			Py_INCREF(cls);
++			PyCell_SET(cell, cls);
++		}
++		Py_DECREF(cell);
++	}
++	Py_DECREF(ns);
++	Py_DECREF(meta);
++	Py_XDECREF(mkw);
++	Py_DECREF(bases);
++	return cls;
++}
++
++PyDoc_STRVAR(build_class_doc,
++"__build_class__(func, name, *bases, metaclass=None, **kwds) -> class\n\
++\n\
++Internal helper function used by the class statement.");
++
++static PyObject *
++builtin_compile(PyObject *self, PyObject *args, PyObject *kwds)
++{
++	char *str;
++	char *filename;
++	char *startstr;
++	int mode = -1;
++	int dont_inherit = 0;
++	int supplied_flags = 0;
++	PyCompilerFlags cf;
++	PyObject *cmd;
++	static char *kwlist[] = {"source", "filename", "mode", "flags",
++				 "dont_inherit", NULL};
++	// int start[] = {Py_file_input, Py_eval_input, Py_single_input};
++
++	if (!PyArg_ParseTupleAndKeywords(args, kwds, "Oss|ii:compile",
++					 kwlist, &cmd, &filename, &startstr,
++					 &supplied_flags, &dont_inherit))
++		return NULL;
++
++	cf.cf_flags = supplied_flags | PyCF_SOURCE_IS_UTF8;
++
++	if (supplied_flags &
++	    ~(PyCF_MASK | PyCF_MASK_OBSOLETE | PyCF_DONT_IMPLY_DEDENT | PyCF_ONLY_AST))
++	{
++		PyErr_SetString(PyExc_ValueError,
++				"compile(): unrecognised flags");
++		return NULL;
++	}
++	/* XXX Warn if (supplied_flags & PyCF_MASK_OBSOLETE) != 0? */
++
++	if (!dont_inherit) {
++		PyEval_MergeCompilerFlags(&cf);
++	}
++
++	if (strcmp(startstr, "exec") == 0)
++		mode = 0;
++	else if (strcmp(startstr, "eval") == 0)
++		mode = 1;
++	else if (strcmp(startstr, "single") == 0)
++		mode = 2;
++	else {
++		PyErr_SetString(PyExc_ValueError,
++				"compile() arg 3 must be 'exec', 'eval' or 'single'");
++		return NULL;
++	}
++
++	if (PyAST_Check(cmd)) {
++		PyObject *result;
++		if (supplied_flags & PyCF_ONLY_AST) {
++			Py_INCREF(cmd);
++			result = cmd;
++		}
++		else {
++			PyArena *arena;
++			mod_ty mod;
++
++			arena = PyArena_New();
++			mod = PyAST_obj2mod(cmd, arena, mode);
++			if (mod == NULL) {
++				PyArena_Free(arena);
++				return NULL;
++			}
++			result = (PyObject*)PyAST_Compile(mod, filename,
++							  &cf, arena);
++			PyArena_Free(arena);
++		}
++		return result;
++	}
++
++	str = source_as_string(cmd, "compile", "string, bytes, AST or code");
++	if (str == NULL)
++		return NULL;
++
++	return compile(str, filename, startstr, supplied_flags, dont_inherit); // py3k
++	// return Py_CompileStringFlags(str, filename, start[mode], &cf);
++}
++
++PyDoc_STRVAR(compile_doc,
++"compile(source, filename, mode[, flags[, dont_inherit]]) -> code object\n\
++\n\
++Compile the source string (a Python module, statement or expression)\n\
++into a code object that can be executed by exec() or eval().\n\
++The filename will be used for run-time error messages.\n\
++The mode must be 'exec' to compile a module, 'single' to compile a\n\
++single (interactive) statement, or 'eval' to compile an expression.\n\
++The flags argument, if present, controls which future statements influence\n\
++the compilation of the code.\n\
++The dont_inherit argument, if non-zero, stops the compilation inheriting\n\
++the effects of any future statements in effect in the code calling\n\
++compile; if absent or zero these statements do influence the compilation,\n\
++in addition to any features explicitly specified.");
++
++static PyObject *
++builtin_eval(PyObject *self, PyObject *args)
++{
++	PyObject *cmd;
++	// PyObject *cmd, *result, *tmp = NULL;
++	PyObject *globals = Py_None, *locals = Py_None;
++	// char *str;
++	// PyCompilerFlags cf;
++
++	if (!PyArg_UnpackTuple(args, "eval", 1, 3, &cmd, &globals, &locals))
++		return NULL;
++	if (locals != Py_None && !PyMapping_Check(locals)) {
++		PyErr_SetString(PyExc_TypeError, "locals must be a mapping");
++		return NULL;
++	}
++	if (globals != Py_None && !PyDict_Check(globals)) {
++		PyErr_SetString(PyExc_TypeError, PyMapping_Check(globals) ?
++			"globals must be a real dict; try eval(expr, {}, mapping)"
++			: "globals must be a dict");
++		return NULL;
++	}
++	if (globals == Py_None) {
++		globals = PyEval_GetGlobals();
++		if (locals == Py_None)
++			locals = PyEval_GetLocals();
++	}
++	else if (locals == Py_None)
++		locals = globals;
++
++	if (globals == NULL || locals == NULL) {
++		PyErr_SetString(PyExc_TypeError, 
++			"eval must be given globals and locals "
++			"when called without a frame");
++		return NULL;
++	}
++
++	if (PyDict_GetItemString(globals, "__builtins__") == NULL) {
++		if (PyDict_SetItemString(globals, "__builtins__",
++					 PyEval_GetBuiltins()) != 0)
++			return NULL;
++	}
++
++	if (!PyCode_Check(cmd)) { // py3k
++		char *str = source_as_string(cmd, "eval", "string, bytes or code"); // py3k
++		if((cmd = compile(str, "", "eval", 0, 0)) == NULL) return NULL; // py3k
++	} // py3k
++
++	// if (PyCode_Check(cmd)) {
++		if (PyCode_GetNumFree((PyCodeObject *)cmd) > 0) {
++			PyErr_SetString(PyExc_TypeError,
++		"code object passed to eval() may not contain free variables");
++			return NULL;
++		}
++		return PyEval_EvalCode((PyCodeObject *) cmd, globals, locals);
++	// }
++
++	// str = source_as_string(cmd, "eval", "string, bytes or code");
++	// if (str == NULL)
++		// return NULL;
++
++	// while (*str == ' ' || *str == '\t')
++		// str++;
++
++	// cf.cf_flags = PyCF_SOURCE_IS_UTF8;
++	// (void)PyEval_MergeCompilerFlags(&cf);
++	// result = PyRun_StringFlags(str, Py_eval_input, globals, locals, &cf);
++	// Py_XDECREF(tmp);
++	// return result;
++}
++
++PyDoc_STRVAR(eval_doc,
++"eval(source[, globals[, locals]]) -> value\n\
++\n\
++Evaluate the source in the context of globals and locals.\n\
++The source may be a string representing a Python expression\n\
++or a code object as returned by compile().\n\
++The globals must be a dictionary and locals can be any mapping,\n\
++defaulting to the current globals and locals.\n\
++If only globals is given, locals defaults to it.\n");
++
++static PyObject *
++builtin_exec(PyObject *self, PyObject *args)
++{
++	PyObject *v;
++	PyObject *prog, *globals = Py_None, *locals = Py_None;
++	int plain = 0;
++
++	if (!PyArg_ParseTuple(args, "O|OO:exec", &prog, &globals, &locals))
++		return NULL;
++	
++	if (globals == Py_None) {
++		globals = PyEval_GetGlobals();
++		if (locals == Py_None) {
++			locals = PyEval_GetLocals();
++			plain = 1;
++		}
++		if (!globals || !locals) {
++			PyErr_SetString(PyExc_SystemError,
++					"globals and locals cannot be NULL");
++			return NULL;
++		}
++	}
++	else if (locals == Py_None)
++		locals = globals;
++
++	if (!PyDict_Check(globals)) {
++		PyErr_Format(PyExc_TypeError, "exec() arg 2 must be a dict, not %.100s",
++			     globals->ob_type->tp_name);
++		return NULL;
++	}
++	if (!PyMapping_Check(locals)) {
++		PyErr_Format(PyExc_TypeError,
++		    "arg 3 must be a mapping or None, not %.100s",
++		    locals->ob_type->tp_name);
++		return NULL;
++	}
++	if (PyDict_GetItemString(globals, "__builtins__") == NULL) {
++		if (PyDict_SetItemString(globals, "__builtins__",
++					 PyEval_GetBuiltins()) != 0)
++			return NULL;
++	}
++
++	if (!PyCode_Check(prog)) { // py3k
++		char *str = source_as_string(prog, "exec", "string, bytes or code"); // py3k
++		if((prog = compile(str, "", "exec", 0, 0)) == NULL) return NULL; // py3k
++	} // py3k
++
++	// if (PyCode_Check(prog)) {
++		if (PyCode_GetNumFree((PyCodeObject *)prog) > 0) {
++			PyErr_SetString(PyExc_TypeError,
++				"code object passed to exec() may not "
++				"contain free variables");
++			return NULL;
++		}
++		v = PyEval_EvalCode((PyCodeObject *) prog, globals, locals);
++	// }
++	// else {
++		// char *str = source_as_string(prog, "exec",
++					     // "string, bytes or code");
++		// PyCompilerFlags cf;
++		// if (str == NULL)
++			// return NULL;
++		// cf.cf_flags = PyCF_SOURCE_IS_UTF8;
++		// if (PyEval_MergeCompilerFlags(&cf))
++			// v = PyRun_StringFlags(str, Py_file_input, globals,
++					      // locals, &cf);
++		// else
++			// v = PyRun_String(str, Py_file_input, globals, locals);
++	// }
++	if (v == NULL)
++		return NULL;
++	Py_DECREF(v);
++	Py_RETURN_NONE;
++}
++
++PyDoc_STRVAR(exec_doc,
++"exec(object[, globals[, locals]])\n\
++\n\
++Read and execute code from a object, which can be a string, a code\n\
++object or a file object.\n\
++The globals and locals are dictionaries, defaulting to the current\n\
++globals and locals.  If only globals is given, locals defaults to it.");
++
++static PyMethodDef builtin_methods[] = {
++ 	{"__build_class__", (PyCFunction)builtin___build_class__,
++         METH_VARARGS | METH_KEYWORDS, build_class_doc},
++ 	// {"__import__",	(PyCFunction)builtin___import__, METH_VARARGS | METH_KEYWORDS, import_doc},
++ 	// {"abs",		builtin_abs,        METH_O, abs_doc},
++ 	// {"all",		builtin_all,        METH_O, all_doc},
++ 	// {"any",		builtin_any,        METH_O, any_doc},
++ 	// {"ascii",	builtin_ascii,      METH_O, ascii_doc},
++	// {"bin",		builtin_bin,	    METH_O, bin_doc},
++ 	// {"chr",		builtin_chr,        METH_VARARGS, chr_doc},
++ 	// {"cmp",		builtin_cmp,        METH_VARARGS, cmp_doc},
++ 	{"compile",	(PyCFunction)builtin_compile,    METH_VARARGS | METH_KEYWORDS, compile_doc},
++ 	// {"delattr",	builtin_delattr,    METH_VARARGS, delattr_doc},
++ 	// {"dir",		builtin_dir,        METH_VARARGS, dir_doc},
++ 	// {"divmod",	builtin_divmod,     METH_VARARGS, divmod_doc},
++ 	{"eval",	builtin_eval,       METH_VARARGS, eval_doc},
++	{"exec",        builtin_exec,       METH_VARARGS, exec_doc},
++ 	// {"format",	builtin_format,     METH_VARARGS, format_doc},
++ 	// {"getattr",	builtin_getattr,    METH_VARARGS, getattr_doc},
++ 	// {"globals",	(PyCFunction)builtin_globals,    METH_NOARGS, globals_doc},
++ 	// {"hasattr",	builtin_hasattr,    METH_VARARGS, hasattr_doc},
++ 	// {"hash",	builtin_hash,       METH_O, hash_doc},
++ 	// {"hex",		builtin_hex,        METH_O, hex_doc},
++ 	// {"id",		builtin_id,         METH_O, id_doc},
++ 	// {"input",	builtin_input,      METH_VARARGS, input_doc},
++ 	// {"isinstance",  builtin_isinstance, METH_VARARGS, isinstance_doc},
++ 	// {"issubclass",  builtin_issubclass, METH_VARARGS, issubclass_doc},
++ 	// {"iter",	builtin_iter,       METH_VARARGS, iter_doc},
++ 	// {"len",		builtin_len,        METH_O, len_doc},
++ 	// {"locals",	(PyCFunction)builtin_locals,     METH_NOARGS, locals_doc},
++ 	// {"max",		(PyCFunction)builtin_max,        METH_VARARGS | METH_KEYWORDS, max_doc},
++ 	// {"min",		(PyCFunction)builtin_min,        METH_VARARGS | METH_KEYWORDS, min_doc},
++	// {"next",	(PyCFunction)builtin_next,       METH_VARARGS, next_doc},
++ 	// {"oct",		builtin_oct,        METH_O, oct_doc},
++ 	// {"ord",		builtin_ord,        METH_O, ord_doc},
++ 	// {"pow",		builtin_pow,        METH_VARARGS, pow_doc},
++ 	// {"print",	(PyCFunction)builtin_print,      METH_VARARGS | METH_KEYWORDS, print_doc},
++ 	// {"repr",	builtin_repr,       METH_O, repr_doc},
++ 	// {"round",	(PyCFunction)builtin_round,      METH_VARARGS | METH_KEYWORDS, round_doc},
++ 	// {"setattr",	builtin_setattr,    METH_VARARGS, setattr_doc},
++ 	// {"sorted",	(PyCFunction)builtin_sorted,     METH_VARARGS | METH_KEYWORDS, sorted_doc},
++ 	// {"sum",		builtin_sum,        METH_VARARGS, sum_doc},
++ 	// {"vars",	builtin_vars,       METH_VARARGS, vars_doc},
++	{NULL,		NULL},
++};
++
++PyDoc_STRVAR(builtin_doc,
++"py3to2 Built-in functions, exceptions, and other objects");
++
++// PyObject *initpy3k_builtins(void) {
++				// return Py_InitModule("py3k_builtins", builtin_methods);
++// }
++// PyMODINIT_FUNC inittiming(void)
++// {
++    // if (PyErr_WarnPy3k("the timing module has been removed in "
++                        // "Python 3.0; use time.clock() instead", 2) < 0)
++        // return;
++   //  
++	// (void)Py_InitModule("timing", timing_methods);
++// }
++
++PyMODINIT_FUNC init_py3to2(void)
++{
++	PyObject *mod;
++	mod = Py_InitModule4("_py3to2", builtin_methods,
++			     builtin_doc, (PyObject *)NULL,
++			     PYTHON_API_VERSION);
++	if (mod == NULL)
++		return NULL;
++}
+diff -Naur src/Modules/Setup.local patched/Modules/Setup.local
+--- src/Modules/Setup.local	1969-12-31 16:00:00.000000000 -0800
++++ patched/Modules/Setup.local	2008-11-19 02:58:09.796406000 -0800
+@@ -0,0 +1,2 @@
++# Edit this file for local setup changes
++_py3to2 _py3to2module.o
+diff -Naur src/Objects/funcobject.c patched/Objects/funcobject.c
+--- src/Objects/funcobject.c	2008-06-08 21:58:54.000000000 -0700
++++ patched/Objects/funcobject.c	2008-11-19 02:58:09.744770000 -0800
+@@ -526,7 +526,7 @@
+ 		PyFunction_GET_GLOBALS(func), (PyObject *)NULL,
+ 		&PyTuple_GET_ITEM(arg, 0), PyTuple_Size(arg),
+ 		k, nk, d, nd,
+-		PyFunction_GET_CLOSURE(func));
++		func); // py3k - replace func->closure w/ func
+ 
+ 	if (k != NULL)
+ 		PyMem_DEL(k);
+diff -Naur src/Objects/typeobject.c patched/Objects/typeobject.c
+--- src/Objects/typeobject.c	2008-08-26 15:42:08.000000000 -0700
++++ patched/Objects/typeobject.c	2008-11-19 02:58:09.809586000 -0800
+@@ -6553,18 +6553,83 @@
+ 	}
+ }
+ 
++//////////////////////////////////////////////////////////////// py3k beg - PEP3135  New Super
++#include "frameobject.h" // py3k
++
+ static int
+ super_init(PyObject *self, PyObject *args, PyObject *kwds)
+ {
+ 	superobject *su = (superobject *)self;
+-	PyTypeObject *type;
++	PyTypeObject *type = NULL; // py3k
+ 	PyObject *obj = NULL;
+ 	PyTypeObject *obj_type = NULL;
+ 
+ 	if (!_PyArg_NoKeywords("super", kwds))
+ 		return -1;
+-	if (!PyArg_ParseTuple(args, "O!|O:super", &PyType_Type, &type, &obj))
++	if (!PyArg_ParseTuple(args, "|O!O:super", &PyType_Type, &type, &obj)) // py3k
+ 		return -1;
++
++        if (type == NULL) {
++		/* Call super(), without args -- fill in from __class__
++		   and first local variable on the stack. */
++		PyFrameObject *f = PyThreadState_GET()->frame;
++		PyCodeObject *co = f->f_code;
++		int i, n;
++		if (co == NULL) {
++			PyErr_SetString(PyExc_SystemError,
++					"super(): no code object");
++			return -1;
++		}
++		if (co->co_argcount == 0) {
++			PyErr_SetString(PyExc_SystemError,
++					"super(): no arguments");
++			return -1;
++		}
++		obj = f->f_localsplus[0];
++		if (obj == NULL) {
++			PyErr_SetString(PyExc_SystemError,
++					"super(): arg[0] deleted");
++			return -1;
++		}
++		if (co->co_freevars == NULL)
++			n = 0;
++		else {
++			assert(PyTuple_Check(co->co_freevars));
++			n = PyTuple_GET_SIZE(co->co_freevars);
++		}
++		for (i = 0; i < n; i++) {
++			PyObject *name = PyTuple_GET_ITEM(co->co_freevars, i);
++			assert(PyString_Check(name)); // py3k
++                        if (!strcmp(PyString_AS_STRING(name), "__class__")) { // py3k
++				PyObject *cell =
++					f->f_localsplus[co->co_nlocals + i];
++				if (cell == NULL || !PyCell_Check(cell)) {
++					PyErr_SetString(PyExc_SystemError,
++					  "super(): bad __class__ cell");
++					return -1;
++				}
++				type = (PyTypeObject *) PyCell_GET(cell);
++				if (type == NULL) {
++					PyErr_SetString(PyExc_SystemError,
++					  "super(): empty __class__ cell");
++					return -1;
++				}
++				if (!PyType_Check(type)) {
++				    PyErr_Format(PyExc_SystemError,
++				      "super(): __class__ is not a type (%s)",
++				      Py_TYPE(type)->tp_name);
++				    return -1;
++				}
++				break;
++			}
++		}
++		if (type == NULL) {
++			PyErr_SetString(PyExc_SystemError,
++					"super(): __class__ cell not found");
++			return -1;
++		}
++        }
++
+ 	if (obj == Py_None)
+ 		obj = NULL;
+ 	if (obj != NULL) {
+@@ -6581,13 +6646,20 @@
+ }
+ 
+ PyDoc_STRVAR(super_doc,
++"super() -> same as super(__class__, <first argument>)\n"
+ "super(type) -> unbound super object\n"
+ "super(type, obj) -> bound super object; requires isinstance(obj, type)\n"
+ "super(type, type2) -> bound super object; requires issubclass(type2, type)\n"
+ "Typical use to call a cooperative superclass method:\n"
+ "class C(B):\n"
+ "    def meth(self, arg):\n"
+-"	 super(C, self).meth(arg)");
++"	 super().meth(arg)\n"
++"This works for class methods too:\n"
++"class C(B):\n"
++"    @classmethod\n"
++"    def cmeth(cls, arg):\n"
++"	 super().cmeth(arg)\n");
++//////////////////////////////////////////////////////////////// py3k end
+ 
+ static int
+ super_traverse(PyObject *self, visitproc visit, void *arg)
+diff -Naur src/Python/ceval.c patched/Python/ceval.c
+--- src/Python/ceval.c	2008-07-25 15:13:52.000000000 -0700
++++ patched/Python/ceval.c	2008-11-19 02:58:09.729027000 -0800
+@@ -19,6 +19,195 @@
+ 
+ #include <ctype.h>
+ 
++//////////////////////////////////////////////////////////////// py3k beg - header
++// new opcodes
++#define py3k_SET_ADD 17 // 17 in py3k
++#define py3k_STORE_LOCALS 69 // 69 in py3k
++#define py3k_LOAD_BUILD_CLASS 34 // 71 in py3k
++#define py3k_MAKE_BYTES 35 // 85 in py3k
++#define py3k_POP_EXCEPT 36 // 89 in py3k
++#define py3k_LOAD_BUILD_PSEUDOMETHOD 37 // pseudomethod feature a..b(*args, **kwds) -> b(a, *args, **kwds)
++#define py3k_UNPACK_EX 94 // 94 in py3k
++#define py3k_BUILD_SET 192 // 104 in py3k
++#define py3k_MAKE_FUNCTION 193 // 132 in py2x - replace MAKE_FUNCTION
++
++// macros
++#define PyCode_ISPY3K(co) ((co)->co_argcount & 0xffff0000) // check if py3k codeobj
++#define PyCode_GETARGCOUNT(co) ((co)->co_argcount & 0xffff) // retrieve co_argcount w/ metaflag removed
++#define PyCode_GETKWONLYARGCOUNT(co) (((co)->co_argcount >> 16) & 0xff) // get kwonlyargcount from metaflag
++#define PyFunction_SetAnnotations(x, v) PyObject_SetAttrString(x, "__annotations__", v)
++#define PyFunction_SetKwDefaults(x, v) PyObject_SetAttrString(x, "__kwdefaults__", v)
++
++// helper functions
++PyObject *PyFunction_GET_KW_DEFAULTS(PyObject *obj) { // body derived from PyObject_GenericGetAttr
++	PyTypeObject *tp = Py_TYPE(obj);
++	PyObject *descr = NULL;
++	PyObject *res = NULL;
++	Py_ssize_t dictoffset;
++	PyObject **dictptr;
++
++	/* Inline _PyObject_GetDictPtr */
++	dictoffset = tp->tp_dictoffset;
++	if (dictoffset != 0) {
++		PyObject *dict;
++		if (dictoffset < 0) {
++			Py_ssize_t tsize;
++			size_t size;
++
++			tsize = ((PyVarObject *)obj)->ob_size;
++			if (tsize < 0)
++				tsize = -tsize;
++			size = _PyObject_VAR_SIZE(tp, tsize);
++
++			dictoffset += (long)size;
++			assert(dictoffset > 0);
++			assert(dictoffset % SIZEOF_VOID_P == 0);
++		}
++		dictptr = (PyObject **) ((char *)obj + dictoffset);
++		dict = *dictptr;
++		if (dict != NULL) {
++			Py_INCREF(dict);
++			res = PyDict_GetItemString(dict, "__kwdefaults__");
++			if (res != NULL) {
++				// Py_INCREF(res); // py3k
++				Py_XDECREF(descr);
++                                Py_DECREF(dict);
++			}
++                        Py_DECREF(dict);
++		}
++	}
++	return res;
++}
++
++static int // py3k - patched w/ PEP3132  Extended Iterable Unpacking
++py3k_unpack_iterable(PyObject *v, int argcnt, int argcntafter, PyObject **sp)
++{
++	int i = 0, j = 0;
++	Py_ssize_t ll = 0;
++	PyObject *it;  /* iter(v) */
++	PyObject *w;
++	PyObject *l = NULL; /* variable list */
++
++	assert(v != NULL);
++
++	it = PyObject_GetIter(v);
++	if (it == NULL)
++		goto Error;
++
++	for (; i < argcnt; i++) {
++		w = PyIter_Next(it);
++		if (w == NULL) {
++			/* Iterator done, via error or exhaustion. */
++			if (!PyErr_Occurred()) {
++				PyErr_Format(PyExc_ValueError,
++					"need more than %d value%s to unpack",
++					i, i == 1 ? "" : "s");
++			}
++			goto Error;
++		}
++		*--sp = w;
++	}
++
++	if (argcntafter == -1) {
++		/* We better have exhausted the iterator now. */
++		w = PyIter_Next(it);
++		if (w == NULL) {
++			if (PyErr_Occurred())
++				goto Error;
++			Py_DECREF(it);
++			return 1;
++		}
++		Py_DECREF(w);
++		PyErr_SetString(PyExc_ValueError, "too many values to unpack");
++		goto Error;
++	}
++
++	l = PySequence_List(it);
++	if (l == NULL)
++		goto Error;
++	*--sp = l;
++	i++;
++
++	ll = PyList_GET_SIZE(l);
++	if (ll < argcntafter) {
++		PyErr_Format(PyExc_ValueError, "need more than %zd values to unpack",
++			     argcnt + ll);
++		goto Error;
++	}
++
++	/* Pop the "after-variable" args off the list. */
++	for (j = argcntafter; j > 0; j--, i++) {
++		*--sp = PyList_GET_ITEM(l, ll - j);
++	}
++	/* Resize the list. */
++	Py_SIZE(l) = ll - argcntafter;
++	Py_DECREF(it);
++	return 1;
++
++Error:
++	for (; i > 0; i--, sp++)
++		Py_DECREF(*sp);
++	Py_XDECREF(it);
++	return 0;
++}
++
++// PyPseudomethodObject
++PyTypeObject PyPseudomethod_Type;
++
++typedef struct {
++	PyObject_HEAD
++	PyObject *self;
++	PyObject *func;
++} PyPseudomethodObject;
++
++static void pseudomethod_dealloc(PyPseudomethodObject *x) {
++	Py_DECREF(x->self);
++	Py_DECREF(x->func);
++	PyObject_DEL(x);
++}
++
++static PyObject *pseudomethod_new(PyObject *self, PyObject *func) {
++	if (func->ob_type->tp_call == NULL) {
++		PyErr_Format(PyExc_TypeError, "pseudomethod '%.200s' object is not callable", func->ob_type->tp_name);
++		return NULL;
++	}
++	PyPseudomethodObject *x = PyObject_NEW(PyPseudomethodObject, &PyPseudomethod_Type);
++	x->self = self; Py_INCREF(self);
++	x->func = func; Py_INCREF(func);
++	return (PyObject *)x;
++}
++
++static PyObject *pseudomethod_call(PyPseudomethodObject *x, PyObject *args, PyObject *kwds) {
++	PyObject* self_and_args = PyTuple_New(PyTuple_Size(args) + 1);
++	Py_INCREF(x->self); PyTuple_SetItem(self_and_args, 0, x->self);
++	int i = 0; PyObject *arg;
++	while (i < PyTuple_Size(args)) {
++		arg = PyTuple_GetItem(args, i); i++;
++		Py_INCREF(arg); PyTuple_SetItem(self_and_args, i, arg);
++	}
++	PyObject *result = PyEval_CallObjectWithKeywords(x->func, self_and_args, kwds);
++	Py_DECREF(self_and_args); return result;
++}
++
++PyTypeObject PyPseudomethod_Type = {
++	PyVarObject_HEAD_INIT(&PyType_Type, 0)	/* ob_type */
++	"pseudomethod",	/* ob_size */
++	sizeof(PyPseudomethodObject),	/* tp_name */
++	0,	/* tp_itemsize */
++	(destructor)pseudomethod_dealloc,	/* tp_dealloc */
++	0,	/* tp_print */
++	0,	/* tp_getattr */
++	0,	/* tp_setattr */
++	0,	/* tp_compare */
++	0,	/* tp_repr */
++	0,	/* tp_as_number */
++	0,	/* tp_as_sequence */
++	0,	/* tp_as_mapping */
++	0,	/* tp_hash */
++	(ternaryfunc)pseudomethod_call,	/* tp_call */
++};
++//////////////////////////////////////////////////////////////// py3k end
++
+ #ifndef WITH_TSC
+ 
+ #define READ_TIMESTAMP(var)
+@@ -2492,6 +2681,166 @@
+ 			oparg = oparg<<16 | NEXTARG();
+ 			goto dispatch_opcode;
+ 
++		//////////////////////////////////////////////////////////////// py3k beg - add new opcodes here
++		if PyCode_ISPY3K(co) { // only run these opcodes if py3k flag bit is set
++		case py3k_SET_ADD:
++			w = POP();
++			v = POP();
++			err = PySet_Add(v, w);
++			Py_DECREF(v);
++			Py_DECREF(w);
++			if (err == 0) {
++				PREDICT(JUMP_ABSOLUTE);
++				continue;
++			}
++			break;
++
++		case py3k_STORE_LOCALS:
++			x = POP();
++			v = f->f_locals;
++			Py_XDECREF(v);
++			f->f_locals = x;
++			continue;
++
++		case py3k_LOAD_BUILD_CLASS:
++			x = PyDict_GetItemString(f->f_builtins,
++						 "__build_class__");
++			if (x == NULL) {
++				PyErr_SetString(PyExc_ImportError,
++						"__build_class__ not found");
++				break;
++			}
++			Py_INCREF(x);
++			PUSH(x);
++			break;
++
++		// case py3k_MAKE_BYTES - unused
++
++		// case py3k_POP_EXCEPT - unused
++
++		case py3k_LOAD_BUILD_PSEUDOMETHOD:
++			w = POP();
++			v = TOP();
++			x = pseudomethod_new(v, w);
++			Py_DECREF(v);
++			Py_DECREF(w);
++			SET_TOP(x);
++			if (x != NULL) continue;
++			break;
++
++		case py3k_UNPACK_EX:
++		{
++			int totalargs = 1 + (oparg & 0xFF) + (oparg >> 8);
++			v = POP();
++
++			if (py3k_unpack_iterable(v, oparg & 0xFF, oparg >> 8,
++					    stack_pointer + totalargs)) {
++				stack_pointer += totalargs;
++			} else {
++				why = WHY_EXCEPTION;
++			}
++			Py_DECREF(v);
++			break;
++		}
++
++		case py3k_BUILD_SET:
++			x = PySet_New(NULL);
++			if (x != NULL) {
++				for (; --oparg >= 0;) {
++					w = POP();
++					if (err == 0)
++						err = PySet_Add(x, w);
++					Py_DECREF(w);
++				}
++				if (err != 0) {
++					Py_DECREF(x);
++					break;
++				}
++				PUSH(x);
++				continue;
++			}
++			break;
++
++		case py3k_MAKE_FUNCTION:
++		{
++		    int posdefaults = oparg & 0xff;
++		    int kwdefaults = (oparg>>8) & 0xff;
++		    int num_annotations = (oparg >> 16) & 0x7fff;
++
++			v = POP(); /* code object */
++			x = PyFunction_New(v, f->f_globals);
++			Py_DECREF(v);
++
++			if (x != NULL && opcode == MAKE_CLOSURE) {
++				v = POP();
++				err = PyFunction_SetClosure(x, v);
++				Py_DECREF(v);
++			}
++
++			if (x != NULL && num_annotations > 0) {
++				Py_ssize_t name_ix;
++				u = POP(); /* names of args with annotations */
++				v = PyDict_New();
++				if (v == NULL) {
++					Py_DECREF(x);
++					x = NULL;
++					break;
++				}
++				name_ix = PyTuple_Size(u);
++				assert(num_annotations == name_ix+1);
++				while (name_ix > 0) {
++					--name_ix;
++					t = PyTuple_GET_ITEM(u, name_ix);
++					w = POP();
++					/* XXX(nnorwitz): check for errors */
++					PyDict_SetItem(v, t, w);
++					Py_DECREF(w);
++				}
++
++				err = PyFunction_SetAnnotations(x, v);
++				Py_DECREF(v);
++				Py_DECREF(u);
++			}
++
++			/* XXX Maybe this should be a separate opcode? */
++			if (x != NULL && posdefaults > 0) {
++				v = PyTuple_New(posdefaults);
++				if (v == NULL) {
++					Py_DECREF(x);
++					x = NULL;
++					break;
++				}
++				while (--posdefaults >= 0) {
++					w = POP();
++					PyTuple_SET_ITEM(v, posdefaults, w);
++				}
++				err = PyFunction_SetDefaults(x, v);
++				Py_DECREF(v);
++			}
++			if (x != NULL && kwdefaults > 0) {
++				v = PyDict_New();
++				if (v == NULL) {
++					Py_DECREF(x);
++					x = NULL;
++					break;
++				}
++				while (--kwdefaults >= 0) {
++					w = POP(); /* default value */
++					u = POP(); /* kw only arg name */
++					/* XXX(nnorwitz): check for errors */
++					PyDict_SetItem(v, u, w);
++					Py_DECREF(w);
++					Py_DECREF(u);
++				}
++				err = PyFunction_SetKwDefaults(x, v);
++				Py_DECREF(v);
++			}
++			PUSH(x);
++			break;
++		}
++		}
++		//////////////////////////////////////////////////////////////// py3k end
++
+ 		default:
+ 			fprintf(stderr,
+ 				"XXX lineno: %d, opcode: %d\n",
+@@ -2712,6 +3061,13 @@
+ 	   PyObject **args, int argcount, PyObject **kws, int kwcount,
+ 	   PyObject **defs, int defcount, PyObject *closure)
+ {
++	// py3k beg
++	int co_argcount = PyCode_GETARGCOUNT(co);
++	int co_kwonlyargcount = PyCode_GETKWONLYARGCOUNT(co);
++	int co_argcount_all = co_argcount + co_kwonlyargcount;
++	PyObject *kwdefs = closure; // recall fast_function passed func instead of func->closure
++	if (closure != NULL && PyFunction_Check(closure)) closure = PyFunction_GET_CLOSURE(closure);
++	// py3k end
+ 	register PyFrameObject *f;
+ 	register PyObject *retval = NULL;
+ 	register PyObject **fastlocals, **freevars;
+@@ -2733,7 +3089,7 @@
+ 	fastlocals = f->f_localsplus;
+ 	freevars = f->f_localsplus + co->co_nlocals;
+ 
+-	if (co->co_argcount > 0 ||
++	if (co_argcount_all > 0 ||
+ 	    co->co_flags & (CO_VARARGS | CO_VARKEYWORDS)) {
+ 		int i;
+ 		int n = argcount;
+@@ -2742,25 +3098,25 @@
+ 			kwdict = PyDict_New();
+ 			if (kwdict == NULL)
+ 				goto fail;
+-			i = co->co_argcount;
++			i = co_argcount_all; // py3k
+ 			if (co->co_flags & CO_VARARGS)
+ 				i++;
+ 			SETLOCAL(i, kwdict);
+ 		}
+-		if (argcount > co->co_argcount) {
++		if (argcount > co_argcount) {
+ 			if (!(co->co_flags & CO_VARARGS)) {
+ 				PyErr_Format(PyExc_TypeError,
+ 				    "%.200s() takes %s %d "
+ 				    "%sargument%s (%d given)",
+ 				    PyString_AsString(co->co_name),
+ 				    defcount ? "at most" : "exactly",
+-				    co->co_argcount,
++				    co_argcount,
+ 				    kwcount ? "non-keyword " : "",
+-				    co->co_argcount == 1 ? "" : "s",
++				    co_argcount == 1 ? "" : "s",
+ 				    argcount);
+ 				goto fail;
+ 			}
+-			n = co->co_argcount;
++			n = co_argcount;
+ 		}
+ 		for (i = 0; i < n; i++) {
+ 			x = args[i];
+@@ -2771,7 +3127,7 @@
+ 			u = PyTuple_New(argcount - n);
+ 			if (u == NULL)
+ 				goto fail;
+-			SETLOCAL(co->co_argcount, u);
++			SETLOCAL(co_argcount_all, u); // py3k
+ 			for (i = n; i < argcount; i++) {
+ 				x = args[i];
+ 				Py_INCREF(x);
+@@ -2792,13 +3148,13 @@
+ 			/* Speed hack: do raw pointer compares. As names are
+ 			   normally interned this should almost always hit. */
+ 			co_varnames = PySequence_Fast_ITEMS(co->co_varnames);
+-			for (j = 0; j < co->co_argcount; j++) {
++			for (j = 0; j < co_argcount_all; j++) { // py3k
+ 				PyObject *nm = co_varnames[j];
+ 				if (nm == keyword)
+ 					goto kw_found;
+ 			}
+ 			/* Slow fallback, just in case */
+-			for (j = 0; j < co->co_argcount; j++) {
++			for (j = 0; j < co_argcount_all; j++) { // py3k
+ 				PyObject *nm = co_varnames[j];
+ 				int cmp = PyObject_RichCompareBool(
+ 					keyword, nm, Py_EQ);
+@@ -2810,7 +3166,7 @@
+ 			/* Check errors from Compare */
+ 			if (PyErr_Occurred())
+ 				goto fail;
+-			if (j >= co->co_argcount) {
++			if (j >= co_argcount_all) { // py3k
+ 				if (kwdict == NULL) {
+ 					PyErr_Format(PyExc_TypeError,
+ 					    "%.200s() got an unexpected "
+@@ -2835,8 +3191,33 @@
+ 			Py_INCREF(value);
+ 			SETLOCAL(j, value);
+ 		}
+-		if (argcount < co->co_argcount) {
+-			int m = co->co_argcount - defcount;
++		// py3k beg - PEP3102  Keyword-Only Arguments
++		if (co_kwonlyargcount > 0) {
++			if (kwdefs != NULL) kwdefs = PyFunction_GET_KW_DEFAULTS(kwdefs); // py3k - deferred this expensive operation
++			for (i = co_argcount;
++			     i < co_argcount_all; // py3k
++			     i++) {
++				PyObject *name, *def;
++				if (GETLOCAL(i) != NULL)
++					continue;
++				name = PyTuple_GET_ITEM(co->co_varnames, i);
++				def = NULL;
++				if (kwdefs != NULL)
++					def = PyDict_GetItem(kwdefs, name);
++				if (def != NULL) {
++					Py_INCREF(def);
++					SETLOCAL(i, def);
++					continue;
++				}
++				PyErr_Format(PyExc_TypeError,
++					"%.200s() needs keyword-only argument %s", // py3k
++					PyString_AsString(co->co_name), PyString_AsString(name)); // py3k
++				goto fail;
++			}
++		}
++		// py3k end
++		if (argcount < co_argcount) {
++			int m = co_argcount - defcount;
+ 			for (i = argcount; i < m; i++) {
+ 				if (GETLOCAL(i) == NULL) {
+ 					PyErr_Format(PyExc_TypeError,
+@@ -2880,7 +3261,7 @@
+ 		char *cellname, *argname;
+ 		PyObject *c;
+ 
+-		nargs = co->co_argcount;
++		nargs = co_argcount_all; // py3k
+ 		if (co->co_flags & CO_VARARGS)
+ 			nargs++;
+ 		if (co->co_flags & CO_VARKEYWORDS)
+@@ -3736,7 +4117,7 @@
+ 
+ 	PCALL(PCALL_FUNCTION);
+ 	PCALL(PCALL_FAST_FUNCTION);
+-	if (argdefs == NULL && co->co_argcount == n && nk==0 &&
++	if (argdefs == NULL && PyCode_GETARGCOUNT(co) == n && PyCode_GETKWONLYARGCOUNT(co) == 0 && nk==0 && // py3k
+ 	    co->co_flags == (CO_OPTIMIZED | CO_NEWLOCALS | CO_NOFREE)) {
+ 		PyFrameObject *f;
+ 		PyObject *retval = NULL;
+@@ -3775,7 +4156,7 @@
+ 	return PyEval_EvalCodeEx(co, globals,
+ 				 (PyObject *)NULL, (*pp_stack)-n, na,
+ 				 (*pp_stack)-2*nk, nk, d, nd,
+-				 PyFunction_GET_CLOSURE(func));
++				 func); // py3k - replace func->closure w/ func
+ }
+ 
+ static PyObject *
+diff -Naur src/Python/pythonrun.c patched/Python/pythonrun.c
+--- src/Python/pythonrun.c	2008-08-23 22:04:52.000000000 -0700
++++ patched/Python/pythonrun.c	2008-11-19 02:58:09.783123000 -0800
+@@ -353,6 +353,7 @@
+ Py_Initialize(void)
+ {
+ 	Py_InitializeEx(1);
++	PyRun_SimpleString("import py3to2_init"); // py3k
+ }
+ 
+ 
