@@ -1,0 +1,3 @@
+PROJECTNAME = "slc.autotranslate"
+
+DEPENDENCIES = [ ]
