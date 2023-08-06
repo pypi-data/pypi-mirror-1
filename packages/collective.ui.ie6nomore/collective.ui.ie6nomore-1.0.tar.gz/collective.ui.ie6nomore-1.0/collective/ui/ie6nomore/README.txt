@@ -1,0 +1,81 @@
+collective.ui.ie6nomore
+=======================
+
+Overview
+--------
+
+**Enough is enough**. Microsoft Internet Explorer 6 was released in late 2001. 
+For its time, it was a decent browser, but in 2009, it is still in use by a 
+significant portion of the web population, and its time is now up.
+
+This is a Plone 3 implementation of the code available at http://www.ie6nomore.com/.
+
+Embrace this campaign, support this noble cause.
+
+Requirements
+------------
+    - Plone 3.3.x (http://plone.org/products/plone)
+
+    - Plone 3.2.x (http://plone.org/products/plone)
+    
+    - Plone 3.1.x (http://plone.org/products/plone)
+    
+    - Plone 3.0.x (http://plone.org/products/plone)
+
+Installation
+------------
+    
+To use this package, on a buildout based installation:
+
+    1. Unpack collective.ui.ie6nomore package to src/ folder of your 
+    buildout
+    2. Edit your buildout.cfg and add the following information::
+
+        [buildout]
+        ...
+        eggs = 
+            collective.ui.ie6nomore
+
+        [instance]
+        zcml = 
+            ...
+            collective.ui.ie6nomore
+    
+    The last line tells buildout to generate a zcml snippet that tells
+    Zope to configure collective.ui.ie6nomore.
+
+    If another package depends on the collective.ui.ie6nomore egg or 
+    includes its zcml directly you do not need to specify anything in the 
+    buildout configuration: buildout will detect this automatically.
+
+    After updating the configuration you need to run the ''bin/buildout'',
+    which will take care of updating your system.
+
+Go to the 'Site Setup' page in the Plone interface and click on the
+'Add/Remove Products' link.
+
+Choose the product (check its checkbox) and click the 'Install' button.
+
+Uninstall -- This can be done from the same management screen, but only
+if you installed it from the quick installer.
+
+Note: You may have to empty your browser cache to see the effects of the
+product installation.
+
+Browsers and OS's
+-----------------
+    * Internet Explorer 6.0 (WinXP/Vista) ()
+    
+    * Internet Explorer 8.0 (WinXP/Vista)
+    
+    * Internet Explorer 7.0 (WinXP/Vista)
+    
+    * Firefox 3 (WinXP/Vista/MacOSX)
+    
+    * Safari 3 (WinXP/Vista/MacOSX)
+
+Credits
+-------
+
+* Erico Andrei (products at simplesconsultoria dot com dot br) - Packaging
+
