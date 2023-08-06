@@ -1,0 +1,332 @@
+==========
+Membership
+==========
+
+The REST API can be used to subscribe and unsubscribe users to mailing lists.
+A subscribed user is called a 'member'.  There is a top level collection that
+returns all the members of all known mailing lists.
+
+There are no mailing lists and no members yet.
+
+    >>> dump_json('http://localhost:8001/3.0/members')
+    resource_type_link: http://localhost:8001/3.0/#members
+    start: None
+    total_size: 0
+
+We create a mailing list, which starts out with no members.
+
+    >>> mlist_one = create_list('test-one@example.com')
+    >>> transaction.commit()
+
+    >>> dump_json('http://localhost:8001/3.0/members')
+    resource_type_link: http://localhost:8001/3.0/#members
+    start: None
+    total_size: 0
+
+
+Subscribers
+===========
+
+After Bart subscribes to the mailing list, his subscription is available via
+the REST interface.
+
+    >>> from mailman.interfaces.member import MemberRole
+    >>> from mailman.interfaces.usermanager import IUserManager
+    >>> from zope.component import getUtility
+    >>> user_manager = getUtility(IUserManager)
+
+    >>> def subscribe(mlist, first_name, role=MemberRole.member):
+    ...     address = '{0}person@example.com'.format(first_name[0].lower())
+    ...     full_name = '{0} Person'.format(first_name)
+    ...     person = user_manager.get_user(address)
+    ...     if person is None:
+    ...         person = user_manager.create_user(address, full_name)
+    ...     preferred_address = list(person.addresses)[0]
+    ...     preferred_address.subscribe(mlist, role)
+    ...     transaction.commit()
+
+    >>> subscribe(mlist_one, 'Bart')
+    >>> dump_json('http://localhost:8001/3.0/members')
+    entry 0:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/member/bperson@example.com
+    resource_type_link: http://localhost:8001/3.0/#members
+    start: 0
+    total_size: 1
+
+When Cris also joins the mailing list, her subscription is also available via
+the REST interface.
+
+    >>> subscribe(mlist_one, 'Cris')
+    >>> dump_json('http://localhost:8001/3.0/members')
+    entry 0:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/member/bperson@example.com
+    entry 1:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/member/cperson@example.com
+    resource_type_link: http://localhost:8001/3.0/#members
+    start: 0
+    total_size: 2
+
+The subscribed members are returned in alphabetical order, so when Anna
+subscribes, she is returned first.
+
+    >>> subscribe(mlist_one, 'Anna')
+
+    >>> dump_json('http://localhost:8001/3.0/members')
+    entry 0:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/member/aperson@example.com
+    entry 1:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/member/bperson@example.com
+    entry 2:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/member/cperson@example.com
+    resource_type_link: http://localhost:8001/3.0/#members
+    start: 0
+    total_size: 3
+
+Subscriptions are also returned alphabetically by mailing list posting
+address.  Anna and Cris subscribe to this new mailing list.
+
+    >>> mlist_two = create_list('alpha@example.com')
+    >>> subscribe(mlist_two, 'Anna')
+    >>> subscribe(mlist_two, 'Cris')
+
+    >>> dump_json('http://localhost:8001/3.0/members')
+    entry 0:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/alpha@example.com/member/aperson@example.com
+    entry 1:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/alpha@example.com/member/cperson@example.com
+    entry 2:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/member/aperson@example.com
+    entry 3:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/member/bperson@example.com
+    entry 4:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/member/cperson@example.com
+    resource_type_link: http://localhost:8001/3.0/#members
+    start: 0
+    total_size: 5
+
+
+Owners and moderators
+=====================
+
+Mailing list owners and moderators also show up in the REST API.  Cris becomes
+an owner of the alpha mailing list and Dave becomes a moderator of the
+test-one mailing list.
+
+    >>> subscribe(mlist_one, 'Cris', MemberRole.owner)
+    >>> subscribe(mlist_two, 'Dave', MemberRole.moderator)
+
+    >>> dump_json('http://localhost:8001/3.0/members')
+    entry 0:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/alpha@example.com/moderator/dperson@example.com
+    entry 1:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/alpha@example.com/member/aperson@example.com
+    entry 2:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/alpha@example.com/member/cperson@example.com
+    entry 3:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/owner/cperson@example.com
+    entry 4:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/member/aperson@example.com
+    entry 5:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/member/bperson@example.com
+    entry 6:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/test-one@example.com/member/cperson@example.com
+    resource_type_link: http://localhost:8001/3.0/#members
+    start: 0
+    total_size: 7
+
+
+Joining a mailing list
+======================
+
+A user can be subscribed to a mailing list via the REST API.  Actually,
+addresses not users are subscribed to mailing lists, but addresses are always
+tied to users.  A subscribed user is called a member.
+
+Elly subscribes to the alpha mailing list.  By default, get gets a regular
+delivery.  Since Elly's email address is not yet known to Mailman, a user is
+created for her.
+
+    >>> dump_json('http://localhost:8001/3.0/members', {
+    ...           'ws.op': 'join',
+    ...           'fqdn_listname': 'alpha@example.com',
+    ...           'address': 'eperson@example.com',
+    ...           'real_name': 'Elly Person',
+    ...           })
+    http_etag: ...
+    resource_type_link: http://localhost:8001/3.0/#member
+    self_link: http://localhost:8001/3.0/lists/alpha@example.com/member/eperson@example.com
+
+Elly is now a member of the mailing list.
+
+    >>> elly = user_manager.get_user('eperson@example.com')
+    >>> elly
+    <User "Elly Person" at ...>
+
+    >>> set(member.mailing_list for member in elly.memberships.members)
+    set([u'alpha@example.com'])
+
+    >>> dump_json('http://localhost:8001/3.0/members')
+    entry 0:
+    ...
+    entry 3:
+        http_etag: ...
+        resource_type_link: http://localhost:8001/3.0/#member
+        self_link: http://localhost:8001/3.0/lists/alpha@example.com/member/eperson@example.com
+    ...
+
+
+Leaving a mailing list
+======================
+
+Elly decides she does not want to be a member of the mailing list after all,
+so she unsubscribes from the mailing list.
+
+    # Ensure our previous reads don't keep the database lock.
+    >>> transaction.abort()
+    >>> dump_json('http://localhost:8001/3.0/members', {
+    ...           'ws.op': 'leave',
+    ...           'fqdn_listname': 'alpha@example.com',
+    ...           'address': 'eperson@example.com',
+    ...           })
+
+Elly is no longer a member of the mailing list.
+
+    >>> set(member.mailing_list for member in elly.memberships.members)
+    set([])
+
+
+Digest delivery
+===============
+
+Fred joins the alpha mailing list but wants MIME digest delivery.
+
+    >>> transaction.abort()
+    >>> dump_json('http://localhost:8001/3.0/members', {
+    ...           'ws.op': 'join',
+    ...           'fqdn_listname': 'alpha@example.com',
+    ...           'address': 'fperson@example.com',
+    ...           'real_name': 'Fred Person',
+    ...           'delivery_mode': 'mime_digests',
+    ...           })
+    http_etag: ...
+    resource_type_link: http://localhost:8001/3.0/#member
+    self_link: http://localhost:8001/3.0/lists/alpha@example.com/member/fperson@example.com
+
+    >>> fred = user_manager.get_user('fperson@example.com')
+    >>> memberships = list(fred.memberships.members)
+    >>> len(memberships)
+    1
+    >>> memberships[0]
+    <Member: Fred Person <fperson@example.com>
+             on alpha@example.com as MemberRole.member>
+
+
+Corner cases
+============
+
+For some reason Elly tries to join a mailing list that does not exist.
+
+    >>> dump_json('http://localhost:8001/3.0/members', {
+    ...           'ws.op': 'join',
+    ...           'fqdn_listname': 'beta@example.com',
+    ...           'address': 'eperson@example.com',
+    ...           'real_name': 'Elly Person',
+    ...           })
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 400: Bad Request
+
+Then, she tries to leave a mailing list that does not exist.
+
+    >>> dump_json('http://localhost:8001/3.0/members', {
+    ...           'ws.op': 'leave',
+    ...           'fqdn_listname': 'beta@example.com',
+    ...           'address': 'eperson@example.com',
+    ...           'real_name': 'Elly Person',
+    ...           })
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 400: Bad Request
+
+She then tries to leave a mailing list with a bogus address.
+
+    >>> dump_json('http://localhost:8001/3.0/members', {
+    ...           'ws.op': 'leave',
+    ...           'fqdn_listname': 'alpha@example.com',
+    ...           'address': 'elly',
+    ...           })
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 400: Bad Request
+
+For some reason, Elly tries to leave the mailing list again, but she's already
+been unsubscribed.
+
+    >>> dump_json('http://localhost:8001/3.0/members', {
+    ...           'ws.op': 'leave',
+    ...           'fqdn_listname': 'alpha@example.com',
+    ...           'address': 'eperson@example.com',
+    ...           })
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 400: Bad Request
+
+Anna tries to join a mailing list she's already a member of.
+
+    >>> dump_json('http://localhost:8001/3.0/members', {
+    ...           'ws.op': 'join',
+    ...           'fqdn_listname': 'alpha@example.com',
+    ...           'address': 'aperson@example.com',
+    ...           })
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 400: Bad Request
+
+Gwen tries to join the alpha mailing list using an invalid delivery mode.
+
+    >>> dump_json('http://localhost:8001/3.0/members', {
+    ...           'ws.op': 'join',
+    ...           'fqdn_listname': 'alpha@example.com',
+    ...           'address': 'gperson@example.com',
+    ...           'real_name': 'Gwen Person',
+    ...           'delivery_mode': 'in_digests',
+    ...           })
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 400: Bad Request
