@@ -1,0 +1,64 @@
+import improviser.Ensembles.Bands as Bands
+import improviser.Progressions.Contemporary as Contemporary
+
+class Block:
+
+	progressions = Contemporary.reincarnatie
+	
+	bpm = 200
+	resolution = 4
+	meter = (4,4)
+
+	swing = True
+	key = 'A'
+	instruments = Bands.dummy
+
+	wildness = 0.7
+
+	def get_bpm(self, iterations, tick):
+		return self.bpm
+
+	def get_key(self, iteration):
+		return self.key
+
+	def get_instruments(self, iteration):
+		return self.instruments
+
+	def get_meter(self, iteration, tick):
+		return self.meter
+
+	def get_progression(self, iteration):
+		p = self.progressions
+		res = []
+		for i in range(len(p)):
+			if i < len(p) - 1:
+				if p[i][0] <= iteration and p[i + 1][0] > iteration:
+					res= p[i][1]
+					break
+			else:
+				res = p[i][1]
+				break
+		if res == 'R':
+			song_length = p[-1][0] - p[0][0]
+			for prog in p:
+				p[p.index(prog)] = \
+					(prog[0] + song_length, prog[1])
+			return self.get_progression(iteration)
+		return res
+
+
+	def get_resolution(self, iteration):
+		return self.resolution
+
+	def get_tick_length(self, tick, tick_length):
+		if not self.swing:
+			return tick_length
+		else:
+			if tick % 2 == 0:
+				return tick_length * 1.33
+			else:
+				return tick_length * 0.66
+
+
+	def get_wildness(self, iteration, tick):
+		return self.wildness
