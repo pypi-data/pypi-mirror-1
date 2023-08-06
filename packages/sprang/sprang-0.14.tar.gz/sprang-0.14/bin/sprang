@@ -1,0 +1,190 @@
+#!/usr/bin/env python
+
+import fcntl
+import logging
+import optparse
+import os
+import shutil
+import sys
+from urllib import urlencode
+from urllib2 import urlopen, Request
+
+# Globals
+
+project_id = "sprang"
+project_name = "Sprang"
+__revision__ = "0.14"
+__docformat__ = "restructuredtext en"
+
+# Configuration
+
+logger = logging.getLogger(__name__)
+LOG_HELP = ','.join(["%d=%s" % (4-x, logging.getLevelName((x+1)*10)) for x in xrange(5)])
+#LOG_FORMAT_CONS = '%(levelname)s: %(message)s'
+LOG_FORMAT_CONS = '%(levelname)s: %(message)s'
+LOG_FORMAT_FILE = '%(asctime)s %(name)s[%(process)d] %(levelname)10s %(message)s'
+LOGLEVEL_DICT = {1:50, 2:40, 3:20, 4:10, 5:1}
+DEFAULT_VERBOSITY = 3
+LOG_DIVIDER = "=" * 70
+
+BASE_URL = "http://sprunge.us"
+
+# i18n
+
+DEFAULT_LANGUAGE = "en"
+
+STRINGS = {
+    "en": {
+        "NOTICE_CACHE_REMOVED": "Cache has been removed.",
+        "NOTICE_NEW_POST": "New Post",
+        "ERROR_NO_INPUTS": "You must pipe text to 'stdin', or use the 'file' or 'text' arguments.",
+        "ERROR_TOO_MANY_INPUTS": "You can only use a single input method such as 'stdin', 'file' or 'text'.",
+        "ERROR_CANNOT_OPEN_INPUT_FILE": "Cannot open input file.",
+        "ERROR_CANNOT_INIT_NOTIFICATIONS": "Cannot initialise Notification support.",
+        "ERROR_NOTIFICATIONS_UNAVAILABLE": "Notification support is not available.",
+        "LABEL_RETRIEVING": "Retrieving",        
+        "LABEL_MODE": "Mode",
+        "LABEL_CONTENT": "Content",
+        "LABEL_CODE": "Code",
+        "LABEL_URL": "URL"
+    }
+}
+
+# Configure STDIN to be non-blocking
+
+fcntl.fcntl(sys.stdin, fcntl.F_SETFL, os.O_NONBLOCK) 
+
+# Option Parsing
+
+parser = optparse.OptionParser(usage="%prog or type %prog -h (--help) for help", description=__doc__, version=project_name+" v" + __revision__)
+
+parser.add_option("-v", action="count", dest="verbosity", default=DEFAULT_VERBOSITY, help="Verbosity. Add more -v to be more verbose (%s) [default: %%default]" % LOG_HELP)
+parser.add_option("-z", "--logfile", dest="logfile", default=None, help = "Log to file instead of console")
+
+parser.add_option("-f", "--file", dest="input_file", default=None, help="File to send to pastebin")
+parser.add_option("-t", "--text", dest="input_text", default=None, help="Text to send to pastebin")
+parser.add_option("-g", "--get", dest="get_code", default=None, help="Retrieve contents from pastebin using this code")
+parser.add_option("-d", "--delete-cache", dest="delete_cache", default=False, action="store_true", help="Clear local cached copy of pastebin posts")
+parser.add_option("-l", "--language", dest="language", default=DEFAULT_LANGUAGE, help="Language to use for output messages")
+
+(options, args) = parser.parse_args()
+
+input_file, input_text, get_code, delete_cache, language = options.input_file, options.input_text, options.get_code, options.delete_cache, options.language
+if language not in STRINGS:
+    language = DEFAULT_LANGUAGE
+    
+_t = STRINGS[language]
+
+# Logging Setup
+
+verbosity = LOGLEVEL_DICT.get(int(options.verbosity), DEFAULT_VERBOSITY)
+
+if options.logfile is None:
+    logging.basicConfig(level=verbosity, format=LOG_FORMAT_CONS)
+else:
+    logfilename = os.path.normpath(options.logfile)
+    logging.basicConfig(level=verbosity, format=LOG_FORMAT_FILE, filename=logfilename, filemode="a")
+    print >> sys.stderr, "Logging to %s" % logfilename
+    
+# Caching
+
+config_folder = os.path.expanduser("~/" + "." + project_id)
+cache_folder = os.path.join(config_folder, "cache")
+
+if delete_cache:
+    if os.path.exists(cache_folder): shutil.rmtree(cache_folder)
+    logger.debug(_t["NOTICE_CACHE_REMOVED"])
+    sys.exit(0)
+    
+try: os.makedirs(config_folder)
+except OSError: pass
+try: os.makedirs(cache_folder)
+except OSError: pass
+        
+# Retrieval
+
+if get_code is not None:
+
+    logger.debug("%s '%s'..." % (_t["LABEL_RETRIEVING"], get_code))
+    url = "%s/%s" % (BASE_URL, get_code)
+    response = urlopen(Request(url)).read()
+    if "not found" in response:
+        sys.exit(1)
+    print response
+    sys.exit(0)
+    
+# Get STDIN
+    
+try:
+    stdin = sys.stdin.read()
+except IOError:
+    stdin = None
+
+# Validation
+
+input_file, input_text = options.input_file, options.input_text
+
+if not any([stdin, input_file, input_text]):
+    logger.error(_t["ERROR_NO_INPUTS"])
+    sys.exit(1)
+    
+if len([x for x in [stdin, input_file, input_text] if x is not None]) > 1:
+    logger.error(_t["ERROR_TOO_MANY_INPUTS"])
+    sys.exit(1)
+    
+if stdin is not None:
+    mode = "stdin"
+elif input_file is not None:
+    mode = "file"
+elif input_text is not None:
+    mode = "text"   
+
+logger.debug("%s: %s" % (_t["LABEL_MODE"], mode.upper()))    
+    
+# Reading input
+
+content = ""    
+    
+if mode == "file":
+    if os.path.isfile(input_file):
+        content = open(input_file, "r").read()
+    else:
+        logger.error(_t["ERROR_CANNOT_OPEN_INPUT_FILE"])   
+elif mode == "text":
+    content = input_text
+elif mode == "stdin":
+    content = stdin
+    
+logger.debug("%s:" % _t["LABEL_CONTENT"])
+logger.debug(content)    
+
+# Post to pastebin provider
+
+params = urlencode([("sprunge", content)])
+response = urlopen(Request(BASE_URL), params).read()
+code = response.split("/")[-1].replace("\n","")
+
+# Cache 
+
+cache = open(os.path.join(cache_folder, code), "w")
+cache.write(content)
+cache.close()
+
+# Output to console
+
+logger.info("%s: %s" % (_t["LABEL_CODE"], code))
+logger.info("%s: %s/%s" % (_t["LABEL_URL"], BASE_URL, code))
+
+# Output to notifications API
+
+try:
+    import pynotify
+    if pynotify.init(project_id):
+        n = pynotify.Notification("%s: %s" % (_t["NOTICE_NEW_POST"], code), "\n%s: %s\n%s: %s/%s" % (_t["LABEL_CODE"], code, _t["LABEL_URL"], BASE_URL, code))
+        n.show()
+    else:
+        logger.debug(_t["ERROR_CANNOT_INIT_NOTIFICATIONS"])
+except:
+    logger.debug(_t["ERROR_NOTIFICATIONS_UNAVAILABLE"])
+    
+    
