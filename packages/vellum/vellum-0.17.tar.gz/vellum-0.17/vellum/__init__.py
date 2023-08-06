@@ -1,0 +1,31 @@
+# Copyright (C) 2008 Zed A. Shaw.  Licensed under the terms of the GPLv3.
+
+
+"""Vellum is a build tool similar in spirit to Make, Rake, and
+Scons but with a separation of the build description and the 
+processing."""
+
+class DieError(Exception):
+    """
+    Used by everything to abort processing.
+    Tracks targets and line numbers for the user.
+    """
+    def __init__(self, target, line, cmd, msg):
+        Exception.__init__(self, msg)
+        self.target = target
+        self.line = line
+        self.cmd = cmd
+
+    def __str__(self):
+        return "(%s:%d) failed running %s:\n\t'%s'" % (self.target, 
+                self.line, 
+                repr(self.cmd), 
+                self.args[0])
+
+
+class LoadError(ImportError):
+    pass
+
+class TargetNotFoundError(ValueError):
+    pass
+
