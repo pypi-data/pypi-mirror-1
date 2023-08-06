@@ -1,0 +1,139 @@
+.. -*-doctest-*-
+
+=====================
+rpatterson.stripdupes
+=====================
+
+Installation
+============
+
+All you need is easy_install_::
+
+  $ easy_install rpatterson.stripdupes
+
+Usage
+=====
+
+See the stripdupes console script's help message.
+
+    >>> import subprocess
+    >>> popen = subprocess.Popen(
+    ...     [stripdupes_script, '--help'],
+    ...     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    >>> print popen.stdout.read()
+    Usage: stripdupes [options]
+    Strip duplicated sequences of lines.
+    Options:
+      -h, --help  show this help message and exit
+      -m NUM, --min=NUM  Minimum length of duplicated sequence.  If
+                         NUM is less than one, use a proportion of the
+                         total number of lines, otherwise NUM is a
+                         number of lines. [default: 0.01]
+      -p REGEXP, --pattern=REGEXP
+                            Regular expression pattern used to
+                            normalize strings in sequences of strings.
+                            The default matches all whitespace. Use an
+                            empty string to disable. [default: '\s+']
+      -r STRING, --repl=STRING
+                            String to replace matches of pattern with
+                            for normalizing strings in sequences of
+                            strings. [default: ' ']
+
+When given input files whose combined contents include sequences of
+lines longer than the threshold that are duplicated elsewhere in the
+input files, the output file will be written without those repeated
+sequences.
+
+    >>> input = """\
+    ... foo
+    ... foo
+    ... bar
+    ... baz
+    ... qux
+    ... quux
+    ... foo
+    ... bar
+    ... baz
+    ... qux
+    ... bah
+    ... blah1
+    ... quux
+    ... blah
+    ... quux
+    ... fin
+    ... """
+
+    >>> import cStringIO
+    >>> from rpatterson import stripdupes
+    >>> for line in stripdupes.strip(
+    ...     cStringIO.StringIO(input).readlines()): print line,
+    foo
+    bar
+    baz
+    qux
+    quux
+    bah
+    blah1
+    blah
+    fin
+
+    >>> input = """\
+    ... blah
+    ... quux
+    ... bah
+    ... foo
+    ... foo\t
+    ... bar
+    ... baz
+    ... qux
+    ... quux
+    ... foo
+    ... bar
+    ... baz
+    ... qux
+    ... fin
+    ... fin
+    ... fin
+    ... null
+    ... fin
+    ... """
+
+    >>> for line in stripdupes.strip(
+    ...     cStringIO.StringIO(input).readlines()): print line,
+    blah
+    quux
+    bah
+    foo
+    bar
+    baz
+    qux
+    fin
+    null
+
+Ensure that odd sequences can be handled.
+
+    >>> list(stripdupes.strip([]))
+    []
+    >>> list(stripdupes.strip(['foo']))
+    ['foo']
+
+A duplicated sequence is not stripped if it is 1% or less of the
+length of the sequence.
+
+    >>> seq = range(149)+[0]
+    >>> len(seq)
+    150
+    >>> seq[0] == seq[149]
+    True
+    >>> len(list(stripdupes.strip(seq, pattern=None)))
+    150
+
+    >>> seq = range(148)+[0]
+    >>> len(seq)
+    149
+    >>> seq[0] == seq[148]
+    True
+    >>> len(list(stripdupes.strip(seq, pattern=None)))
+    148
+
+    .. _easy_install: http://peak.telecommunity.com/DevCenter/EasyInstall#installing-easy-install
