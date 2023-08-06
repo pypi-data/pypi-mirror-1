@@ -1,0 +1,161 @@
+Pretendo probar en este test la forma de solucionar algunos
+problemas por medio de widgets modificados.
+
+Primero las configuraciones de rutina...
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> from Products.CMFCore.utils import getToolByName
+    >>> from Products.PloneTestCase.setup import portal_owner, \
+    ...                                          default_user, \
+    ...                                          default_password
+
+    >>> browser = Browser()
+
+    >>> portal = self.portal
+    >>> folder = self.folder
+    >>> portal_url = portal.absolute_url()
+    >>> folder_url = self.folder.absolute_url()
+    >>> login_url = portal_url + '/login_form'
+    >>> logout_url = portal_url + '/logout'
+    >>> prefs_languages_url = portal_url + '/portal_languages/prefs_languages'
+
+	>>> portal.error_log._ignored_exceptions = ()
+    >>> browser.handleErrors = False
+
+	>>> self.setRoles(['Manager', 'Member'])
+
+Now, we must login...
+    >>> browser.open(login_url)
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+
+	>>> member = portal.portal_membership.getAuthenticatedMember()
+	>>> member.setMemberProperties({'icsemantic.preferred_languages': ('es', 'en', 'it')})
+	>>> member.getProperty('icsemantic.preferred_languages')
+	('es', 'en', 'it')
+
+Y configuro los lenguajes disponibles...
+
+	>>> browser.getLink('Site Setup').click()
+	>>> browser.getLink('Language Settings').click()
+
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='en').selected = True
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='es').selected = True
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='it').selected = True
+	>>> browser.getControl('Save').click()
+
+    >>> browser.open(prefs_languages_url)
+    >>> browser.getControl(name='defaultLanguage').value = ('es',)
+	>>> browser.getControl('Save').click()
+
+Vamos a configurar langview...
+	>>> browser.getLink('Site Setup').click()
+	>>> browser.getLink('icSemantic').click()
+	>>> browser.getLink('Content Types').click()
+	>>> browser.open(browser.url + '?debug=1') # vamos a testear en modo debug
+	>>> browser.getControl(name='form.fallback_types:list').value = ['ATDocument',]
+	>>> browser.getControl("Apply").click()
+
+Entonces podemos seguir...
+Voy a emparchar a mano los widgets que es lo que quiero probar...
+
+	>>> from Products.ATContentTypes.content.document import ATDocument
+	>>> ATDocument.schema['title'].widget.macro = 'multilingual_' + \
+	...			ATDocument.schema['title'].widget.macro
+	>>> ATDocument.schema['description'].widget.macro = 'multilingual_' + \
+	...			ATDocument.schema['description'].widget.macro
+	>>> ATDocument.schema['text'].widget.macro = 'multilingual_' + \
+	...			ATDocument.schema['text'].widget.macro
+
+	>>> ATDocument.schema['title'].widget.macro
+	'multilingual_widgets/string'
+	>>> ATDocument.schema['description'].widget.macro
+	'multilingual_widgets/textarea'
+	>>> ATDocument.schema['text'].widget.macro
+	'multilingual_widgets/rich'
+
+1) Crear dos usuarios con la propiedad "icsemantic.langfallback" modificada:
+
+    usuario:    icsemantic.langfallback:
+    test1        en;es;it
+    test2        es;en
+
+	>>> member1 = portal.portal_registration.addMember('test1', 'test1')
+	>>> member1.setMemberProperties({'icsemantic.preferred_languages': ('en', 'es', 'it')})
+
+	>>> member2 = portal.portal_registration.addMember('test2', 'test2')
+	>>> member2.setMemberProperties({'icsemantic.preferred_languages': ('es', 'en')})
+
+2) Crear un documento en tres idiomas usando LinguaPlone: Castellano, Inglés, Italiano
+
+Castellano:
+    Título: Esta es una prueba.
+    Descripción: Una simple prueba para verificar el funcionamiento de LinguaView.
+    Texto: La prueba tiene que mostrar el mismo documento en diferentes idiomas.
+
+	>>> browser.open(folder_url)
+    >>> browser.getLink('Page').click()
+    >>> browser.getControl('Title').value = 'Esta es una prueba.'
+    >>> browser.getControl('Description').value = 'Una simple prueba para verificar el funcionamiento de LinguaView.'
+    >>> browser.getControl('Body Text').value = 'La prueba tiene que mostrar el mismo documento en diferentes idiomas.'
+    >>> browser.getControl('Save').click()
+    >>> 'Changes saved.' in browser.contents
+    True
+
+Inglés:
+    Título: Just a test
+    Description: A simple test to check how works LinguaView.
+
+    >>> # browser.getLink('Translate into').click()
+    >>> browser.getLink('English').click()
+    >>> browser.getControl('Title').value = 'Just a test'
+    >>> browser.getControl('Description').value = 'A simple test to check how works LinguaView.'
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+Italiano:
+    Título: Questo e una prova.
+
+    >>> # browser.getLink('Translate into').click()
+    >>> browser.getLink('Italiano').click()
+    >>> browser.getControl('Title').value = 'Questo e una prova.'
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+	>>> doc_url = folder_url + '/esta-es-una-prueba'
+
+3) Entrar como usuario test1, chequear el resultado del documento:
+
+    Título: Just a test
+    Descripción: A simple test to check how works LinguaView.
+    Texto: La prueba tiene que mostrar el mismo documento en diferentes idiomas.
+
+    >>> browser.open(logout_url)
+    >>> browser.open(login_url)
+    >>> browser.getControl(name='__ac_name').value = 'test1'
+    >>> browser.getControl(name='__ac_password').value = 'test1'
+    >>> browser.getControl(name='submit').click()
+
+	>>> browser.open(doc_url+'/base_view')
+	>>> '<!-- CustomRichWidget -->' in browser.contents
+	True
+    >>> 'Just a test' in browser.contents
+    True
+    >>> 'A simple test to check how works LinguaView.' in browser.contents
+    True
+    >>> 'La prueba tiene que mostrar el mismo documento en diferentes idiomas.' in browser.contents
+	True
+
+	>>> browser.open(doc_url+'/base_view?set_language=es')
+	>>> '<!-- CustomRichWidget -->' in browser.contents
+	True
+    >>> 'Esta es una prueba.' in browser.contents
+    True
+    >>> 'Una simple prueba para verificar el funcionamiento de LinguaView.' in browser.contents
+    True
+    >>> 'La prueba tiene que mostrar el mismo documento en diferentes idiomas.' in browser.contents
+	True
