@@ -1,0 +1,631 @@
+Metadata-Version: 1.0
+Name: RelStorage
+Version: 1.2.0b2
+Summary: A backend for ZODB that stores pickles in a relational database.
+Home-page: http://pypi.python.org/pypi/RelStorage
+Author: Shane Hathaway
+Author-email: shane@hathawaymix.org
+License: ZPL 2.1
+Description: 
+        RelStorage is a storage implementation for ZODB that stores pickles in
+        a relational database. PostgreSQL 8.1 and above (via psycopg2), MySQL
+        5.0.32+ / 5.1.34+ (via MySQLdb 1.2.2 and above), and Oracle 10g (via
+        cx_Oracle) are currently supported. RelStorage replaces the PGStorage
+        project.
+        
+        .. contents::
+        
+        
+        Features
+        ========
+        
+        * It is a drop-in replacement for FileStorage and ZEO.
+        * There is a simple way to convert FileStorage to RelStorage and back again.
+        You can also convert a RelStorage instance to a different relational database.
+        * Designed for high volume sites: multiple ZODB instances can share the same
+        database. This is similar to ZEO, but RelStorage does not require ZEO.
+        * According to some tests, RelStorage handles high concurrency better than
+        the standard combination of ZEO and FileStorage.
+        * Whereas FileStorage takes longer to start as the database grows due to an
+        in-memory index of all objects, RelStorage starts quickly regardless of
+        database size.
+        * Supports undo and packing.
+        * Free, open source (ZPL 2.1)
+        
+        
+        Installation
+        ============
+        
+        You can install RelStorage using easy_install::
+        
+        easy_install RelStorage
+        
+        If you are not using easy_install (part of the setuptools package), you can
+        get the latest release at PyPI (http://pypi.python.org/pypi/RelStorage), then
+        place the relstorage package in the lib/python directory of either the
+        SOFTWARE_HOME or the INSTANCE_HOME.  You can do this with the following
+        command::
+        
+        python2.4 setup.py install --install-lib=${INSTANCE_HOME}/lib/python
+        
+        RelStorage requires a version of ZODB with the invalidation polling patch
+        applied.  You can get versions of ZODB with the patch already applied here:
+        
+        http://packages.willowrise.org
+        
+        The patches are also included in the source distribution of RelStorage.
+        
+        You need the Python database adapter that corresponds with your database.
+        Install psycopg2, MySQLdb 1.2.2+, or cx_Oracle 4.3+.  Note that Debian Etch
+        ships MySQLdb 1.2.1, but that version has a bug in BLOB handling that manifests
+        itself only with certain character set configurations.  MySQLdb 1.2.2 fixes the
+        bug.
+        
+        Finally, modify etc/zope.conf of your Zope instance.  Remove the main mount
+        point and add one of the following blocks.  For PostgreSQL::
+        
+        %import relstorage
+        <zodb_db main>
+        mount-point /
+        <relstorage>
+        <postgresql>
+        # The dsn is optional, as are each of the parameters in the dsn.
+        dsn dbname='zodb' user='username' host='localhost' password='pass'
+        </postgresql>
+        </relstorage>
+        </zodb_db>
+        
+        For MySQL::
+        
+        %import relstorage
+        <zodb_db main>
+        mount-point /
+        <relstorage>
+        <mysql>
+        # Most of the options provided by MySQLdb are available.
+        # See component.xml.
+        db zodb
+        </mysql>
+        </relstorage>
+        </zodb_db>
+        
+        For Oracle (10g XE in this example)::
+        
+        %import relstorage
+        <zodb_db main>
+        mount-point /
+        <relstorage>
+        <oracle>
+        user username
+        password pass
+        dsn XE
+        </oracle>
+        </relstorage>
+        </zodb_db>
+        
+        
+        Migration
+        =========
+        
+        Migrating from FileStorage
+        --------------------------
+        
+        You can convert a FileStorage instance to RelStorage and back using a utility
+        called ZODBConvert.  See http://wiki.zope.org/ZODB/ZODBConvert .
+        
+        
+        Migrating from PGStorage
+        ------------------------
+        
+        The following script migrates your database from PGStorage to RelStorage 1.0
+        beta:
+        
+        migrate.sql_
+        
+        .. _migrate.sql: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate.sql
+        
+        After you do this, you still need to migrate from 1.0 beta to the latest
+        release.
+        
+        
+        Migrating to a new version of RelStorage
+        ----------------------------------------
+        
+        Sometimes RelStorage needs a schema modification along with a software
+        upgrade.  Hopefully, this will not often be necessary.
+        
+        Version 1.2.0b1 does not require a schema migration from version 1.1.3.
+        
+        To migrate from version 1.1.1 to version 1.1.2 or 1.1.3, see:
+        
+        migrate-to-1.1.2.txt_
+        
+        .. _migrate-to-1.1.2.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.1.2.txt
+        
+        To migrate from version 1.1 to version 1.1.1, see:
+        
+        migrate-to-1.1.1.txt_
+        
+        .. _migrate-to-1.1.1.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.1.1.txt
+        
+        To migrate from version 1.0.1 to version 1.1, see:
+        
+        migrate-to-1.1.txt_
+        
+        .. _migrate-to-1.1.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.1.txt
+        
+        To migrate from version 1.0 beta to version 1.0c1 through 1.0.1, see:
+        
+        migrate-to-1.0.txt_
+        
+        .. _migrate-to-1.0.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.0.txt
+        
+        
+        Optional Features
+        =================
+        
+        Specify these options in zope.conf, as parameters for the RelStorage
+        constructor, or as attributes of a relstorage.Options instance.
+        In the latter two cases, use underscores instead of dashes in the
+        parameter names.
+        
+        poll-interval
+        
+        Defer polling the database for the specified maximum time interval,
+        in seconds.  Set to 0 (the default) to always poll.  Fractional
+        seconds are allowed.  Use this to lighten the database load on
+        servers with high read volume and low write volume.
+        
+        The poll-interval option works best in conjunction with
+        the cache-servers option.  If both are enabled, RelStorage will
+        poll a single cache key for changes on every request.
+        The database will not be polled unless the cache indicates
+        there have been changes, or the timeout specified by poll-interval
+        has expired.  This configuration keeps clients fully up to date,
+        while removing much of the polling burden from the database.
+        A good cluster configuration is to use memcache servers
+        and a high poll-interval (say, 60 seconds).
+        
+        This option can be used without the cache-servers option,
+        but a large poll-interval without cache-servers increases the
+        probability of basing transactions on stale data, which does not
+        affect database consistency, but does increase the probability
+        of conflict errors, leading to low performance.
+        
+        pack-gc
+        
+        If pack-gc is false, pack operations do not perform
+        garbage collection.  Garbage collection is enabled by default.
+        
+        If garbage collection is disabled, pack operations keep at least one
+        revision of every object.  With garbage collection disabled, the
+        pack code does not need to follow object references, making
+        packing conceivably much faster.  However, some of that benefit
+        may be lost due to an ever increasing number of unused objects.
+        
+        Disabling garbage collection is also a hack that ensures
+        inter-database references never break.
+        
+        pack-dry-run
+        
+        If pack-dry-run is true, pack operations perform a full analysis
+        of what to pack, but no data is actually removed.  After a dry run,
+        the pack_object, pack_state, and pack_state_tid tables are filled
+        with the list of object states and objects that would have been
+        removed.
+        
+        pack-batch-timeout
+        
+        Packing occurs in batches of transactions; this specifies the
+        timeout in seconds for each batch.  Note that some database
+        configurations have unpredictable I/O performance
+        and might stall much longer than the timeout.
+        The default timeout is 5.0 seconds.
+        
+        pack-duty-cycle
+        
+        After each batch, the pack code pauses for a time to
+        allow concurrent transactions to commit.  The pack-duty-cycle
+        specifies what fraction of time should be spent on packing.
+        For example, if the duty cycle is 0.75, then 75% of the time
+        will be spent packing: a 6 second pack batch
+        will be followed by a 2 second delay.  The duty cycle should
+        be greater than 0.0 and less than or equal to 1.0.  Specify
+        1.0 for no delay between batches.
+        
+        The default is 0.5.  Raise it to finish packing faster; lower it
+        to reduce the effect of packing on transaction commit performance.
+        
+        pack-max-delay
+        
+        This specifies a maximum delay between pack batches.  Sometimes
+        the database takes an extra long time to finish a pack batch; at
+        those times it is useful to cap the delay imposed by the
+        pack-duty-cycle.  The default is 20 seconds.
+        
+        cache-servers
+        
+        Specifies a list of memcache servers.  Enabling memcache integration
+        is useful if the connection to the relational database has high
+        latency and the connection to memcache has significantly lower
+        latency.  On the other hand, if the connection to the relational
+        database already has low latency, memcache integration may actually
+        hurt overall performance.
+        
+        Provide a list of host:port pairs, separated by whitespace.
+        "127.0.0.1:11211" is a common setting.  The default is to disable
+        memcache integration.
+        
+        cache-module-name
+        
+        Specifies which Python memcache module to use.  The default is
+        "memcache", a pure Python module.  There are several alternative
+        modules available through PyPI.  This setting has no effect unless
+        cache-servers is set.
+        
+        Development
+        ===========
+        
+        You can checkout from Subversion using the following command::
+        
+        svn co svn://svn.zope.org/repos/main/relstorage/trunk RelStorage
+        
+        You can also browse the code:
+        
+        http://svn.zope.org/relstorage/trunk/
+        
+        The best place to discuss development of RelStorage is on the zodb-dev
+        mailing list.
+        
+        
+        
+        FAQs
+        ====
+        
+        Q: How can I help improve RelStorage?
+        
+        A: The best way to help is to test and to provide database-specific
+        expertise.  Ask questions about RelStorage on the zodb-dev mailing list.
+        
+        Q: Can I perform SQL queries on the data in the database?
+        
+        A: No.  Like FileStorage and DirectoryStorage, RelStorage stores the data
+        as pickles, making it hard for anything but ZODB to interpret the data.  An
+        earlier project called Ape attempted to store data in a truly relational
+        way, but it turned out that Ape worked too much against ZODB principles and
+        therefore could not be made reliable enough for production use.  RelStorage,
+        on the other hand, is much closer to an ordinary ZODB storage, and is
+        therefore much safer for production use.
+        
+        Q: How does RelStorage performance compare with FileStorage?
+        
+        A: According to benchmarks, RelStorage with PostgreSQL is often faster than
+        FileStorage, especially under high concurrency.
+        
+        Q: Why should I choose RelStorage?
+        
+        A: Because RelStorage is a fairly small layer that builds on world-class
+        databases.  These databases have proven reliability and scalability, along
+        with numerous support options.
+        
+        Q: Can RelStorage replace ZRS (Zope Replication Services)?
+        
+        A: In theory, yes.  With RelStorage, you can use the replication features
+        native to your database.  However, this capability has not yet been tested.
+        
+        
+        Project URLs
+        ============
+        
+        * http://wiki.zope.org/ZODB/RelStorage         (wiki)
+        * http://shane.willowrise.com/                 (blog)
+        * http://pypi.python.org/pypi/RelStorage       (PyPI entry and downloads)
+        
+        
+        Change History
+        ==============
+        
+        
+        Version 1.2.0b2 (2009-05-05)
+        ----------------------------
+        
+        - RelStorage now implements IMVCCStorage, making it compatible with
+        ZODB 3.9.0b1 and above.
+        
+        - Removed two-phase commit support from the PostgreSQL adapter. The
+        feature turned out to be unnecessary.
+        
+        - Added MySQL 5.1.34 and above to the list of supportable databases.
+        
+        - Fixed minor test failures under Windows. Windows is now a supportable
+        platform.
+        
+        
+        Version 1.1.3 (2009-02-04)
+        --------------------------
+        
+        - In rare circumstances, ZODB can legitimately commit an object twice in a
+        single transaction.  Fixed RelStorage to accept that.
+        
+        - Auto reconnect to Oracle sometimes did not work because cx_Oracle was
+        raising a different kind of exception than expected.  Fixed.
+        
+        - Included LICENSE.txt in the source distribution.
+        
+        
+        Version 1.1.2 (2009-01-27)
+        --------------------------
+        
+        - When both cache-servers and poll-interval are set, we now poll the
+        cache for changes on every request.  This makes it possible to use
+        a high poll-interval to reduce the database polling burden, yet
+        every client can see changes immediately.
+        
+        - Added the pack-dry-run option, which causes pack operations to only
+        populate the pack tables with the list of objects and states to pack,
+        but not actually pack.
+        
+        - Refined the pack algorithm.  It was not removing as many object states
+        as it should have.  As a bonus, there is now a method of adapters called
+        fill_object_refs(), which could be useful for debugging.  It ensures the
+        object_ref table is fully populated.
+        
+        - Began using zc.buildout for development.
+        
+        - Increased automated test coverage.
+        
+        - Fixed KeyError reporting to not trip over a related KeyError while logging.
+        
+        
+        Version 1.1.1 (2008-12-27)
+        --------------------------
+        
+        - Worked around MySQL performance bugs in packing.  Used temporary
+        tables and another column in the pack_object table.  The
+        other databases may benefit from the optimization as well.
+        
+        - Applied an optimization using setinputsizes() to the Oracle code,
+        bringing write speed back up to where it was in version 1.0.
+        
+        
+        Version 1.1 (2008-12-19)
+        ------------------------
+        
+        - Normalized poll-invalidation patches as Solaris' patch command would not
+        accept the current format. The patches now apply with:
+        patch -d lib/python/ZODB -p0 < poll-invalidation-1-zodb-3-X-X.patch
+        
+        - In MySQL, Use DROP TABLE IF EXISTS instead of TRUNCATE to clear 'temp_store'
+        because:
+        
+        - TRUNCATE has one page of caveats in the MySQL documentation.
+        - TEMPORARY TABLEs have half a page of caveats when it comes to
+        replication.
+        - The end result is that 'temp_store' may not exist on the
+        replication slave at the exact same time(s) it exists on the
+        master.
+        
+        - Implemented the database size query in MySQL, based on a patch from
+        Kazuhiko Shiozaki.  Thanks!
+        
+        - Optimized Oracle object retrieval by causing BLOBs to be sent inline
+        when possible, based on a patch by Helge Tesdal.  By default, the
+        optimization is activated automatically when cx_Oracle 5 is used.
+        
+        - Updated the storage iterator code to be compatible with ZODB 3.9.
+        The RelStorage tests now pass with the shane-poll-invalidations branch
+        of ZODB 3.9.
+        
+        - Added a translation of README.txt to Brazilian Portuguese by
+        Rogerio Ferreira.  Thanks!
+        
+        
+        Version 1.1c1
+        -------------
+        
+        - Added optional memcache integration.  This is useful when the connection
+        to the relational database has high latency.
+        
+        - Made it possible to set the pack and memcache options in zope.conf.
+        
+        - Log more info when a KeyError occurs within RelStorage.
+        
+        
+        Version 1.1b2
+        -------------
+        
+        - Made the MySQL locks database-specific rather than server-wide.  This is
+        important for multi-database configurations.
+        
+        - In the PostgreSQL adapter, made the pack lock fall back to table locking
+        rather than advisory locks for PostgreSQL 8.1.
+        
+        - Changed a query for following object references (used during packing)
+        to work around a MySQL performance bug.  Thanks to Anton Stonor for
+        discovering this.
+        
+        
+        Version 1.1b1
+        -------------
+        
+        - Fixed the use of setup.py without setuptools.  Thanks to Chris Withers.
+        
+        - Fixed type coercion of the transaction extension field.  This fixes
+        an issue with converting databases.  Thanks to Kevin Smith for
+        discovering this.
+        
+        - Added logging to the pack code to help diagnose performance issues.
+        
+        - Additions to the object_ref table are now periodically committed
+        during pre_pack so that the work is not lost if pre_pack fails.
+        
+        - Modified the pack code to pack one transaction at a time and
+        release the commit lock frequently.  This should help large pack
+        operations.
+        
+        - Fixed buildout-based installation of the zodbconvert script.  Thanks to
+        Jim Fulton.
+        
+        
+        Version 1.0.1
+        -------------
+        
+        - The speedtest script failed if run on a test database that has no tables.
+        Now the script creates the tables if needed.  Thanks to Flavio Coelho
+        for discovering this.
+        
+        - Reworked the auto-reconnect logic so that applications never see
+        temporary database disconnects if possible.  Thanks to Rigel Di Scala
+        for pointing out this issue.
+        
+        - Improved the log messages explaining database connection failures.
+        
+        - Moved poll_invalidations to the common adapter base class, reducing the
+        amount of code to maintain.
+        
+        
+        Version 1.0
+        -----------
+        
+        - Added a utility for converting between storages called zodbconvert.
+        
+        
+        Version 1.0c1
+        -------------
+        
+        - The previous fix for non-ASCII characters was incorrect.  Now transaction
+        metadata is stored as raw bytes.  A schema migration is required; see
+        notes/migrate-1.0-beta.txt.
+        
+        - Integrated setuptools and made an egg.
+        
+        
+        Version 1.0 beta
+        ----------------
+        
+        - Renamed to reflect expanding database support.
+        
+        - Added support for Oracle 10g.
+        
+        - Major overhaul with many scalability and reliability improvements,
+        particularly in the area of packing.
+        
+        - Moved to svn.zope.org and switched to ZPL 2.1.
+        
+        - Made two-phase commit optional in both Oracle and PostgreSQL.  They
+        both use commit_lock in such a way that the commit is not likely to
+        fail in the second phase.
+        
+        - Switched most database transaction isolation levels from serializable
+        to read committed.  It turns out that commit_lock already provides
+        the serializability guarantees we need, so it is safe to take advantage
+        of the potential speed gains.  The one major exception is the load
+        connection, which requires an unchanging view of the database.
+        
+        - Stored objects are now buffered in a database table rather than a file.
+        
+        - Stopped using the LISTEN and NOTIFY statements in PostgreSQL since
+        they are not strictly transactional in the sense we require.
+        
+        - Started using a prepared statement in PostgreSQL for getting the
+        newest transaction ID quickly.
+        
+        - Removed the code in the Oracle adapter for retrying connection attempts.
+        (It is better to just reconfigure Oracle.)
+        
+        - Added support for MySQL 5.0.
+        
+        - Added the poll_interval option.  It reduces the frequency of database
+        polls, but it also increases the potential for conflict errors on
+        servers with high write volume.
+        
+        - Implemented the storage iterator protocol, making it possible to copy
+        transactions to and from FileStorage and other RelStorage instances.
+        
+        - Fixed a bug that caused OIDs to be reused after importing transactions.
+        Added a corresponding test.
+        
+        - Made it possible to disable garbage collection during packing.
+        Exposed the option in zope.conf.
+        
+        - Valery Suhomlinov discovered a problem with non-ASCII data in transaction
+        metadata.  The problem has been fixed for all supported databases.
+        
+        
+        PGStorage history
+        =================
+        
+        Version 0.4
+        -----------
+        
+        - Began using the PostgreSQL LISTEN and NOTIFY statements as a shortcut
+        for invalidation polling.
+        
+        - Removed the commit_order code.  The commit_order idea was intended to
+        allow concurrent commits, but that idea is a little too ambitious while
+        other more important ideas are being tested.  Something like it may
+        come later.
+        
+        - Improved connection management: only one database connection is
+        held continuously open per storage instance.
+        
+        - Reconnect to the database automatically.
+        
+        - Removed test mode.
+        
+        - Switched from using a ZODB.Connection subclass to a ZODB patch.  The
+        Connection class changes in subtle ways too often to subclass reliably;
+        a patch is much safer.
+        
+        - PostgreSQL 8.1 is now a dependency because PGStorage uses two phase commit.
+        
+        - Fixed an undo bug.  Symptom: attempting to examine the undo log revealed
+        broken pickles.  Cause: the extension field was not being wrapped in
+        psycopg2.Binary upon insert.  Solution: used psycopg2.Binary.
+        Unfortunately, this doesn't fix existing transactions people have
+        committed.  If anyone has any data to keep, fixing the old transactions
+        should be easy.
+        
+        - Moved from a private CVS repository to Sourceforge.
+        See http://pgstorage.sourceforge.net .  Also switched to the MIT license.
+        
+        - David Pratt added a basic getSize() implementation so that the Zope
+        management interface displays an estimate of the size of the database.
+        
+        - Turned PGStorage into a top-level package.  Python generally makes
+        top-level packages easier to install.
+        
+        
+        Version 0.3
+        -----------
+        
+        - Made compatible with Zope 3, although an undo bug apparently remains.
+        
+        
+        Version 0.2
+        -----------
+        
+        - Fixed concurrent commits, which were generating deadlocks.  Fixed by
+        adding a special table, "commit_lock", which is used for
+        synchronizing increments of commit_seq (but only at final commit.)
+        If you are upgrading from version 0.1, you need to change your
+        database using the 'psql' prompt:
+        
+        create table commit_lock ();
+        
+        - Added speed tests and an OpenDocument spreadsheet comparing
+        FileStorage / ZEO with PGStorage.  PGStorage wins at reading objects
+        and writing a lot of small transactions, while FileStorage / ZEO
+        wins at writing big transactions.  Interestingly, they tie when
+        writing a RAM disk.
+        
+        
+Platform: any
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Programming Language :: Python
+Classifier: Topic :: Database
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Operating System :: Microsoft :: Windows
+Classifier: Operating System :: Unix
