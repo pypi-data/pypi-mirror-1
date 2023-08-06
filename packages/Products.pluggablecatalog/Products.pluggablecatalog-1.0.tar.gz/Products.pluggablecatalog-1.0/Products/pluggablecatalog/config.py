@@ -1,0 +1,3 @@
+GLOBALS = globals()
+
+PROJECTNAME = 'pluggablecatalog'
