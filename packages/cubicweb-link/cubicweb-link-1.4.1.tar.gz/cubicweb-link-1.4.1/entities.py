@@ -1,0 +1,32 @@
+"""entity classes for Link entities
+
+:organization: Logilab
+:copyright: 2003-2009 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
+:contact: http://www.logilab.fr/ -- mailto:contact@logilab.fr
+"""
+__docformat__ = "restructuredtext en"
+
+from cubicweb.entities import AnyEntity, fetch_config
+
+from cubicweb.interfaces import IEmbedable
+
+
+class Link(AnyEntity):
+    """customized class for Link entities"""
+    __regid__ = 'Link'
+    fetch_attrs, fetch_order = fetch_config(['title', 'url'])
+    __implements__ = (IEmbedable,)
+
+
+    def dc_title(self):
+        return u'%s (%s)' % (self.title, self.url)
+
+    def embeded_url(self):
+        """embed action interface"""
+        return self.url
+
+    def actual_url(self):
+        if not self.embed:
+            return self.url
+        return self._cw.build_url('embed', url=self.url, rql=self._cw.form.get('rql'))
+
