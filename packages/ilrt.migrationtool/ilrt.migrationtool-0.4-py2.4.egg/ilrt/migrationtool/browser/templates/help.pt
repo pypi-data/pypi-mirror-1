@@ -1,0 +1,155 @@
+<tal:block define="egg_id context/getEgg;
+		   contexts container/portal_quickinstaller/listInstalledProducts;
+                   likely_contexts python:[c for c in contexts if c['title'] != 'Site Migration Tool'];  
+                   ">
+<h1 tal:replace="structure context/manage_page_header">PAGE HEADER</h1>
+<h2 tal:define="manage_tabs_message options/manage_tabs_message | nothing"
+    tal:replace="structure context/manage_tabs">TABS</h2>
+
+<p><a href="http://pypi.python.org/pypi/ilrt.migrationtool">Up to date documentation is on pypi</a></p>
+
+<div class="section" id="overview">
+<h3>Overview</h3>
+<p>The Site Migration Tool provides a controlled upgrade (and downgrade) system for production
+plone sites. It is designed for a scenario where you have developed a theme egg for
+the site and you now wish to roll out new development phases to the production
+site in an automated manner, e.g. without significant use of the ZMI.</p>
+<p>The tool is based on the plone portal_migrationtool but with the downgrade functionality added.
+This is because most site upgrades involve more minor changes than a plone upgrade, ie. adding
+some products, configuring them, changing the security, etc. If we are going to automate these
+changes then we also want to automate undoing them. That way we can quickly revert a roll out
+if it goes wrong.</p>
+<p>Once it is installed you will have a new tool at /site_migration via the ZMI in your plone site.</p>
+<p>As a generic site migration tool it provides the framework and a number of migration related
+utility functions, plus one 'sub-tool' (so far) for migrating content's workflow states, the
+workflow migration tool, which can be used in isolation.</p>
+<p>The main utility function allows migrations to use generic setup so that each migration is
+likely to have a related profile in the theme egg, where the changes from the last migration
+(or the initial default profile) are stored.</p>
+<p>Just as with the portal_migration tool the site_migration tool looks up the version via the
+version.txt on the file system as compared to the version in the ZODB. Based on that it flags
+up whether a migration is needed.</p>
+</div>
+<div class="section" id="concept">
+<h3>Concept</h3>
+<p>It is envisaged that users would run through performing an upgrade on a development server with
+a copy of the production ZODB, from that they would generate the appropriate migration profile
+and compose the upgrade, downgrade methods. These can then be added and re-tested ready for pushing
+the migrate button on the production server.</p>
+<p>The underlying principle being that the exact configuration state of your production site is
+recorded and replicable ... similar to the aims of generic setup ... but here you are
+more specifically recording the plone customisations related to the particular
+production site / theme egg, rather than all the setup configurations in plone.</p>
+<p>Of course if you lose track of the changes made between one migration and the next you could just
+dump the whole generic setup export into your migration profile ... that at least ties a site
+config to a version of the site, but buries the changes required for that version of the site
+amongst all the others.</p>
+</div>
+<div class="section" id="using-the-site-migration-tool">
+<h3>Using the Site Migration Tool</h3>
+<p>The tool allows for the setting of the source theme egg for migrations.</p>
+<p>That egg must have the actual migrations added to it within a migrations folder.
+An example migrations folder is provided within the migrationtool to copy to a theme egg, ie.
+copy ilrt.migrationtool/docs/migrations to my.theme/my/theme/migrations</p>
+<p>Each migration script within the folder must be imported in the __init__.py for the folder in
+order to find it. The migrations upgrade can have a related folder created in profiles with
+generic setup files added.</p>
+<p><a href="#appendix1">Example content</a> for these files is listed below</p>
+<ul class="simple">
+<li>Once the theme egg has migrations, and the server has been restarted to initialize these new
+files, the migrationtool can use python introspection to find them and activate them.</li>
+<li>Choose the appropriate profile from the drop down on the 'Set migration source' tab for the tool.</li>
+<li>You should then see a list of your migrations and what versions of the site they relate to.</li>
+<li>Now you can click on the 'Do migration' tab</li>
+<li>For a site to be ready for migration the ZODB version of the theme egg should be earlier
+than the one on the file system, ie. your file system code is upgraded ... so now the ZODB
+needs to be migrated to be in synch.</li>
+<li>If this is the case for your site the Migrate button will be available, if not then either
+your theme egg version.txt file needs upping a notch (plus a restart), or you need to force
+the ZODB version down a notch with the 'update instance version' button.</li>
+<li>Once you have the migrate button you can check 'Dry run' to test it will work first.</li>
+<li>A failiure to upgrade or any other errors mean you will need to fix your upgrade methods.</li>
+<li>Once the 'Dry run' runs OK, you can upgrade for real, and add the migration to your egg and repeat
+the process on your production server.</li>
+</ul>
+</div>
+<div class="section" id="workflow-migration-tool">
+<h3>Workflow Migration Tool</h3>
+<p>The workflow migration tool moves the state of content that has been in one workflow to the
+specified state in another. Likely uses for the tool are to maintain equivalent state for
+content when the workflow that a site uses is changed, or in conjunction with CMFPlacefulWorkflow.</p>
+<p>So for example a site may allow users to toggle whether a folder is an intranet folder or public.
+However when a public folder is made into an intranet the user doesn't want everything to be
+reset to the private state, in this case the tool can be called via an event tied to the change
+of workflow policy for a folder.</p>
+<p>To use the tool via the web:</p>
+<ul class="simple">
+<li>Change the workflows for your plone site in the portal_workflow tool
+(or add a placeful workflow policy to a folder)</li>
+<li>Go to the Migrate workflow tab and enter the previous workflow followed by the new one you
+have replaced it with.</li>
+<li>Next specify the mapping that you require of states from one workflow to another,
+eg. public draft = published etc.</li>
+<li>Finally if its placeful specify the folder.</li>
+</ul>
+<p>Hit submit and the migration will recursively find all the objects in the new workflow and update
+their state based on the mapping, from what it was in the old one. The tool will return the
+number of workflow transitions performed.</p>
+
+
+<p>This migration and setup tool allows you to handle migrating between releases 
+of the main theme egg for your plone site. In order to create a set of migrations
+for a site ... you would add the following migrations folder, and related 
+numbered migration profiles (if generic setup modifications are needed when
+a new code base for a live site is rolled out).</p>
+
+<br />
+
+<h3><a name="appendix1"></a>Example migration code for your theme egg</h3>
+
+migrations/__init__.py
+
+<blockquote>import migration1 </blockquote>
+
+migrations/migration1.py
+
+<blockquote>
+from ilrt.migrationtool.browser.utils import *<br />
+VERSIONS = ('1','2')<br />
+<br />
+def upgrade(portal):
+<blockquote>
+    """ 1 upgrade to 2 """<br />
+    out = []<br />
+    runGenericSetupSteps(portal, out, profile = 'my.theme:migration1')<br />
+    myMethod(portal,out)<br />
+    return out<br />
+</blockquote>
+<br />
+def downgrade(portal):
+<blockquote>
+    """ 2 downgrade to 1 """<br />
+    out = []<br />
+    runGenericSetupSteps(portal, out, profile = 'my.theme:default',steps = ['rolemap',])<br />
+    myUndoMethod(portal,out)<br />
+    return out<br />
+</blockquote>
+
+def myMethod(portal,out):
+<blockquote>
+    """ demo method """<br />
+    out.append('Do nothing')<br />
+    return out<br />
+</blockquote>
+
+def myUndoMethod(portal,out):
+<blockquote>
+    """ demo undo method """<br />
+    out.append('Undo nothing')<br />
+    return out<br />
+</blockquote>
+
+
+<h1 tal:replace="structure context/manage_page_footer">PAGE FOOTER</h1>
+</tal:block>
+
