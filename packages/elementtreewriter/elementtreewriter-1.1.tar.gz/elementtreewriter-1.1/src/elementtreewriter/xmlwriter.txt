@@ -1,0 +1,169 @@
+DocTest for the XMLWriter module
+--------------------------------
+(c) 2006 by Martin Raspe (hertzhaft@biblhertz.it)
+
+Obs: In this implementation the order of the namespace declarations is 
+alphabetical by prefixes. This is not required but was introduced to be able 
+to compare the resulting XML. A more sophisticated test should reparse the 
+resulting XML and check individual nodes and their namespaces.
+
+The elementtree parser loses namespace prefixes on parsing (which is OK). They 
+have to be reintroduced through XMLWriter's "namespaces" parameter.
+
+	>>> from elementtree import ElementTree
+	>>> from elementtreewriter.xmlwriter import XMLWriter
+	>>> from StringIO import StringIO
+	>>> def parse(xmlstring):
+	...		return ElementTree.parse(StringIO(xmlstring))
+
+Parse a test XML string
+
+	>>> xml0 = '<test>Schas</test>'
+	>>> tree0 = parse(xml0)
+	>>> tree0
+	<elementtree.ElementTree.ElementTree instance ...>
+
+Set up a XMLWriter
+
+	>>> writer0 = XMLWriter(tree0)
+	>>> writer0
+	<elementtreewriter.xmlwriter.XMLWriter object ...>
+	>>> writer0.tree._root
+	<Element test ...>
+
+Write XML to string
+
+	>>> writer0()
+	'<?xml version="1.0" encoding="utf-8"?>\n<test>Schas</test>'
+
+Different encoding
+
+	>>> writer0(encoding="windows-1252")
+	'<?xml version="1.0" encoding="windows-1252"?>\n<test>Schas</test>'
+	
+Declare a namespace with prefix. The prefix should be declared, but not used.
+
+	>>> ns0 = { "schas" : "s" }
+	>>> writer0(namespaces=ns0)
+	'<?xml version="1.0" encoding="windows-1252"?>\n<test xmlns:s="schas">Schas</test>'
+
+Declare a namespace without prefix. The declaration should not be inserted.
+
+	>>> ns0 = { "schas" : "" }
+	>>> writer0(namespaces=ns0)
+	'<?xml version="1.0" encoding="windows-1252"?>\n<test>Schas</test>'
+
+Parse a XML with comment: ElementTree does not support comments or PI's
+
+writexml = '<test><!-- XXX --></test>'
+xml = '<test><? X=testing ?></test>'
+
+Parse a XML with a default namespace, declared by "xmlns" attribute
+
+	>>> xml1 = '<test xmlns="schas">X</test>'
+	>>> tree1 = parse(xml1)
+	>>> writer1 = XMLWriter(tree1)
+	>>> writer1()
+	'<?xml version="1.0" encoding="utf-8"?>\n<test xmlns="schas">X</test>'
+
+Parse a XML with two namespaces
+
+	>>> xml2 = '<test xmlns="schas"><a xmlns="forest">X</a></test>'
+	>>> tree2 = parse(xml2)
+	>>> writer2 = XMLWriter(tree2)
+	>>> writer2()
+	'<?xml version="1.0" encoding="utf-8"?>\n<test xmlns="schas"><a xmlns="forest">X</a></test>'
+
+Parse a XML with two namespaces. For the first a prefix is declared
+
+	>>> xml3 = '<test xmlns="schas"><a xmlns="forest">X</a></test>'
+	>>> tree3 = parse(xml3)
+	>>> ns3 = { "schas" : "s" }
+	>>> writer3 = XMLWriter(tree3, ns3)
+	>>> writer3()
+	'<?xml version="1.0" encoding="utf-8"?>\n<s:test xmlns:s="schas"><a xmlns="forest">X</a></s:test>'
+
+Parse a XML with two namespaces. For the second a prefix is declared
+
+	>>> xml4 = '<test xmlns="schas"><a xmlns="forest">X</a></test>'
+	>>> tree4 = parse(xml4)
+	>>> ns4 = { "forest" : "f" }
+	>>> writer4 = XMLWriter(tree4, ns4)
+	>>> writer4()
+	'<?xml version="1.0" encoding="utf-8"?>\n<test xmlns:f="forest" xmlns="schas"><f:a>X</f:a></test>'
+
+Declare the first namespace without prefix
+
+	>>> xml5 = '<test xmlns="schas"><a xmlns="forest">X</a></test>'
+	>>> tree5 = parse(xml5)
+	>>> ns5 = { "forest" : "f", "schas" : "" }
+	>>> writer5 = XMLWriter(tree5, ns5)
+	>>> writer5()
+	'<?xml version="1.0" encoding="utf-8"?>\n<test xmlns="schas" xmlns:f="forest"><f:a>X</f:a></test>'
+
+Declare the second namespace without prefix
+
+	>>> xml6 = '<test xmlns="schas"><a xmlns="forest">X</a></test>'
+	>>> tree6 = parse(xml6)
+	>>> ns6 = { "forest" : "", "schas" : "s" }
+	>>> writer6 = XMLWriter(tree6, ns6)
+	>>> writer6()
+	'<?xml version="1.0" encoding="utf-8"?>\n<s:test xmlns="forest" xmlns:s="schas"><a>X</a></s:test>'
+
+Two attributes, one in the no-prefix namespace and one with prefix
+
+	>>> xml7 = '<s:test xmlns:s="schas" xmlns:f="forest"><s:a f:attr="test" s:attr="test">X</s:a></s:test>'
+	>>> tree7 = parse(xml7)
+	>>> ns7 = { "schas" : "", "forest" : "f" }
+	>>> writer7 = XMLWriter(tree7, ns7)
+	>>> writer7()
+	'<?xml version="1.0" encoding="utf-8"?>\n<test xmlns="schas" xmlns:f="forest"><a f:attr="test" ns2:attr="test" xmlns:ns2="schas">X</a></test>'
+
+A deeper structure
+
+	>>> xml8 = '<test xmlns="schas"><a><b><c>X</c></b></a></test>'
+	>>> tree8 = parse(xml8)
+	>>> ns8 = { "schas" : "" }
+	>>> writer8 = XMLWriter(tree8, ns8)
+	>>> writer8()
+	'<?xml version="1.0" encoding="utf-8"?>\n<test xmlns="schas"><a><b><c>X</c></b></a></test>'
+
+A deeper structure with prefixes
+
+	>>> xml8 = '<test xmlns="schas"><a><b><c>X</c></b></a></test>'
+	>>> tree8 = parse(xml8)
+	>>> ns8 = { "schas" : "s" }
+	>>> writer8 = XMLWriter(tree8, ns8)
+	>>> writer8()
+	'<?xml version="1.0" encoding="utf-8"?>\n<s:test xmlns:s="schas"><s:a><s:b><s:c>X</s:c></s:b></s:a></s:test>'
+
+A sequence with prefixes
+
+	>>> xml9 = '<test xmlns="schas" xmlns:f="forest"><a><b>X</b><f:b>X</f:b></a></test>'
+	>>> tree9 = parse(xml9)
+	>>> ns9 = { "schas" : "", "forest" : "f" }
+	>>> writer9 = XMLWriter(tree9, ns9)
+	>>> writer9()
+	'<?xml version="1.0" encoding="utf-8"?>\n<test xmlns="schas" xmlns:f="forest"><a><b>X</b><f:b>X</f:b></a></test>'
+
+A more complex sequence
+
+	>>> xmlA = '<test xmlns="schas" xmlns:f="forest"><a><b>X</b><f:b>X</f:b><c>Z</c><f:d>W</f:d></a></test>'
+	>>> treeA = parse(xmlA)
+	>>> nsA = { "schas" : "s", "forest" : "f" }
+	>>> writerA = XMLWriter(treeA, nsA)
+	>>> writerA()
+	'<?xml version="1.0" encoding="utf-8"?>\n<s:test xmlns:f="forest" xmlns:s="schas"><s:a><s:b>X</s:b><f:b>X</f:b><s:c>Z</s:c><f:d>W</f:d></s:a></s:test>'
+
+A nested structure without declarations
+
+	>>> xmlB = '<test xmlns="schas" xmlns:f="forest"><a><f:b><c><f:d>X</f:d></c></f:b></a></test>'
+	>>> treeB = parse(xmlB)
+	>>> writerB = XMLWriter(treeB)
+	>>> writerB()
+	'<?xml version="1.0" encoding="utf-8"?>\n<test xmlns="schas"><a><b xmlns="forest"><c xmlns="schas"><d xmlns="forest">X</d></c></b></a></test>'
+
+Open an interactive shell
+
+	self.interact(locals())
+
