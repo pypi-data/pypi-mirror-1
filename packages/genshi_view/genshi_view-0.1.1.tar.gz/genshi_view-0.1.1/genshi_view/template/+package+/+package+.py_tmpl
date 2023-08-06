@@ -1,0 +1,76 @@
+"""
+${project}: a view with webob
+"""
+
+from genshi.template import TemplateLoader
+from paste.fileapp import FileApp
+from pkg_resources import resource_filename
+from webob import Request, Response, exc
+
+class ${project.title()}View(object):
+
+    ### class level variables
+    defaults = { 'auto_reload': 'False'}
+
+    def __init__(self, **kw):
+
+        # set instance parameters from kw and defaults
+        for key in self.defaults:
+            setattr(self, key, kw.get(key, self.defaults[key]))
+        self.auto_reload = self.auto_reload.lower() == 'true'
+
+        # methods to respond to
+        self.response_functions = { 'GET': self.get,
+                                    'POST': self.post,
+                                    }
+
+        # static files
+        self.htdocs = resource_filename(__name__, 'static')
+
+        # template loader
+        templates_dir = resource_filename(__name__, 'templates')
+        self.loader = TemplateLoader(templates_dir,
+                                     auto_reload=self.auto_reload)
+
+    ### methods dealing with HTTP
+    def __call__(self, environ, start_response):
+        request = Request(environ)
+        filename = os.path.join(self.htdocs, request.path_info)
+        if request.path_info != '/' and os.path.exists(filename):
+            fileapp = FileApp(filename)
+            return fileapp(environ, start_response)
+        res = self.make_response(request)
+        return res(environ, start_response)
+                                
+    def make_response(self, request):
+        return self.response_functions.get(request.method, self.error)(request)
+
+    def get_response(self, text, content_type='text/html'):
+        """make an HTTP response from text"""
+        res = Response(content_type=content_type, body=text)
+        return res
+
+    def get(self, request):
+        """
+        return response to a GET requst
+        """
+
+        # template data dictionary      
+        data = { 'subject': request.GET.get('subject', 'world') } 
+
+        # render the template
+        template = self.loader.load('helloworld.html')
+        res = template.generate(**data).render('html', doctype='html')
+        # generate the response
+        return self.get_response(res)
+
+    def post(self, request):
+        """
+        return response to a POST request
+        """
+        return exc.HTTPOk("Ok")
+
+    def error(self, request):
+        """deal with non-supported methods"""
+        return exc.HTTPMethodNotAllowed("Only %r operations are allowed" % self.response_functions.keys())
+        
