@@ -1,0 +1,137 @@
+Chapter 6: Message Customization and Internationalization
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+WARNING: **None of this has been tested and most likely is incorrect**
+
+Customising Converter Error Messages
+====================================
+
+The ConversionKit converters all come with default messages to set on
+conversion objects if error conditions occur but very frequently you will want
+to customise these messages so that they make sense in the context in which
+they are being used.
+
+Specifying Alternative Arguments
+--------------------------------
+
+The error messages used by a converter are defined by the function arguments to
+the converter factory which produces the converter. All error message arguments
+start with the characters ``msg_``. 
+
+As an example, the error message which is set if an email converter recieves a
+conversion whose value is empty is called ``msg_empty`` and by default has the
+value ``u'Please enter an email address'``. If you want to customise this
+message you can do so by specifying an alternative when you call the
+``stringToEmail()`` converter factory.
+
+Here's an example. First the imports:
+
+.. sourcecode :: pycon
+
+    >>> from conversionkit import Conversion
+    >>> from formconvert.email import stringToEmail
+
+Then the standard version:
+
+.. sourcecode :: pycon
+
+    >>> email = stringToEmail()
+    >>> Conversion('').perform(email).error
+    u'Please enter an email address'
+    
+Here is a customised version:
+
+.. sourcecode :: pycon
+
+    >>> email = stringToEmail(
+    ...     msg_empty = u'No value was entered'
+    ... )
+    >>> Conversion('').perform(email).error
+    u'No value was entered'
+    
+Notice that the erorr now uses the customised message.
+
+You can find out the error messages which are available to be customised by
+looking at the arguments to the converters in the API Documentation. Any
+arguments starting ``msg_`` are customizable error messages.
+
+Planning For Error Variables
+----------------------------
+
+Some error messages have certain values associated with them which you can use
+in the message using Python string interpolation of dictionary values.
+
+For example the ``msg_socket`` error message for the ``stringToEmail()`` converter
+factory looks like this: ``u'An error occured when trying to connect to the
+server: %(error)s'``.  Here, the ``%(error)s`` text will be replaced with the
+actual error. Generally speaking, if the original error message contains
+variables it is wise to ensure your customised versions do too.
+
+The ``state.conversionkit.message()`` Function
+----------------------------------------------
+
+If you look at the source code for any of the ConversionKit converters you'll
+see that the messages are all declared by being wrapped in a ``_()`` function.
+Tools such as Babel and GNU gettext can recognise this function and extract the
+message from the Python source code into a ``.po`` file for
+internationalization. A ``.pot`` file is created from the ``.po`` file and a
+translater translates the strings. The ``.po`` file is then compiled in a
+``.mo`` file, known as a message catalog, and an internationalisation function
+can then pick the right translation to use for the particular user. The
+ConversionKit ``_()`` function itself doesn't do anything except return the
+value passed to it.
+
+Whenever ConversionKit generates an error message for a conversion it calls the
+``conversionkit.message()`` function with three arguments:
+
+``state``
+
+    The state argument passed to the conversion's ``.perform()`` method when the 
+    converter was applied.
+
+``message``
+
+    The error message as a string, whether it was the default or a customised 
+    message passed as a converter factory argument
+
+``args``
+    A dictionary of any arguments which can be substituted into the message 
+    string.
+
+If the code using ConversionKit supports internationalisation you can provide
+ConversionKit with a custom function which also gets passed these arguments and
+is responsible for returning a translated version of the error message and for
+substituting in any ``args``. 
+
+.. note ::
+
+    At the moment ConversionKit only has messages translated into British English
+    but if you would like to provide a variant in an alternative language the
+    authors would be happy to accept a ``.pot`` file. 
+
+Here's an example function which doesn't return the messages in another
+language but does make all messages uppercase. The principle is the same:
+
+.. sourcecode :: pycon
+
+    >>> def message(state, message, args):
+    ...     return message.upper() % args
+
+To get ConversionKit to use your custom error message handler you need to set
+the function as part of the ``state`` object. Here's an example which sets up the
+state with the ``message()`` function above and then tests it:
+
+.. sourcecode :: pycon
+
+    >>> from conversionkit import Conversion
+    >>> from bn import AttributeDict
+    >>> from formconvert.email import stringToEmail
+    >>> email = stringToEmail()
+    >>> state = AttributeDict()
+    >>> state['conversionkit'] = {'message': message}
+    >>> Conversion('').perform(email, state).error
+    u'PLEASE ENTER AN EMAIL ADDRESS'
+
+You can imagine that a different function would be capable of translating the 
+error message instead.
+
