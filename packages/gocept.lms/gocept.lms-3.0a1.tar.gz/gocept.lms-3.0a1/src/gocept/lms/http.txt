@@ -1,0 +1,104 @@
+=============
+HTTP handling
+=============
+
+The HTTP handler is responsible to check the status of, classify and allow or
+deny checking of URLs that belong to the HTTP family (http and https).
+
+>>> from gocept.lms.http import HTTP
+>>> handler = HTTP()
+
+
+URL checking
+============
+
+Let's set up an HTTP server to answer our requests:
+
+Determine a random port to listen on:
+
+>>> import random
+>>> port = random.randint(10000, 99999)
+>>> base_url = 'http://localhost:%s' % port
+
+Create a directory from which to serve data:
+
+>>> import tempfile
+>>> dir = tempfile.mkdtemp()
+>>> import os
+>>> os.chdir(dir)
+
+Create an HTTP server in a separate thread:
+
+>>> from BaseHTTPServer import HTTPServer
+>>> from gocept.lms.tests import TestHTTPRequestHandler
+>>> server = HTTPServer(('localhost', port), TestHTTPRequestHandler)
+>>> handler_threads = []
+>>> import threading
+>>> def handle_one():
+...     t = threading.Thread(target=server.handle_request)
+...     t.setDaemon(True)
+...     t.start()
+...     handler_threads.append(t)
+
+Now we can get the directory listing:
+
+>>> import urllib2
+>>> handle_one()
+>>> f = urllib2.urlopen(base_url)
+>>> print f.read()
+<title>Directory listing for /</title>
+<h2>Directory listing for /</h2>
+<hr>
+<ul>
+</ul>
+<hr>
+
+The checker determines that the result is valid:
+
+>>> handle_one()
+>>> handler.check(base_url)
+('ok', 'OK')
+
+If a request does not give a response code that shows that the URL is available
+(like a 404) the checker will report it as unavailable and give a corresponding
+explanation:
+
+>>> handle_one()
+>>> handler.check(base_url+'/foo')
+('unavailable', 'Not Found')
+
+If we request a URL that we can't even connect to, it will be reported as unavailable as well:
+
+>>> handler.check('http://foo.example')
+('unavailable', '... not known')
+
+
+User-agent
+==========
+
+Most sites don't like us sending 'urllib2' as the user agent. As we do
+implement a specific bot, we also send a corresponding user agent:
+
+>>> handle_one()
+>>> handler.check(base_url+'/agent')
+('unavailable', 'Bot/LMS (lms.gocept.com)')
+
+
+SSL support
+===========
+
+Setting up HTTPS servers isn't that simple. We currently rely on a (for us)
+known and reliable server out there:
+
+>>> from gocept.lms.http import HTTPS
+>>> handler = HTTPS()
+>>> handler.check('https://mail.gocept.net/')
+('ok', 'OK')
+
+
+Clean-up
+========
+
+We created a couple of threads along the way which we need to join:
+
+>>> _ = [x.join(2) for x in handler_threads]

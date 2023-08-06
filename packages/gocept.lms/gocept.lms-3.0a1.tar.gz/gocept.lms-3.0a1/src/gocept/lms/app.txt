@@ -1,0 +1,139 @@
+Do a functional doctest test on the app.
+========================================
+
+Let's first create an instance of gocept.lms.LMS at the top level:
+
+>>> import gocept.lms.app
+>>> root = getRootFolder()
+>>> import zope.app.component.hooks
+>>> old_site = zope.app.component.hooks.getSite()
+>>> zope.app.component.hooks.setSite(root)
+
+>>> root['app'] = gocept.lms.app.LMS()
+>>> zope.app.component.hooks.setSite(root['app'])
+
+
+Local utilities
+---------------
+
+>>> urls = zope.component.getUtility(gocept.lms.interfaces.IURLProvider)
+>>> urls
+<gocept.lms.url.URLContainer object at 0x...>
+
+>>> clients = zope.component.getUtility(gocept.lms.interfaces.IClientProvider)
+>>> clients
+<gocept.lms.client.ClientContainer object at 0x...>
+
+
+Clients
+-------
+
+>>> clients.add(gocept.lms.client.Client('fred'))
+>>> fred = clients.get('fred')
+>>> fred
+<gocept.lms.client.Client object at 0x...>
+
+>>> clients.get('asdf') is None
+True
+
+URLs
+----
+
+>>> fred.register_urls([urls.add('http://example.com/'),
+...                     urls.add('http://example.com/asdf')])
+>>> list(sorted(fred.iter_urls()))
+[<gocept.lms.url.URL 'http://example.com/'>,
+ <gocept.lms.url.URL 'http://example.com/asdf'>]
+
+We can now find out that Fred is actually using both URLs:
+
+>>> example = urls.get_url('http://example.com/')
+>>> example.clients
+InstrumentedSet([u'/app/ClientContainer/fred'])
+>>> list(example.clients)
+[<gocept.lms.client.Client object at 0x...>]
+>>> len(list(example.clients))
+1
+
+The URLs can be unregistered using the ``unreigster_urls`` method. When an URL
+is passed which is not registered for the client no error will be raised:
+
+>>> fred.unregister_urls(
+...     [urls.get_url('http://example.com/'),
+...      urls.add('http://not-registered-yet/')])
+>>> list(fred.iter_urls())
+[<gocept.lms.url.URL 'http://example.com/asdf'>]
+
+The URL http://example.com/ has no client now:
+
+>>> list(example.clients)
+[]
+
+But /asdf still has
+>>> list(urls.get_url('http://example.com/asdf').clients)
+[<gocept.lms.client.Client object at 0x...>]
+
+
+Clean up
+--------
+
+>>> zope.app.component.hooks.setSite(old_site)
+
+
+Run tests in the testbrowser
+----------------------------
+
+The zope.testbrowser.browser module exposes a Browser class that
+simulates a web browser similar to Mozilla Firefox or IE.  We use that
+to test how our application behaves in a browser.  For more
+information, see http://pypi.python.org/pypi/zope.testbrowser.
+
+Create a browser and visit the instance you just created:
+
+>>> from zope.testbrowser.testing import Browser
+>>> browser = Browser()
+>>> browser.open('http://localhost/app')
+
+Check some basic information about the page you visit:
+
+>>> browser.url
+'http://localhost/app'
+>>> browser.headers.get('Status').upper()
+'200 OK'
+
+
+Adding clients
+==============
+
+Adding clients requires authorization:
+
+>>> browser.open('http://localhost/app/ClientContainer/addclient')
+Traceback (most recent call last):
+    ...
+httperror_seek_wrapper: HTTP Error 401: Unauthorized
+
+>>> browser.addHeader('Authorization', 'Basic mgr:mgrpw')
+>>> browser.open('http://localhost/app/ClientContainer/addclient')
+>>> browser.getControl('Id').value = 'testid'
+>>> browser.getControl('Password').value = 'asdf'
+>>> browser.getControl('Contact name').value = 'Hans Meiser'
+>>> browser.getControl('Contact email').value = 'hans@meiser.de'
+>>> browser.getControl('Callback').value = 'http://hans.meiser.de/foo'
+>>> browser.getControl('Add').click()
+
+Make sure the client is registered:
+
+>>> list(clients)
+[u'fred', u'testid']
+>>> test = clients.get('testid')
+>>> test.id
+u'testid'
+>>> test.password
+u'asdf'
+>>> test.contact_name
+u'Hans Meiser'
+>>> test.contact_email
+u'hans@meiser.de'
+>>> test.callback
+'http://hans.meiser.de/foo'
+

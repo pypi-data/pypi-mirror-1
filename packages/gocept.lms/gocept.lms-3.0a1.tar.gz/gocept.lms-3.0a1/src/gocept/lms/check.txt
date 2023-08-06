@@ -1,0 +1,385 @@
+===============
+The URL checker
+===============
+
+The checker pulls URLs from the check queue and checks them[#functionaltest]_.
+
+
+Pulling URLs from the check queue
+=================================
+
+A thread pool is used for managing worker threads. We reduce the maximum
+number of concurrent active threads for this test:
+
+>>> from zope.component import getUtility
+>>> import gocept.lms.interfaces
+>>> import threading
+>>> thread_pool = getUtility(gocept.lms.interfaces.IThreadPool)
+>>> thread_pool.limit = 3
+>>> thread_pool.active
+set([])
+>>> thread_pool.available
+3
+
+Also, for the time being, we don't care about not accessing URL classes too
+frequently:
+
+>>> import datetime
+>>> import gocept.lms.check
+>>> gocept.lms.check.CLASS_INTERVAL = datetime.timedelta(seconds=0)
+
+If the check queue is empty, running the checker will not create any worker
+threads:
+
+>>> from gocept.lms.check import check
+>>> check()
+>>> thread_pool.active
+set([])
+>>> thread_pool.available
+3
+
+We create some URLs:
+
+>>> urls = zope.component.getUtility(gocept.lms.interfaces.IURLProvider)
+>>> url1 = urls.add('foo://example.com/1')
+>>> url2 = urls.add('foo://example.com/2')
+>>> url3 = urls.add('foo://example.com/3')
+>>> url4 = urls.add('foo://example.com/4')
+>>> url5 = urls.add('foo://example.com/5')
+
+Now put the first one in the check queue:
+
+>>> import zc.queue.interfaces
+>>> check_queue = zope.component.getUtility(zc.queue.interfaces.IQueue,
+...                                         name='check')
+>>> check_queue.put(url1)
+
+The checker will empty the queue but not create a worker thread since we do
+not have a handler for the foo scheme:
+
+>>> check()
+>>> list(check_queue)
+[]
+>>> thread_pool.active
+set([])
+
+Handlers are scheme-specific components that provide the `ISchemeHandler`
+interface:
+
+>>> import zope.interface
+>>> from gocept.lms.interfaces import ISchemeHandler
+>>> class FooHandler(object):
+...     zope.interface.implements(ISchemeHandler)
+...     do_allow = True
+...     def allow(self, url):
+...         return self.do_allow
+...     def check(self, url):
+...         return 'ok', 'A foo does not know better.'
+...     def classify(self, url):
+...         return url
+>>> handler = FooHandler()
+>>> zope.component.provideUtility(handler, name='foo')
+
+Checker threads are created for URL strings and use the scheme-specific
+handler to perform the actual check. In our case `FooHandler` is used:
+
+>>> from gocept.lms.check import CheckerThread
+>>> thread = CheckerThread('foo://nowhere/to/go')
+>>> thread.start()
+>>> thread.join(2)
+>>> thread.state
+'ok'
+>>> thread.reason
+'A foo does not know better.'
+
+Now that a handler for the `foo` URLs is registered, the checker service will
+process them:
+
+>>> check_queue.put(url1)
+>>> check()
+>>> list(check_queue)
+[]
+>>> t1 = list(thread_pool.active)[0]
+>>> t1.join(2)
+>>> thread_pool.active
+set([<CheckerThread(Thread-2, stopped)>])
+>>> thread_pool.available
+2
+
+Two more URLs can be checked until the thread limit is reached:
+
+>>> check_queue.put(url2)
+>>> check_queue.put(url3)
+>>> check()
+>>> list(check_queue)
+[]
+>>> _ = [t.join(2) for t in thread_pool.active]
+>>> sorted(thread_pool.active, key=lambda t:t.getName())
+[<CheckerThread(Thread-2, stopped)>,
+ <CheckerThread(Thread-3, stopped)>,
+ <CheckerThread(Thread-4, stopped)>]
+>>> thread_pool.available
+0
+
+Now the checker cannot create any more worker threads. It will not take URLs
+from the queue:
+
+>>> check_queue.put(url4)
+>>> check()
+>>> list(check_queue)
+[<gocept.lms.url.URL 'foo://example.com/4'>]
+>>> len(thread_pool.active)
+3
+>>> thread_pool.available
+0
+
+After releasing one thread, we can continue to pull URLs from the queue.
+Remaining URLs that cannot be pulled because threads are used up again will
+stay in the queue:
+
+>>> eliminate_thread = sorted(thread_pool.active, key=lambda t:t.getName())[0]
+>>> thread_pool.active.discard(eliminate_thread)
+>>> check_queue.put(url5)
+>>> check()
+>>> list(check_queue)
+[<gocept.lms.url.URL 'foo://example.com/5'>]
+>>> _ = [t.join(2) for t in thread_pool.active]
+>>> len(thread_pool.active)
+3
+>>> thread_pool.available
+0
+
+
+Processing the results of checker threads
+=========================================
+
+The function `process_finished` is responsible to scan the list of threads for
+finished ones and write their check results back to the database.
+
+The current thread list contains a few finished threads which will be picked
+up by the next run of `process_finished`:
+
+>>> len(thread_pool.active)
+3
+>>> from gocept.lms.check import process_finished
+>>> process_finished()
+>>> len(thread_pool.active)
+0
+
+We eliminated the thread of URL 1 initially and URL 5 never made it to a check.
+URL 2-4 have been updated though:
+
+>>> url1.last_check == mindate
+True
+>>> url2.last_check > mindate
+True
+>>> url3.last_check > mindate
+True
+>>> url4.last_check > mindate
+True
+>>> url5.last_check == mindate
+True
+
+Reason data will always be updated. Let's set up a thread with a specific
+state and reason as the result:
+
+>>> thread = CheckerThread(url1.url)
+>>> thread.start()
+>>> thread_pool.active.add(thread)
+>>> thread.join(2)
+>>> thread.state = None
+>>> thread.reason = 'Nothing happened'
+
+When processing the thread pool now, the state reason for URL 1 is updated:
+
+>>> process_finished()
+>>> url1.reason
+'Nothing happened'
+
+The last state change date was not touched, because the state is still
+unknown:
+
+>>> print url1.state
+None
+>>> url1.last_state_change
+datetime.datetime(1, 1, 1, 0, 0, tzinfo=<UTC>)
+
+However, if a checker thread ends with a different state, it will be updated
+and the last state change is touched as well:
+
+>>> thread = CheckerThread(url1.url)
+>>> thread.start()
+>>> thread_pool.active.add(thread)
+>>> thread.join(2)
+>>> thread.state = gocept.lms.interfaces.STATE_UNAVAILABLE
+
+>>> process_finished()
+>>> url1.state
+'unavailable'
+>>> url1.last_state_change > mindate
+True
+
+When a URL was by the `process_finished` function, the changes are reflected
+in the catalog as well:
+
+>>> from hurry.query.interfaces import IQuery
+>>> from hurry.query import Eq, Ge
+>>> query = zope.component.getUtility(IQuery)
+
+URLs 1-4 have been processed and therefore have a `last_check` date greater
+than `mindate`:
+
+>>> list(query.searchResults(~Eq(('urls', 'last_check'), mindate)))
+[<gocept.lms.url.URL 'foo://example.com/1'>,
+ <gocept.lms.url.URL 'foo://example.com/2'>,
+ <gocept.lms.url.URL 'foo://example.com/3'>,
+ <gocept.lms.url.URL 'foo://example.com/4'>]
+
+URL 1 was indexed with a state of `unavailable`:
+
+>>> list(query.searchResults(Eq(('urls', 'state'), 'unavailable')))
+[<gocept.lms.url.URL 'foo://example.com/1'>]
+
+URL 1 is also the only URL where the state changed and so a
+`last_state_change` was recorded:
+
+>>> list(query.searchResults(Ge(('urls', 'last_state_change'),
+...                             url1.last_state_change)))
+[<gocept.lms.url.URL 'foo://example.com/1'>]
+
+
+URL classes
+===========
+
+The checker takes care not to utilize individual resources too heavily. It
+does so by classifying URLs and restricting the number of requests per time to
+URLs from each URL class.
+
+>>> gocept.lms.check.CLASS_INTERVAL = datetime.timedelta(seconds=3)
+
+Make sure the check queue is empty at this point and no threads are active:
+
+>>> while check_queue: _ = check_queue.pull()
+>>> thread_pool.active
+set([])
+
+We register some URLs which have the same URL classification and send them to
+the check queue:
+
+>>> url6 = urls.add('http://127.0.0.1/6')
+>>> url7 = urls.add('http://127.0.0.1/7')
+>>> check_queue.put(url6)
+>>> check_queue.put(url7)
+
+The checker will consume only one of them in one run:
+
+>>> check()
+>>> thread_pool.available
+2
+>>> list(check_queue)
+[<gocept.lms.url.URL 'http://127.0.0.1/7'>]
+
+Another immediate check won't consume the remaining URL either because the
+time limit has not yet been reached:
+
+>>> check()
+>>> thread_pool.available
+2
+>>> list(check_queue)
+[<gocept.lms.url.URL 'http://127.0.0.1/7'>]
+
+After the configured interval has elapsed, another URL of the same class may
+be checked again:
+
+>>> import time
+>>> time.sleep(3.1)
+>>> check()
+>>> thread_pool.available
+1
+>>> list(check_queue)
+[]
+
+Clean up:
+
+>>> _ = [t.join(2) for t in thread_pool.active]
+>>> process_finished()
+>>> gocept.lms.check.CLASS_INTERVAL = datetime.timedelta(seconds=0)
+
+
+Disallowed URLs
+===============
+
+Handlers may disallow certain URLs. When the checker finds such a URL in the
+check queue, it discards the URL:
+
+>>> url = urls.add('foo://bar.baz/')
+>>> handler.do_allow = False
+>>> check_queue.put(url)
+>>> check()
+>>> list(check_queue)
+[]
+>>> thread_pool.available
+3
+
+Allowing the same URL again causes the checker to check it in the next run:
+
+>>> handler.do_allow = True
+>>> check_queue.put(url)
+>>> check()
+>>> list(check_queue)
+[]
+>>> thread_pool.available
+2
+>>> thread_pool.active.pop().join(2)
+
+
+Statistical data
+================
+
+The embracing function `check_and_process` runs a full cycle of first
+processing and then checking.  It also updates the statistical information for
+the thread pool.
+
+Let's put a couple of dummy threads in there that will change the statistical
+information:
+
+>>> class DummyThread(object):
+...     def isAlive(self):
+...         return True
+>>> thread_pool.active.add(DummyThread())
+>>> thread_pool.active.add(DummyThread())
+>>> thread_pool.active.add(DummyThread())
+
+Now, running `check_and_process` updates the statistical information to
+reflect the current size of the pool:
+
+>>> from gocept.lms.check import check_and_process
+>>> check_and_process()
+>>> from gocept.lms.interfaces import IStatistics
+>>> statistics = zope.component.getUtility(IStatistics)
+>>> statistics.thread_pool
+3
+
+Clean up
+========
+
+>>> zope.component.globalSiteManager.unregisterUtility(handler, name='foo')
+True
+
+
+.. [#functionaltest] Setup functional test
+
+    >>> import gocept.lms.app
+    >>> root = getRootFolder()
+    >>> import zope.app.component.hooks
+    >>> old_site = zope.app.component.hooks.getSite()
+    >>> zope.app.component.hooks.setSite(root)
+
+    >>> from zope.app.testing.placelesssetup import setUp, tearDown
+
+    >>> root['app'] = gocept.lms.app.LMS()
+    >>> zope.app.component.hooks.setSite(root['app'])
+
+    >>> import pytz
+    >>> import datetime
+    >>> mindate = datetime.datetime.min.replace(tzinfo=pytz.UTC)

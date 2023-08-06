@@ -1,0 +1,192 @@
+=============
+The scheduler
+=============
+
+The scheduler looks over the URLs in the database and decides which one have to
+be checked[#functionaltest]_.
+
+Register some URLs:
+
+>>> import zope.component
+>>> import gocept.lms.interfaces
+>>> urls = zope.component.getUtility(gocept.lms.interfaces.IURLProvider)
+>>> url1 = urls.add('http://example.com/1')
+>>> url2 = urls.add('http://example.com/2')
+>>> url3 = urls.add('http://example.com/3')
+>>> url4 = urls.add('http://example.com/4')
+
+Set different states:
+
+>>> url1.state = gocept.lms.interfaces.STATE_OK
+>>> url2.state = gocept.lms.interfaces.STATE_TEMPORARY
+>>> url3.state = gocept.lms.interfaces.STATE_UNAVAILABLE
+
+The scheduler puts the URLs to be checked into the check queue. Initially it is
+empty:
+
+>>> import zc.queue.interfaces
+>>> check_queue = zope.component.getUtility(zc.queue.interfaces.IQueue,
+...                                         name='check')
+>>> list(check_queue)
+[]
+
+Run the scheduler. None of the created URLs have been checked so the queue will
+contain all URLs after the scheduling run:
+
+>>> import gocept.lms.schedule
+>>> gocept.lms.schedule.schedule()
+>>> list(check_queue)
+[<gocept.lms.url.URL 'http://example.com/1'>,
+ <gocept.lms.url.URL 'http://example.com/2'>,
+ <gocept.lms.url.URL 'http://example.com/3'>,
+ <gocept.lms.url.URL 'http://example.com/4'>]
+
+
+When we run the scheduler again we'll have every link twice in the queue:
+
+>>> gocept.lms.schedule.schedule()
+>>> list(check_queue)
+[<gocept.lms.url.URL 'http://example.com/1'>,
+ <gocept.lms.url.URL 'http://example.com/2'>,
+ <gocept.lms.url.URL 'http://example.com/3'>,
+ <gocept.lms.url.URL 'http://example.com/4'>,
+ <gocept.lms.url.URL 'http://example.com/1'>,
+ <gocept.lms.url.URL 'http://example.com/2'>,
+ <gocept.lms.url.URL 'http://example.com/3'>,
+ <gocept.lms.url.URL 'http://example.com/4'>]
+
+
+Let's empty the queue and set last_check dates:
+
+>>> while check_queue:
+...     check_queue.pull()
+<gocept.lms.url.URL 'http://example.com/1'>
+<gocept.lms.url.URL 'http://example.com/2'>
+<gocept.lms.url.URL 'http://example.com/3'>
+<gocept.lms.url.URL 'http://example.com/4'>
+<gocept.lms.url.URL 'http://example.com/1'>
+<gocept.lms.url.URL 'http://example.com/2'>
+<gocept.lms.url.URL 'http://example.com/3'>
+<gocept.lms.url.URL 'http://example.com/4'>
+>>> list(check_queue)
+[]
+
+>>> import datetime
+>>> import pytz
+>>> now = datetime.datetime.now(pytz.UTC)
+>>> second = datetime.timedelta(seconds=1)
+>>> url1.last_check = now
+>>> url2.last_check = now + second
+>>> url3.last_check = now + 2*second
+>>> url4.last_check = now + 3*second
+
+Since we're using a catalog we need to send ObjectModified events:
+
+>>> import zope.event
+>>> import zope.lifecycleevent
+>>> zope.event.notify(zope.lifecycleevent.ObjectModifiedEvent(url1))
+>>> zope.event.notify(zope.lifecycleevent.ObjectModifiedEvent(url2))
+>>> zope.event.notify(zope.lifecycleevent.ObjectModifiedEvent(url3))
+>>> zope.event.notify(zope.lifecycleevent.ObjectModifiedEvent(url4))
+
+When we schedule now, nothing will be added to the check queue:
+
+>>> gocept.lms.schedule.schedule()
+>>> list(check_queue)
+[]
+
+Lower the check interval to one second:
+
+>>> gocept.lms.schedule.INTERVAL = datetime.timedelta(seconds=1)
+
+Let's wait a second and schedule again:
+
+>>> import time
+>>> time.sleep(1.1)
+>>> gocept.lms.schedule.schedule()
+>>> list(check_queue)
+[<gocept.lms.url.URL 'http://example.com/1'>]
+
+"check" the entire queue:
+
+>>> def check_all():
+...     while check_queue:
+...         url = check_queue.pull()
+...         url.last_check = datetime.datetime.now(pytz.UTC)
+...         zope.event.notify(zope.lifecycleevent.ObjectModifiedEvent(url))
+>>> check_all()
+
+When we schedule now, nothing will be put to the queue again:
+
+
+>>> gocept.lms.schedule.schedule()
+>>> list(check_queue)
+[]
+
+
+Let's wait a second and schedule again. Now 1 and 2 are to be checked:
+
+>>> import time
+>>> time.sleep(1.1)
+>>> gocept.lms.schedule.schedule()
+>>> list(check_queue)
+[<gocept.lms.url.URL 'http://example.com/1'>,
+ <gocept.lms.url.URL 'http://example.com/2'>]
+
+"check" the queue:
+
+>>> check_all()
+
+When we schedule now, nothing will be put to the queue again:
+
+>>> gocept.lms.schedule.schedule()
+>>> list(check_queue)
+[]
+
+
+
+Long queue protection
+=====================
+
+zc.queue tends to perform badly with millions of entries becoming very slow
+for pull and len() operations. Therefore we limit the size of the queue at
+roughly 1000 entries at the scheduler:
+
+>>> url5 = urls.add('http://example.com/5')
+>>> for x in xrange(1100):
+...   check_queue.put(1)
+>>> len(check_queue)
+1100
+
+This scheduler run would put URL 5 into the queue, but it backs of and tells
+the main loop to sleep for 5 minutes:
+
+>>> gocept.lms.schedule.schedule()
+300
+
+The length of the queue remained at the level it was before:
+
+>>> len(check_queue)
+1100
+
+Now, when we empty the queue, the scheduler will start putting items in it
+again:
+
+>>> while check_queue:
+...   _ = check_queue.pull()
+>>> len(check_queue)
+0
+>>> gocept.lms.schedule.schedule()
+>>> len(check_queue)
+1
+
+.. [#functionaltest] Setup functional test
+
+    >>> import gocept.lms.app
+    >>> root = getRootFolder()
+    >>> import zope.app.component.hooks
+    >>> old_site = zope.app.component.hooks.getSite()
+    >>> zope.app.component.hooks.setSite(root)
+
+    >>> root['app'] = gocept.lms.app.LMS()
+    >>> zope.app.component.hooks.setSite(root['app'])

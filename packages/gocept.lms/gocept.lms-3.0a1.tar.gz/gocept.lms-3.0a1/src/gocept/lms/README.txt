@@ -1,0 +1,151 @@
+=============================
+gocept Link Monitoring Server
+=============================
+
+The Link Monitoring Server (lms) is a coherent set of components to regularly
+check that URLs area reachable. It currently supports http, https and ftp URLs.
+
+
+History
+=======
+
+gocept.lms is the third version of lms (hence the initial version of 3.x).
+
+The first version was directly integrated into CMFLinkChecker and ran as a
+thread.  This was not very stable.
+
+The second version was using the Twisted framework and used a MySQL as a
+backend. This was not very stable either.
+
+The third version now is written in Zope 3 / Grok, uses the ZODB as data
+storage and separates concerns where ever possible. This is stable.
+
+
+Building blocks
+===============
+
+The lms consists of little blocks which only communicate via storing data in
+the ZODB.
+
+XML-RPC server
+++++++++++++++
+
+The XML-RPC server is the API to talk to the lms. It provides functions to
+register and deregister clients and urls.  A management system can register
+clients. A client can register URLs it wants to be checked by the lms.
+
+Scheduler
++++++++++
+
+The scheduler looks over the URLs that where added by the clients. It decides
+which URLs have to be checked and puts them into the check queue.
+
+
+Checker
++++++++
+
+The checker pulls URLs from the check queue and checks them. It checks up to 20
+URLs at the same time, but only once per second per host to avoid overload.
+
+Notifier
+++++++++
+
+The notifier keeps the registered clients updated about the state information
+for the URLs they subscribed to. Clients are notified via XML-RPC.
+
+Synchroniser / Syncer
+++++++++++++++++++++++
+
+The syncer is responsible to keep the URL databases of the lms and the clients
+synchronized. It does this daily by getting a full snapshot of the clients'
+databases and provides them with the current status information for all URLs
+they are interested in.
+
+Installation
+============
+
+The installation works with a buildout. An example can be found at our SVN::
+
+    % svn co http://svn.gocept.com/repos/gocept/gocept.lms/deployment/profiles
+
+The buildout currently defines two profiles:
+
+- prod.cfg for a production setup
+- test.cfg for a test setup
+
+The profiles are not really different right now, though. They're there to
+illustrate the possibilities. The test profile looks like this::
+
+    [buildout]
+    extends = base.cfg
+
+    [app]
+    admin-password = admin
+    appname = test    
+    mail-server-host = localhost
+
+    [zeo]
+    address = localhost:8100
+
+    [lms]
+    address = localhost:8080
+
+
+To select the test profile create a buildout.cfg which includes it::
+
+    [buildout]
+    extends = profiles/test.cfg
+
+Next, bootstrap the buildout with python 2.5::
+
+    % python2.5 bootstrap.py
+
+This creates the actual buildout script as ``bin/buildout``::
+
+    % bin/buildout
+
+After the buildout was run there are scripts created to start the various
+parts. The test profile uses a deployment sandbox, so all the scripts are
+contained in ``parts/deployment/etc/init.d``::
+
+
+To get started, first start the ZEO and the lms web interface::
+
+    % parts/deployment/etc/init.d/lms-zeo start
+    % parts/deployment/etc/init.d/lms-web start
+
+Point your browser to http://localhost:8080. this opens the grok admin UI.
+Create a lms with the id ``test``. Once created the lms will display
+"Congratulations". 
+
+
+Start the other services now::
+
+    % parts/deployment/etc/init.d/lms-checker start
+    % parts/deployment/etc/init.d/lms-notifier start
+    % parts/deployment/etc/init.d/lms-scheduler start
+    % parts/deployment/etc/init.d/lms-syncer start
+
+
+The next step is to register a client. The lms welcome page has a link to a
+very rudimentary form. There you have to enter:
+
+Client Id
+    This is an identificator for the client. It is used to authenticate.
+
+Password
+    The password to authenticate the client.
+
+Contact name
+    Emails sent by the lms will contain the name to address the recipient.
+
+Contact email address	
+    Emails sent by the lms regarding this client will be sent to this address.
+
+Callback URL	
+    The callback url is the XML-RPC point where the callback methods are
+    called. For a gocept.linkchecker installation this would be
+    http://example.com/portal_linkchecker/database/.
+
+After registring the client you can configure gocept.linkchecker (or any other
+client) to talk to the lms.

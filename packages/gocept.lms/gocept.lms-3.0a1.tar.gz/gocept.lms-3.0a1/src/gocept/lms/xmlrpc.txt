@@ -1,0 +1,270 @@
+======
+XMLRPC
+======
+
+Let's first create an instance of gocept.lms.LMS at the top level:
+
+>>> import gocept.lms.app
+>>> root = getRootFolder()
+>>> import zope.app.component.hooks
+>>> old_site = zope.app.component.hooks.getSite()
+>>> zope.app.component.hooks.setSite(root)
+
+>>> root['app'] = gocept.lms.app.LMS()
+
+>>> from zope.app.testing.xmlrpc import ServerProxy
+>>> server = ServerProxy('http://localhost/app/')
+
+
+registerClient
+==============
+
+registerClient is a management function, thus the 'secret'[#maildelivery]_:
+
+>>> server.registerClient('secret', 'gocept', 'http://example.com/callback',
+...                       'Ben Utzer', 'bu@example.com')
+(lms@gocept.testing -> ['bu@example.com', 'admin@gocept.testing', 'otheradmin@gocept.testing'])
+To: Ben Utzer <bu@example.com>
+From: Link Monitoring Server <lms@gocept.testing>
+Subject: Registration of client id "gocept"
+<BLANKLINE>
+Dear Ben Utzer
+<BLANKLINE>
+Your client id "gocept" has been registered with the lms Test LMS.
+<BLANKLINE>
+Thanks for trying out CMFLinkChecker and the Link Monitoring Server. If you
+have not done so already, please subscribe to the CMFLinkChecker and lms
+mailing list at linkchecker@lists.gocept.com (with subscribe as subject).
+<BLANKLINE>
+If you have any problems using CMFLinkChecker feel free to contact us at
+mail@gocept.com or the CMFLinkChecker mailing list.
+<BLANKLINE>
+Information stored on the lms:
+<BLANKLINE>
+    Client-Id   : gocept
+    Password    : ...
+    Callback URL: http://example.com/callback
+    Contact     : Ben Utzer <bu@example.com>
+<BLANKLINE>
+The address of the lms is <http://lms.testing/>.
+<BLANKLINE>
+<BLANKLINE>
+True
+
+After the client was registered an email will be generated containing the
+password. Get the password from the mail:
+
+>>> len(mailer.messages)
+1
+>>> body = mailer.messages[0][3]
+>>> import re
+>>> password = re.search(r'Password\s+: (.+)$', body, re.M).group(1)
+>>> password is None
+False
+>>> len(password)
+30
+
+
+checkConnection
+===============
+
+Check connnection is used to verify that a) the connection is up and
+authentication works and b) to get the protocol version of the lms:
+
+>>> server.checkConnection('gocept', password)
+2
+
+With wrong credentials we'll get an Unauthorized:
+
+>>> server.checkConnection('gocept', 'bsdf')
+Traceback (most recent call last):
+    ...
+ProtocolError: <ProtocolError for localhost/app/: 401 401 Unauthorized>
+
+
+registerURLs
+============
+
+registerURLs is used to register URLs for the client. Those URLs are checked
+and reported back to the client[#registerURLs-auth]_.
+
+Register some urls. ``registerURLs`` returns a list of triples (url, state,
+reason) for URLs the lms already knows. Currently there are no URLs known so
+the list is empty:
+
+>>> server.registerURLs(
+...     'gocept', password,
+...     ['http://example.com/url1',
+...      'http://example.com/url2'])
+[]
+
+
+Let's make sure that we have stored the URLs and they're assigned to the
+client. We need to to this directly because there is no
+XML-RPC-API[#functionaltest]_:
+
+>>> import zope.component
+>>> urls = zope.component.getUtility(gocept.lms.interfaces.IURLProvider)
+>>> list(urls.values())
+[<gocept.lms.url.URL 'http://example.com/url1'>,
+ <gocept.lms.url.URL 'http://example.com/url2'>]
+
+
+>>> clients = zope.component.getUtility(gocept.lms.interfaces.IClientProvider)
+>>> list(clients)
+[u'gocept']
+>>> cl_gocept = clients.get('gocept')
+>>> list(cl_gocept.iter_urls())
+[<gocept.lms.url.URL 'http://example.com/url1'>,
+ <gocept.lms.url.URL 'http://example.com/url2'>]
+
+
+Let's update the state of `url2` and create another URL to verify the return
+value of ``registerURLs``:
+
+>>> import gocept.lms.interfaces
+>>> url2 = urls.get_url('http://example.com/url2')
+>>> url2.state = gocept.lms.interfaces.STATE_OK
+>>> url2.reason = 'Ok'
+>>> url3 = urls.add('http://example.com/url3')
+>>> url3.state = gocept.lms.interfaces.STATE_TEMPORARY
+>>> url3.reason = 'DNS failed'
+
+Commit the transaction:
+
+>>> import transaction
+>>> transaction.commit()
+
+Register url1 and url2 again as well as url3. We'll immediately get the states
+back if they are known to the lms:
+
+>>> result = server.registerURLs(
+...     'gocept', password,
+...     ['http://example.com/url1',
+...      'http://example.com/url2',
+...      'http://example.com/url3'])
+>>> import pprint
+>>> pprint.pprint(result)
+[['http://example.com/url2', 'ok', 'Ok'],
+ ['http://example.com/url3', 'temporary unavailable', 'DNS failed']]
+
+
+Disallowed URLs are ignored by the server. They do not raise any errors:
+
+>>> server.registerURLs('gocept', password, ['foo://bar/baz'])
+[]
+>>> [url.url for url in cl_gocept.urls]
+['http://example.com/url1',
+ 'http://example.com/url2',
+ 'http://example.com/url3']
+
+
+End functional test:
+
+>>> zope.app.component.hooks.setSite(old_site)
+
+
+unregisterURLs
+==============
+
+The client calls ``unregisterURLs`` if he doesn't want to get further
+notifications for URLs[#unregisterURLs-auth]_:
+
+>>> server.unregisterURLs(
+...     'gocept', password,
+...     ['http://example.com/url2',
+...      'http://example.com/url3'])
+True
+
+After calling unregisterURLs those URLs are no longer int he client's
+list[#functionaltest]_:
+
+>>> transaction.abort()
+>>> list(cl_gocept.iter_urls())
+[<gocept.lms.url.URL 'http://example.com/url1'>]
+
+>>> zope.app.component.hooks.setSite(old_site)
+
+
+Setting/getting the notification status
+=======================================
+
+Clients can choose whether or not hey want to retrieve notifications. This
+flag can be either set manually using the XML-RPC API or sometimes is set by
+the server (e.g. after a certain number of failed notifications):
+
+Initially, the notifications are sent:
+>>> server.getClientNotifications('gocept', password)
+True
+
+The client can choose to not receive them anymore:
+
+>>> server.setClientNotifications('gocept', password, False)
+>>> server.getClientNotifications('gocept', password)
+False
+
+And can re-enable them:
+
+>>> server.setClientNotifications('gocept', password, True)
+>>> server.getClientNotifications('gocept', password)
+True
+
+Forcing synchronization
+=======================
+
+Clients can ask for a complete URL registration and status synchronization
+using the `forceSynchronization` method:
+
+>>> from gocept.lms.interfaces import ISynchronization
+>>> gocept_sync = ISynchronization(cl_gocept)
+>>> gocept_sync.force
+False
+
+>>> server.forceSynchronization('gocept', password)
+
+Our client's `force` synchronization flag is now set and will be processed by
+the syncer service:
+
+>>> gocept_sync.force
+True
+
+
+Various API methods, currently implemented as stubs
+===================================================
+
+>>> server.getInfoFrameURL('gocept', password)
+'http://lms.gocept.com/v2/alerts'
+
+
+
+
+Clean up:
+
+>>> sm.unregisterUtility(mailer)
+True
+
+.. [#registerURLs-auth] registerURLs needs authentication:
+
+    >>> server.registerURLs('gocept', 'bsdf', [])
+    Traceback (most recent call last):
+        ...
+    ProtocolError: <ProtocolError for localhost/app/: 401 401 Unauthorized>
+
+.. [#unregisterURLs-auth] unregisterURLs needs authentication:
+
+    >>> server.unregisterURLs('gocept', 'bsdf', [])
+    Traceback (most recent call last):
+        ...
+    ProtocolError: <ProtocolError for localhost/app/: 401 401 Unauthorized>
+
+.. [#functionaltest] Setup functional test
+
+    >>> zope.app.component.hooks.setSite(root['app'])
+
+.. [#maildelivery] Setup mail delivery
+
+    >>> import zope.component
+    >>> import gocept.lms.tests
+    >>> sm = zope.component.getSiteManager()
+    >>> mailer = gocept.lms.tests.DummyMailDelivery()
+    >>> sm.registerUtility(mailer)

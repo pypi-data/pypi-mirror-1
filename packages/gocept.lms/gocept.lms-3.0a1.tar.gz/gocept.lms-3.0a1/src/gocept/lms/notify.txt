@@ -1,0 +1,231 @@
+============
+The notifier
+============
+
+The notifier keeps the registered clients updated about the state information
+for the URLs they subscribed to[#functionaltest]_.
+
+As the notifier talks to the clients using XML-RPC we keep a dummy around
+which lets us demonstrate how the communication works:
+
+>>> from gocept.lms.tests import install_xmlrpcdummy
+>>> xmlrpc = install_xmlrpcdummy()
+
+We also decrease the pause between updates to single clients so the test runs
+faster:
+
+>>> import gocept.lms.notify
+>>> import datetime
+>>> gocept.lms.notify.INTERVAL = datetime.timedelta(seconds=0)
+
+
+Sending out notifications
+=========================
+
+When run with an empty database, nothing happens:
+
+>>> from gocept.lms.notify import notify
+>>> notify()
+>>> xmlrpc.show_log()
+
+Let's create a couple of URLs and clients:
+
+>>> import zope.component
+>>> import gocept.lms.interfaces
+>>> urls = zope.component.getUtility(gocept.lms.interfaces.IURLProvider)
+>>> url1 = urls.add('http://example.com/1')
+>>> url2 = urls.add('http://example.com/2')
+>>> url3 = urls.add('http://example.com/3')
+>>> url4 = urls.add('http://example.com/4')
+
+>>> clients = zope.component.getUtility(gocept.lms.interfaces.IClientProvider)
+>>> clients.add(gocept.lms.client.Client('fred'))
+>>> fred = clients.get('fred')
+>>> fred.register_urls([url1, url2, url3])
+
+Fred has never been informed about the state of the URLs he subscribed to, so
+we expect that he will be notified the next time:
+
+>>> notify()
+>>> xmlrpc.show_log()
+Connect: None
+Update many states: fred - 3
+
+Running another notification would not produce any actions, because Fred was
+successfully notified:
+
+>>> notify()
+>>> xmlrpc.show_log()
+
+When Fred subscribes to another URL that has a `last state change` date
+before his last notification he will not receive a notification from this
+component (those status updates are handled by the XML-RPC interface):
+
+>>> fred.register_urls([url4])
+>>> notify()
+>>> xmlrpc.show_log()
+
+
+Suppressing notifications
+=========================
+
+There are two conditions for a client to not be notified. The first is if the
+client's notifications are disabled:
+
+>>> fred_notifications = gocept.lms.interfaces.INotifications(fred)
+>>> fred_notifications.last = fred_notifications.__class__.last
+>>> fred_notifications.enabled = False
+>>> notify()
+>>> xmlrpc.show_log()
+
+The client's last notification date has not been updated because he didn't
+receive a notification:
+
+>>> fred_notifications.last
+datetime.datetime(1, 1, 1, 0, 0, tzinfo=<UTC>)
+
+Clean-up:
+
+>>> fred_notifications.enabled = True
+
+The second is if the client should receive notifications but has received one
+a short time ago:
+
+>>> import pytz
+>>> now = datetime.datetime.now(pytz.UTC)
+>>> fred_notifications.last = now
+>>> gocept.lms.notify.INTERVAL = datetime.timedelta(seconds=2)
+
+Ensure that a URL was changed recently enough for the client to be notified
+about it:
+
+>>> url1.last_state_change = now
+>>> import zope.event, zope.lifecycleevent
+>>> zope.event.notify(zope.lifecycleevent.ObjectModifiedEvent(url1))
+
+>>> notify()
+>>> xmlrpc.show_log()
+
+After the interval has elapsed, the client will receive notifications again:
+
+>>> import time
+>>> time.sleep(2.1)
+>>> notify()
+>>> xmlrpc.show_log()
+Connect: None
+Update many states: fred - 1
+
+Disabling client notifications that fail too often
+==================================================
+
+Clients might be unreachable for a while (e.g. during maintenance intervals).
+We tolerate this, but disable clients after a number of failed notifications:
+
+>>> xmlrpc.fail_update = True
+>>> xmlrpc.updateManyStates('foo', 'foo', [])
+Traceback (most recent call last):
+Exception: Client unreachable
+
+Fred's notifications are currently enabled:
+
+>>> fred_notifications.enabled
+True
+
+We try to notify him 20 times, after which the flag will turn over to `False`
+and an event will be fired which signals this:
+
+>>> def handle_disabling(event):
+...     print event, event.client.id
+>>> zope.component.provideHandler(
+...     handle_disabling,
+...     (gocept.lms.client.NotificationsDisabled,))
+>>> mindate = datetime.datetime.min.replace(tzinfo=pytz.UTC)
+
+>>> for i in range(20):
+...   fred_notifications.last = mindate
+...   fred_notifications.notify()
+<gocept.lms.client.NotificationsDisabled object at 0x...> fred
+>>> fred_notifications.enabled
+False
+>>> fred_notifications.failed
+20
+
+We also see the connection attempts that happened:
+>>> xmlrpc.show_log()
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+Connect: None
+
+Let's enable the client again:
+
+>>> xmlrpc.fail_update = False
+
+Notifying the client directly by using the notify* methods
+==========================================================
+
+Clients provide a couple of methods that allow direct notification about URL
+status. Those methods are mostly policy-free, so they don't check for high
+frequency of notifications or the `don't notify me` option. Those have to be
+taken care of by the invoking code.
+
+The `notify` method can be used to notify a client about individual URLs'
+status:
+
+>>> fred.notify([url1])
+>>> xmlrpc.show_log()
+Connect: None
+Update many states: fred - 1
+
+The `notify_all` method can be used to notify a client about the status of all
+of its URLs:
+
+>>> fred.notify_all()
+>>> xmlrpc.show_log()
+Connect: None
+Update many states: fred - 4
+
+The `notify_update` method notifies a client about the status of all of its
+URLs that changed after the date that is set in the client's
+INotifications.last field. Assume we just ran the notifier, then Fred doesn't
+get any update notifications currently:
+
+>>> fred_notifications.last = datetime.datetime.now(pytz.UTC)
+>>> fred.notify_update()
+>>> xmlrpc.show_log()
+
+Let's set Fred's last update date to URL 1's change date and try again:
+
+>>> fred_notifications.last = url1.last_state_change
+>>> fred.notify_update()
+>>> xmlrpc.show_log()
+Connect: None
+Update many states: fred - 1
+
+
+.. [#functionaltest] Setup functional test
+
+    >>> import gocept.lms.app
+    >>> root = getRootFolder()
+    >>> import zope.app.component.hooks
+    >>> old_site = zope.app.component.hooks.getSite()
+    >>> zope.app.component.hooks.setSite(root)
+
+    >>> root['app'] = gocept.lms.app.LMS()
+    >>> zope.app.component.hooks.setSite(root['app'])
