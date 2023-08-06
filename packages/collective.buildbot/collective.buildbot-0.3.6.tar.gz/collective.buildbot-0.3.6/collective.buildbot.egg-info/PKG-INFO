@@ -1,0 +1,1257 @@
+Metadata-Version: 1.0
+Name: collective.buildbot
+Version: 0.3.6
+Summary: A set of zc.buildout recipes and support for declarative configuration for Buildbot
+Home-page: UNKNOWN
+Author: Gael Pasgrimaud
+Author-email: gael.pasgrimaud@ingeniweb.com
+License: ZPL
+Description: 
+        .. contents::
+        
+        Package description
+        *******************
+        
+        This package provides a set of zc.buildout_ recipes that make it easy
+        to configure a buildbot_ setup (build master, build slaves and
+        projects) and a scripts to run the buildbot master and slaves. The
+        recipes produce INI-style declarative configuration files based on the
+        buildout configuration. These configuration files are in turn read by
+        the buildbot runner script to initialize the buildbot environment.
+        
+        The available recipes are:
+        
+        * ``collective.buildbot:master`` -- Produces a configuration file
+        for the build master process.
+        
+        * ``collective.buildbot:slave`` -- Produces a configuration file for
+        the build slave process.
+        
+        * ``collective.buildbot:project`` -- Produces a configuration for a
+        project build on a selected slave.
+        
+        * ``collective.buildbot:poller`` -- Produces configuration for code
+        repository pollers.
+        
+        It is possible to use all the recipes in a single buildout and have
+        both the master and slave(s) on the same machine. However, in most
+        cases you will have one buildout for the build master that uses the
+        ``collective.buildbot:master`` and ``collective.buildbot:project`` to
+        set up the build processes and then separate buildouts on each of the
+        slave machines that use the ``collective.buildbot:slave`` recipe.
+        
+        .. _zc.buildout: http://pypi.python.org/pypi/zc.buildout
+        .. _buildbot: http://pypi.python.org/pypi/buildbot
+        
+        Quick start
+        ***********
+        
+        A paster template is provided with the package to generate a basic
+        configuration. Just run::
+        
+        $ easy_install -U collective.buildbot
+        $ paster create -t buildbot my.project
+        $ cd my.project
+        
+        Check the generated configuration in `master.cfg`.
+        
+        Build the environnement::
+        
+        $ python bootstrap.py
+        $ ./bin/buildout
+        
+        Then start the daemons::
+        
+        $ ./bin/master start
+        $ ./bin/yourhostname start
+        
+        Go to http://localhost:9080 and enjoy your new buildbot
+        
+        
+        
+        The build master recipe
+        ***********************
+        
+        The ``collective.buildbot:master`` recipe produces a configuration
+        file that sets up the build master process. Once the build master is
+        configured you can run in by executing the controller script under the
+        buildout's bin directory. The controller script will be named after
+        the section name, so if you had a ``[buildmaster]`` section in your
+        buildout.cfg you would get a ``bin/buildmaster`` script.
+        
+        Supported options
+        =================
+        
+        The recipe supports the following options:
+        
+        ``port``
+        The port the build master process listens for connections from
+        build slaves. The slaves must be configured to use the
+        corresponding port in the sections using the
+        ``collective.buildbot:slave`` recipe.
+        
+        ``wport``
+        The web port for serving the buildbot web interface.
+        
+        ``project-name``
+        Project name. Displayed on the web interface.
+        
+        ``project-url``
+        Project url, used on the web interface.
+        
+        ``url``
+        buildbot url.
+        
+        ``build-slaves``
+        A sequence of build slave configurations. Each build slave must be
+        defined on a separate line containing the name of the build slave
+        and the password for the build slave separated by white space.
+        
+        ``allow-force`` (optional)
+        If ``true`` allows users to force builds using the web
+        interface. Defaults to ``false``.
+        
+        ``public-html`` (optional)
+        Location of a directory that contains custom resources (HTML, CSS,
+        images) for the web interface.
+        
+        
+        Additionally you can use the following options if you need to run an
+        IRC bot:
+        
+        ``irc-host``
+        The irc host to connect to. ie: irc.freenode.net
+        
+        ``irc-channels``
+        A list of channels to join, ie: #plone
+        If channel has password write it after colon, ie. #private:passwd
+        
+        ``irc-nickname``
+        The bot nickname. Defaults to ``buildbot``
+        
+        ``irc-password``
+        The password used to identify the bot. Defaults to an empty string
+        
+        You can also use the following options if you need to run an ``PBListener``:
+        
+        ``listener-port``
+        The port on which ``PBListener`` should listen for connections.
+        
+        ``listener-user``
+        Username used for connection authentication.
+        
+        ``listener-passwd``
+        Password used for connection authentication.
+        
+        
+        Example usage
+        =============
+        
+        We'll start by creating a buildout that uses the recipe::
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = buildmaster
+        ...
+        ... [buildmaster]
+        ... recipe = collective.buildbot:master
+        ... port = 8080
+        ... wport = 8082
+        ... project-name = The project
+        ... project-url = http://example.com/
+        ... url = http://example.com/buildbot
+        ... slaves =
+        ...     slave1 password
+        ...     slave2 password
+        ... """)
+        
+        Running the buildout gives us::
+        
+        >>> print system(buildout)
+        Installing buildmaster...
+        New python executable in /sample-buildout/parts/buildmaster/.../python...
+        Installing setuptools.............done.
+        Generated script '/sample-buildout/parts/buildmaster/buildbot.tac'.
+        Generated config '/sample-buildout/parts/buildmaster/buildbot.cfg'.
+        Generated script '/sample-buildout/bin/buildmaster'.
+        
+        As shown above, the buildout generated the required configuration
+        files and the runner script under ``bin``. You can control build
+        master process by running::
+        
+        $ ./bin/buildmaster [start | stop | restart]
+        
+        
+        The Twisted .tac file that is used to launch the buildbot process::
+        
+        >>> cat(join('parts', 'buildmaster', 'buildbot.tac'))
+        from twisted.application import service
+        from buildbot.master import BuildMaster
+        import os
+        import sys
+        import collective.buildbot
+        <BLANKLINE>
+        basedir = r'/sample-buildout/parts/buildmaster'
+        buildbot = os.path.dirname(collective.buildbot.__file__)
+        <BLANKLINE>
+        configfile = os.path.join(buildbot, 'master.py')
+        application = service.Application('buildmaster')
+        <BLANKLINE>
+        master = BuildMaster(basedir, configfile)
+        master.setServiceParent(application)
+        <BLANKLINE>
+        
+        We can also see that the configuration file generated by the recipe reflects
+        the options we chose in our buildout configuration::
+        
+        >>> config_path  = os.path.join('parts', 'buildmaster', 'buildbot.cfg')
+        >>> config = ConfigParser()
+        >>> _ = config.read(config_path)
+        >>> slave_res = []
+        >>> for opt, val in (('slave1', 'password'),
+        ...     ('slave2','password'),
+        ... ):
+        ...     slave_res.append(bool(val == config.get('slaves', opt)))
+        >>> False not in slave_res
+        True
+        
+        >>> buildbot_res = []
+        >>> for opt, val in (('project-name','The project'),
+        ...     ('projects-directory', '%s/parts/projects' % os.getcwd()),
+        ...     ('pollers-directory', '%s/parts/pollers' % os.getcwd()),
+        ...     ('wport', '8082'),
+        ...     ('project-url', 'http://example.com/'),
+        ...     ('port', '8080'),
+        ...     ('allow-force', 'false'),
+        ... ):
+        ...     buildbot_res.append(bool(val == config.get('buildbot', opt)))
+        >>> False not in buildbot_res
+        True
+        
+        
+        The build slave recipe
+        **********************
+        
+        The ``collective.buildbot:slave`` recipe produces a configuration
+        file that sets up a build slave process. Once the build slave is
+        configured you can run it by executing the controller script under the
+        buildout's bin directory. The controller script will be named after
+        the section name, so if you had a ``[buildslave]`` section in your
+        buildout.cfg you would get a ``bin/buildslave`` script.
+        
+        Since the name of the section using this recipe will also become the
+        name of the build slave it is important to choose the name that
+        corresponds to the buildmaster configuration.
+        
+        Supported options
+        =================
+        
+        The recipe supports the following options:
+        
+        ``host``
+        Hostname of the build master.
+        
+        ``port``
+        Port that the build master is listening. This should match the
+        ``port`` option in the section using the
+        ``collective.buildbot:master`` recipe in your buildmaster
+        buildout.
+        
+        ``password``
+        Build slave password. This should match the password in the
+        ``slave-names`` section in the buildmaster buildout.
+        
+        ``eggs``
+        Used to install extra eggs in slave environment.
+        
+        ``environment``
+        Can define the name of a section, containing environment variable
+        that will be defined in the slave environment.
+        
+        ``umask``
+        Override the default 0077 umask which is used in the build directory.
+        
+        Example usage
+        =============
+        
+        We'll start by creating a buildout that uses the recipe::
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts =
+        ...	   buildslave
+        ...
+        ... [buildslave]
+        ... recipe = collective.buildbot:slave
+        ... host = localhost
+        ... port = 8888
+        ... password = password
+        ... environment = slaveenv
+        ... umask = 0002
+        ...
+        ... [slaveenv]
+        ... PATH = /bin:/usr/bin:/usr/local/bin:/usr/local/firefox
+        ... """)
+        
+        Running the buildout gives us::
+        
+        >>> print system(buildout)
+        Installing buildslave.
+        ...
+        Generated script /sample-buildout/parts/buildslave/buildbot.tac.
+        Generated script '/sample-buildout/bin/buildslave'.
+        <BLANKLINE>
+        
+        As shown above, the buildout generated the required scripts. You can
+        control build slave process by running::
+        
+        $ ./bin/buildslave [start | stop | restart]
+        
+        The project recipe
+        ******************
+        
+        The ``collective.buildbot:project`` recipe is responsible for creating
+        the buildbot configuration for a project which is a single testable
+        component. Whether this project corresponds to a single sofware
+        package or many is up to you. In most cases a project corresponds to a
+        buildout which in turn may contain one or many software packages. Each
+        project has a separate state and is visualized as a column in the
+        waterfall display.
+        
+        This recipe should be used in the same buildout with
+        ``collective.buildbot:master``.
+        
+        
+        Supported options
+        =================
+        
+        The recipe supports the following options:
+        
+        ``slave-names`` (mandatory)
+        
+        A white-space separated list of slave names that the project will be
+        built on. These must correspond to the section names that use the
+        ``collective.buildbot:slave`` recipe and that are consequently
+        referred in the ``slaves`` option of the section using the
+        ``collective.buildbot:master`` recipe.
+        
+        ``vcs`` (optional)
+        
+        The version control system used to obtain the source code for the
+        project. Defaults to ``svn``. Other possible values are: ``hg``,
+        ``bzr``, ``git`` and ``cvs``.
+        
+        ``vcs-mode`` (optional)
+        
+        The mode used to fetch the source code from the version control
+        system. Defaults to ``update``. Other possible values are:
+        ``clobber``, ``copy`` and ``export``. See the buildbot manual
+        section for ``Source Checkout`` for a description of what each
+        option does.
+        
+        ``repositories`` (mandatory)
+        
+        A sequence of newline separated URLs to the code repositories that
+        correspond to the selected version control system. For Subversion
+        this could be something like
+        ``https://svn.plone.org/svn/collective/collective.buildbot/trunk``
+        for Git something like
+        ``git@github.com:dokai/hexagonit-swfheader.git``
+        and for CVS like
+        ``:pserver:anonymous@cvs.sourceforge.net:/cvsroot/buildbot!buildbot``.
+        
+        For Subversion, if the url root is found in HOME/.buildout/.httpauth,
+        username and password will be used to perform checkouts and updates.
+        See: http://pypi.python.org/pypi/lovely.buildouthttp.
+        
+        For each repository you define, a separate Buildbot project
+        configuration will be generated that shares all the other
+        options. This is useful if you have multiple similar projects within
+        the same repository and can save you a lot of typing. Since
+        Subversion URLs contain the branch information it is even possible
+        to pull in code from separate branches. For other version control
+        system that use the ``branch`` option (e.g. Git) you're limited to a
+        single shared branch name.
+        
+        ``branch`` (optional)
+        
+        The branch in the version control system that will be checked out. For
+        Subversion checkouts you should provide the full URL to the desired branch
+        (e.g. something that ends with ``trunk`` or ``branches/foo``) and leave this
+        option empty. For Git repositories the default value is ``master``. Note
+        that for Git repositories you can use any identifier that resolves to (in
+        the git rev-parse sense) to a treeish object.
+        
+        ``always-use-latest`` (optional, defaults to ``False``)
+        
+        Whether to always update to the most recent available sources for
+        this build. Please refer to the 'alwaysUseLatest' option of
+        ``buildbot.steps.source.Source`` for more info.
+        
+        Basically, if your buildbot is watching changes from multiple
+        repositories it is very likely that you will need to set this option
+        to ``True``.
+        
+        ``email-notification-sender`` (optional)
+        
+        An email address that will be used in the From: header for the
+        notification messages.
+        
+        ``email-notification-recipients`` (optional)
+        
+        A newline separated sequence of email addresses the notification
+        messages will be sent to.
+        
+        ``mail-mode`` (optional)
+        
+        The mode to use for sending mails. Available options are:
+        
+        * all
+        
+        Send mail about all builds, both passing and failing
+        
+        * failing
+        
+        Only send mail about builds which fail
+        
+        * problem
+        
+        Only send mail about a build which failed when the previous build
+        has passed. If your builds usually pass, then this will only send
+        mail when a problem occurs.
+        
+        Defaults to::
+        
+        failing
+        
+        ``build-sequence`` (optional)
+        
+        A newline separated sequence of shell commands executed on the build
+        slave after checking out the code from the repository that will
+        build the project.
+        
+        Defaults to::
+        
+        bin/python bootstrap.py
+        bin/buildout
+        
+        which is appropriate for buildout based projects.
+        
+        If a command starts with python, the command will be replaced with the
+        full path to the python of the buildbot slave. The slave has its own
+        virtualenv python
+        
+        ``test-sequence`` (optional)
+        
+        A newline separated sequence of shell commands executed on the build
+        slave to execute the test suite. Defaults to::
+        
+        bin/test
+        
+        ``default-scheduler`` (optional)
+        
+        Sets up the default scheduler that triggers a build after every change
+        using a grace period waiting for more changes.  The period can be specified
+        in seconds.
+        
+        ``periodic-scheduler`` (optional)
+        
+        Sets up a periodic scheduler that schedules a build every ``n``
+        minutes, where ``n`` is the given integer value.
+        
+        ``cron-scheduler`` (optional)
+        
+        Sets up a cron-like scheduler that schedules a build at a given
+        time. The time is configured in a crontab manner using white space
+        separated values for the following fields::
+        
+        [minute] [hour] [day of month] [month] [day of week]
+        
+        The values should be integers in the approriate range for the given
+        field or ``*`` (asterisk) for all values. For example to schedule a
+        build at 3:00 am every night you would use::
+        
+        cron-scheduler = 0 3 * * *
+        
+        ``dependent-scheduler`` (optional)
+        
+        Sets up a dependency between the given project and the current
+        one. After a successful build of the given project, this one will be
+        triggered.
+        
+        ``dependencies`` (optional)
+        
+        A sequence of newline-separated paths that when found on a change
+        set should cause a build to be triggered on this slave.
+        
+        For example, if you would like to cause your build to be run
+        whenever a change to a project you depend on named
+        ``some.other-project`` happens, you would use::
+        
+        dependencies = some.other-project/trunk
+        
+        The paths you list here are checked using substring matching. So for
+        example, if you don't care which branch of ``some.other-project``
+        has changed, you could use::
+        
+        dependencies = some.other-project
+        
+        Or, alternatively, if you only care if a single file inside that
+        project is changed, you could use a more specific path as well::
+        
+        dependencies = some.other-project/trunk/versions.cfg
+        
+        ``pyflakes`` (optional)
+        
+        A sequence of newline separated PyFlakes_ commands to run. If
+        defined, the given PyFlakes commands will be run after the test
+        sequence.
+        
+        The commands should consist of a path to the ``pyflakes`` script and
+        a path to the source code container. For example, using a global
+        pyflakes installation on a project located under
+        ``src/some.project`` within the build directory you would set::
+        
+        pyflakes = pyflakes src/some.project
+        
+        You can also have your slave buildout install pyflakes and use that
+        instead of a globally installed version.
+        
+        .. _PyFlakes: http://divmod.org/trac/wiki/DivmodPyflakes
+        
+        Example usage
+        =============
+        
+        We'll start by creating a buildout that uses the recipe. A full
+        example would propably have other sections defining the build master
+        and slaves, but here we will demonstrate only the use of the
+        ``collective.buildbot:project`` recipe.
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = my.package other.package
+        ...
+        ... [my.package]
+        ... recipe = collective.buildbot:project
+        ... email-notification-sender = email@example.com
+        ... slave-names = slave1
+        ... mail-host = localhost
+        ... email-notification-recipients =
+        ... 	email@example.com
+        ... vcs = svn
+        ... vcs-mode = clobber
+        ... repositories = http://example.com/svn/my.package/trunk
+        ... always-use-latest = yes
+        ...
+        ... [other.package]
+        ... recipe = collective.buildbot:project
+        ... slave-names = slave1
+        ... vcs = git
+        ... branch = 3720f2e9b3a6a148b01843bc64fbea5af59df2af
+        ... repositories = git://github.com/dokai/other.package.git
+        ... dependencies = my.package/trunk
+        ... """)
+        
+        Running the buildout gives us::
+        
+        >>> print system(buildout)
+        Installing my.package.
+        Generated config '/sample-buildout/parts/projects/my.package.cfg'.
+        Installing other.package.
+        Generated config '/sample-buildout/parts/projects/other.package.cfg'.
+        
+        As we can see, the recipe generated the project configuration files
+        under the ``projects`` directory in the parts::
+        
+        >>> config_path  = os.path.join('parts', 'projects', 'my.package.cfg')
+        >>> config = ConfigParser()
+        >>> _ = config.read(config_path)
+        >>> res = []
+        >>> for opt, val in (('name', 'my.package'),
+        ...     ('repository','http://example.com/svn/my.package/trunk'),
+        ...     ('email-notification-sender', 'email@example.com'),
+        ...     ('slave-names', 'slave1'),
+        ...     ('mail-host', 'localhost'),
+        ...     ('email-notification-recipients', '\nemail@example.com'),
+        ...     ('vcs', 'svn'),
+        ...     ('vcs-mode', 'clobber'),
+        ...     ('always-use-latest', 'yes'),
+        ... ):
+        ...     res.append(bool(val == config.get('project', opt)))
+        >>> False not in res
+        True
+        
+        >>> config_path  = os.path.join('parts', 'projects', 'other.package.cfg')
+        >>> config = ConfigParser()
+        >>> _ = config.read(config_path)
+        >>> res = []
+        >>> for opt, val in (('name', 'other.package'),
+        ...     ('repository', 'git://github.com/dokai/other.package.git'),
+        ...     ('slave-names', 'slave1'),
+        ...     ('vcs', 'git'),
+        ...     ('dependencies', 'my.package/trunk'),
+        ...     ('branch', '3720f2e9b3a6a148b01843bc64fbea5af59df2af'),
+        ... ):
+        ...     res.append(bool(val == config.get('project', opt)))
+        >>> False not in res
+        True
+        
+        If you have multiple similar projects you can define them within a
+        single buildout section by providing multiple repository URLs. All the
+        projects share the same options (except the repository URL). To
+        further reduce repetition we've defined the base URL to our repository
+        in the buildout section::
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = my_project
+        ... svn = http://svn.example.com/svnroot
+        ...
+        ... [my_project]
+        ... recipe = collective.buildbot:project
+        ... slave-names = slave1
+        ... vcs = svn
+        ... repositories =
+        ...    ${buildout:svn}/my.package/trunk
+        ...    ${buildout:svn}/other.package/tags/1.2.3
+        ...    ${buildout:svn}/third.package/branches/foobar
+        ...    ${buildout:svn}/third.package/branches/another
+        ...    ${buildout:svn}/third.package/branches/another
+        ... """)
+        
+        When we run the buildout we can see that it generated a separate configuration
+        file for each project representing a single repository.  A branch name is used
+        as extra identifier if detectable, otherwise an integer is added::
+        
+        >>> print system(buildout)
+        Uninstalling other.package.
+        Uninstalling my.package.
+        Installing my_project.
+        Generated config '/sample-buildout/parts/projects/my.package.cfg'.
+        Generated config '/sample-buildout/parts/projects/other.package.cfg'.
+        Generated config '/sample-buildout/parts/projects/third.package.cfg'.
+        Generated config '/sample-buildout/parts/projects/third.package_another.cfg'.
+        Generated config '/sample-buildout/parts/projects/third.package_2.cfg'.
+        
+        
+        The poller recipe
+        ******************
+        
+        The poller recipe defines pollers that automatically query the code
+        repositories for changes in project code base and then execute the
+        builders if changes are found.
+        
+        Supported options
+        =================
+        
+        The recipe supports the following options:
+        
+        ``vcs``
+        
+        The version control system. Defaults to ``svn``. Currently only
+        Subversion repositories are supported.
+        
+        ``repositories``
+        
+        A sequence of newline separated URLs to the root of the Subversion
+        repository containing the project code. Note: This is the root URL
+        to the repository and not the full path to your project. You only
+        need to provide one URL per repository, not per project.
+        
+        ``splitter``
+        
+        A regexp used to parse paths analyzed by the poller. The regexp must return 2
+        groups. The only important one is the project name to match in a builder
+        repository.
+        
+        Note that the regexp you provide will be treated as in raw-string
+        format for you (e.g. this
+        ``(?P<project>\S+\/foo|\S+\/bar\/[^\/]+)/(?P<relative>.*))`` becomes
+        ``r'(?P<project>\S+\/foo|\S+\/bar\/[^\/]+)/(?P<relative>.*))'``
+        
+        (Default
+        ``'(?P<project>\S+\/trunk|\S+\/branches\/[^\/]+)/(?P<relative>.*)'``).
+        
+        ``hist-max``
+        
+        Number of history lines to look at (Default 100).
+        
+        ``user``
+        
+        A svn user (Default None).
+        
+        ``password``
+        
+        A valid svn password for the user (Default None).
+        
+        ``poll-interval``
+        
+        Interval in seconds to check for changes (Default 600).
+        
+        ``svn-binary``
+        
+        Path to the ``svn`` binary. Defaults to ``svn`` which should work if
+        you have in your ``PATH``.
+        
+        Example usage
+        =============
+        
+        We can define a poller to make our buildbot aware of commits::
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = svnpoller
+        ...
+        ... [svnpoller]
+        ... recipe = collective.buildbot:poller
+        ... repositories = http://example.com/svn
+        ... user = h4x0r
+        ... password = passwd
+        ... """)
+        
+        >>> print system(buildout)
+        Installing svnpoller.
+        Generated config '/sample-buildout/parts/pollers/svnpoller.cfg'.
+        
+        Poller generation. You can see here all the available options::
+        
+        >>> config_path  = os.path.join('parts', 'pollers', 'svnpoller.cfg')
+        >>> config = ConfigParser()
+        >>> _ = config.read(config_path)
+        >>> res = []
+        >>> for opt, val in (('hist-max', '100'),
+        ...     ('repository','http://example.com/svn'),
+        ...     ('vcs','svn'),
+        ...     ('user','h4x0r'),
+        ...     ('svn-binary','svn'),
+        ...     ('password','passwd'),
+        ...     ('poll-interval','60')
+        ... ):
+        ...     res.append(bool(val == config.get('poller', opt)))
+        >>> False not in res
+        True
+        
+        You can also have the poller to observe multiple repositories.
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = svnpoller
+        ...
+        ... [svnpoller]
+        ... recipe = collective.buildbot:poller
+        ... repositories =
+        ...     http://example.com/svn
+        ...     http://otherexample.com/svn
+        ...     http://other.server.com/svn
+        ... user = h4x0r
+        ... password = passwd
+        ... """)
+        
+        >>> print system(buildout)
+        Uninstalling svnpoller.
+        Installing svnpoller.
+        Generated config '/sample-buildout/parts/pollers/svnpoller_0.cfg'.
+        Generated config '/sample-buildout/parts/pollers/svnpoller_1.cfg'.
+        Generated config '/sample-buildout/parts/pollers/svnpoller_2.cfg'.
+        <BLANKLINE>
+        
+        
+        Putting it all together
+        ***********************
+        
+        Below we will demonstrate how to put all the pieces together to create
+        a buildbot environment for your own projects. We will use two separate
+        buildouts: one for the build master and one for a single build
+        slave. For your own projects you may choose to use multiple build
+        slaves with each running, for example, on a different architecture or
+        a different python version.
+        
+        We'll start with the build master buildout that defines the build
+        master process and all the projects that we wish to build and test. We
+        also include a poller configuration that will poll the Subversion
+        repository for changes the projects and execute the build when changes
+        have occurred. If we were to use another version control system, such
+        as Git, we would need to use a commit-hook or a time-based build
+        scheduler.
+        
+        We'll also use PyFlakes to perform additional checks on the source
+        code.
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts =
+        ...     buildmaster
+        ...     svnpoller
+        ...     my.project
+        ...     my.buildout
+        ...     another.package
+        ...
+        ... [buildmaster]
+        ... recipe = collective.buildbot:master
+        ... port = 8080
+        ... wport = 8082
+        ... project-name = The company buildout
+        ... project-url = http://my.company.com
+        ... url = http://buildbot.my.company.com
+        ... allow-force = true
+        ... public-html = ${buildout:directory}/buildbot_css
+        ... slaves =
+        ...     buildslave secretpassword
+        ...
+        ... [svnpoller]
+        ... recipe = collective.buildbot:poller
+        ... repositories =
+        ...     ${my.project:svnroot}
+        ...     ${my.buildout:svnroot}
+        ... user = someuser
+        ... password = anothersecret
+        ...
+        ... [my.project]
+        ... recipe = collective.buildbot:project
+        ... slave-names = slave1
+        ... svnroot = https://svn.company.com/svn
+        ... repositories = ${my.project:svnroot}/my.project/trunk
+        ... email-notification-sender = buildbot@my.company.com
+        ... email-notification-recipients =
+        ...     my.project@my.company.com
+        ...     dev@my.company.com
+        ... mail-mode = problem
+        ... mail-lookup = plone.org
+        ... build-sequence =
+        ... test-sequence = ../../bin/python setup.py test
+        ...
+        ... [my.buildout]
+        ... recipe = collective.buildbot:project
+        ... slave-names = slave1
+        ... svnroot = https://svn.othercompany.com/svn
+        ... repositories = ${my.buildout:svnroot}/my.buildout/trunk
+        ... email-notification-sender = buildbot@my.company.com
+        ... email-notification-recipients = dev@my.company.com
+        ... test-sequence = bin/zope-instance test -v -vv
+        ... pyflakes =
+        ...     ../../../../bin/pyflakes src/collective.foo
+        ...     ../../../../bin/pyflakes src/collective.bar
+        ...
+        ... [another.package]
+        ... recipe = collective.buildbot:project
+        ... slave-names = slave1
+        ... vcs = git
+        ... repositories = git://git.company.com/projects/another-package.git
+        ... email-notification-sender = buildbot@my.company.com
+        ... email-notification-recipients = dev@my.company.com
+        ... build-sequence =
+        ... test-sequence = ../../bin/python setup.py test
+        ... periodic-scheduler = 60
+        ... pyflakes = ../../../../bin/pyflakes .
+        ... """)
+        
+        We've allowed forced builds which is quite handy sometimes. Since the
+        default buildbot web interface is not the most aesthetic we've also
+        included a directory that contains our custom css.
+        
+        The ``my.project`` and ``another.package`` packages are simple python
+        packages so we use the setup.py script to run the test suites. Because
+        these are simple packages we also clear out the ``build-sequence``
+        option since there is nothing to do before running the tests. The
+        ``my.buildout`` section is your typical Zope buildout and uses the
+        Zope controller script, ``zope-instance`` in this particular case, to
+        run the tests.
+        
+        Also, because the ``another.package`` project uses a Git repository,
+        the SVN poller won't apply to it so we've set up a periodic scheduler
+        that builds the project once in an hour. An alternative would be to
+        install a post-commit hook to the Git repository that notifies the
+        buildout of changes and schedules a build.
+        
+        The ``my.buildout`` project is a buildout based project, so we can use
+        the default ``build-sequence`` which will bootstrap and run the
+        buildout for us. For the zope.testing test runner we pass the
+        ``--exit-with-status`` parameter so that buildbot will know whether
+        the tests failed or not. The trunk may have additional svn:externals
+        defined that actually pull in the code that is tested which is the
+        common place. We've also demonstrated using pyflakes on multiple
+        source packages which may be the case in a full buildout.
+        
+        Let's run the buildout now.
+        
+        >>> mkdir('buildbot_css')
+        >>> print system(buildout)
+        Installing buildmaster...
+        New python executable in /sample-buildout/parts/buildmaster/.../python...
+        Installing setuptools............done.
+        Generated script '/sample-buildout/parts/buildmaster/buildbot.tac'.
+        Generated config '/sample-buildout/parts/buildmaster/buildbot.cfg'.
+        Generated script '/sample-buildout/bin/buildmaster'.
+        Installing my.project.
+        Generated config '/sample-buildout/parts/projects/my.project.cfg'.
+        Installing my.buildout.
+        Generated config '/sample-buildout/parts/projects/my.buildout.cfg'.
+        Installing svnpoller.
+        Generated config '/sample-buildout/parts/pollers/svnpoller_0.cfg'.
+        Generated config '/sample-buildout/parts/pollers/svnpoller_1.cfg'.
+        Installing another.package.
+        Generated config '/sample-buildout/parts/projects/another.package.cfg'.
+        <BLANKLINE>
+        
+        As we can see we got the ``bin/buildmaster`` script to run the build
+        master process and the corresponding configuration files. Our build
+        master is now ready and you can start it by running::
+        
+        $ ./bin/buildmaster start
+        
+        Next, we create the buildout for the build slave. This buildout may be
+        located on a different machine although having it on the same machine
+        will work just as fine.
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts =
+        ...    buildslave
+        ...    pyflakes
+        ...
+        ... [buildslave]
+        ... recipe = collective.buildbot:slave
+        ... host = buildbot.my.company.com
+        ... port = 8080
+        ... password = secretpassword
+        ...
+        ... [pyflakes]
+        ... recipe = zc.recipe.egg
+        ... eggs = pyflakes
+        ... entry-points = pyflakes=pkg_resources:run_script
+        ... arguments = 'pyflakes', 'pyflakes'
+        ... """)
+        
+        The slave buildout is very simple since the build master is in charge
+        of everything and the slave simply needs to contact the master and
+        receive instructions. We configured the address of the build master
+        and the password to match the configuration in the build master
+        buildout above.
+        
+        We've also included PyFlakes in the slave buildout to assure that it
+        is available on the slave machine. The pyflakes commands in the master
+        buildout use a path referring to this version of pyflakes.
+        
+        Running the buildout will give us the controller script for the slave
+        and the pyflakes script::
+        
+        >>> print system(buildout)
+        Uninstalling...
+        Installing buildslave...
+        New python executable in /sample-buildout/parts/buildslave/.../python...
+        Installing setuptools............done.
+        Generated script /sample-buildout/parts/buildslave/buildbot.tac.
+        Generated script '/sample-buildout/bin/buildslave'.
+        Installing pyflakes...
+        Generated script '/sample-buildout/bin/pyflakes'.
+        <BLANKLINE>
+        
+        The build slave can be started by running::
+        
+        $ ./bin/buildslave start
+        
+        Once you have both the build master and slave running the poller
+        should react to commits to the SVN repositories and run the builds
+        after each change. You can view the buildbot status pages at the
+        configured address, http://buildbot.my.company.com:8082/ in this
+        case. You can use the web interface to force a build which can be
+        useful to verify that the buildbot and projects are configured
+        correctly.
+        
+        It is now easy to add new projects or build slaves by modifying the
+        buildout configurations and rerunning the buildouts.
+        
+        Support
+        *******
+        
+        - Documentation: http://pypi.python.org/pypi/collective.buildbot
+        
+        - Mailing list (and bug reports): http://groups.google.fr/group/collectivebuildbot
+        
+        - Source: http://svn.plone.org/svn/collective/collective.buildbot/trunk/
+        
+        
+        Contributors
+        ************
+        
+        Project initiated at Ingeniweb (http://ingeniweb.com)
+        
+        Initial Authors:
+        - Gael Pasgrimaud
+        - Tarek Ziade
+        
+        Moved to the collective during the Plone Paris Sprint 2008.
+        
+        Contributors:
+        - Gael Pasgrimaud [gawel]
+        - Tarek Ziade [tarek]
+        - Kai Lautaportti [dokai]
+        - Jean-Francois Roche
+        - Mustapha Benali [mustapha]
+        - Sylvain Viollon [thefunny]
+        - Reinout van Rees [reinout]
+        
+        Change history
+        **************
+        
+        0.3.6 (2009-12-22)
+        ==================
+        
+        - Better fix for similar project names that occur in different buildout
+        parts.  For svn projects, this fixes that _trunk is appended unnecessarily
+        and it allows the automatic projectname_branchname names to work again.
+        
+        - Setting "usepty" in the slave.tac to buildbot's new default of 0.  See
+        http://buildbot.net/trac/ticket/158 and especially
+        http://buildbot.net/trac/ticket/255 .  This fixes problems with simple
+        shell commands like "cp" and "rm" failing for no apparent good reason.
+        And the stdio output seems to react much quicker now: nice.
+        [reinout]
+        
+        - Allow configuration updates to work again.
+        [hannosch]
+        
+        - Add possibility to use the default scheduler that triggers a build after
+        every change using a grace period waiting for more changes.
+        [witsch]
+        
+        - When using svn and you test multiple branches of the same project, you now
+        get project_branch-a, project_branch-b instead of project_2, project_3.
+        Named after the branch/tag name.
+        [reinout]
+        
+        - SVNScheduler changed the incoming change object in addChange to match
+        to its internal structure. But the change is reused in the next project
+        where it won't match any longer because of the change.
+        [do3cc]
+        
+        - Offering two more mail features of buildbot for configuration in
+        collective.buildbot mail-mode and mail-lookup. See updated
+        collective.buildbot documentation [do3cc]
+        
+        - Fixed an issue with similar project names that appeared in different
+        buildout parts [do3cc]
+        
+        - Fixed an issue with multiple repositories in a poller recipe
+        [do3cc]
+        
+        
+        0.3.5 (2009-07-17)
+        ====================
+        
+        - buildbot 0.7.11 compatibility
+        
+        - various small fixes
+        
+        
+        0.3.4 (2009-05-21)
+        ====================
+        
+        - Remove useless imports in docs.
+        [gawel]
+        
+        - Possible to configure ``PBListener``
+        [stxnext]
+        
+        - Added support for CVS repositories in project recipe. Location of code in
+        CVS is described by `cvsroot` and `cvsmodule`. This two parameters are
+        taken by spliting on `!` sign on repository location.
+        [stxnext]
+        
+        - IRC bot can join password protected channels.
+        [stxnext]
+        
+        - Refactor of all doctests that demonstrate recipes that subclass BaseRecipe
+        and rely upon it's write_config method. The implementation relies upon the
+        ConfigParser module which utilizes a dictionary data structure for storage
+        of sections and options. This can never be assumed to be ordered across
+        Python versions and we really shouldn't care upon order in our
+        implementation. Tests now verify existence within intended section and
+        correct value, rather than placement.
+        [andrewb]
+        
+        - Completing work from r67547 (e.g. Fixed occurrences of
+        `email-notification-recipients` to the plural form).  When initializing
+        collective.buildbot.project.Project we want to actually look for the plural
+        version.  Additionally, we want our comment regarding notifications in
+        master.cfg_tmpl to suggest the correct value to be set.
+        [andrewb]
+        
+        - Make timeout configurable, globally and independently for build
+        and test steps.
+        [sidnei]
+        
+        - Strip always_use_latest option to avoid issues with whitespace.
+        [sidnei]
+        
+        - Make Source Checkout retry up to 3 times, 10 seconds
+        apart. Somehow later versions of buildbot seem to fail much more
+        often when removing the checkout directory, and hopefully this
+        will work around that.
+        [sidnei]
+        
+        - Make Source Checkout mode configurable through ``vcs-mode``.
+        [sidnei]
+        
+        - Make ``build`` steps set ``haltOnFailure=True``. No point in doing
+        any testing if the build steps failed.
+        [sidnei]
+        
+        - Fixed compatibility problem with buildbot 0.7.9
+        [dokai]
+        
+        - Fixed problem with the test suite initialization which resulted in all
+        the doctests not being run. Also fixed test regressions that had surfaced
+        undetected because of the problem.
+        [dokai]
+        
+        0.3.3 (2008-09-26)
+        ==================
+        
+        - Apply patch from Chris Shenton to override default umask
+        [gawel]
+        
+        - Improve default template configuration
+        [gawel]
+        
+        - Add clean css to template
+        [gawel]
+        
+        0.3.2 (2008-09-14)
+        ==================
+        
+        - Add paster template to quickly generate a basic configuration
+        [gawel]
+        
+        - Fixed occurrences of `email-notification-recipients` to the singular form
+        as used in most places.
+        [hannosch]
+        
+        - Added a mechanism to have username/password for Subversion authentication
+        Which consists of a buildbot patch and a link to .httpauth on buildout
+        side
+        [tarek]
+        
+        - Add dependency between projects. The build of one project can
+        trigger the build of one other. [thefunny]
+        
+        - Improve the virtual env creation for Windows (mingw) and Cygwin.
+        Installation of eggs works with mingw, and we should get a python
+        ../../bin/python for Cygwin as well (symlink to the python used to
+        run buildout). [thefunny]
+        
+        0.3.1 (2008-05-31)
+        ==================
+        
+        - Fixed poller documentation and examples [mustapha]
+        
+        - Fixed failed tests when your executable is called something other
+        than python, e.g python2.4 [mustapha]
+        
+        0.3.0 (2008-05-28)
+        ==================
+        
+        - Use a custom scheduler to get poller working again [gawel]
+        
+        - Add splitter option to the poller recipe [gawel]
+        
+        - Added support for running PyFlakes on projects [dokai]
+        
+        - Refactored project name extraction logic [dokai]
+        
+        - Added Git support
+        
+        - Added support for defining multiple projects that result in
+        duplicate project names (e.g. projects referring to different
+        branches in a Subversion repository.)
+        
+        - Try to retrieve project name from svn urls [gawel]
+        
+        - Use a random minute in cron-scheduler when we have more than one
+        repository [gawel]
+        
+        - Deactive virtualenv under cygwin, this doesn't work [thefunny]
+        
+        - 'environment' can be used to specify environment variable on
+        slaves [thefunny]
+        
+        - 'eggs' can be used to install extra eggs in slaves [thefunny]
+        
+        - Refactored the functionality of the 'projects' recipe into the
+        'project' recipe and removed the 'projects' entry point. [dokai]
+        
+        - Refactored the functionality of the 'pollers' recipe into the
+        'poller' recipe and removed the 'pollers' entry point. [dokai]
+        
+        - Poller config files are now named after the section name, allowing
+        multiple poller sections to be defined. [dokai]
+        
+        0.2.1 (2008-05-21)
+        ==================
+        
+        - Fixed a critical typo in the slave name configuration in
+        fullexample.txt [dokai]
+        
+        0.2.0 (2008-05-21)
+        ==================
+        
+        - Added irc options so you can attach an irc bot to the master buildbot
+        [mustapha]
+        
+        - Allow public_html customization [gawel]
+        
+        - Added custom about page to link to collective.buildout [gawel]
+        
+        - Added support for Git repositories [dokai]
+        
+        - Refactored the repository URL configuration. For Subversion, you
+        should use only the ``repository`` option to specify a full URL to
+        the desired branch (trunk, tag or branch) that will be built. For
+        Git in addition to setting the ``repository`` option you can use
+        the ``branch`` option to specify a specific branch to build. By
+        default the ``master`` branch will be used for Git
+        repositories. [dokai]
+        
+        - Cleaned up a lot of redundant imports. [dokai]
+        
+        - Updated the documentation and examples. [dokai]
+        
+        - Deprecated the collective.buildbot:projects recipe [dokai]
+        
+        - Fixed problem with missing twistd.log files on first run [dokai]
+        
+        - Fixed bug that prevented the master from starting if there weren't
+        any SVN pollers configured. [dokai]
+        
+        - Added new options ``periodic-scheduler`` and ``cron-scheduler`` to
+        set up passive schedulers for projects. [dokai]
+        
+        
+        0.1.1 (2008-05-02)
+        ==================
+        
+        - bugs fixes [gawel]
+        
+        0.1.0 (xxxx-xx-xx)
+        ==================
+        
+        - Created recipe with ZopeSkel [Gael Pasgrimaud].
+        
+        Download
+        ********
+        
+Keywords: buildout buildbot
+Platform: UNKNOWN
+Classifier: Framework :: Buildout
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Software Development :: Build Tools
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: License :: OSI Approved :: Zope Public License
