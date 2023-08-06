@@ -1,0 +1,95 @@
+Tests for hooks
+---------------
+
+The configuration for hooks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+There is just a folder for the available add-ons which is blank by default::
+
+    >>> from clockin.config import ClockinConfig
+    >>> ClockinConfig.configFile = configFile
+    >>> config = ClockinConfig()
+    >>> config
+    <clockin.config.ClockinConfig instance at ...>
+
+    >>> print config['addons']
+    <BLANKLINE>
+
+So let's set it to something::
+
+    >>> CONFIG = """
+    ... [clockin]
+    ... username = user@example.com
+    ... password = secret
+    ... calendar = time
+    ... addons = /does/not/exist
+    ... """
+
+    >>> cf = open(config.configFile, "w")
+    >>> cf.write(CONFIG)
+    >>> cf.flush()
+
+    >>> config.load()
+    >>> print config['addons']
+    /does/not/exist
+
+But for later use let's create a real addon folder::
+
+    >>> import tempfile
+    >>> addOnFolder = tempfile.mkdtemp()
+
+    >>> CONFIG = """
+    ... [clockin]
+    ... username = user@example.com
+    ... password = secret
+    ... calendar = time
+    ... addons = %s
+    ... """ % addOnFolder
+
+    >>> cf = open(config.configFile, "w")
+    >>> cf.write(CONFIG)
+    >>> cf.flush()
+
+    >>> config.load()
+    >>> print config['addons']
+    /...
+
+Now let put a plugin into the folder::
+
+    >>> ADDON = """
+    ... def before_new(entry, clockin):
+    ...     entry.title = "addon processed title"
+    ... """
+
+    >>> import os
+    >>> af = open(os.path.join(addOnFolder, "plugin.py"), "w")
+    >>> af.write(ADDON)
+    >>> af.flush()
+
+We have to reload the addon folder::
+
+    >>> from clockin import hooks
+    >>> hooks.hookHandler = hooks.HookHandler()
+    >>> hooks.hookHandler.config = config
+    >>> hooks.hookHandler.loadAddOns()
+    >>> hooks.hookHandler.addons
+    set(['plugin'])
+
+So process a method::
+
+    >>> class StubEntry(object):
+    ...     def __init__(self, t, d):
+    ...         self.title = t
+    ...         self.description = d
+
+    >>> entry = StubEntry("title", "description")
+    >>> hooks.hookHandler.process("unknown_method", entry, None)
+    >>> print entry.title
+    title
+
+As we have seen the title has not been changed due to a not implemented method.
+Let's use a existing method::
+
+    >>> hooks.hookHandler.process("before_new", entry, None)
+    >>> print entry.title
+    addon processed title
