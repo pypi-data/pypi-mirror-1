@@ -1,0 +1,97 @@
+Event Invier Tests
+==================
+
+Event Inviter is Plone add-on package that allows the user to send
+email invitations for event attendees.
+
+The main pieces in place with collective.eventinviter are IInviter objects,
+which adapt events implementing interface IInvitationAware. To retrieve the
+list of attendees, the inviter can use another adapter IAttendeeEnumerator.
+
+Load configuration
+------------------
+
+    >>> from Products.Five.zcml import load_config
+    >>> import Products.Five
+    >>> load_config('configure.zcml', package=Products.Five)
+    >>> import Products.GenericSetup
+    >>> load_config('meta.zcml', Products.GenericSetup)
+    >>> import collective.eventinviter
+    >>> load_config('configure.zcml', package=collective.eventinviter)
+
+
+Create demo content
+-------------------
+
+Create an example event object and set attendees.
+
+First, create a new instance:
+
+    >>> self.loginAsPortalOwner()
+    >>> self.folder.invokeFactory(id='obj1', type_name='Event')
+    'obj1'
+    >>> from Products.CMFPlone.utils import base_hasattr
+    >>> base_hasattr(self.folder, 'obj1')
+    True
+    >>> obj1 = getattr(self.folder, 'obj1')
+    >>> obj1.edit(attendees='john.smith@smith.nospam.com\nbobby')
+
+
+Now we can adapt the event to get the list of attendees:
+
+    >>> from collective.eventinviter.interfaces import IAttendeeEnumerator
+    >>> enumerator = IAttendeeEnumerator(obj1)
+    >>> enumerator.attendees()
+    ['john.smith@smith.nospam.com']
+
+Now lets get the inviter adapter:
+
+    >>> from collective.eventinviter.interfaces import IInviter
+    >>> inviter = IInviter(obj1)
+    >>> mails = inviter.invite(debug=True)
+    >>> from Products.SecureMailHost import mail
+    >>> len([m for m in mails if isinstance(m, mail.Mail)]) == len(mails)
+    True
+    >>> 
+
+
+Setup Browser tests
+-------------------
+
+    >>> from Testing.ZopeTestCase import user_password
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser()
+    >>> browser.addHeader('Authorization',
+    ...                   'Basic %s:%s' % ('portal_owner', user_password))
+
+There's still no mail host configuration, so a message should be shown warning about it.
+
+    >>> browser.open(obj1.absolute_url() + '/edit')
+    >>> browser.getControl('Title').value = 'Test Event'
+    >>> browser.getControl(name='startDate').value = '2009/05/10 15:15:00 GMT'
+    >>> browser.getControl(name='endDate').value = '2009/05/15 15:15:00 GMT'
+    >>> browser.getControl('Save').click()
+    >>> 'There\'s a problem with the mail host setup. No email invitations where sent.' in browser.contents
+    True
+    
+
+Lets create a mail host for testing purposes.
+
+    >>> from collective.eventinviter.tests.common import DummyMailHost
+    >>> self.portal.MailHost = DummyMailHost('MailHost')
+    >>> mailhost = self.portal.MailHost
+
+Now, after the next edition, a message should be shown indicating which recipients where notified.
+
+    >>> browser.open(obj1.absolute_url() + '/edit')
+    >>> browser.getControl('Save').click()
+    >>> 'Sent email invitation to john.smith@smith.nospam.com.' in browser.contents
+    True
+
+Also ensure that our message is at the fake mail host.
+
+    >>> len(mailhost.messages)
+    1
+    >>> msg = mailhost.messages[0]
+    >>> msg.mto
+    'john.smith@smith.nospam.com'
