@@ -1,0 +1,73 @@
+Introduction
+============
+
+This is a PAS plugin that makes it possible to create groups "on the fly" for 
+users via subscription adapters and utilities.
+
+The plugin can be installed using a GenericSetup extension profile.
+
+For example, say you have an LDAP repository where a user property contains a
+user's business unit. If this is mapped as a user property, you can write a 
+subscription adapter that adapts the user to ISuperGroups. It would look up
+this property on a user and return a list of group ids that corresponds to the 
+value of the property. When Plone lists a user's groups or assigns roles based 
+on a user's groups, the user will appear to be a member of this group.
+
+For example::
+
+    from zope.interface import implements
+    from zope.component import adapts
+    
+    from borg.supergroup.interfaces import ISuperGroups
+    from Products.PluggableAuthService.interfaces.authservice import IBasicUser
+    
+    class ImpliedGroups(object):
+        implements(ISuperGroups)
+        adapts(IBasicUser)
+        
+        def __init__(self, context):
+            self.principal = context
+        
+        def __call__(self):
+            implied = self.principal.getProperty('implied_group', '')
+            if implied:
+                yield implied
+
+This can be registered in ZCML with::
+
+    <subscriber factory=".groups.ImpliedGroups" />
+
+This is a simple example that looks for an implied group in the 
+'implied_groups' user property. Of course, you could source the group(s) from
+wherever you want. The return value should be an iterable (here we use a 
+generator).
+
+To make implied groups show up in general group listings (e.g. on the 
+'Sharing' tab in the Plone user interface), you could write a named utility 
+providing ISuperGroupsEnumeration. This will be passed some search parameters, 
+and should return any implied groups if they can be matched to the search 
+parameters.
+
+For example::
+
+    from zope.interface import implements
+    from zope.component import adapts
+    
+    from borg.supergroup.interfaces import ISuperGroupsEnumeration
+    
+    class ImpliedGroupsEnumeration(object):
+        implements(ISuperGroupsEnumeration)
+        
+        def enumerate_groups(self, id=None, exact_match=False, **kw):
+            if (exact_match and id == 'Alpha') or (not exact_match and id in 'Alpha'):
+                yield dict(id='Alpha', title='Alpha Group')
+
+In ZCML, this would be registered with::
+
+    <utility 
+        factory=".groups.ImpliedGroupsEnumeration" 
+        name="my.implied.groups"
+        />
+
+For more examples, see the tests in integration.txt and the interface
+declarations in interfaces.py.
