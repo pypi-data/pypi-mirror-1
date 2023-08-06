@@ -1,0 +1,166 @@
+
+var FCKBaseHref = {};
+
+
+// adapted from $Id: kupuploneeditor.js 9879 2005-03-18 12:04:00Z yuppie $
+makeLinksRelative = function(basehref, contents) {
+    var base=basehref.replace('<dtml-var "REQUEST.SERVER_URL">','');
+    var href = base.replace(/\/[^\/]*$/, '/');
+    var hrefparts = href.split('/');
+    return contents.replace(/(<[^>]* (?:src|href)=")([^"]*)"/g,
+        function(str, tag, url, offset, contents) {
+            url=url.replace('<dtml-var "REQUEST.SERVER_URL">','');
+            // gruikkk patch for old gecko content inner anchors fck bug
+            if (url.substring(0,1)== '#') {
+                str = tag + url +'"';
+            }
+            else {
+                var urlparts = url.split('#');
+                var anchor = urlparts[1] || '';
+                url = urlparts[0];
+                var urlparts = url.split('/');
+                var common = 0;
+                while (common < urlparts.length &&
+                       common < hrefparts.length &&
+                       urlparts[common]==hrefparts[common])
+                    common++;
+                var last = urlparts[common];
+                if (common+1 == urlparts.length && last=='emptypage') {
+                    urlparts[common] = '';
+                }
+                // The base and the url have 'common' parts in common.
+                if (common > 0) {
+                    var path = new Array();
+                    var i = 0;
+                    for (; i+common < hrefparts.length-1; i++) {
+                        path[i] = '..';
+                    };
+                    while (common < urlparts.length) {
+                        path[i++] = urlparts[common++];
+                    };
+                    if (i==0) {
+                        path[i++] = '.';
+                    }
+                    str = path.join('/');
+                    if (anchor) {
+                        str = [str,anchor].join('#');
+                    }
+                    str = tag + str+'"';
+                }
+            }    
+            return str;
+        });
+};
+
+finalizePublication = function ( editorInstance ) {
+   var oField = editorInstance.LinkedField;
+   var fieldName = oField.name;
+   var baseHref = FCKBaseHref[fieldName];
+   if (baseHref) {
+       relativeLinksHtml = makeLinksRelative(FCKBaseHref[fieldName], editorInstance.GetXHTML());
+       oField.value = relativeLinksHtml;
+   }  
+   else oField.value = editorInstance.GetXHTML();
+   // for control only
+   // alert(oField.value);
+}
+
+
+getParamValue = function (id) {
+    value = document.getElementById(id).value;
+    if (value=='true') return true;
+    if (value=='false') return false;
+    return value;
+}
+
+
+FCKeditor_Plone_start_instance = function (fckContainer, inputname) {
+        var inputContainer = document.getElementById (inputname + '_' + 'cleaninput');
+        if (inputContainer) {        
+            var fckParams = [
+                             'path_user', 'base_path', 'fck_basehref', 'links_basehref',
+                             'input_url', 'allow_server_browsing', 'browser_root', 
+                             'allow_file_upload', 'allow_image_upload', 'allow_flash_upload', 
+                             'fck_skin_path', 'lang', 'fck_default_r2l', 'force_paste_as_text',  
+                             'allow_latin_entities', 'spellchecker', 'keyboard_entermode', 
+                             'keyboard_shiftentermode', 'fck_toolbar', 'editor_width', 'editor_height'
+                             ];
+            var fckValues = {};
+            
+            for (var i=0; i<fckParams.length; i++)  {
+               var id = inputname + '_' + fckParams [i];
+               fckValues [fckParams [i]] = getParamValue(id);
+            }
+            
+            var oFck = new FCKeditor(inputname); 
+            var pathUser = fckValues ['path_user'] + '/';          
+            oFck.BasePath = fckValues ['base_path'] + '/';  
+            oFck.Config['CustomConfigurationsPath'] = fckValues ['input_url'] + '/fckconfigPlone.js?field_name='+ inputname;
+            oFck.BaseHref = fckValues ['fck_basehref'];
+            FCKBaseHref[inputname] = fckValues ['links_basehref'];
+            if (inputContainer.innerText != undefined) oFck.Value = inputContainer.innerText;
+            else oFck.Value = inputContainer.textContent;
+            oFck.Config['LinkBrowser'] = fckValues ['allow_server_browsing'];
+            oFck.Config['LinkBrowserURL'] = fckValues ['base_path'] + '/fckbrowser/browser.html?field_name='+ inputname + '&Connector=' + fckValues ['input_url'] + '/connectorPlone&ServerPath='+ fckValues ['browser_root'] + '&CurrentPath=' + pathUser ;
+            oFck.Config['LinkUpload'] = fckValues ['allow_file_upload'] ;
+            oFck.Config['LinkUploadURL'] = fckValues ['input_url'] + '/uploadPlone?field_name='+ inputname + '&CurrentPath=' + pathUser;
+            oFck.Config['ImageBrowser'] = fckValues ['allow_server_browsing'];      
+            oFck.Config['ImageBrowserURL'] = fckValues ['base_path'] + '/fckbrowser/browser.html?field_name='+ inputname + '&Type=Image&Connector=' + fckValues ['input_url'] + '/connectorPlone&ServerPath='+ fckValues ['browser_root'] + '&CurrentPath=' + pathUser ;
+            oFck.Config['ImageUpload'] = fckValues ['allow_image_upload'] ; 
+            oFck.Config['ImageUploadURL'] = fckValues ['input_url'] + '/uploadPlone?field_name='+ inputname + '&CurrentPath=' + pathUser;
+            oFck.Config['FlashBrowser'] = fckValues ['allow_server_browsing'];
+            oFck.Config['FlashBrowserURL'] = fckValues ['base_path'] + '/fckbrowser/browser.html?field_name='+ inputname + '&Type=Flash&Connector=' + fckValues ['input_url'] + '/connectorPlone&ServerPath='+ fckValues ['browser_root'] + '&CurrentPath=' + pathUser ;
+            oFck.Config['FlashUpload'] = fckValues ['allow_flash_upload'] ; 
+            oFck.Config['FlashUploadURL'] = fckValues ['input_url'] + '/uploadPlone?field_name='+ inputname + '&CurrentPath=' + pathUser;
+            oFck.Config['MediaBrowser'] = fckValues ['allow_server_browsing'];
+            oFck.Config['MediaBrowserURL'] = fckValues ['base_path'] + '/fckbrowser/browser.html?field_name='+ inputname + '&Type=Media&Connector=' + fckValues ['input_url'] + '/connectorPlone&ServerPath='+ fckValues ['browser_root'] + '&CurrentPath=' + pathUser ;        
+            oFck.Config['SkinPath'] = fckValues ['base_path'] + '/editor/' + fckValues ['fck_skin_path'];
+            oFck.Config['AutoDetectLanguage'] = false;
+            oFck.Config['DefaultLanguage'] = fckValues ['lang'];
+            oFck.Config['ForcePasteAsPlainText'] = fckValues ['force_paste_as_text'];
+            oFck.Config['IncludeLatinEntities'] = fckValues ['allow_latin_entities'];
+            oFck.Config['SpellChecker'] = fckValues ['spellchecker'];
+            oFck.Config['EnterMode'] = fckValues ['keyboard_entermode'];
+            oFck.Config['ShiftEnterMode'] = fckValues ['keyboard_shiftentermode'];
+            oFck.ToolbarSet = fckValues ['fck_toolbar']; 
+            oFck.Width = fckValues ['editor_width']; 
+            oFck.Height = fckValues ['editor_height'];
+            try {
+               fckContainer.innerHTML = oFck.CreateHtml();
+               document.getElementById(inputname + '_fckLoading').style.display = 'none';
+            }
+            catch(e) {
+               document.getElementById(inputname + '_fckLoading').style.display = 'none';
+               document.getElementById(inputname + '_fckError').style.display = 'block';
+            }
+        }  
+
+}
+
+Save_inline = function ( fieldname, form, editorInstance ) {  
+    if (editorInstance.Commands.GetCommand('FitWindow').GetState()){
+        kukit.log('Full screen mode must be disabled before saving inline');
+        editorInstance.Commands.GetCommand('FitWindow').Execute();
+    } ;
+    saveField = document.getElementById(fieldname + '_fckSaveField');
+    if (saveField) {
+        kukit.log('Fire the savekupu server event = save inline without submitting');
+        saveField.style.visibility='visible';
+        if ( saveField.fireEvent ) {
+            saveField.fireEvent('onChange');
+        }
+        else {
+            var evt = document.createEvent("HTMLEvents");
+            evt.initEvent("change",true,true);
+            saveField.dispatchEvent( evt );        
+        }
+        comp = (setTimeout("saveField.style.visibility='hidden'",2000));
+        return false;
+    }
+    else {
+        kukit.log('Try to submit the form in portal_factory');
+        window.onbeforeunload = null;
+        form.submit();
+    }
+}        
+
