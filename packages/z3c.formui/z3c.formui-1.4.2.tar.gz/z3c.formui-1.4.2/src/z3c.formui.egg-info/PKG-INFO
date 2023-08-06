@@ -1,0 +1,828 @@
+Metadata-Version: 1.0
+Name: z3c.formui
+Version: 1.4.2
+Summary: A set of initial UI components for z3c.form.
+Home-page: http://pypi.python.org/pypi/z3c.formui
+Author: Stephan Richter, Roger Ineichen and the Zope Community
+Author-email: zope-dev@zope.org
+License: ZPL 2.1
+Description: This package provides a set of default layouts for the ``z3c.form``
+        framework. In particular it provides a DIV-based and a TABLE-based layout. The
+        developer can use either layout by inheriting from a different base layer.
+        
+        The package also has some support for layout/pagelet tempaltes.
+        
+        
+        Detailed Documentation
+        **********************
+        
+        ====================
+        Form User Interfaces
+        ====================
+        
+        This package provides several useful templates to get a quick start with the
+        ``z3c.form`` package. Previous form frameworks always included default
+        templates that were implemented in a particular user-interface development
+        pattern. If you wanted to use an alternative strategy to develop user
+        interfaces, it was often tedious to do so. This package aims to provide some
+        options without requiring them for the basic framework.
+        
+        
+        Layout Template Support
+        -----------------------
+        
+        One common pattern in Zope 3 user interface development is the use of layout
+        templates (see z3c.template). This package provides some mixin classes to the regular form
+        classes to support layout-based templating.
+        
+        &gt;&gt;&gt; from z3c.form import testing
+        &gt;&gt;&gt; testing.setupFormDefaults()
+        
+        Before we can start writing forms, we must have the content to work with:
+        
+        &gt;&gt;&gt; import zope.interface
+        &gt;&gt;&gt; import zope.schema
+        &gt;&gt;&gt; class IPerson(zope.interface.Interface):
+        ...
+        ...     name = zope.schema.TextLine(
+        ...         title=u'Name',
+        ...         required=True)
+        ...
+        ...     age = zope.schema.Int(
+        ...         title=u'Age',
+        ...         description=u"The person's age.",
+        ...         min=0,
+        ...         default=20,
+        ...         required=False)
+        
+        &gt;&gt;&gt; from zope.schema.fieldproperty import FieldProperty
+        &gt;&gt;&gt; class Person(object):
+        ...     zope.interface.implements(IPerson)
+        ...
+        ...     name = FieldProperty(IPerson['name'])
+        ...     age = FieldProperty(IPerson['age'])
+        ...
+        ...     def __init__(self, name, age):
+        ...         self.name = name
+        ...         self.age = age
+        ...
+        ...     def __repr__(self):
+        ...         return '&lt;%s %r&gt;' % (self.__class__.__name__, self.name)
+        
+        Okay, that should suffice for now. Let's now create a working add form:
+        
+        &gt;&gt;&gt; from z3c.form import field
+        &gt;&gt;&gt; from z3c.formui import form, layout
+        &gt;&gt;&gt; class PersonAddForm(form.AddForm):
+        ...
+        ...     fields = field.Fields(IPerson)
+        ...
+        ...     def create(self, data):
+        ...         return Person(**data)
+        ...
+        ...     def add(self, object):
+        ...         self.context[object.id] = object
+        ...
+        ...     def nextURL(self):
+        ...         return 'index.html'
+        
+        Let's create a request:
+        
+        &gt;&gt;&gt; from z3c.form.testing import TestRequest
+        &gt;&gt;&gt; from zope.interface import alsoProvides
+        &gt;&gt;&gt; divRequest = TestRequest()
+        
+        And support the div form layer for our request:
+        
+        &gt;&gt;&gt; from z3c.formui.interfaces import IDivFormLayer
+        &gt;&gt;&gt; alsoProvides(divRequest, IDivFormLayer)
+        
+        Now create the form:
+        
+        &gt;&gt;&gt; addForm = PersonAddForm(root, divRequest)
+        
+        Since we have not specified a template yet, we have to do this now. We use our
+        div based form template:
+        
+        &gt;&gt;&gt; import os
+        &gt;&gt;&gt; import z3c.formui
+        &gt;&gt;&gt; divFormTemplate = os.path.join(os.path.dirname(z3c.formui.__file__),
+        ...     'div-form.pt')
+        
+        &gt;&gt;&gt; from z3c.template.template import TemplateFactory
+        &gt;&gt;&gt; divFormFactory = TemplateFactory(divFormTemplate, 'text/html')
+        
+        Now register the form (content) template:
+        
+        &gt;&gt;&gt; import zope.interface
+        &gt;&gt;&gt; import zope.component
+        &gt;&gt;&gt; from z3c.template.interfaces import IContentTemplate
+        &gt;&gt;&gt; zope.component.provideAdapter(divFormFactory,
+        ...     (zope.interface.Interface, IDivFormLayer),
+        ...     IContentTemplate)
+        
+        And let's define a layout template which simply calls the render method. For a
+        more advanced content/layout render concept see z3c.pagelet.
+        
+        &gt;&gt;&gt; import tempfile
+        &gt;&gt;&gt; temp_dir = tempfile.mkdtemp()
+        
+        &gt;&gt;&gt; myLayout = os.path.join(temp_dir, 'myLayout.pt')
+        &gt;&gt;&gt; open(myLayout, 'w').write('''&lt;html&gt;
+        ...   &lt;body&gt;
+        ...     &lt;tal:block content="structure view/render"&gt;
+        ...       content
+        ...     &lt;/tal:block&gt;
+        ...   &lt;/body&gt;
+        ... &lt;/html&gt;''')
+        &gt;&gt;&gt; myLayoutFactory = TemplateFactory(myLayout, 'text/html')
+        
+        &gt;&gt;&gt; from z3c.template.interfaces import ILayoutTemplate
+        &gt;&gt;&gt; zope.component.provideAdapter(myLayoutFactory,
+        ...     (zope.interface.Interface, zope.interface.Interface), ILayoutTemplate)
+        
+        Now we can get our layout template:
+        
+        &gt;&gt;&gt; layout = zope.component.getMultiAdapter((addForm, divRequest),
+        ...     ILayoutTemplate)
+        
+        &gt;&gt;&gt; layout
+        &lt;zope.app.pagetemplate.viewpagetemplatefile.ViewPageTemplateFile object at ...&gt;
+        
+        
+        DIV-based Layout
+        ----------------
+        
+        Let's now render the page. Note the output doesn't contain the layout template:
+        
+        &gt;&gt;&gt; addForm.update()
+        &gt;&gt;&gt; print addForm.render()
+        &lt;form action="http://127.0.0.1" method="post"
+        enctype="multipart/form-data" class="edit-form"
+        name="form" id="form"&gt;
+        &lt;div class="viewspace"&gt;
+        &lt;div class="required-info"&gt;
+        &lt;span class="required"&gt;*&lt;/span&gt; &amp;ndash; required
+        &lt;/div&gt;
+        &lt;div&gt;
+        &lt;div id="form-widgets-name-row" class="row"&gt;
+        &lt;div class="label"&gt;
+        &lt;label for="form-widgets-name"&gt;
+        &lt;span&gt;Name&lt;/span&gt;
+        &lt;span class="required"&gt;*&lt;/span&gt;
+        &lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class="widget"&gt;&lt;input type="text" id="form-widgets-name"
+        name="form.widgets.name"
+        class="text-widget required textline-field" value="" /&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div id="form-widgets-age-row" class="row"&gt;
+        &lt;div class="label"&gt;
+        &lt;label for="form-widgets-age"&gt;
+        &lt;span&gt;Age&lt;/span&gt;
+        &lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class="widget"&gt;&lt;input type="text" id="form-widgets-age"
+        name="form.widgets.age" class="text-widget int-field"
+        value="20" /&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div&gt;
+        &lt;div class="buttons"&gt;
+        &lt;input type="submit" id="form-buttons-add"
+        name="form.buttons.add"
+        class="submit-widget button-field" value="Add" /&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;/form&gt;
+        
+        But we can call our form which uses the new layout template which renders
+        the form within the div-form content template:
+        
+        &gt;&gt;&gt; print addForm()
+        &lt;html&gt;
+        &lt;body&gt;
+        &lt;form action="http://127.0.0.1" method="post"
+        enctype="multipart/form-data" class="edit-form"
+        name="form" id="form"&gt;
+        &lt;div class="viewspace"&gt;
+        &lt;div class="required-info"&gt;
+        &lt;span class="required"&gt;*&lt;/span&gt;
+        &amp;ndash; required
+        &lt;/div&gt;
+        &lt;div&gt;
+        &lt;div id="form-widgets-name-row" class="row"&gt;
+        &lt;div class="label"&gt;
+        &lt;label for="form-widgets-name"&gt;
+        &lt;span&gt;Name&lt;/span&gt;
+        &lt;span class="required"&gt;*&lt;/span&gt;
+        &lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class="widget"&gt;&lt;input type="text" id="form-widgets-name"
+        name="form.widgets.name"
+        class="text-widget required textline-field" value="" /&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div id="form-widgets-age-row" class="row"&gt;
+        &lt;div class="label"&gt;
+        &lt;label for="form-widgets-age"&gt;
+        &lt;span&gt;Age&lt;/span&gt;
+        &lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class="widget"&gt;&lt;input type="text" id="form-widgets-age"
+        name="form.widgets.age" class="text-widget int-field"
+        value="20" /&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div&gt;
+        &lt;div class="buttons"&gt;
+        &lt;input type="submit" id="form-buttons-add"
+        name="form.buttons.add"
+        class="submit-widget button-field" value="Add" /&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;/form&gt;
+        &lt;/body&gt;
+        &lt;/html&gt;
+        
+        
+        Table-based Forms
+        -----------------
+        
+        There is a table based layout too. Let's define the template and use them:
+        
+        &gt;&gt;&gt; from z3c.formui.interfaces import ITableFormLayer
+        &gt;&gt;&gt; tableFormTemplate = os.path.join(os.path.dirname(z3c.formui.__file__),
+        ...     'table-form.pt')
+        
+        &gt;&gt;&gt; from z3c.template.template import TemplateFactory
+        &gt;&gt;&gt; tableFormFactory = TemplateFactory(tableFormTemplate, 'text/html')
+        
+        Now register the form (content) template:
+        
+        &gt;&gt;&gt; zope.component.provideAdapter(tableFormFactory,
+        ...     (zope.interface.Interface, ITableFormLayer), IContentTemplate)
+        
+        Patch the request and call the form again:
+        
+        &gt;&gt;&gt; tableRequest = TestRequest()
+        &gt;&gt;&gt; alsoProvides(tableRequest, ITableFormLayer)
+        
+        Now our new request should know the table based form template:
+        
+        &gt;&gt;&gt; addForm = PersonAddForm(root, tableRequest)
+        &gt;&gt;&gt; print addForm()
+        &lt;html&gt;
+        &lt;body&gt;
+        &lt;form action="http://127.0.0.1" method="post"
+        enctype="multipart/form-data" class="edit-form"
+        name="form" id="form"&gt;
+        &lt;div class="viewspace"&gt;
+        &lt;div class="required-info"&gt;
+        &lt;span class="required"&gt;*&lt;/span&gt;
+        &amp;ndash; required
+        &lt;/div&gt;
+        &lt;div&gt;
+        &lt;table class="form-fields"&gt;
+        &lt;tr class="row"&gt;
+        &lt;td class="label"&gt;
+        &lt;label for="form-widgets-name"&gt;
+        &lt;span&gt;Name&lt;/span&gt;
+        &lt;span class="required"&gt; * &lt;/span&gt;
+        &lt;/label&gt;
+        &lt;/td&gt;
+        &lt;td class="field"&gt;
+        &lt;div class="widget"&gt;&lt;input type="text" id="form-widgets-name"
+        name="form.widgets.name"
+        class="text-widget required textline-field" value="" /&gt;
+        &lt;/div&gt;
+        &lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr class="row"&gt;
+        &lt;td class="label"&gt;
+        &lt;label for="form-widgets-age"&gt;
+        &lt;span&gt;Age&lt;/span&gt;
+        &lt;/label&gt;
+        &lt;/td&gt;
+        &lt;td class="field"&gt;
+        &lt;div class="widget"&gt;&lt;input type="text" id="form-widgets-age"
+        name="form.widgets.age" class="text-widget int-field"
+        value="20" /&gt;
+        &lt;/div&gt;
+        &lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;/table&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div&gt;
+        &lt;div class="buttons"&gt;
+        &lt;input type="submit" id="form-buttons-add"
+        name="form.buttons.add"
+        class="submit-widget button-field" value="Add" /&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;/form&gt;
+        &lt;/body&gt;
+        &lt;/html&gt;
+        
+        
+        Form Macros
+        -----------
+        
+        Load the confguration, which will make sure that all macros get registered
+        correctly.
+        
+        &gt;&gt;&gt; from zope.configuration import xmlconfig
+        &gt;&gt;&gt; import zope.component
+        &gt;&gt;&gt; import zope.viewlet
+        &gt;&gt;&gt; import zope.app.component
+        &gt;&gt;&gt; import zope.app.publisher.browser
+        &gt;&gt;&gt; import z3c.macro
+        &gt;&gt;&gt; import z3c.template
+        &gt;&gt;&gt; import z3c.formui
+        &gt;&gt;&gt; xmlconfig.XMLConfig('meta.zcml', zope.component)()
+        &gt;&gt;&gt; xmlconfig.XMLConfig('meta.zcml', zope.viewlet)()
+        &gt;&gt;&gt; xmlconfig.XMLConfig('meta.zcml', zope.app.component)()
+        &gt;&gt;&gt; xmlconfig.XMLConfig('meta.zcml', zope.app.publisher.browser)()
+        &gt;&gt;&gt; xmlconfig.XMLConfig('meta.zcml', z3c.macro)()
+        &gt;&gt;&gt; xmlconfig.XMLConfig('meta.zcml', z3c.template)()
+        &gt;&gt;&gt; xmlconfig.XMLConfig('configure.zcml', z3c.formui)()
+        
+        Div IContentTemplate
+        --------------------
+        
+        Create some dummy form discriminators for calling div layout templates and
+        macros and check the div IContentTemplates:
+        
+        &gt;&gt;&gt; objects = (addForm, divRequest)
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IContentTemplate).filename
+        '...div-form.pt'
+        
+        &gt;&gt;&gt; objects = (form.DisplayForm(None, None), divRequest)
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IContentTemplate, '').filename
+        '...div-form-display.pt'
+        
+        We offer the following named IContentTemplate:
+        
+        &gt;&gt;&gt; objects = (form.DisplayForm(None, None), divRequest)
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IContentTemplate,
+        ...     'display').filename
+        '...div-form-display.pt'
+        
+        &gt;&gt;&gt; objects = (form.DisplayForm(None, None), divRequest)
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IContentTemplate,
+        ...     'subform').filename
+        '...subform.pt'
+        
+        
+        Table ILayoutTemplate
+        ---------------------
+        
+        There is one generic layout template to build sub forms:
+        
+        &gt;&gt;&gt; objects = (form.DisplayForm(None, None), divRequest)
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, ILayoutTemplate,
+        ...     'subform').filename
+        '...subform-layout.pt'
+        
+        
+        Div layout macros
+        -----------------
+        
+        We have different form macros available for IInputForm:
+        
+        
+        &gt;&gt;&gt; from z3c.macro.interfaces import IMacroTemplate
+        &gt;&gt;&gt; objects = (None, addForm, divRequest)
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form')
+        [...div-form.pt'), ...metal:define-macro': u'form'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'subform')
+        [...div-form.pt'), ...define-macro': u'subform'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-label')
+        [...div-form.pt'), ...define-macro': u'label'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-required-info')
+        [...div-form.pt'), ...define-macro', u'required-info'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-header')
+        [...div-form.pt'), ...define-macro': u'header'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-errors')
+        [...div-form.pt'), ...define-macro': u'errors'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'widget-rows')
+        [...div-form.pt'), ...define-macro': u'widget-rows'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'widget-row')
+        [...div-form.pt'), ...define-macro': u'widget-row'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-groups')
+        [...div-form.pt'), ...define-macro': u'groups'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-buttons')
+        [...div-form.pt'), ...define-macro', u'buttons'...
+        
+        
+        And we have different form macros available for IDisplayForm:
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'subform-display')
+        [...div-form-display.pt'), ...define-macro': u'subform-display'...
+        
+        
+        Table IContentTemplate
+        ----------------------
+        
+        Create some dummy form discriminators for calling table layout templates and
+        macros and check the div IContentTemplates:
+        
+        &gt;&gt;&gt; objects = (addForm, tableRequest)
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IContentTemplate, '').filename
+        '...table-form.pt'
+        
+        &gt;&gt;&gt; objects = (form.DisplayForm(None, None), tableRequest)
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IContentTemplate, '').filename
+        '...table-form-display.pt'
+        
+        We offer the following named IContentTemplate:
+        
+        &gt;&gt;&gt; objects = (form.DisplayForm(None, None), tableRequest)
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IContentTemplate,
+        ...     'display').filename
+        '...table-form-display.pt'
+        
+        &gt;&gt;&gt; objects = (form.DisplayForm(None, None), tableRequest)
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IContentTemplate,
+        ...     'subform').filename
+        '...subform.pt'
+        
+        
+        
+        Table ILayoutTemplate
+        ---------------------
+        
+        There is one generic layout template to build sub forms:
+        
+        &gt;&gt;&gt; objects = (form.DisplayForm(None, None), tableRequest)
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, ILayoutTemplate,
+        ...     'subform').filename
+        '...subform-layout.pt'
+        
+        
+        Table layout macros
+        -------------------
+        
+        We have different form macros available for IInputForm:
+        
+        &gt;&gt;&gt; objects = (None, addForm, tableRequest)
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form')
+        [...table-form.pt'), ...metal:define-macro': u'form'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'subform')
+        [...table-form.pt'), ...define-macro': u'subform'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-label')
+        [...table-form.pt'), ...define-macro': u'label'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-required-info')
+        [...table-form.pt'), ...define-macro', u'required-info'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-header')
+        [...table-form.pt'), ...define-macro': u'header'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-errors')
+        [...table-form.pt'), ...define-macro': u'errors'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-table')
+        [...table-form.pt'), ...define-macro', u'formtable'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-row')
+        [...table-form.pt'), ...define-macro': u'formrow'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-label-cell')
+        [...table-form.pt'), ...define-macro', u'labelcell'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-widget-cell')
+        [...table-form.pt'), ...define-macro', u'widgetcell'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-groups')
+        [...table-form.pt'), ...define-macro': u'groups'...
+        
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'form-buttons')
+        [...table-form.pt'), ...define-macro', u'buttons'...
+        
+        
+        And we have different form macros available for IDisplayForm:
+        
+        &gt;&gt;&gt; zope.component.getMultiAdapter(objects, IMacroTemplate, 'subform-display')
+        [...table-form-display.pt'), ...define-macro': u'subform-display'...
+        
+        
+        Subform
+        -------
+        
+        Let's give a quick overview how subform content and layout templates get used:
+        First define a new form which uses the template getter methods offered
+        from z3.template
+        
+        &gt;&gt;&gt; from z3c.template.template import getPageTemplate
+        &gt;&gt;&gt; from z3c.template.template import getLayoutTemplate
+        
+        We also need the provider TALES expression which is a part of the lookup
+        concept:
+        
+        &gt;&gt;&gt; from zope.app.pagetemplate import metaconfigure
+        &gt;&gt;&gt; from zope.contentprovider import tales
+        &gt;&gt;&gt; metaconfigure.registerType('provider', tales.TALESProviderExpression)
+        
+        and the TALES expression called ``macro`` which can lookup our macro adapters.
+        Yes, macros are adapters in our content/layout template concept. See z3c.macro
+        for more information about the implementation:
+        
+        &gt;&gt;&gt; from zope.app.pagetemplate import metaconfigure
+        &gt;&gt;&gt; from z3c.macro import tales
+        &gt;&gt;&gt; metaconfigure.registerType('macro', tales.MacroExpression)
+        
+        and at least we need a pagelet renderer. By default we use the provider called
+        ``PageletRenderer`` defined in the z3c.pagelet package. But right now, we
+        don't have a dependency on this package. So let's implement a simple renderer
+        and use them as a IContentProvider:
+        
+        &gt;&gt;&gt; class PageletRenderer(object):
+        ...     zope.component.adapts(zope.interface.Interface,
+        ...         zope.publisher.interfaces.browser.IBrowserRequest,
+        ...         zope.interface.Interface)
+        ...
+        ...     def __init__(self, context, request, pagelet):
+        ...         self.__updated = False
+        ...         self.__parent__ = pagelet
+        ...         self.context = context
+        ...         self.request = request
+        ...
+        ...     def update(self):
+        ...         pass
+        ...
+        ...     def render(self):
+        ...         return self.__parent__.render()
+        
+        &gt;&gt;&gt; from zope.contentprovider.interfaces import IContentProvider
+        &gt;&gt;&gt; zope.component.provideAdapter(PageletRenderer,
+        ...     provides=IContentProvider, name='pagelet')
+        
+        Now define the form:
+        
+        &gt;&gt;&gt; class PersonEditForm(form.EditForm):
+        ...     """Edit form including layout support. See z3c.formui.form."""
+        ...
+        ...     template = getPageTemplate('subform')
+        ...     layout = getLayoutTemplate('subform')
+        ...
+        ...     fields = field.Fields(IPerson)
+        
+        Now we can render the form with our previous created person instance:
+        
+        &gt;&gt;&gt; person = Person(u'Jessy', 6)
+        &gt;&gt;&gt; editForm = PersonEditForm(person, divRequest)
+        
+        Now we call the form which will update and render it:
+        
+        &gt;&gt;&gt; print editForm()
+        &lt;div class="viewspace"&gt;
+        &lt;div class="required-info"&gt;
+        &lt;span class="required"&gt;*&lt;/span&gt;
+        &amp;ndash; required
+        &lt;/div&gt;
+        &lt;div&gt;
+        &lt;div id="form-widgets-name-row" class="row"&gt;
+        &lt;div class="label"&gt;
+        &lt;label for="form-widgets-name"&gt;
+        &lt;span&gt;Name&lt;/span&gt;
+        &lt;span class="required"&gt;*&lt;/span&gt;
+        &lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class="widget"&gt;&lt;input type="text" id="form-widgets-name"
+        name="form.widgets.name"
+        class="text-widget required textline-field"
+        value="Jessy" /&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div id="form-widgets-age-row" class="row"&gt;
+        &lt;div class="label"&gt;
+        &lt;label for="form-widgets-age"&gt;
+        &lt;span&gt;Age&lt;/span&gt;
+        &lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class="widget"&gt;&lt;input type="text" id="form-widgets-age"
+        name="form.widgets.age" class="text-widget int-field"
+        value="6" /&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div&gt;
+        &lt;div class="buttons"&gt;
+        &lt;input type="submit" id="form-buttons-apply"
+        name="form.buttons.apply"
+        class="submit-widget button-field" value="Apply" /&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        
+        You can see that the form above is a real subform. It doesn't define the form
+        tag which makes it usable as a subform in parent forms.
+        
+        Of course this works with table layout based forms too. Let's use our table
+        request and render the form again:
+        
+        &gt;&gt;&gt; editForm = PersonEditForm(person, tableRequest)
+        &gt;&gt;&gt; print editForm()
+        &lt;div class="viewspace"&gt;
+        &lt;div class="required-info"&gt;
+        &lt;span class="required"&gt;*&lt;/span&gt;
+        &amp;ndash; required
+        &lt;/div&gt;
+        &lt;div&gt;
+        &lt;table class="form-fields"&gt;
+        &lt;tr class="row"&gt;
+        &lt;td class="label"&gt;
+        &lt;label for="form-widgets-name"&gt;
+        &lt;span&gt;Name&lt;/span&gt;
+        &lt;span class="required"&gt; * &lt;/span&gt;
+        &lt;/label&gt;
+        &lt;/td&gt;
+        &lt;td class="field"&gt;
+        &lt;div class="widget"&gt;&lt;input type="text" id="form-widgets-name"
+        name="form.widgets.name"
+        class="text-widget required textline-field"
+        value="Jessy" /&gt;
+        &lt;/div&gt;
+        &lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr class="row"&gt;
+        &lt;td class="label"&gt;
+        &lt;label for="form-widgets-age"&gt;
+        &lt;span&gt;Age&lt;/span&gt;
+        &lt;/label&gt;
+        &lt;/td&gt;
+        &lt;td class="field"&gt;
+        &lt;div class="widget"&gt;&lt;input type="text" id="form-widgets-age"
+        name="form.widgets.age" class="text-widget int-field"
+        value="6" /&gt;
+        &lt;/div&gt;
+        &lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;/table&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div&gt;
+        &lt;div class="buttons"&gt;
+        &lt;input type="submit" id="form-buttons-apply"
+        name="form.buttons.apply"
+        class="submit-widget button-field" value="Apply" /&gt;
+        &lt;/div&gt;
+        &lt;/div&gt;
+        
+        
+        Cleanup
+        -------
+        
+        &gt;&gt;&gt; import shutil
+        &gt;&gt;&gt; shutil.rmtree(temp_dir)
+        
+        
+        =======
+        CHANGES
+        =======
+        
+        Version 1.4.2 (2008-08-26)
+        --------------------------
+        
+        - Bug: Corrected typos and unwanted unicode characters.
+        
+        
+        Version 1.4.1 (2008-01-23)
+        --------------------------
+        
+        - Fixed up meta-data and the release.
+        
+        
+        Version 1.4.0 (2008-01-21)
+        --------------------------
+        
+        - Feature: Added subform content and layout template. This allows you to
+        configure real sub forms which do not render the form tag.
+        
+        - Feature: Improve layout implementation, support built-in layout templates.
+        
+        - Feature: Use ``IContentTemplate`` instead of ``IPageTemplate`` in layout
+        base classes. This will help to prevent running into recursion errors if
+        there is a missing layout template.
+        
+        - Feature: Added form module which offers built-in layout support.
+        
+        - Bug: Added missing display ``IContentTemplate``, otherwise we can run into a
+        recursion in some cases.
+        
+        - Bug: Renamed table macro argument from ``form-required-info`` to
+        ``required-info``. The macro ``form-required-info`` did not exist.
+        
+        - Bug: Added unit tests for layout support.
+        
+        - Bug: Added tests for layout macros.
+        
+        - Bug: Added tests for layout templates.
+        
+        
+        Version 1.3.0 (2007-08-24)
+        --------------------------
+        
+        - Refactoring: Update CSS classes to reflect latest changes to the widget
+        classes in ``z3c.form``.
+        
+        - Bug: Error view snippets may have a empty ``widget`` attribute values, so we
+        cannot rely on accessing the label of the widget. This is the case, if the
+        error view sniipet was created from an invariants validation error.
+        
+        - Bug: The table-form template did not properly render the error at the
+        widget, because the ``render()`` method was not called. Thanks to Markus
+        Leist for the report.
+        
+        
+        Version 1.2.0 (2007-07-18)
+        --------------------------
+        
+        - Feature: The row div element now also has an id of the form
+        "&lt;widget-id&gt;-row".
+        
+        
+        Version 1.1.1 (2007-07-04)
+        --------------------------
+        
+        - Refactoring: Split up registrations for simpler management of UI
+        components. This also makes it easier to see for developers how to create a
+        new template for forms.
+        
+        
+        Version 1.1.0 (2007-06-29)
+        --------------------------
+        
+        - Feature: Registered all defined macros for each form template. Also, added
+        more slots to the templates providing more hooks for customization.
+        
+        - Feature: Added a macro/slot for the "required info", which explains how
+        required fields are marked.
+        
+        - Feature: Added support for form labels.
+        
+        - Feature: Added support for groups to templates.
+        
+        
+        Version 1.0.1 (2007-06-22)
+        --------------------------
+        
+        - Bug: Make sure we use the id for the "for" attribute of the "label"
+        element and not the name. This has worked until recently, because the
+        name and id were the same, but they are different now.
+        
+        
+        Version 1.0.0 (2007-05-24)
+        --------------------------
+        
+        - Initial Release
+        
+Keywords: zope3 form widget
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Framework :: Zope3
