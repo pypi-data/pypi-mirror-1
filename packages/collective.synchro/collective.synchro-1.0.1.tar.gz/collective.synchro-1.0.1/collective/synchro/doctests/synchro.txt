@@ -1,0 +1,89 @@
+----------------------
+Doc test about synchro
+----------------------
+
+    >>> from collective.synchro.scripts.synchro_queues import SshRemoteQueue
+    >>> from collective.synchro.scripts.synchro_queues import ExportQueue
+    >>> from collective.synchro.scripts.synchro_queues import get_sysuser
+    >>> from collective.synchro.scripts.utils import create_queue_structure
+    >>> filename = 'testsynchro'
+    >>> import os
+    >>> from tempfile import gettempdir
+    >>> class Dir(object):
+    ...     path =  os.path.join( gettempdir(), filename)
+
+
+Create an directory structure for import/export data::
+
+    >>> create_queue_structure(Dir())
+    >>> dst_path = os.path.join( gettempdir(), filename,'IMPORT','TO_PROCESS')
+    >>> src_path = os.path.join( gettempdir(), filename)
+    >>> os.path.exists(dst_path)
+    True
+
+Populate TO_PROCESS src_path::
+
+    >>> src_process_path = os.path.join( gettempdir(), filename,'EXPORT','TO_PROCESS')
+    >>> from time import time
+    >>> import random
+    >>> def buildfilename(uid):
+    ...     randint = random.randint(0, 1000000)
+    ...     file_name = os.path.join(src_process_path,
+    ...                              'data_%s_%f_%d.zs' % (uid, time(), randint))
+    ...     return file_name
+    >>> for i in range(0,100):
+    ...     file_name = buildfilename(i)
+    ...     f = open(file_name,'w')
+    ...     f.write(str(i))
+    ...     f.close()
+
+Add some lock file to TO_PROCESS::
+    >>> for i in range(100,105):
+    ...    file_name = '%s.lock' % buildfilename(i)
+    ...    f = open(file_name,'w')
+    ...    f.write(str(i))
+    ...    f.close()
+
+
+Be carrefull This doc test use an ssh connexion. Please provide an automatic
+ssh connexion::
+
+    >>> user = get_sysuser()
+    >>> host = 'localhost'
+    >>> remote_queue = SshRemoteQueue(user, host,
+    ...                               dst_path, gettempdir() )
+
+    >>> queue = ExportQueue(src_path , remote_queue)
+    >>> queue.fire()
+
+Verify that all is well done::
+
+
+
+    >>> len(os.listdir(dst_path))
+    100
+    >>> len(os.listdir(src_process_path))
+    5
+    >>> len(os.listdir(os.path.join( gettempdir(), filename,'EXPORT','PROCESSING')))
+    0
+    >>> len(os.listdir(os.path.join( gettempdir(), filename,'EXPORT','DONE')))
+    100
+
+Now Unlock file::
+
+
+    >>> for file in os.listdir(src_process_path):
+    ...    new_file = file[:-len('.lock')]
+    ...    os.rename(os.path.join(src_process_path,file),
+    ...              os.path.join(src_process_path,new_file))
+
+    >>> queue.fire()
+    >>> len(os.listdir(dst_path))
+    105
+    >>> len(os.listdir(src_process_path))
+    0
+    >>> len(os.listdir(os.path.join( gettempdir(), filename,'EXPORT','DONE')))
+    105
+
+    >>> import shutil
+    >>> shutil.rmtree(os.path.join( gettempdir(), filename))
