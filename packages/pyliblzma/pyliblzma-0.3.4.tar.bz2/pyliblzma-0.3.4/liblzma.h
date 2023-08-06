@@ -1,0 +1,59 @@
+#ifndef LIBLZMA_H
+#define LIBLZMA_H 1
+/* To handle length as ssize_t in stead of int, otherwise we'd either have to
+ * use the internal _PyArg_ParseTuple_SizeT function to avoid screwups
+ */
+#define PY_SSIZE_T_CLEAN 1
+#include <Python.h>
+#include <stdio.h>
+#include <stdlib.h>
+#if defined (__APPLE__) || defined(__FreeBSD__) || \
+    defined(__OpenBSD__) || defined(__NetBSD__)
+#include <stdlib.h>
+#else
+#include <malloc.h>
+#endif
+#include <string.h>
+#include <inttypes.h>
+#ifndef linux
+typedef unsigned long ulong;
+#endif
+#include <sys/types.h>
+#include <lzma.h>
+
+#ifdef WITH_THREAD
+#include <pythread.h>
+#define ACQUIRE_LOCK(obj) PyThread_acquire_lock(obj->lock, 1)
+#define RELEASE_LOCK(obj) PyThread_release_lock(obj->lock)
+#else
+#define ACQUIRE_LOCK(obj)
+#define RELEASE_LOCK(obj)
+#endif
+
+#ifdef __STDC_VERSION__
+#if __STDC_VERSION__ >= 199901L
+#include <stdbool.h>
+#endif
+#else
+#define bool    uint8_t
+#define true    1
+#define false   0
+#ifndef inline
+#define inline __inline__
+#endif
+#endif
+
+#if BUFSIZ <= 1024
+#define DEFAULTALLOC 8192
+#else
+#define	DEFAULTALLOC BUFSIZ
+#endif
+
+#define INITCHECK if (!self->is_initialised) {	PyErr_Format(PyExc_RuntimeError, "%s object not initialised!", self->ob_type->tp_name);	return NULL; }
+
+extern PyObject *libLZMAError;
+
+bool CatchlibLZMAError(lzma_ret lzuerror, lzma_stream *lzus);
+
+
+#endif /* LIBLZMA_H */
