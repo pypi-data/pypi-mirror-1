@@ -1,0 +1,43 @@
+__doc__ = """
+>>> test_append([])
+None
+None
+got error
+[1, 2, (3, 4)]
+>>> test_append(A())
+appending
+1
+appending
+2
+appending
+(3, 4)
+got error
+<append.A instance at ...>
+>>> test_append(B())
+None
+None
+None
+None
+[1, 2, (3, 4), 5, 6]
+"""
+
+class A:
+    def append(self, x):
+        print "appending"
+        return x
+        
+class B(list):
+    def append(self, *args):
+        for arg in args:
+            list.append(self, arg)
+
+def test_append(L):
+    print L.append(1)
+    print L.append(2)
+    print L.append((3,4))
+    try:
+        print L.append(5,6)
+    except TypeError:
+        print "got error"
+    print L
+
