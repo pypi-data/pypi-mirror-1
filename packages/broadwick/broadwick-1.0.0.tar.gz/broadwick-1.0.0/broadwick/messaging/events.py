@@ -1,0 +1,3 @@
+
+LoggedInEvent = 'STOMP_CLIENT_LOGGED_IN'
+ConnectionLostEvent = 'STOMP_CLIENT_CONNECTION_LOST'
