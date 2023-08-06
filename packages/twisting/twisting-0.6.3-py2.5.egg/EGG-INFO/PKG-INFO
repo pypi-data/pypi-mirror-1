@@ -1,0 +1,163 @@
+Metadata-Version: 1.0
+Name: twisting
+Version: 0.6.3
+Summary: twisting is based on twisted deferred thread with GTK
+Home-page: http://bitbucket.org/florent/twisting
+Author: Florent PIGOUT
+Author-email: florent.pigout@gmail.com
+License: BSD
+Description: How to use a progress window
+        ============================
+        
+        Requirements
+        ------------
+        
+        To be effective the twisting needs the twisted library in addition with
+        gtk. Then we have to do the following imports at the beginning of the main
+        entry file of the application::
+        
+        # twisted install
+        from twisted.internet import gtk2reactor
+        # install the gtk2 reactor
+        gtk2reactor.install()
+        # twisted import
+        from twisted.internet import reactor
+        
+        Before we started the application with traditional gtk main thread starting:
+        
+        *# gtk thread start*
+        *gtk.main()*
+        
+        Now we use the twisted reactor start after as follow::
+        
+        # twisted reactor start
+        reactor.run()
+        
+        **Note:** *your main graphic window must be created before the reactor start
+        like with gtk.*
+        
+        Framework overview
+        ------------------
+        
+        The gui part of the twisting framework offer the following functionalities:
+        
+        ``1. gui elements to display the tasks progress``
+        - *taskbox object:* attach to a task to inform about the task
+        progression
+        - *progress window:* contains all the task boxes that  can be hidden
+        - *progress box:* can be use in a parent window to inform about the
+        average progression
+        
+        ``2. several tasks management``
+        - *add task:* create a thread and a taskox attach to a working method
+        - *pause/play task:* automatically managed by the framework
+        - *stop task:* return a flag to the main loop
+        - *remove* a taskbox from the progress window *(stopped automatically)*
+        
+        *nb: each task correspond with a gui widget displaying the progress
+        status of the task*
+        
+        ``3. callbacks``
+        - *result callback:*  set when we add the task and call with a result
+        by the twisted deferred thread when the worker loop ended
+        - *error callback:*  set when we add the task and call by the twisted
+        deferred thread on error
+        - *all tasks finished callback:* call by the progress window when all
+        tasks are finished, can be used for message display, progress window
+        hide or i don't know...
+        
+        Framework best practice
+        -----------------------
+        
+        Here we explain the standard use of the framework step by step.
+        
+        
+        **1. Create the progress window**
+        The progress window is a singleton and must be created before the reactor
+        start or in the gtk workflow with the following lines::
+        
+        # progress window import
+        from twisting import ProgressManager
+        # Progress manager init
+        ProgressManager(all_finish_callback=on_all_tasks_finished, ui=True)
+        
+        
+        **2. Set a progress bar for more progress info**
+        The progress bar can be added every where and will be updated by the
+        progress window to display progress average depending of the current tasks
+        in progress. To do so we create the progress box and set it to the
+        progress window::
+        
+        # progress box import
+        from twisting.gui_worker import ProgressManager
+        import gtk
+        
+        # create the box
+        progress_bar = gtk.ProgressBar()
+        # add the box
+        ProgressManager().set_parent(self.main_window, progress_bar)
+        
+        **Note:** *we prefer to set a parent to the progress window to use the
+        transient function of gtk*
+        
+        
+        **3. Add a new task**
+        We add a task to the progress window with the add function. The thread and
+        the taskbox will be created, attached and start automatically by the
+        progress window::
+        
+        # add the task
+        ProgressManager().add_task(
+        id_, pretty_name,
+        self.task_function,
+        end_callback=self.end_callback,
+        error_callback=self.error_callback)
+        
+        Some details:
+        
+        - ``id_`` corresponds to an unique id for the task
+        - ``pretty_name`` will be displayed in the task box widget
+        - ``task_function`` is the function that will be threaded using twisted
+        and that should manage the task loop depending of the twisting
+        framework api
+        - ``end_callback`` is the result callback for twisted receiving the
+        *task_function* result whatever it is
+        - ``error_callback`` is the error callback for twisted receiving a
+        twisted object failure in parameter
+        
+        
+        **4. The threaded task loop function**
+        The loop function receive the corresponding taskbox in parameters. Then we
+        have to inform the taskbox of the number of iterations to init the good
+        progress ratio::
+        
+        # set the number of iterations
+        taskbox.set_max_pulse(100)
+        
+        To hide a maximum of the thread management we will use the ``state_method``
+        given by the framework. It should be import a follow::
+        
+        # state_machine function import
+        from twisting import state_machine
+        
+        For each task iteration this method will update the progess info, check for
+        ``Pause`` or ``Stop`` event. The thread pause is directly managed in that
+        function. If an event ``Stop`` is catched the function returns ``True``, it
+        means that the threaded function must exit. The method must be called with
+        the taskbox instance to poll the taskbox event queue::
+        
+        # IN THE LOOP
+        # check for stop or pause events
+        if state_machine(taskbox):
+        # we quit
+        return stop_result
+        
+        At the end we call the taskbox finish method throw a twisted thread to stop
+        the progress in the task box and display an ending message. Then we return
+        the work result that will be send to the result callback by the twisted::
+        
+        # call the finish action throw the parent event queue
+        reactor.callFromThread(taskbox.finish)
+        # we finish
+        return end_result
+Platform: UNKNOWN
