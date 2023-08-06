@@ -1,0 +1,186 @@
+AbsenceAdapter
+==============
+
+The AbsenceAdapter allows access to absence information on Employees.
+
+First we add some content.
+
+    >>> from datetime import date, timedelta
+    >>> self.loginAsPortalOwner()
+    >>> portal.invokeFactory('WorkLocation', 'wl')
+    'wl'
+    >>> portal.wl.invokeFactory('Employee', 'emp')
+    'emp'
+    >>> employee = portal.wl.emp
+
+
+Now lets adapt the employee and try adding an absence:
+
+    >>> from plonehrm.absence.interfaces import IAbsenceAdapter
+    >>> absentemployee = IAbsenceAdapter(employee)
+    >>> absentemployee.is_absent()
+    False
+    >>> absentemployee.add_absence("Broke leg")
+    <Absence: Broke leg, ...>
+    >>> absentemployee.is_absent()
+    True
+
+We can retrieve the currently open absence:
+
+    >>> absentemployee.current_absence()
+    <Absence: Broke leg, ...>
+
+...or a list of all absences:
+
+    >>> absentemployee.absencelist
+    [<Absence: Broke leg, ...>]
+
+
+We can't add another absence until the previous one is closed:
+
+    >>> absentemployee.add_absence("Flu")
+    Traceback (most recent call last):
+    ...
+    AssertionError: there can only be one open absence
+
+So let's close the absence and try again.
+
+    >>> absentemployee.close_absence(date.today())
+    <Absence: Broke leg, ... - ...>
+
+...but we can't another absence that overlaps a previous one, either:
+
+    >>> absentemployee.add_absence("Flu")
+    Traceback (most recent call last):
+    ...
+    ConflictingStartDateError...
+
+Nor can we start a new absence before an existing one.
+
+    >>> absentemployee.add_absence("Flu", start_date=date(1979, 1, 29))
+    Traceback (most recent call last):
+    ...
+    ConflictingStartDateError...
+
+Another limitation is that we cannot start an absence in the future.
+Well... tomorow is okay.
+
+    >>> absentemployee.add_absence("Flu", start_date=date.today() + timedelta(2))
+    Traceback (most recent call last):
+    ...
+    StartDateInFutureError...
+    >>> absentemployee.add_absence("Flu", start_date=date.today() + timedelta(1))
+    <Absence: Flu, ...>
+
+We will remove that one immediately:
+
+    >>> absentemployee.remove_absence(1)
+    <Absence: Flu, ...>
+
+Trying to trick the method by handing it something else than a date
+also fails:
+
+    >>> absentemployee.add_absence("Flu", start_date='yesterday')
+    Traceback (most recent call last):
+    ...
+    AssertionError: date expected, got <type 'str'>
+
+Apparently we are not allowed to get the flu.
+
+To be able to create more absences than the one we've currenly got, we
+need to clear the list and create a couple of new ones.
+
+We can remove absences by using their index number. For instance, to
+remove our broken leg absence we can use the ``remove_absence`` method
+like this:
+
+    >>> absentemployee.remove_absence(0)
+    <Absence: Broke leg, ... - ...>
+    >>> absentemployee.absencelist
+    []
+
+If we now try to remove an absence, we're treated to a nice error:
+
+    >>> absentemployee.remove_absence(0)
+    Traceback (most recent call last):
+    ...
+    AssertionError
+
+So let's create a new absences in the past:
+
+    >>> absentemployee.add_absence('Cut himself while shaving',
+    ...                            start_date=date(2007, 3, 12))
+    <Absence: Cut himself while shaving, 2007-03-12>
+    >>> absentemployee.close_absence(date(2007, 3, 11))
+    Traceback (most recent call last):
+    ...
+    CloseDateBeforeStartDateError...
+
+Whoops, obviously we are not allowed to get well before we get sick.
+We also cannot fool the ``close_absence`` method either. The end date
+will have to be a proper date.
+
+    >>> absentemployee.close_absence('')
+    Traceback (most recent call last):
+    ...
+    AssertionError: date expected, got <type 'str'>
+    >>> absentemployee.close_absence(date(2007, 3, 13))
+    <Absence: Cut himself while shaving, 2007-03-12 - 2007-03-13>
+
+Let's create a bunch of absences:
+
+    >>> absentemployee.add_absence('Dentist', start_date=date(2008, 7, 10))
+    <Absence: Dentist, 2008-07-10>
+    >>> absentemployee.close_absence(date(2008, 7, 10))
+    <Absence: Dentist, 2008-07-10 - 2008-07-10>
+    >>> absentemployee.add_absence('Broke leg', start_date=date(2009, 1, 5))
+    <Absence: Broke leg, 2009-01-05>
+    >>> absentemployee.close_absence(date(2009, 2, 5))
+    <Absence: Broke leg, 2009-01-05 - 2009-02-05>
+
+Now we can finally get the flu:
+
+    >>> absentemployee.add_absence('Flu', start_date=date(2009, 4, 20))
+    <Absence: Flu, 2009-04-20>
+
+Let's review the absencelist:
+
+    >>> absentemployee.absencelist
+    [<Absence: Cut himself while shaving, 2007-03-12 - 2007-03-13>,
+     <Absence: Dentist, 2008-07-10 - 2008-07-10>,
+     <Absence: Broke leg, 2009-01-05 - 2009-02-05>,
+     <Absence: Flu, 2009-04-20>]
+
+Since we only tested removing the first (and only) absence in the
+list, we'll now remove the dentist appointment to test the remove method:
+
+    >>> absentemployee.remove_absence(1)
+    <Absence: Dentist, 2008-07-10 - 2008-07-10>
+    >>> absentemployee.absencelist
+    [<Absence: Cut himself while shaving, 2007-03-12 - 2007-03-13>,
+     <Absence: Broke leg, 2009-01-05 - 2009-02-05>,
+     <Absence: Flu, 2009-04-20>]
+
+Now we check that the portal absence tool exists.
+    >>> portal.portal_absence
+    <AbsenceTool at /plone/portal_absence>
+
+We can add several templates in it.
+    >>> tool = portal.portal_absence
+    >>> tool.invokeFactory('Template', 'template',
+    ...                    title='This one will appear in the list',
+    ...                    type='absence_evaluation')
+    'template'
+    >>> tool.invokeFactory('Template', 'template1',
+    ...                    title='This one will not',
+    ...                    type='contract')
+    'template1'
+
+Now when we add a EvaluationInterview, the templates proposed should
+only have for type 'absence_evaluation'.
+
+    >>> absence = absentemployee.absencelist[-1]
+    >>> absence.invokeFactory('EvaluationInterview', 'evaluation')
+    'evaluation'
+    >>> absence['evaluation']._templates()
+    <DisplayList [('template', 'This one will appear in the list')] at ...>
