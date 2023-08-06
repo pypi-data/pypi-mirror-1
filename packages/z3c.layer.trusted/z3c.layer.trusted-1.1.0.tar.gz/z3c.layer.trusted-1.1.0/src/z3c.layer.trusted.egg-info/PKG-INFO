@@ -1,0 +1,276 @@
+Metadata-Version: 1.0
+Name: z3c.layer.trusted
+Version: 1.1.0
+Summary: Trusted layer setup for Zope3
+Home-page: http://pypi.python.org/pypi/z3c.layer.trusted
+Author: Zope Foundation and Contributors
+Author-email: zope-dev@zope.org
+License: ZPL 2.1
+Description: This package provides a trused layer setup for Zope3. Truted means you can
+        travers over objects which you don't have permission for. This is needed if you
+        have a setup with more then one IAuthentication utility. Otherwise you don't
+        hav a chance to traverse to the IAthentication utility in the subsite without
+        to authenticate at the parent IAuthentication.
+        
+        
+        .. contents::
+        
+        
+        ======
+        README
+        ======
+        
+        This package contains the trusted layer. This layer support a correct set of
+        component registration and can be used for inheritation in custom skins.
+        
+        The ITrustedBrowserLayer supports the same registration set like the
+        IMinimalBrowserLayer. The only difference is, that the trusted layer offers
+        trusted traversal adapters. This means a skin using this layer can traverse
+        over a PAU (pluggable IAuthentication utility) without to run into a
+        Unautorized exception.
+        
+        For more information see also the README.txt in z3c.layer.minimal.
+        
+        
+        Testing
+        -------
+        
+        For testing the ITrustedBrowserLayer we use the testing skin defined in the
+        tests package which uses the ITrustedBrowserLayer. This means, that our
+        testing skin provides also the views defined in the minimal package
+        and it's testing views defined in the minimal tests.
+        
+        Login as manager first:
+        
+        >>> from zope.testbrowser.testing import Browser
+        >>> manager = Browser()
+        >>> manager.addHeader('Authorization', 'Basic mgr:mgrpw')
+        
+        Check if we can access the public page.html view which is registred in the
+        ftesting.zcml file with our skin:
+        
+        >>> skinURL = 'http://localhost/++skin++TrustedTesting'
+        >>> manager.open(skinURL + '/page.html')
+        >>> manager.url
+        'http://localhost/++skin++TrustedTesting/page.html'
+        
+        >>> print manager.contents
+        <BLANKLINE>
+        <html>
+        <head>
+        <title>testing</title>
+        </head>
+        <body>
+        <BLANKLINE>
+        test page
+        <BLANKLINE>
+        </body>
+        </html>
+        <BLANKLINE>
+        <BLANKLINE>
+        
+        Now check the not found page which is a exception view on the exception
+        ``zope.publisher.interfaces.INotFound``:
+        
+        >>> manager.open(skinURL + '/foobar.html')
+        Traceback (most recent call last):
+        ...
+        HTTPError: HTTP Error 404: Not Found
+        
+        >>> print manager.contents
+        <BLANKLINE>
+        <html>
+        <head>
+        <title>testing</title>
+        </head>
+        <body>
+        <div>
+        <br />
+        <br />
+        <h3>
+        The page you are trying to access is not available
+        </h3>
+        <br />
+        <b>
+        Please try the following:
+        </b>
+        <br />
+        <ol>
+        <li>
+        Make sure that the Web site address is spelled correctly.
+        </li>
+        <li>
+        <a href="javascript:history.back(1);">
+        Go back and try another URL.
+        </a>
+        </li>
+        </ol>
+        </div>
+        </body>
+        </html>
+        <BLANKLINE>
+        <BLANKLINE>
+        
+        And check the user error page which is a view registred for
+        ``zope.exceptions.interfaces.IUserError`` exceptions:
+        
+        >>> manager.open(skinURL + '/@@usererror.html')
+        >>> print manager.contents
+        <BLANKLINE>
+        <html>
+        <head>
+        <title>testing</title>
+        </head>
+        <body>
+        <div>
+        <div>simply user error</div>
+        </div>
+        </body>
+        </html>
+        <BLANKLINE>
+        <BLANKLINE>
+        
+        And check error view registred for
+        ``zope.interface.common.interfaces.IException``:
+        
+        >>> manager.open(skinURL + '/@@systemerror.html')
+        >>> print manager.contents
+        <BLANKLINE>
+        <html>
+        <head>
+        <title>testing</title>
+        </head>
+        <body>
+        <div>
+        <br />
+        <br />
+        <h3>A system error occurred</h3>
+        <br />
+        <b>Please contact the administrator.</b>
+        <a href="javascript:history.back(1);">
+        Go back and try another URL.
+        </a>
+        </div>
+        </body>
+        </html>
+        <BLANKLINE>
+        <BLANKLINE>
+        
+        And check the ``zope.security.interfaces.IUnauthorized`` view, use a new
+        unregistred user (test browser) for this:
+        
+        >>> unauthorized = Browser()
+        >>> unauthorized.open(skinURL + '/@@forbidden.html')
+        Traceback (most recent call last):
+        ...
+        HTTPError: HTTP Error 401: Unauthorized
+        
+        >>> print unauthorized.contents
+        <BLANKLINE>
+        <html>
+        <head>
+        <title>testing</title>
+        </head>
+        <body>
+        <div>
+        <BLANKLINE>
+        <h1>Unauthorized</h1>
+        <BLANKLINE>
+        <p>You are not authorized</p>
+        <BLANKLINE>
+        </div>
+        </body>
+        </html>
+        <BLANKLINE>
+        <BLANKLINE>
+        
+        When an object gets traversed, its security proxy is removed, so its
+        sub-objects can be publically accessed, too:
+        
+        >>> import zope.site.folder
+        >>> getRootFolder()['test'] = zope.site.folder.Folder()
+        >>> manager.open(skinURL + '/container_contents.html')
+        
+        The view displays the types of the content objects inside the root
+        folder. The content objects are not security proxied:
+        
+        >>> print manager.contents
+        [<class 'zope.site.folder.Folder'>]
+        
+        =======
+        CHANGES
+        =======
+        
+        1.1.0 (2009-02-21)
+        ------------------
+        
+        - Doctests show that removing security proxies from traversed
+        objects is the desired behavior.
+        
+        - Using ``zope.container`` instead of ``zope.app.container``.
+        
+        - Made sure that long_description renders properly on pypi.
+        
+        - Cleaned up dependencies.
+        
+        
+        1.0.1 (2008-01-24)
+        ------------------
+        
+        - Bug: Corrected and improved meta-data and documentation.
+        
+        
+        1.0.0 (2008-01-21)
+        ------------------
+        
+        - Restructure: Move ``z3c.layer.trusted`` package to it's own top level
+        package form ``zope.layer`` to ``z3c.layer.trusted``.
+        
+        - Bug: Reflect changes in ``zope.app.securitypolicy`` ZCML
+        configuration. Prevent loading deprecated module configuration.
+        
+        - Restructure: Moved implementation from ``z3c.layer`` to
+        ``z3c.layer.trusted``.
+        
+        
+        0.2.3 (2007-11-07)
+        ------------------
+        
+        - Forward-Bug: Due to a bug in mechanize, the testbrowser throws
+        ``httperror_seek_wrapper`` instead of ``HTTPError`` errors. Thanks to RE
+        normalizers, the code will now work whether the bug is fixed or not in
+        mechanize.
+        
+        
+        0.2.2 (2007-10-31)
+        ------------------
+        
+        - Bug: Fixed package meta-data.
+        
+        - Bug: Fixed test failures due to depency updates.
+        
+        - Restructure: Fixed deprecation warninf for ``ZopeSecurityPolicy``.
+        
+        
+        0.2.1 (2007-??-??)
+        ------------------
+        
+        - Changes unknown.
+        
+        
+        0.2.0 (2007-??-??)
+        ------------------
+        
+        - Initial release.
+        
+Keywords: z3c trusted layer zope zope3
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Framework :: Zope3
