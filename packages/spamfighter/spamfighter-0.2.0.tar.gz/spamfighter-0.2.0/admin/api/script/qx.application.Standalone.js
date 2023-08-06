@@ -1,0 +1,1 @@
+{type:"class",attributes:{"isStatic":"true","name":"Standalone","packageName":"qx.application","childClasses":"spamfighter.Application","fullName":"qx.application.Standalone"}}
