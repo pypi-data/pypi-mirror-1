@@ -1,0 +1,6 @@
+DATA_DIR = "/usr/share"
+LIB_DIR = "/usr/lib"
+VERSION = "0.2.0"
+PACKAGE = "freespeak"
+GETTEXT_PACKAGE = "freespeak"
+PYTHONDIR = "/usr/lib/python2.5/site-packages"
