@@ -1,0 +1,20 @@
+tinyMCE.addI18n('zh.emotions_dlg',{
+title:" \u63D2\u5165\u8868\u60C5 ",
+desc:" \u8868\u60C5 ",
+cool:"\u9177",
+cry:"\u5927\u54ED",
+embarassed:"\u96E3\u70BA\u60C5",
+foot_in_mouth:"\u54A7\u5634",
+frown:"\u76BA\u7709",
+innocent:"\u5929\u771F",
+kiss:"\u543B",
+laughing:"\u5927\u7B11",
+money_mouth:"\u767C\u8CA1",
+sealed:"\u7121\u9F52",
+smile:"\u5FAE\u7B11",
+surprised:"\u9A5A\u5947",
+tongue_out:"\u5410\u820C\u982D",
+undecided:"\u6298\u78E8",
+wink:"\u7728\u773C",
+yell:"\u5FCD\u4E0D\u4F4F\u7B11"
+});
