@@ -1,0 +1,203 @@
+==========================
+plone.recipe.pound package
+==========================
+
+.. contents::
+
+What is plone.recipe.pound ?
+============================
+
+`plone.recipe.pound` is a buildout recipe to compile and configure Pound.
+It uses `zc.recipe.cmmi` then configure pound.cfg.
+
+How to use plone.recipe.pound ?
+===============================
+
+As a recipe, you have to provide a part in your buildout file::
+
+    >>> from zc.buildout.testing import *
+    >>> import getpass
+    >>> owner = group = getpass.getuser()
+    >>> import os; join = os.path.join
+    >>> data_dir = join(test_dir, 'data')
+    >>> parts_dir = join(data_dir, 'parts')
+    >>> bin_dir = join(data_dir, 'bin')
+    >>> buildout = {'instance': {'location': test_dir},
+    ...             'buildout': {'directory': test_dir,
+    ...                          'parts-directory': parts_dir,
+    ...                          'bin-directory': bin_dir,
+    ...                          'index' : 'http://pypi.python.org/pypi'},
+    ...             }
+    >>> name = 'pound'
+    >>> options = {'url': 'mypackage.tgz',
+    ...            'owner': owner,
+    ...            'group': owner}
+
+For each balancer you want to create, you have to define it::
+
+    >>> balancers = """\
+    ...     one  0.0.0.0:80 127.0.0.1:8080 127.0.0.1:8081
+    ...     two  127.0.0.1:90 127.0.0.1:8082,1,30 127.0.0.1:8083 169.1.1.2:80
+    ... """
+    >>> options['balancers'] = balancers
+    >>> options['executable'] = '/usr/sbin/pound'
+
+Each line is composed of the name and the port, and a list of
+backends, defines by a host and a port.
+
+Creating the recipe::
+
+    >>> from plone.recipe.pound import ConfigureRecipe
+    >>> recipe = ConfigureRecipe(buildout, name, options)
+
+Running it::
+
+    >>> paths = recipe.install()
+
+Checking the files created::
+
+    >>> paths
+    ['...parts/pound/etc', '.../bin/poundctl', '.../bin/poundrun', '.../bin/poundcontrol']
+
+    >>> location = paths[0]
+
+Checking the pound.cfg created::
+
+    >>> cfg = join(location, 'pound.cfg')
+    >>> f = open(cfg)
+    >>> print f.read()
+    # pound.cfg
+    # created by plone.recipe.pound
+    <BLANKLINE>
+    # global options:
+    User        "..."
+    Group       "..."
+    <BLANKLINE>
+    Daemon 1
+    <BLANKLINE>
+    # Logging: (goes to syslog by default)
+    #    0    no logging
+    #    1    normal
+    #    2    extended
+    #    3    Apache-style (common log format)
+    LogLevel   1
+    <BLANKLINE>
+    # Log facility -- the manpage for syslog.conf(5) lists valid values.
+    LogFacility  daemon
+    <BLANKLINE>
+    # check backend every X secs:
+    Alive        30
+    <BLANKLINE>
+    # Enable or disable the dynamic rescaling code (default: 0)
+    DynScale 0
+    <BLANKLINE>
+    # After this long has passed without the client sending any data Pound will close connection (default 10)
+    Client 10
+    <BLANKLINE>
+    # How long should Pound wait for a response from the back-end (in seconds). Default: 15 seconds.
+    TimeOut 15
+    <BLANKLINE>
+    # How long should Pound continue to answer existing connections after a receiving and INT or HUP signal
+    Grace 30
+    <BLANKLINE>
+    # Socket
+    Control "...var/pound.sock"
+    <BLANKLINE>
+    # listen, redirect and ... to:
+    # balancer for one
+    ListenHTTP
+        Address 0.0.0.0
+        Port    80
+        # for webdav
+        xHTTP    2
+        Service
+        BackEnd
+            Address 127.0.0.1
+            Port    8080
+    <BLANKLINE>
+        End
+        BackEnd
+            Address 127.0.0.1
+            Port    8081
+    <BLANKLINE>
+        End
+    <BLANKLINE>
+        # for session cookies
+        Session
+            Type COOKIE
+            ID "__ac"
+            TTL 300
+        End
+    <BLANKLINE>
+        End
+    End
+    # balancer for two
+    ListenHTTP
+        Address 127.0.0.1
+        Port    90
+        # for webdav
+        xHTTP    2
+        Service
+        BackEnd
+            Address 127.0.0.1
+            Port    8082
+            TimeOut 30
+            Priority 1
+    <BLANKLINE>
+        End
+        BackEnd
+            Address 127.0.0.1
+            Port    8083
+    <BLANKLINE>
+        End
+        BackEnd
+            Address 169.1.1.2
+            Port    80
+    <BLANKLINE>
+        End
+    <BLANKLINE>
+        # for session cookies
+        Session
+            Type COOKIE
+            ID "__ac"
+            TTL 300
+        End
+    <BLANKLINE>
+        End
+    End
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+
+Test sticky session::
+
+    >>> f.close()
+    >>> options['sticky'] = 'off'
+    >>> recipe = ConfigureRecipe(buildout, name, options)
+
+Running it::
+
+    >>> paths = recipe.install()
+    >>> f = open(cfg,'r')
+    >>> 'Type COOKIE' in open(cfg).read()
+    True
+
+    >>> options['sessioncookie'] = '__ac'
+    >>> options['sessiontimeout'] = '800'
+    >>> recipe = ConfigureRecipe(buildout, name, options)
+    >>> paths = recipe.install()
+
+
+We also have a general script that is added in the buildout binary folder::
+
+    >>> print open(join(bin_dir, 'poundctl')).read()
+    #!/usr/bin/env bash
+    BUILDOUT_PATH=""
+    ...
+
+Cleaning up the files::
+
+    >>> import shutil
+    >>> shutil.rmtree(paths[0])
+
