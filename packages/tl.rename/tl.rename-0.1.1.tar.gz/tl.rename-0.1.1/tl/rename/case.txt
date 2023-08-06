@@ -1,0 +1,126 @@
+====================
+Case transformations
+====================
+
+Among the operations that can be performed on a file name are
+case transformations such as making all alphabetic characters upper or lower
+case or applying some style of mixed case. The ``tl.rename.case`` module
+provides a number of functions that implement such transformations, as well as
+one compound transformation that applies a specific implementation based on
+the value of the ``case`` option.
+
+All these transformation functions take, as usual, an iterable of old file
+names as an argument and return a list of transformed names. File names are
+encoded strings; case transformations of byte values beyond 7 bits depend on
+the locale, which is why we don't demonstrate them here as we cannot be sure
+about the availability of any particular interesting locale.
+
+
+Transforming to upper and lower case
+====================================
+
+These transformations simply apply the ``upper`` and ``lower`` methods of
+Python's built-in strings.
+
+>>> from tl.rename.case import transform_uppercase
+>>> transform_uppercase(['foo/abc123.txt', 'Bar\xd7', 'BAZ -.*'])
+['FOO/ABC123.TXT', 'BAR\xd7', 'BAZ -.*']
+
+>>> from tl.rename.case import transform_lowercase
+>>> transform_lowercase(['FOO/ABC123.TXT', 'Bar\xd7', 'baz -.*'])
+['foo/abc123.txt', 'bar\xd7', 'baz -.*']
+
+
+Sentence case
+=============
+
+Sentence case is a style of mixed case that applies upper case to the
+beginning of the first word of a sentence (delimited by a single period):
+
+>>> from tl.rename.case import transform_sentence_case
+>>> transform_sentence_case(['foo bar baz', 'FOO bar. baz Asdf'])
+['Foo bar baz', 'Foo bar. Baz asdf']
+
+There can be any number of sentences, regardless of any whitespace surrounding
+the periods (the first example makes sure of a bug fix in 0.1.1):
+
+>>> transform_sentence_case(
+...     ['foo.bar.baz', 'foo . bar . baz', 'foo .bar .baz'])
+['Foo.Bar.Baz', 'Foo . Bar . Baz', 'Foo .Bar .Baz']
+
+Whitespace is retained:
+
+>>> transform_sentence_case(
+...     ['FOO \tbar .  Baz\nasdf']) #doctest: -NORMALIZE_WHITESPACE
+['Foo \tbar .  Baz\nasdf']
+
+Numerals are counted as letters and can form a word or a part thereof:
+
+>>> transform_sentence_case(
+...     ['3 times', 'only 3 times', '12th time', 'the 12th time'])
+['3 times', 'Only 3 times', '12th time', 'The 12th time']
+
+Sentences are recognized correctly in the presence of non-alphanumeric
+characters:
+
+>>> transform_sentence_case(['foo bar. (foo bar.) 3 baz (asdf).'])
+['Foo bar. (Foo bar.) 3 baz (asdf).']
+
+Sentence case is applied to each path segment:
+
+>>> transform_sentence_case(['foo bar/baz asdf', '/foo/bar/baz asdf'])
+['Foo bar/Baz asdf', '/Foo/Bar/Baz asdf']
+
+Exceptions
+----------
+
+Roman numerals are capitalized even in the middle of a sentence. As a welcome
+side-effect, this includes the english word "I":
+
+>>> transform_sentence_case(['foo i bar McDXx.txt'])
+['Foo I bar MCDXX.Txt']
+
+Words that follow an ellipsis aren't capitalized even if they start a
+sentence. Ellipses are any sequences of two or more consecutive periods,
+whitespace around them doesn't matter:
+
+>>> transform_sentence_case(
+...     ['... foo', 'foo .... bar', '..123.. foo']) #doctest: -ELLIPSIS
+['... foo', 'Foo .... bar', '..123.. foo']
+
+There is no capitalization after an apostrophe, even if the first word of a
+sentence starts with one. This is based on a guess that file names are more
+likely to contain an apostrophe to signal omission of characters than as a
+single quote.
+
+>>> transform_sentence_case(["'til noon. this ain't now. 'nuff said"])
+["'til noon. This ain't now. 'nuff said"]
+
+
+Selecting a case transformation by options
+==========================================
+
+The ``tl.rename.case`` module provides one transformation function that
+selects and applies a specific case transformation determined by the value of
+the ``case`` option:
+
+>>> from tl.rename.case import transform
+>>> transform(['foo Bar'], case='upper')
+['FOO BAR']
+>>> transform(['foo Bar'], case='lower')
+['foo bar']
+>>> transform(['foo Bar'], case='sentence')
+['Foo bar']
+
+Non-existent case transformation identifiers will be ignored, as will the
+absence of the option:
+
+>>> transform(['foo Bar'], case='non-existent')
+['foo Bar']
+>>> transform(['foo Bar'])
+['foo Bar']
+
+
+.. Local Variables:
+.. mode: rst
+.. End:
