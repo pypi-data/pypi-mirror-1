@@ -1,0 +1,198 @@
+Main user story
+===============
+
+.. Copyright (C) 2008 Ingeniweb
+
+.. This program is free software; you can redistribute it and/or modify
+.. it under the terms of the GNU General Public License as published by
+.. the Free Software Foundation; either version 2 of the License, or (at
+.. your option) any later version.
+
+.. This program is distributed in the hope that it will be useful, but
+.. WITHOUT ANY WARRANTY; without even the implied warranty of
+.. MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+.. General Public License for more details.
+
+.. You should have received a copy of the GNU General Public License
+.. along with this program; see the file LICENSE.txt. If not, write to
+.. the Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139,
+.. USA.
+
+.. $Id: test_globalprocess.txt 36 2008-09-07 09:08:55Z glenfant $
+
+Some inits and setups
+---------------------
+
+  >>> import simplejson
+  >>> from zope.component import getAdapter
+  >>> from iw.sitestat.interfaces import IFileLinksFinder
+  >>> from iw.sitestat.interfaces import ISitestatConfigSchema
+  >>> from iw.sitestat.interfaces import IContentOptions
+  >>> from iw.sitestat.browser.jsslot import JSSlotEndViewlet
+  >>> from iw.sitestat.tests import utils as ns_utils
+  >>> REQUEST = self.app.REQUEST
+  >>> self.loginAsPortalOwner()
+  >>> foo_file = ns_utils.addFile(self.portal, 'foo', 'Foo')
+  >>> foo_file.title_or_id()
+  'Foo'
+  >>> foo_file.manage_edit('Foo', 'text/html', filedata=ns_utils.LOREM_IPSUM_HTML)
+
+
+Our content has a file link
+---------------------------
+
+  >>> foo_file_urls = getAdapter(foo_file, IFileLinksFinder).fileURLs()
+  >>> foo_file_urls
+  ['http://nohost/plone/foo',
+  'http://nohost/plone/foo/at_download/file']
+
+We check our configuration tools
+--------------------------------
+
+  >>> portal_config = getAdapter(self.portal, ISitestatConfigSchema)
+  >>> portal_config
+  <iw.sitestat.browser.controlpanel.SitestatControlPanelAdapter ...>
+  >>> foo_config = getAdapter(foo_file, IContentOptions)
+  >>> foo_config
+  <iw.sitestat.browser.contentoptions.ContentOptionsManager ...>
+
+
+Check default site config
+-------------------------
+
+  >>> portal_config.sitestat_enabled
+  False
+  >>> portal_config.country_code
+  u'fr'
+  >>> portal_config.company_code
+  'acme'
+  >>> portal_config.site_code
+  'internet'
+  >>> portal_config.sitestat_private_url
+  ''
+  >>> portal_config.counter_name_mode
+  u'id'
+  >>> portal_config.pdf_marking
+  False
+  >>> portal_config.files_as_pdf
+  False
+  >>> portal_config.dltime_enabled
+  False
+  >>> portal_config.https_enabled
+  False
+  >>> portal_config.clickin_enabled
+  False
+  >>> portal_config.clickout_urls
+  ()
+  >>> portal_config.clickin_uids
+  ()
+  >>> portal_config.clickin_paths
+  ()
+
+Check default item options
+--------------------------
+
+  >>> foo_config.is_clickin_target
+  False
+  >>> foo_config.override_counters
+  False
+
+Check default viewlets
+----------------------
+
+  >>> foo_end_viewlet = JSSlotEndViewlet(foo_file, REQUEST, None, None)
+  >>> foo_end_viewlet.update()
+  >>> foo_end_viewlet.enabled()
+  False
+
+We activate and configurie sitestat
+-----------------------------------
+
+  >>> portal_config.sitestat_enabled = True
+  >>> portal_config.counter_name_mode = 'id'
+
+Our viewlet is enabled
+
+  >>> foo_end_viewlet.update()
+  >>> foo_end_viewlet.enabled()
+  True
+
+Our viewlet sitestat URL
+
+  >>> foo_end_viewlet.sitestatBaseURL()
+  u'http://fr.sitestat.com/acme/internet/'
+
+We check with a private sitestat URL
+
+  >>> portal_config.sitestat_private_url = 'https://my.sitestat.tld/somesite'
+  >>> foo_end_viewlet.update()
+  >>> foo_end_viewlet.sitestatBaseURL()
+  'https://my.sitestat.tld/somesite/'
+  >>> portal_config.sitestat_private_url = ''
+  
+Our standard code URL
+
+  >>> foo_end_viewlet.standardCodeURL()
+  u'http://fr.sitestat.com/acme/internet/s?foo'
+
+Our viewlet counters
+
+  >>> foo_end_viewlet.getCounters()
+  'foo'
+
+Our viewlet provides correct file infos
+
+  >>> foo_end_viewlet.listPdfURLs()
+  []
+
+We activate URLs for files and PDF files
+
+  >>> portal_config.pdf_marking = True
+  >>> portal_config.files_as_pdf = True
+  >>> foo_end_viewlet.update()
+  >>> foo_end_viewlet.listPdfURLs()
+  ['http://nohost/plone/foo', 'http://nohost/plone/foo/at_download/file']
+
+We change the config to get the titles in code URL
+
+  >>> portal_config.counter_name_mode = 'title'
+  >>> foo_end_viewlet.update()
+  >>> foo_end_viewlet.standardCodeURL()
+  u'http://fr.sitestat.com/acme/internet/s?Foo'
+
+We activate the local config
+----------------------------
+
+And add local keywords
+
+  >>> foo_config.override_counters = True
+  >>> foo_config.counters = 'ping.pong'
+
+We check the new sitestat URL
+
+  >>> foo_end_viewlet.update()
+  >>> foo_end_viewlet.standardCodeURL()
+  u'http://fr.sitestat.com/acme/internet/s?ping.pong'
+
+We add labels and check that URL again
+
+  >>> foo_config.raw_labels = {'category': 'finance', 'other': 'any'}
+  >>> foo_end_viewlet.update()
+  >>> foo_end_viewlet.standardCodeURL()
+  u'http://fr.sitestat.com/acme/internet/s?ping.pong&amp;category=finance&amp;other=any'  ['http://nohost/plone/foo']
+
+
+Testing clickin
+===============
+
+  >>> foo_config.is_clickin_target = True
+  >>> foo_end_viewlet.update()
+  >>> foo_end_viewlet.listClickinURLs()
+  ['http://nohost/plone/foo']
+  >>> self.portal.manage_renameObjects(['foo'], ['bar'])
+  >>> bar_file = self.portal['bar']
+  >>> bar_end_viewlet = JSSlotEndViewlet(bar_file, REQUEST, None, None)
+  >>> bar_end_viewlet.update()
+  >>> bar_end_viewlet.listClickinURLs()
+  ['http://nohost/plone/bar']
+
