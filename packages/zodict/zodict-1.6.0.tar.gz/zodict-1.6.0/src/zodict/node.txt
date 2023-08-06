@@ -1,0 +1,233 @@
+
+Node
+====
+
+Short test on superclass
+::
+
+  >>> from zope.interface.common.mapping import IFullMapping
+  >>> from zodict import zodict
+  >>> zod = zodict()
+  >>> IFullMapping.providedBy(zod)
+  True
+
+We have a base node which provides the default interface implementation
+::
+
+  >>> from zope.interface.common.mapping import IFullMapping
+  >>> from zodict.interfaces import INode
+  >>> from zodict.node import Node
+  >>> root = Node('root')
+  >>> root
+  <Node object 'root' at ...>
+  
+  >>> root.__name__
+  'root'
+  
+  >>> root.__parent__
+
+  >>> root.path
+  ['root']
+  
+  >>> root['child'] = Node()
+  >>> root['child'].path
+  ['root', 'child']
+  
+  >>> root['child']['subchild'] = Node()
+  >>> root['child']['subchild'].path
+  ['root', 'child', 'subchild']
+  
+  >>> root['child']['subchild2'] = Node()
+  >>> root.keys()
+  ['child']
+  
+  >>> root['child'].keys()
+  ['subchild', 'subchild2']
+  
+  >>> root['child'].items()
+  [('subchild', <Node object 'subchild' at ...>), 
+  ('subchild2', <Node object 'subchild2' at ...>)]
+  
+  >>> child = root['child']
+  >>> child.__name__
+  'child'
+  
+  >>> child.__parent__
+  <Node object 'root' at ...>
+  
+Node uses ILocation, so attribute __name__ is set. A python class object itself 
+uses this attribute too, here it stores the class name. If you set a class 
+derived from Node (others would be catched earlier) as a value in a Node you'd 
+get odd effects, so we don't allow it!
+::
+
+  >>> class SomeClass(Node):
+  ...     """for testing"""
+  >>> root['aclasshere'] = SomeClass
+  Traceback (most recent call last):
+  ...
+  ValueError: It isn't allowed to use classes as values.
+
+
+Test filtereditems function
+::
+
+  >>> from zope.interface import Interface
+  >>> from zope.interface import alsoProvides
+  >>> class IMarker(Interface): pass
+  >>> alsoProvides(root['child']['subchild'], IMarker)
+  >>> IMarker.providedBy(root['child']['subchild'])
+  True
+  
+  >>> for item in root['child'].filtereditems(IMarker):
+  ...     print item.path
+  ['root', 'child', 'subchild']
+
+Check UUID stuff
+::
+
+  >>> root._index.keys()
+  [UUID('...'), UUID('...'), UUID('...'), UUID('...')]
+
+  >>> uuid = root['child']['subchild'].uuid
+  >>> uuid
+  UUID('...')
+  
+  >>> root.node(uuid).path
+  ['root', 'child', 'subchild']
+  
+  >>> root.uuid = uuid
+  Traceback (most recent call last):
+    ...
+  ValueError: Given uuid was already used for another Node
+  
+  >>> import uuid
+  >>> newuuid = uuid.uuid4()
+  
+  >>> root.uuid = newuuid
+  >>> root['child'].node(newuuid).path
+  ['root']
+  
+  >>> len(root._index.keys())
+  4
+
+Child of root contains 2 more subchilds.
+::
+
+  >>> len(root['child'].keys())
+  2
+
+Store the uuids of the nodes which are expected to be deleted from index if
+child is deleted
+::
+
+  >>> delindexes = [
+  ...     root['child'].uuid,
+  ...     root['child']['subchild'].uuid,
+  ...     root['child']['subchild2'].uuid,
+  ... ]
+
+Read the uuid index and check containment in index
+::
+
+  >>> uuids = root._index.keys()
+  >>> len(uuids)
+  4
+  
+  >>> delindexes[0] in uuids
+  True
+  
+  >>> delindexes[1] in uuids
+  True
+  
+  >>> delindexes[2] in uuids
+  True
+  
+Delete child. All checked uuids above must be deleted from index.
+::
+  
+  >>> del root['child']
+  >>> root.keys()
+  []
+  
+  >>> uuids = root._index.keys()
+  >>> len(uuids)
+  1
+  
+  >>> delindexes[0] in uuids
+  False
+  
+  >>> delindexes[1] in uuids
+  False
+  
+  >>> delindexes[2] in uuids
+  False
+
+Node insertion
+::
+
+  >>> root.printtree()
+  <class 'zodict.node.Node'>: root
+  
+  >>> root['child1'] = Node()
+  >>> root['child2'] = Node()
+  >>> root.printtree() 
+  <class 'zodict.node.Node'>: root
+    <class 'zodict.node.Node'>: child1
+    <class 'zodict.node.Node'>: child2
+  
+  >>> node = Node()
+  >>> root.insertbefore(node, root['child1'])
+  Traceback (most recent call last):
+    ...
+  ValueError: Given node has no __name__ set.
+  
+  >>> root.insertbefore(root['child2'], root['child1'])
+  Traceback (most recent call last):
+    ...
+  KeyError: u'Given node already contained in tree.'
+  
+  >>> node.__name__ = 'child3'
+  >>> root.insertbefore(node, root['child2'])
+  >>> root.printtree()
+  <class 'zodict.node.Node'>: root
+    <class 'zodict.node.Node'>: child1
+    <class 'zodict.node.Node'>: child3
+    <class 'zodict.node.Node'>: child2
+
+Move a node
+::
+
+  >>> node = root['child2']
+  >>> del root['child2']
+  >>> root.values()
+  [<Node object 'child1' at ...>, <Node object 'child3' at ...>]
+  
+  >>> root.insertbefore(node, root['child1'])
+  >>> root.printtree()
+  <class 'zodict.node.Node'>: root
+    <class 'zodict.node.Node'>: child2
+    <class 'zodict.node.Node'>: child1
+    <class 'zodict.node.Node'>: child3
+
+There exist an insertafter function as well
+::
+
+  >>> node = Node('child4')
+  >>> root.insertafter(node, root['child2'])
+  >>> root.printtree()
+  <class 'zodict.node.Node'>: root
+    <class 'zodict.node.Node'>: child2
+    <class 'zodict.node.Node'>: child4
+    <class 'zodict.node.Node'>: child1
+    <class 'zodict.node.Node'>: child3
+  
+  >>> node = Node('child5')
+  >>> root.insertafter(node, root['child3'])
+  >>> root.printtree()
+  <class 'zodict.node.Node'>: root
+    <class 'zodict.node.Node'>: child2
+    <class 'zodict.node.Node'>: child4
+    <class 'zodict.node.Node'>: child1
+    <class 'zodict.node.Node'>: child3
+    <class 'zodict.node.Node'>: child5
