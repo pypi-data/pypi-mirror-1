@@ -1,0 +1,89 @@
+.. -*-doctest-*-
+
+===================
+rpatterson.listfile
+===================
+
+Support list operations over lines of file-like objects.
+
+All operations avoid iterating except when necessary.  Operations that
+force iteration over the whole file include len() and using negative
+indexes.  In order to avoid excess seeking, all list operations may
+change the position of the underlying file object.
+
+Start with a file-like object.
+
+    >>> import cStringIO
+    >>> file_ = cStringIO.StringIO("""\
+    ... foo
+    ... bar
+    ... baz
+    ... qux
+    ... """)
+
+Wrap the file-like object in a listfile instance.
+
+    >>> from rpatterson import listfile
+    >>> wrapped = listfile.ListFile(file_)
+
+Lines can be accessed by index.
+
+    >>> wrapped[0]
+    'foo\n'
+    >>> wrapped[2]
+    'baz\n'
+
+Negative indexes are supported as well.
+
+    >>> wrapped[-1]
+    'qux\n'
+    >>> wrapped[-3]
+    'bar\n'
+
+The length returns the number of lines.
+
+    >>> len(wrapped)
+    4
+
+An index beyond the end of the file raises IndexError.
+
+    >>> wrapped[4]
+    Traceback (most recent call last):
+    IndexError: list index out of range
+
+Retrieving a slice returns a new wrapper around the same file object.
+
+    >>> slice_ = wrapped[1:3]
+    >>> len(slice_)
+    2
+    >>> slice_[0]
+    'bar\n'
+    >>> slice_[1]
+    'baz\n'
+
+    >>> slice_ = wrapped[1:][0:2]
+    >>> len(slice_)
+    2
+    >>> slice_[0]
+    'bar\n'
+    >>> slice_[1]
+    'baz\n'
+
+Slice stepping is also supported.
+
+    >>> slice_ = wrapped[1::2]
+    >>> len(slice_)
+    2
+    >>> slice_[0]
+    'bar\n'
+    >>> slice_[1]
+    'qux\n'
+
+The wrappers are also iterators suitable for writelines().
+
+    >>> list(slice_)
+    ['bar\n', 'qux\n']
+    >>> out = cStringIO.StringIO()
+    >>> out.writelines(slice_)
+    >>> out.getvalue()
+    'bar\nqux\n'
