@@ -1,0 +1,177 @@
+Metadata-Version: 1.0
+Name: Products.pipbox
+Version: 0.2dev
+Summary: Picture In Picture (lightbox/greybox) support for Plone
+Home-page: http://svn.plone.org/svn/collective/Products.pipbox
+Author: Steve McMahon
+Author-email: steve@dcn.org
+License: GPL
+Description: Introduction
+        ============
+        
+        PIP = Picture in Picture
+        
+        pipbox = picture boxes in Plone
+        
+        Products.pipbox provides lightbox / greybox / thickbox support in Plone.
+        This allows lightbox-style popups that may be loaded as images, AJAX html,
+        or iframes.
+        
+        The goal is that this support will be available via methods that wrap the
+        Javascript implementation (currently ThickBox) so that it can change if
+        necessary.
+        
+        Site setup for pipbox is table-driven, with settings in the table allowing
+        you to specify DOM elements via jquery selectors. These are usually going to
+        be <a href... /> or <img src... /> elements. You specify how the URL should be loaded
+        (as an image, AJAX or iframe). You may also optionally supply a regular expression
+        search/replace pair for the URL and additional arguments for the JS engine.
+        
+        Let's say, for example, that you want to make clicking on news-item photos
+        open a lightbox-style larger version of the image. To do this, you'll need to specify:
+        
+        * A jquery style selector for a Plone element, e.g., ".newsImageContainer a"
+        
+        * "image" for the load method ("ajax" and "iframe" are other alternatives)
+        
+        * A regular expression search/replace to transform the href or src URL.
+        In this example, we're changing the URL to point to the preview-sized
+        image. So, our search/replace pair is "/image_view_fullscreen"
+        and "_preview".
+        
+        * You could also specify height and width of the popup in a URL style argument.
+        E.G., "&height=120&width=120". These parameters may include anything supported
+        by ThickBox.
+        
+        Site setup for pipbox is table-driven, with a lines field in
+        portal_properties.pipbox_properties. In this table, each line is a specification,
+        with the elements of the specification separated by "|" characters. So, all of
+        the above will need to be a line like::
+        
+        .newsImageContainer a|image|/image_view_fullscreen|_preview|&height=120&width=120
+        
+        Another quick example, one that provides full-image popups for images placed via kupu::
+        
+        img.image-right,img.image-left,img.image-inline|image|/image_.+$||
+        
+        What's different? We're targeting <img ... /> tags, which don't have href attributes.
+        pipbox picks up the target URL from the src attribute, so that we can have a popup view
+        of image elements that aren't linked to that view. Note also that we're using a real
+        regular expression in the search/replace so that we can strip off image_preview, image_mini,
+        etc.
+        
+        Tests
+        -----
+        
+        Setup the test framework::
+        
+        >>> from zope.component import getMultiAdapter
+        >>> from Products.Five.testbrowser import Browser
+        >>> browser = Browser()
+        >>> portal_url = 'http://nohost/plone'
+        
+        We should already be installed, so there should be a product in the Products space::
+        
+        >>> from Products import pipbox
+        
+        And, quickinstaller should know about us::
+        
+        >>> portal.portal_quickinstaller.isProductInstalled('pipbox')
+        True
+        
+        
+        Property Sheet Installation
+        ---------------------------
+        
+        We'll use a portal_properties property sheet to store site setup::
+        
+        >>> 'pipbox_properties' in portal.portal_properties.objectIds()
+        True
+        
+        It's selector_specs field should contain an automatic activation
+        specification. Here's what's pre-installed::
+        
+        >>> my_props = portal.portal_properties.pipbox_properties
+        >>> my_props.selector_specs
+        ("{type:'overlay',subtype:'image',selector:'.newsImageContainer a',urlmatch:'/image_view_fullscreen$',urlreplace:''}",)
+        
+        
+        Stylesheet View
+        ---------------
+        
+        Popup windows require style support.
+        We should have our stylesheet available as a view::
+        
+        >>> view = getMultiAdapter((portal, app.REQUEST), name=u'pipbox.css')
+        >>> mycss = view()
+        >>> mycss.find('PIPBox Stylesheet') > 0
+        True
+        
+        For ease of interpolating plone style properties,
+        it's a dtml document, and should be interpreted as such::
+        
+        >>> mycss.find('<dtml') == -1
+        True
+        
+        The stylesheet should be installed in the CSS registry::
+        
+        >>> 'pipbox.css' in portal.portal_css.getResourceIds()
+        True
+        
+        
+        Javascript Resource and View
+        ----------------------------
+        
+        We should have two items in the JS registry::
+        
+        >>> jsreg = portal.portal_javascripts
+        >>> ids = jsreg.getResourceIds()
+        >>> '++resource++pipbox.js' in ids and 'pipboxinit.js' in ids
+        True
+        
+        Open the main JS code item as a resource::
+        
+        >>> browser.open(portal_url+'/++resource++pipbox.js')
+        
+        And, make sure it's got our code in it::
+        
+        >>> print browser.contents
+        /*****************
+        <BLANKLINE>
+        PIPbox tools for attaching JQuery Tools bling to CSS with option
+        parameter strings.
+        <BLANKLINE>
+        *****************/
+        ...
+        
+        We have initialization code for our settings in a view::
+        
+        >>> view = getMultiAdapter((portal, app.REQUEST), name=u'pipboxinit.js')
+        
+        This should contain the specifications from our propery sheet::
+        
+        >>> print view()
+        <BLANKLINE>
+        pb.doSetup({type:'overlay',subtype:'image',selector:'.newsImageContainer a',urlmatch:'/image_view_fullscreen$',urlreplace:''});
+        
+        
+        
+        Changelog
+        =========
+        
+        0.2dev
+        ------
+        
+        * Adapt to use with JQuery Tools rather than ThickBox
+        
+        0.1dev
+        ----------------
+        
+        * Initial commit
+        
+        
+Keywords: web zope plone theme
+Platform: UNKNOWN
+Classifier: Framework :: Plone
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
