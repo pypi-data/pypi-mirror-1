@@ -1,0 +1,108 @@
+collective.contentgroup
+========================
+
+Overview
+--------
+
+This package is a Plone add-on that allows to associate users groups with 
+content objects. It works this way: the content type class implement 
+``IObjectWithGroup``, normally inheriting from ``ObjectWithGroupMixin``,
+and this package takes care of creating a correspondent users group for each new 
+content object.
+
+Compatibility
+-------------
+
+Tested with Plone 3.2.3, *probably* works with 3.x and 4.x.
+
+Example usage
+-------------
+
+Use case: We want to create a ``Company`` content type. Each ``Company`` must 
+have a correspondent users group.
+
+First we create the content type class. It could be a common Archetype class,
+but here we'll create a simpler one, without the AT base classes. We'll use
+``ObjectWithGroupMixin`` from the ``base`` module in order to get associated
+group support::
+    
+    >>> from zope.event import notify
+    >>> from zope.app.container.contained import ObjectRemovedEvent
+    >>> from Products.Archetypes.event import (ObjectInitializedEvent, 
+    ...     ObjectEditedEvent)    
+    >>> from collective.contentgroup.base import ObjectWithGroupMixin
+    >>> class Company(ObjectWithGroupMixin):
+    ...     __parent__ = None
+    ...
+    ...     def __init__(self, id, title):
+    ...         self.id = self.__name__ = id
+    ...         self.title = title
+    ...         notify(ObjectInitializedEvent(self))    
+    ...
+    ...     def getId(self):
+    ...         return self.id
+    ...
+    ...     def Title(self):
+    ...         return self.title
+    ...
+    ...     def setTitle(self, title):
+    ...         self.title = title
+    ...         notify(ObjectEditedEvent(self))
+    ...
+    ...     def delete_me(self):
+    ...         notify(ObjectRemovedEvent(self))
+    ...         self.id = self.title = None
+    
+Now we can create a ``Company`` instance and see if we get a correspondent
+group created::
+    
+    >>> from Products.CMFCore.utils import getToolByName
+    >>> c = Company('acme', 'The ACME Corporation')    
+    >>> gtool = getToolByName(portal, 'portal_groups')
+    >>> group = gtool.getGroupById(c.get_group_name())
+    >>> group.getProperty('title') == c.get_group_title()
+    True
+
+Let's check if the group's name and title were generated as expected by the
+``ContentWithGroupMixin`` class::
+
+    >>> c.getId() in c.get_group_name()
+    True
+    >>> c.Title() in c.get_group_title()
+    True
+    
+Let's change the company title and see if the group's title also changes::
+
+    >>> c.setTitle('ACME co.')
+    >>> group = gtool.getGroupById(c.get_group_name())
+    >>> group.getProperty('title') == c.get_group_title()
+    True
+    
+Let's delete the company and see if the group is also removed::
+
+    >>> group_name = c.get_group_name() # Save the group name before it's 
+    >>>                                 # deleted.
+    >>> c.delete_me()
+    >>> gtool.getGroupById(group_name) is None
+    True
+    
+Customizing aspects of group creation, removal and edition
+----------------------------------------------------------
+
+The group managing is done through the ``IGroupManager`` interface. An instance
+of this interface is acquired via adaptaion every time a group operation has
+to be done. One can customize the group managing operations by registering an
+adapter for an specific content type, providing ``IGroupManager``.
+
+The default adapter is registered in ZCML like this::
+
+    <adapter
+        for="*"
+        provides=".interfaces.IGroupManager"
+        factory=".groupmanager.PortalGroupsGroupManager"
+    />
+    
+Credits
+-------
+
+- Rafael Oliveira <rafaelbco@gmail.com>: Author.    
