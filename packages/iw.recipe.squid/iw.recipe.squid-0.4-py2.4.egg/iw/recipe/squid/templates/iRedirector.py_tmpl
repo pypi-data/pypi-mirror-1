@@ -1,0 +1,174 @@
+#!%(executable)s -Ou
+"""
+/**********************************************************************
+FILE     : $RCSfile: iRedirector.py,v $
+PURPOSE  : squid redirector for icoya
+NOTES    : uses squidRewriteRules for custom rules
+AUTHOR   : Simon Eisenmann
+COPYRIGHT: (c) 2003,2004 by struktur AG
+DATE     : 28JAN2003
+REVISION : $Revision: 1.7 $
+VERSION  : $Id: iRedirector.py,v 1.7 2004/08/05 17:04:50 longsleep Exp $ (Author: $Author: longsleep $)
+
+struktur AG            Phone: +49 711 8966560
+Junghansstr. 5         Fax:   +49 711 89665610
+70469 Stuttgart        email: info@struktur.de
+GERMANY
+
+http://www.struktur.de
+http://www.strukturag.com
+
+**********************************************************************/
+ iRedirector.py -- a script for squid redirection.
+ (a long-running process that uses unbuffered io; hence the -u flag in python)
+
+ NOTE: use squidRewriteRules to define the rules
+       squidRewriteRules can be automatically reloaded so you dont have to
+       restart squid when the rules were changed.
+
+Optimized by Florian Schulze (florian dot schulze at gmx dot net)
+
+"""
+import sys, traceback
+from thread import start_new_thread
+import squidRewriteRules
+
+
+# set to 1 to enable logging
+debug = %(debug_redirector)s
+
+# set to 1 to enable squid3 multithreaded redirector support
+# NOTE: having this turned on saves a lot of resources
+#       only turn this on when having redirect_concurrency in squid.conf
+#       set to something other than 0
+threaded =  %(iredirector_thread)s
+
+# the logfile for the redirector log (only used when debug is 1)
+logfile = "%(squid_log_dir)s/iRedirector.log"
+
+# Globally bound for speedier lookup. Run `timing.py` to see why.
+stdin_readline = sys.stdin.readline
+stdout_write = sys.stdout.write
+stdout_flush = sys.stdout.flush
+
+class SquidRedirector:
+    """ iRedirector main base class. """
+
+    def __init__(self):
+        pass
+
+    def rewrite(self,line):
+        if threaded:
+            # start new thread
+            start_new_thread(rewrite_threaded, (line,), {})
+        else:
+            # run single threaded
+            rewrite(line)
+
+    def run(self):
+        # wait for stdin input
+        line = stdin_readline()[:-1]
+        # since we bail out on a failure, there's no point in setting
+        # up a try:except in a tight loop. Run `timing.py` for the
+        # difference between `test3` and `test4`.
+        try:
+            while line:
+                reload_after = squidRewriteRules.reload_after
+                if reload_after < 0:
+                    pass # reload is disabled
+                elif reload_after > 0:
+                    squidRewriteRules.reload_after = reload_after - 1
+                else:
+                    reload(squidRewriteRules)
+
+                # launch rewriting function
+                self.rewrite(line)
+
+                # read new line
+                line = stdin_readline()[:-1]
+        except:
+            exc = sys.exc_info()
+            log(str(traceback.format_exception(exc[0],exc[1],exc[2])))
+            del exc
+            # NOTE: raising the exception aborts this redirector process
+            #       when no redirector is left squid exits as well
+            raise
+
+def log(s):
+    """ Logging facility.
+    """
+    try:
+        f = open(logfile, "a")
+    except IOError:
+        print sys.stderr, s
+        return
+    f.write("%%s\n" %% s)
+    f.flush()
+    f.close()
+
+def rewrite(line):
+    """ Splits up the line from squid and gives it to the redirector class.
+        This method can be called in a new thread so one redirector supports
+        multiple redirections at the same time. This is a squid3 feature.
+    """
+
+    if debug:
+        log("request : " + line)
+
+    # format url, src, ident, method
+    url, src_address, ident, method = line.split(" ")[:4] #XXX - need to make 100%% sure these fields aren't rearranged in squid 2.6/3.0 protocol
+
+    # send through redirector class
+    new_url = squidRewriteRules.rewrite(url, src_address)
+
+    if not new_url:
+        # return empty line when redirector didn't return anything
+        response = ""
+    else:
+        response = " ".join((new_url, src_address, ident, method))
+
+    # write it back to squid
+    stdout_write(response+'\n')
+    stdout_flush()
+
+    if debug:
+        log("response: " + response)
+
+def rewrite_threaded(line, write=sys.stdout.write, flush=sys.stdout.flush):
+    """ Splits up the line from squid and gives it to the redirector class.
+        This method can be called in a new thread so one redirector supports
+        multiple redirections at the same time. This is a squid3 feature.
+    """
+
+    if debug:
+        log("request : " + line)
+
+    # format index, url, src, ident, method
+    index, url, src_address, ident, method = line.split(" ")[:5] #XXX - need to make 100%% sure these fields aren't rearranged in squid 2.6/3.0 protocol
+
+    # send through redirector class
+    new_url = squidRewriteRules.rewrite(url, src_address)
+
+    if not new_url:
+        # return empty line when redirector didn't return anything
+        response = index
+    else:
+        # give back the index
+        response = " ".join((index, new_url, src_address, ident, method))
+
+    # write it back to squid
+    stdout_write(response+'\n')
+    stdout_flush()
+
+    if debug:
+        log("response: " + response)
+
+
+if __name__ == "__main__":
+    sr = SquidRedirector()
+    if debug:
+        log('Starting SquidRedirector')
+    sr.run()
+    if debug:
+        log('Stopped SquidRedirector')
+
