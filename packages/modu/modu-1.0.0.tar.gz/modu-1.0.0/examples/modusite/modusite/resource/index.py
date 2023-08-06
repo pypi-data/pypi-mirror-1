@@ -1,0 +1,44 @@
+# modusite
+# Copyright (c) 2006-2010 Phil Christensen
+# http://modu.bubblehouse.org
+#
+# $Id: index.py 1231 2010-02-04 05:27:06Z phil $
+#
+
+from modu.web import resource, app
+
+from modusite.model import page
+
+class Resource(resource.CheetahTemplateResource):
+	def prepare_content(self, req):
+		"""
+		@see: L{modu.web.resource.IContent.prepare_content()}
+		"""
+		if not(req.postpath):
+			self.set_slot('title', 'modu: a web toolkit')
+			self.set_slot('content', None)
+			return
+		else:
+			page_code = req.postpath[0]
+		
+		req.store.ensure_factory('page', page.Page, force=True)
+		p = req.store.load_one('page', {'active':1, 'url_code':page_code})
+		
+		if(p is None):
+			app.raise404(page_code)
+		
+		self.set_slot('title', p.title)
+		self.set_slot('content', p.data)
+	
+	def get_content_type(self, req):
+		"""
+		@see: L{modu.web.resource.IContent.get_content_type()}
+		"""
+		return 'text/html; charset=UTF-8'
+	
+	def get_template(self, req):
+		"""
+		@see: L{modu.web.resource.ITemplate.get_template()}
+		"""
+		return 'index.html.tmpl'
+
