@@ -1,0 +1,460 @@
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"
+      xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      lang="en"
+      metal:use-macro="here/main_template/macros/master"
+      i18n:domain="plone">
+<head>
+    <metal:block metal:fill-slot="head_slot">
+        <link rel="alternate" title="RSS 1.0" type="application/rss+xml"
+              tal:condition="request/SearchableText|nothing"
+              tal:attributes="href string:$here_url/search_rss?${request/QUERY_STRING}"/>
+    </metal:block>
+
+    <metal:block fill-slot="top_slot"
+                 tal:define="dummy python:request.set('disable_border',1)" />
+    <metal:block fill-slot="column_one_slot" />
+    <metal:block fill-slot="column_two_slot" />
+</head>
+
+<body>
+<div metal:fill-slot="main"
+     tal:define="use_types_blacklist request/use_types_blacklist | python:True;
+                 use_navigation_root request/use_navigation_root | python:True;
+                 search_view context/@@searchtools;
+                 types_view context/@@typestools;
+                 errors options/state/getErrors;
+                 haserrors errors/normativas|errors/addressbook|errors/send_from_address|nothing;
+                 arearqt request/getArea|nothing;
+                 results python:search_view.search_results(request);
+                 Batch python:modules['Products.CMFPlone'].Batch;
+                 b_size python:30;b_start python:0;b_start request/b_start | b_start;
+                 desc_length site_properties/search_results_description_length;
+                 desc_ellipsis site_properties/ellipsis;
+                 searchterm request/SearchableText|nothing;
+                 use_view_action site_properties/typesUseViewActionInListings|python:();">
+
+    <h1 class="documentFirstHeading">
+        <span i18n:translate="heading_search_results">
+            Search results
+        </span>
+        <span class="discreet">
+        &mdash;
+        <span i18n:translate="batch_x_items_matching_your_criteria"
+        ><span i18n:name="number" 
+        tal:omit-tag="" 
+        tal:content="python:len(results)">234</span> items matching your search terms</span>
+    </h1>
+
+
+
+    <div tal:condition="not: results">
+        <p><strong i18n:translate="description_no_results_found">No results were found.</strong></p>
+    </div>
+
+      <form name="sendto_form"
+            action="sendto_form"
+            method="post"
+            enctype="multipart/form-data"
+            tal:attributes="action string:$here_url/$template_id">
+
+          <input type="hidden" name="getArea" value="area" tal:attributes="value arearqt" />
+
+    <div tal:define="batch python:Batch(results, b_size, int(b_start), orphan=1);
+                     error errors/normativas|nothing;" 
+         tal:condition="results|haserrors"
+         tal:attributes="class python:test(error, 'field error', 'field')">
+
+        <div tal:content="error">Validation error output</div>
+
+        <dl class="searchResults">
+        <tal:results repeat="result batch">
+        <tal:entry define="result_url result/getURL;
+                           result_type result/portal_type;
+                           item_icon python:plone_view.getIcon(result);
+                           url python:'%s?searchterm=%s'%(test(result_type in use_view_action, result_url+'/view', result_url+'/'), searchterm);">
+            <input type=checkbox name="normativas:list" value="result_url" style="float: left; margin-top: 4px;" tal:attributes="value result_url;
+                checked python: result_url in request.get('normativas',[])">
+            <dt tal:define="item_wf_state_class string:state-${result/review_state};"
+                tal:attributes="class python:'contenttype-' + normalizeString(result.portal_type)">
+              <img tal:replace="structure item_icon/html_tag" />
+               <a
+                 href="#" 
+                 tal:attributes="href url;
+                                 class string:$item_wf_state_class"
+                 tal:content="result/pretty_title_or_id" />
+            </dt>
+            
+            <dd>
+
+                <span class="documentModified">
+                    <span tal:replace="result/getDate"/>
+                    &mdash;
+                </span>
+
+                <span class="documentAuthor">
+                      <span tal:replace="result/getSource"/>
+                </span>
+
+                <span tal:condition="result/getCudap">
+                    &mdash;
+                    <span tal:replace="result/getCudap"/>
+                </span>
+                
+                <br/>
+
+                <span tal:content="structure python:result.Description.replace('\n', '<br/>')">
+                    Cropped description
+                </span>
+<!--
+                <span tal:replace="python:plone_view.cropText(result.Description, desc_length, desc_ellipsis)">
+                    Cropped description
+                </span>
+
+            <span class="documentByLine"
+                  tal:condition="python:not isAnon or site_properties.allowAnonymousViewAbout">
+                <span class="documentAuthor"
+                    i18n:translate="label_by_author">
+                by
+                <a href="#"
+                   tal:attributes="href string:${portal_url}/author/${result/Creator}"
+                   tal:content="result/Creator"
+                   tal:omit-tag="not:result/Creator"
+                   i18n:name="author">
+                Bob Dobalina
+                </a>
+
+                </span>
+
+                <span class="documentModified">
+                  &mdash;
+                    <span i18n:translate="box_last_modified">
+                    last modified
+                    </span>
+                    <span tal:replace="python:toLocalizedTime(result.ModificationDate, long_format=1)">
+                    August 16, 2001 at 23:35:59
+                    </span>
+                </span>
+
+
+            </span>
+-->
+            </dd>
+
+        </tal:entry>
+        </tal:results>
+        </dl>
+         
+        <div metal:use-macro="here/batch_macros/macros/navigation" />
+
+    </div>
+
+<!-- -->
+    <div tal:condition="results|haserrors">
+
+        <fieldset>
+
+          <legend i18n:translate="legend_address_info">Address info</legend>
+
+          <div class="field"
+               tal:define="error errors/addressbook|nothing;"
+               tal:attributes="class python:test(error, 'field error', 'field')">
+
+            <label for="send_to_address" i18n:translate="label_send_to_mail">Send to</label>
+
+            <span class="fieldRequired" title="Required"
+                  i18n:attributes="title title_required;"
+                  i18n:translate="label_required">(Required)</span>
+
+                  <div class="formHelp" i18n:translate="help_send_to_mail">
+                    The e-mail address to send this link to.
+                  </div>
+
+                  <div tal:content="error">Validation error output</div>
+
+
+            <select id="addressbook" name="addressbook:list" size="10" multiple="multiple" tal:attributes="tabindex tabindex/next;">
+              <tal:emails-loop repeat="email python:types_view.get_area_emails(arearqt)">
+               <option value="email" tal:attributes="value email;
+                                                     selected python:email in request.get('addressbook',[]) and 1 or 0"
+                                     tal:content="email">E mail Address</option>
+              </tal:emails-loop>
+    	    </select>
+
+
+          </div>
+
+          <div class="field"
+               tal:define="error errors/send_from_address|nothing;"
+               tal:attributes="class python:test(error, 'field error', 'field')">
+
+            <label for="send_from_address" i18n:translate="label_send_from">From</label>
+
+            <span class="fieldRequired" title="Required"
+                  i18n:attributes="title title_required;"
+                  i18n:translate="label_required">(Required)</span>
+
+                  <div class="formHelp" i18n:translate="help_send_from">
+                    Your email address.
+                  </div>
+
+                  <div tal:content="error">Validation error output</div>
+
+                  <input type="text"
+                         id="send_from_address"
+                         name="send_from_address"
+                         size="25"
+                         tabindex=""
+                         tal:attributes="value python: request.get('send_from_address', member.getProperty('email',''));
+                                         tabindex tabindex/next;"
+                         />
+          </div>
+
+          <div class="field"
+               tal:define="error errors/subject|nothing;"
+               tal:attributes="class python:test(error, 'field error', 'field')">
+
+            <label for="subject" i18n:translate="label_subject">Subject</label>
+
+            <span class="fieldRequired" title="Required"
+                  i18n:attributes="title title_required;"
+                  i18n:translate="label_required">(Required)</span>
+
+                  <div tal:content="error">Validation error output</div>
+
+                  <input type="text"
+                         id="subject"
+                         name="subject"
+                         size="25"
+                         tabindex=""
+                         tal:attributes="value python: request.get('subject', member.getProperty('email',''));
+                                         tabindex tabindex/next;"
+                         />
+          </div>
+
+          <div class="field">
+            <label for="comment" i18n:translate="label_comment">Comment</label>
+
+            <div class="formHelp" i18n:translate="help_comment_to_link">
+              A comment about this link.
+            </div>
+
+            <textarea cols="80"
+                      rows="5"
+                      tabindex=""
+                      id="comment"
+                      name="comment"
+                      tal:content="request/comment | nothing"
+                      tal:attributes="tabindex tabindex/next;"
+                      >
+              Comment
+            </textarea>
+          </div>
+
+          <div class="formControls">
+            <input class="context"
+                   tabindex=""
+                   type="submit"
+                   name="form.button.Send"
+                   value="Send"
+                   i18n:attributes="value label_send;"
+                   tal:attributes="tabindex tabindex/next;"
+                   />
+          </div>
+
+          <input type="hidden" name="form.submitted" value="1" />
+
+        </fieldset>
+
+
+</div>
+<!-- -->
+
+      </form>
+
+
+    <form name="searchform" 
+          action="normativa_search"
+          method="post"
+          tal:attributes="action string:$here_url/$template_id"
+          i18n:domain="DigestoContentTypes">
+
+
+        <fieldset>
+
+            <legend i18n:translate="legend_search_terms">Search Terms</legend>
+
+            <div class="field">
+                <label for="getArea" i18n:translate="label_area">Area</label>
+
+                <select name="getArea" style="width: 130px;">
+                    <tal:areas-loop tal:repeat="area types_view/get_areas" >
+                    	<option tal:content="python: area.Title" tal:attributes="value python:area.id;
+                                                                                 selected python:area.id == arearqt and 1 or 0">Area1</option>
+                    </tal:areas-loop>
+                </select>
+
+            </div>
+
+            <div class="field">
+                <label for="SearchableText" i18n:translate="label_search_text">Search Text</label>
+
+                <div class="formHelp" i18n:translate="help_search_text">
+                For a simple text search, enter your search term
+                here. Multiple words may be found by combining
+                them with <strong>AND</strong> and <strong>OR</strong>.
+                The text in this field will be matched with
+                items' contents, title and description.
+                </div>
+
+                <input type="text"
+                       id="SearchableText"
+                       name="SearchableText"
+                       size="25"
+                       tal:attributes="value request/SearchableText|nothing"
+                       />
+            </div>
+
+
+
+            <div class="field">
+                <label for="getSource" i18n:translate="label_source">Source</label>
+
+                <div class="formHelp" i18n:translate="help_source">
+                Select a Normativa Source.
+                </div>
+
+                <input type="text"
+                       id="getSource"
+                       name="getSource"
+                       size="25"
+                       tal:attributes="value request/getSource|nothing"
+                       />
+            </div>
+
+
+
+            <div class="field">
+                <label for="getNumber" i18n:translate="label_number">Number</label>
+
+                <div class="formHelp" i18n:translate="help_number">
+                Select a Number, and choose if it refers to the Normativa Number, or a Normativa that it Modifies, Repeals or is Repealed by.
+                </div>
+
+                <input type="text"
+                       id="getNumber"
+                       name="getNumber"
+                       size="25"
+                       tal:attributes="value request/getNumber|nothing"
+                       />
+                <br />
+
+
+                <input type="radio"
+                       name="numero_normativa"
+                       id="numeronormativa"
+                       value="number"
+                       class="noborder"
+                       tal:attributes="checked python:'number' == request.get('numero_normativa','number') and 1 or 0"/>
+                    <label for="numeronormativa" i18n:translate="description_numeronormativa">
+                        Normativa Number
+                    </label>
+                    <br />
+
+
+                <input type="radio"
+                        name="numero_normativa"
+                        id="modifica"
+                        value="modifies"
+                        class="noborder"
+                        tal:attributes="checked python:'modifies' == request.get('numero_normativa','') and 1 or 0"/>
+                    <label for="modifica" i18n:translate="description_modifica">
+                        Modifies...
+                    </label>
+                    <br />
+
+
+                <input type="radio"
+                       name="numero_normativa"
+                       id="deroga"
+                       value="repeals"
+                       class="noborder"
+                       tal:attributes="checked python:'repeals' == request.get('numero_normativa','') and 1 or 0"/>
+                    <label for="deroga" i18n:translate="description_deroga">
+                        Repeals...
+                    </label>
+                    <br />
+
+                <input type="radio"
+                        name="numero_normativa"
+                        id="derogadapor"
+                        value="isrepealedby"
+                        class="noborder"
+                        tal:attributes="checked python:'isrepealedby' == request.get('numero_normativa','') and 1 or 0"/>
+                    <label for="derogadapor" i18n:translate="description_derogadapor">
+                        Is repealed by...
+                    </label>
+
+            </div>
+    
+            <div class="field">
+                <label for="Type" i18n:translate="label_type">Document Type</label>
+
+                <div class="formHelp" i18n:translate="help_type">
+                Select the Normativa Type.
+                </div>
+
+                                   
+
+                    <select tal:define="vocab python:types_view.get_normalized_kinds();
+                                        kindrqt request/getKind|nothing"
+                            name="getKind" id="Kind">
+	                    <option value="">-cualquier tipo-</option>
+                        <option tal:repeat="item vocab"
+                                tal:attributes="value item;
+                                                selected python:item == kindrqt and 1 or 0"
+                                tal:content="python:item"
+                                i18n:translate=""
+                                />
+
+                    </select>    
+
+            </div>
+
+            <div class="field">
+                <label for="getDate" i18n:translate="label_year">Year</label>
+
+                <div class="formHelp" i18n:translate="help_year">
+                Select the Normativa Year.
+                </div>
+    
+            <select name="getDate" style="width: 130px;">
+            	<option value="">-cualquier a&ntilde;o-</option>
+                <tal:years-loop tal:repeat="year types_view/get_years" tal:define="yearrqt request/getDate|nothing">
+                	<option tal:content="year" tal:attributes="value year;
+                                                               selected python:str(year) == yearrqt and 1 or 0">2008</option>
+                </tal:years-loop>
+            </select>
+            </div>
+
+            <div class="visualClear" id="clear-space-before-submit"><!-- --></div>
+
+            <div class="formControls">
+                <input class="context"
+                       type="submit"
+                       name="submit"
+                       value="Search"
+                       i18n:attributes="value label_search;"
+                       />
+            </div>
+
+        </fieldset>
+
+    </form>
+
+
+</div>
+</body>
+</html>
+

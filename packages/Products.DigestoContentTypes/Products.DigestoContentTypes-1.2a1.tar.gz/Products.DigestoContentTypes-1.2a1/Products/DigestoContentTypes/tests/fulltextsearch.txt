@@ -1,0 +1,126 @@
+-*- coding: utf-8 -*-
+
+==============================================================================
+Test full text search over Normativa's files
+==============================================================================
+
+Create the browser object we'll be using.
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> from DateTime.DateTime import DateTime
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+    >>> browser.handleErrors = False
+    >>> self.portal.error_log._ignored_exceptions = ()
+
+Log in into the site as manager.
+
+    >>> from Products.PloneTestCase.setup import portal_owner, default_user, default_password
+    >>> login_url = portal_url + '/login_form'
+    >>> logout_url = portal_url + '/logout'
+    >>> browser.open(login_url)
+
+We have the login portlet, so let's use that.
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url)
+
+First, let's create an area where to place our normativas.
+
+    >>> browser.getLink('Add new').click()
+    >>> browser.getControl('Area').click()
+    >>> browser.getControl(name='form.button.Add').click()
+    >>> browser.getControl(name='title').value = 'An Area'
+    >>> browser.getControl(name='sources.source:records:ignore_empty').value = 'Rector'
+    >>> browser.getControl(name='sources.kinds:records:ignore_empty:list').value = ('Ley',)
+    >>> browser.getControl(name='addressBook:lines').value = 'test@test.com'
+    >>> browser.getControl('Save').click()
+    >>> "Changes saved" in browser.contents
+    True
+
+Create a normativa and upload a PDF file in the file field with the word 'árbol'
+in the text.
+
+    >>> import os
+    >>> from Products.DigestoContentTypes.tests.base import test_home
+    >>> input_dir = os.path.join(test_home, 'input')
+    >>> input = open(os.path.join(input_dir, 'test2.pdf'), 'rb')
+    >>> #se deberia hacer de esta manera, pero por problemas con el drop down de kss
+    >>> #se crea la normativa con invokeFactory
+    >>> #browser.getLink('Add Normativa').click()
+    >>> #browser.getControl(name='title').value = 'Normativa Uno'
+    >>> #browser.getControl(name='file_file').value = input
+    >>> #browser.getControl(name='date').value = str(DateTime('2008/04/04'))
+    >>> #browser.getControl(name='source').value = 'Rector'
+    >>> #browser.getControl(name='number').value = '123'
+    >>> #browser.getControl(name='kind').value = 'Ley'
+    >>> #browser.getControl('Save').click()
+    >>> #input.close()
+    >>> #"last modified" in browser.contents
+    >>> area1 = getattr(self.portal, 'an-area')
+    >>> self.setRoles(('Manager',))
+    >>> area1.invokeFactory('Normativa', 'normativa1', source='Rector', kind='Ley', title='Normativa 1', file=input, number='123')
+    'normativa1'
+    >>> from zope.event import notify
+    >>> from Products.Archetypes.event import ObjectInitializedEvent, ObjectEditedEvent
+    >>> area1.normativa1.setDate(DateTime('2008/01/01'))
+    >>> area1.normativa1._renameAfterCreation()
+    >>> normativa1 = getattr(area1, '123_2008')
+    >>> notify(ObjectInitializedEvent(normativa1))
+    >>> normativa1 = getattr(area1.rector.ley, '123_2008')
+    >>> normativa1_url = normativa1.absolute_url()
+    >>> browser.open(normativa1_url)
+    >>> 'Normativa 1' in browser.contents
+    True
+
+We check that the main file was correctly renamed. We have no abbreviature so it
+uses the first three letters from the title.
+
+    >>> 'NOR_123_2008.pdf' in browser.contents
+    True
+    >>> 'test2.pdf' in browser.contents
+    False
+
+We add an Attachment.
+
+    >>> browser.getLink('Manage Attachments').click()
+    >>> input_dir = os.path.join(test_home, 'input')
+    >>> input = open(os.path.join(input_dir, 'test1.pdf'), 'rb')
+    >>> control = browser.getControl(name='attachmentFile')
+    >>> file_control = control.mech_control
+    >>> file_control.add_file(input, filename='test1.pdf')
+    >>> browser.getControl('Upload').click()
+
+We check that the attachment was correctly renamed.
+
+    >>> 'NOR_123_2008_1.pdf' in browser.contents
+    True
+    >>> 'test1.pdf' in browser.contents.replace('value="test1.pdf"', 'XXX')
+    False
+
+Now we search for the 'verde' word using the search box and we expect
+'NOR_123_2008_1.pdf' not to be in the results.
+We search for the 'Sample' word using the search box and we expect
+'NOR_123_2008_1.pdf' not to be in the results.
+
+    >>> browser.open(portal_url)
+    >>> browser.getControl(name='SearchableText').value = 'verde'
+    >>> browser.getControl('Search', index=1).click()
+    >>> 'NOR_123_2008_1.pdf' in browser.contents
+    False
+    >>> browser.open(portal_url)
+    >>> browser.getControl(name='SearchableText').value = 'Sample'
+    >>> browser.getControl('Search', index=1).click()
+    >>> 'NOR_123_2008_1.pdf' in browser.contents
+    True
+
+Now we search for the 'árbol' word using the search box and we expect
+'Normativa Uno' to be in the results.
+
+    >>> browser.open(portal_url)
+    >>> browser.getControl(name='SearchableText').value = 'árbol'
+    >>> browser.getControl('Search', index=1).click()
+    >>> 'Normativa 1' in browser.contents
+    True

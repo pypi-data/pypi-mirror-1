@@ -1,0 +1,122 @@
+-*- coding: utf-8 -*-
+
+==============================================================================
+Test Normativas created with duplicated ids
+==============================================================================
+
+Create the browser object we'll be using.
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> from DateTime.DateTime import DateTime
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+    >>> browser.handleErrors = False
+    >>> self.portal.error_log._ignored_exceptions = ()
+
+Log in into the site as manager.
+
+    >>> from Products.PloneTestCase.setup import portal_owner, default_user, default_password
+    >>> login_url = portal_url + '/login_form'
+    >>> logout_url = portal_url + '/logout'
+    >>> browser.open(login_url)
+
+We have the login portlet, so let's use that.
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url)
+
+First, let's create an area where to place our normativas.
+
+    >>> browser.getLink('Add new').click()
+    >>> browser.getControl('Area').click()
+    >>> browser.getControl(name='form.button.Add').click()
+    >>> browser.getControl(name='title').value = 'An Area'
+    >>> browser.getControl(name='sources.source:records:ignore_empty').value = 'Rector'
+    >>> browser.getControl(name='sources.kinds:records:ignore_empty:list').value = ('Ley',)
+    >>> browser.getControl(name='addressBook:lines').value = 'test@test.com'
+    >>> browser.getControl('Save').click()
+    >>> "Changes saved" in browser.contents
+    True
+
+Create a normativa 123_2008.
+
+    >>> import os
+    >>> from Products.DigestoContentTypes.tests.base import test_home
+    >>> input_dir = os.path.join(test_home, 'input')
+    >>> input = open(os.path.join(input_dir, 'test2.pdf'), 'rb')
+    >>> #se deberia hacer de esta manera, pero por problemas con el drop down de kss
+    >>> #se crea la normativa con invokeFactory
+    >>> #browser.getLink('Add Normativa').click()
+    >>> #browser.getControl(name='title').value = 'Normativa Uno'
+    >>> #browser.getControl(name='file_file').value = input
+    >>> #browser.getControl(name='date').value = str(DateTime('2008/04/04'))
+    >>> #browser.getControl(name='source').value = 'Rector'
+    >>> #browser.getControl(name='number').value = '123'
+    >>> #browser.getControl(name='kind').value = 'Ley'
+    >>> #browser.getControl('Save').click()
+    >>> #input.close()
+    >>> #"last modified" in browser.contents
+    >>> area1 = getattr(self.portal, 'an-area')
+    >>> self.setRoles(('Manager',))
+    >>> area1.invokeFactory('Normativa', 'normativa1', source='Rector', kind='Ley', title='Normativa 1', file=input, date=DateTime('2008/01/01'), number='123')
+    'normativa1'
+    >>> from zope.event import notify
+    >>> from Products.Archetypes.event import ObjectInitializedEvent, ObjectEditedEvent
+    >>> area1.normativa1._renameAfterCreation()
+    >>> normativa1 = getattr(area1, '123_2008')
+    >>> notify(ObjectInitializedEvent(normativa1))
+    >>> normativa1 = getattr(area1.rector.ley, '123_2008')
+    >>> normativa1._at_creation_flag = False
+    >>> normativa1_url = normativa1.absolute_url()
+    >>> browser.open(normativa1_url)
+    >>> 'Normativa 1' in browser.contents
+    True
+
+Create a normativa 123_2008_1.
+
+    >>> area1.invokeFactory('Normativa', 'normativa2', source='Rector', kind='Ley', title='Normativa 2', file=input, date=DateTime('2008/01/01'), number='123')
+    'normativa2'
+    >>> from zope.event import notify
+    >>> from Products.Archetypes.event import ObjectInitializedEvent, ObjectEditedEvent
+    >>> area1.normativa2._renameAfterCreation()
+    >>> normativa2 = getattr(area1, '123_2008')
+    >>> notify(ObjectInitializedEvent(normativa2))
+    >>> normativa2 = getattr(area1.rector.ley, '123_2008_1')
+    >>> normativa2._at_creation_flag = False
+    >>> normativa2_url = normativa2.absolute_url()
+    >>> browser.open(normativa2_url)
+    >>> 'Normativa 2' in browser.contents
+    True
+    >>> normativa2.id
+    '123_2008_1'
+
+We edit TTW and the id must remain the same.
+
+    >>> browser.open(normativa2_url + '/edit')
+    >>> browser.getControl(name='cudap').value = 'RESOREC-BLA:1234567/1111'
+    >>> browser.getControl('Save').click()
+    >>> 'Normativa 2' in browser.contents
+    True
+    >>> '123_2008_1' in browser.url
+    True
+    >>> normativa2.id
+    '123_2008_1'
+
+We edit TTW and the id must change to 123_2004 because we modify the fiels used
+to generate the id.
+
+    >>> browser.open(normativa2_url + '/edit')
+    >>> #browser.getControl(name='date').value = str(DateTime('2004/04/04'))
+    >>> browser.getControl(name='date_year').value = ('2004',)
+    >>> browser.getControl(name='date_month').value = ('04',)
+    >>> browser.getControl(name='date_day').value = ('04',)
+    >>> browser.getControl('Save').click()
+    >>> 'Normativa 2' in browser.contents
+    True
+    >>> '123_2004' in browser.url
+    True
+    >>> normativa2.id
+    '123_2004'
+
