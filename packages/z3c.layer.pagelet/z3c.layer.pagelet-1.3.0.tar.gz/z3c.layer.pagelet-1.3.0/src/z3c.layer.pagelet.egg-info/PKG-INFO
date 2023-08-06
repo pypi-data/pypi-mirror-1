@@ -1,0 +1,911 @@
+Metadata-Version: 1.0
+Name: z3c.layer.pagelet
+Version: 1.3.0
+Summary: Pagelet layer setup for Zope3
+Home-page: http://pypi.python.org/pypi/z3c.layer.pagelet
+Author: Zope Foundation and Contributors
+Author-email: zope-dev@zope.org
+License: ZPL 2.1
+Description: This package provides a pagelet based layer setup for Zope3.
+        
+        
+        .. contents::
+        
+        ==============================
+        Pagelet-based Layer for Zope 3
+        ==============================
+        
+        This package contains the pagelet layer. This layer supports a correct set of
+        component registration and can be used for inheritation in custom skins.
+        
+        Right now the default implementation in Zope3 has different restriction in the
+        traversal concept and use to much registration on the default layer.
+        
+        Important
+        ---------
+        
+        This layer ia based on the pagelet pattern. This means every page e.g. the
+        error page is based on the pagelet concept.
+        
+        
+        ``IPageletBrowserLayer`` Layer
+        ------------------------------
+        
+        The pagelet layer is useful for build custom presentation skins without access
+        to ZMI menus like ``zmi_views`` etc. This means there is no menu item
+        registred if you use this layer.
+        
+        This layer is *NOT* derived from ``IDefaultBrowserLayer`` layer. Therefore it
+        provides only a minimal set of the most important public views such as
+        ``@@absolute_url``.  The following packages are accounted:
+        
+        - ``zope.app.http.exception``
+        - ``zope.app.publication``
+        - ``zope.app.publisher.browser``
+        - ``zope.app.traversing``
+        - ``zope.app.traversing.browser``
+        
+        
+        Testing
+        -------
+        
+        For testing the ``IPageletBrowserLayer`` layer we use the testing skin defined
+        in the tests package which uses the ``IPageletBrowserLayer`` layer as the only
+        base layer.  This means, that our testing skin provides only the views defined
+        in the minimal package and it's testing views defined in tests.
+        
+        Login as manager first:
+        
+        >>> from zope.testbrowser.testing import Browser
+        >>> manager = Browser()
+        
+        Check if we can access the ``page.html`` view which is registred in the
+        ``ftesting.zcml`` file with our skin:
+        
+        >>> skinURL = 'http://localhost/++skin++PageletTestSkin'
+        >>> manager.open(skinURL + '/page.html')
+        >>> manager.url
+        'http://localhost/++skin++PageletTestSkin/page.html'
+        
+        >>> print manager.contents
+        <!DOCTYPE...
+        <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+        <head>
+        <title>PageletTestLayout</title>
+        </head>
+        <body>
+        test page
+        <BLANKLINE>
+        </body>
+        </html>
+        <BLANKLINE>
+        
+        Now check the not found page which is a exception view on the exception
+        ``zope.publisher.interfaces.INotFound``:
+        
+        >>> manager.open(skinURL + '/foobar.html')
+        Traceback (most recent call last):
+        ...
+        httperror_seek_wrapper: HTTP Error 404: Not Found
+        
+        >>> print manager.contents
+        <!DOCTYPE...
+        <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+        <head>
+        <title>PageletTestLayout</title>
+        </head>
+        <body>
+        <div>
+        <br />
+        <br />
+        <h3>
+        The page you are trying to access is not available
+        </h3>
+        <br />
+        <b>
+        Please try the following:
+        </b>
+        <br />
+        <ol>
+        <li>
+        Make sure that the Web site address is spelled correctly.
+        </li>
+        <li>
+        <a href="javascript:history.back(1);">
+        Go back and try another URL.
+        </a>
+        </li>
+        </ol>
+        </div>
+        <BLANKLINE>
+        </body>
+        </html>
+        <BLANKLINE>
+        
+        And check the user error page which is a view registred for
+        ``zope.exceptions.interfaces.IUserError`` exceptions:
+        
+        >>> manager.open(skinURL + '/@@usererror.html')
+        >>> print manager.contents
+        <!DOCTYPE ...
+        <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+        <head>
+        <title>PageletTestLayout</title>
+        </head>
+        <body>
+        <div>
+        <div>simply user error</div>
+        </div>
+        <BLANKLINE>
+        </body>
+        </html>
+        <BLANKLINE>
+        
+        And check error view registred for
+        ``zope.interface.common.interfaces.IException``:
+        
+        >>> manager.open(skinURL + '/@@systemerror.html')
+        >>> print manager.contents
+        <!DOCTYPE...
+        <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+        <head>
+        <title>PageletTestLayout</title>
+        </head>
+        <body>
+        <div>
+        <br />
+        <br />
+        <h3>A system error occurred</h3>
+        <br />
+        <b>Please contact the administrator.</b>
+        <a href="javascript:history.back(1);">
+        Go back and try another URL.
+        </a>
+        </div>
+        <BLANKLINE>
+        </body>
+        </html>
+        <BLANKLINE>
+        
+        To check the ``zope.security.interfaces.IUnauthorized`` view, we use a
+        new unregistred user (test browser). As we have defined an
+        unauthenticatedPrincipal in ZCML (see tests/ftesting.zcml) ``401
+        Unauthorized`` is returned instead of ``403 Forbidden`` which would
+        show up otherwise:
+        
+        >>> unauthorized = Browser()
+        >>> unauthorized.open(skinURL + '/@@forbidden.html')
+        Traceback (most recent call last):
+        ...
+        HTTPError: HTTP Error 401: Unauthorized
+        
+        >>> print unauthorized.contents
+        <!DOCTYPE ...
+        <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+        <head>
+        <title>PageletTestLayout</title>
+        </head>
+        <body>
+        <div>
+        <br />
+        <br />
+        <h3>Unauthorized</h3>
+        <br />
+        <b>You are not authorized.</b>
+        </div>
+        <BLANKLINE>
+        </body>
+        </html>
+        <BLANKLINE>
+        
+        
+        Login and logout
+        ----------------
+        
+        Login and logout work both for basic auth and cookie auth.
+        
+        
+        Setup
+        ~~~~~
+        
+        The layout page template has to include two content providers (viewlet
+        mangers):
+        
+        - ``login-logout-head`` inside the head tag to get automatic
+        redirects and JavaScript code which does the logout for basic
+        auth and
+        
+        - ``login-logout`` inside the body tag to get login and logout links.
+        
+        The sample template looks like this:
+        
+        >>> import os.path
+        >>> template_path = os.path.join(os.path.dirname(__file__), "tests",
+        ...     "login-logout-template.pt")
+        >>> print file(template_path, "r").read()
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        <tal:block replace="structure provider:login-logout-head" />
+        </head>
+        <body>
+        <tal:block replace="structure provider:login-logout" />
+        <tal:block replace="structure provider:pagelet" />
+        </body>
+        </html>
+        
+        This template is registered for the ``IContainer`` interface in
+        ``ftesting.zcml``. After creating a container the template is
+        used when browsing the container:
+        
+        >>> from zope.container.btree import BTreeContainer
+        >>> getRootFolder()['container'] = BTreeContainer()
+        
+        Basic auth
+        ~~~~~~~~~~
+        
+        When the user is not logged in the login link is displayed:
+        
+        >>> from zope.testbrowser.testing import Browser
+        >>> skinURL = 'http://localhost/++skin++PageletTestSkin/'
+        >>> browser = Browser()
+        >>> browser.handleErrors = False
+        >>> browser.open(skinURL + 'container/@@default.html')
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/@@default.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@login.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html">Login</a>
+        </body>
+        </html>
+        
+        Selecting the link leads to the login page, as we use basic auth here,
+        we get an HTTP error 401 (unauthorized):
+        
+        >>> login_url = browser.getLink('Login').url
+        >>> browser.getLink('Login').click()
+        Traceback (most recent call last):
+        httperror_seek_wrapper: HTTP Error 401: Unauthorized
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/@@login.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html'
+        
+        When adding correct credentials we get authorized:
+        
+        >>> browser.addHeader('Authorization', 'Basic mgr:mgrpw')
+        >>> browser.reload()
+        
+        We are redirected to the page where we selected the login link. After
+        logging in the login link is no longer displayed. As we did not
+        specify that logout is supported, no logout link is displayed:
+        
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/@@default.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        </head>
+        <body>
+        </body>
+        </html>
+        
+        Calling the login URL again leads directly to the page referred in nextURL:
+        
+        >>> browser.open(login_url)
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/@@default.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        </head>
+        <body>
+        </body>
+        </html>
+        
+        Calling the login URL again without the query parameter leeds to a
+        confirmation page telling that login was successfull:
+        
+        >>> browser.open(login_url.split('?')[0])
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/@@login.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTestLayout</title>
+        </head>
+        <body>
+        <div>
+        <h1>Login successful!</h1>
+        <p style="font-size: 200%"> You are now logged in as <em>Manager</em>. </p>
+        <a href=".">Back to the main page.</a>
+        </div>
+        </body>
+        </html>
+        
+        Selecting the ``Back to the main page.`` link send the user back to
+        the default view of the container. (``ftesting.zcml`` defines
+        ``@@default.html`` as the default view.):
+        
+        >>> browser.getLink('Back to the main page.').click()
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        </head>
+        <body>
+        </body>
+        </html>
+        
+        
+        Providing an ``ILogoutSupported`` adapter leads to a logout link being
+        displayed:
+        
+        >>> from zope.app.testing import ztapi
+        >>> import zope.interface
+        >>> import zope.app.security
+        >>> import zope.app.security.interfaces
+        >>> ztapi.provideAdapter(
+        ...     zope.interface.Interface,
+        ...     zope.app.security.interfaces.ILogoutSupported,
+        ...     zope.app.security.LogoutSupported)
+        >>> browser.reload()
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@logout.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html">Logout</a>
+        </body>
+        </html>
+        
+        Logout is done using JavaScript and a redirect. zope.testbrowser
+        follows the redirects even if they use the meta tag instead of the
+        status code. So I have to use a non API call to change this behavior
+        to show the file contents:
+        
+        >>> browser.mech_browser.set_handle_refresh(False)
+        
+        As testbrowser is not able to execute JavaScript the user remains
+        authenticated:
+        
+        >>> logout_url = browser.getLink('Logout').url
+        >>> browser.getLink('Logout').click()
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/@@logout.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        <script type="text/javascript"><!--
+        // clear HTTP Authentication
+        ...
+        //-->
+        </script>
+        <meta http-equiv="refresh"
+        content="0;url=http://localhost/++skin++PageletTestSkin/container/@@default.html" />
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@logout.html/@@logout.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40logout.html">Logout</a>
+        <div>
+        <h1>You are being redirected!</h1>
+        <p style="font-size: 150%">
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@default.html">
+        If you see this screen for more than 5 seconds, click here.
+        </a>
+        </p>
+        </div>
+        </body>
+        </html>
+        
+        Calling the logout URL again after logout (simulated using a new
+        browser instance) leads directly to the page referred in nextURL:
+        
+        >>> browser2 = Browser(logout_url)
+        >>> browser2.url
+        'http://localhost/++skin++PageletTestSkin/container/@@default.html'
+        >>> print browser2.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@login.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html">Login</a>
+        </body>
+        </html>
+        
+        Calling the logout URL again without the query parameter leeds to a
+        confirmation page telling that logout was successfull:
+        
+        >>> browser2.open(logout_url.split('?')[0])
+        >>> browser2.url
+        'http://localhost/++skin++PageletTestSkin/container/@@logout.html'
+        >>> print browser2.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        <script type="text/javascript"><!--
+        // clear HTTP Authentication
+        ...
+        //-->
+        </script>
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/logout.html/@@login.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40logout.html">Login</a>
+        <div>
+        <h1>Logout successful!</h1>
+        <p style="font-size: 200%">
+        You are now logged out.
+        </p>
+        <a href=".">Back to the main page.</a>
+        </div>
+        </body>
+        </html>
+        
+        
+        Cookie auth
+        ~~~~~~~~~~~
+        
+        To do cookie auth we have to set up a pluggable auth utility (PAU)
+        with a authenticator plug-in (principal folder) first:
+        
+        >>> from zope.app.security.interfaces import IAuthentication
+        >>> from zope.app.authentication.interfaces import IAuthenticatorPlugin
+        >>> from zope.app.appsetup.bootstrap import ensureUtility
+        >>> from zope.app.authentication.authentication import PluggableAuthentication
+        >>> from zope.app.authentication.principalfolder import PrincipalFolder
+        >>> from zope.site import site
+        
+        >>> auth = ensureUtility(
+        ...     getRootFolder(), IAuthentication, '', PluggableAuthentication,
+        ...     asObject=True)
+        >>> auth.credentialsPlugins = (u'Session Credentials',)
+        >>> principal_folder = ensureUtility(getRootFolder(), IAuthenticatorPlugin,
+        ...     '', PrincipalFolder, name=u'principal_folder', asObject=True)
+        >>> auth.authenticatorPlugins = (u'principal_folder',)
+        
+        We need a principal inside the principal folder:
+        
+        >>> from zope.app.authentication.principalfolder import InternalPrincipal
+        >>> principal_folder['1'] = InternalPrincipal('tester', 'tpass', 'Tester')
+        
+        
+        We use a new browser, so the principal is not logged in and the login
+        link is displayed:
+        
+        >>> browser = Browser()
+        >>> browser.open(skinURL + 'container/@@default.html')
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/@@default.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@login.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html">Login</a>
+        </body>
+        </html>
+        
+        Selecting the link leads to the login page:
+        
+        >>> login_url = browser.getLink('Login').url
+        >>> browser.getLink('Login').click()
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/@@loginForm.html?camefrom=%2F%2B%2Bskin%2B%2BPageletTestSkin%2Fcontainer%2F%40%40login.html%3FnextURL%3Dhttp%253A%2F%2Flocalhost%2F%252B%252Bskin%252B%252BPageletTestSkin%2Fcontainer%2F%2540%2540default.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTestLayout</title>
+        </head>
+        <body>
+        <div>
+        <p>
+        Please provide Login Information
+        </p>
+        <form action="" method="post">
+        <div class="row">
+        <div class="label"><label for="login">User Name</label></div>
+        <div class="field">
+        <input type="text" name="login" id="login" />
+        </div>
+        </div>
+        <div class="row">
+        <div class="label"><label for="password">Password</label></div>
+        <div class="field">
+        <input type="password" name="password" id="password" />
+        </div>
+        </div>
+        <div class="row">
+        <input class="form-element" type="submit"
+        name="SUBMIT" value="Log in" />
+        </div>
+        <input type="hidden" name="camefrom"
+        value="/++skin++PageletTestSkin/container/@@login.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html">
+        </form>
+        </div>
+        </body>
+        </html>
+        
+        Entering wrong username does not authorize but display an error
+        message:
+        
+        >>> browser.getControl('User Name').value = 'me'
+        >>> browser.getControl('Password').value = 'tpass'
+        >>> browser.getControl('Log in').click()
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/@@loginForm.html?camefrom=%2F%2B%2Bskin%2B%2BPageletTestSkin%2Fcontainer%2F%40%40login.html%3FnextURL%3Dhttp%253A%2F%2Flocalhost%2F%252B%252Bskin%252B%252BPageletTestSkin%2Fcontainer%2F%2540%2540default.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTestLayout</title>
+        </head>
+        <body>
+        <div>
+        <p>
+        Please provide Login Information
+        </p>
+        <form action="" method="post">
+        <div class="row">
+        <div class="label"><label for="login">User Name</label></div>
+        <div class="field">
+        <input type="text" name="login" id="login" />
+        </div>
+        </div>
+        <div class="row">
+        <div class="label"><label for="password">Password</label></div>
+        <div class="field">
+        <input type="password" name="password" id="password" />
+        </div>
+        </div>
+        <div class="row">
+        <input class="form-element" type="submit"
+        name="SUBMIT" value="Log in" />
+        </div>
+        <input type="hidden" name="camefrom"
+        value="/++skin++PageletTestSkin/container/@@login.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html">
+        </form>
+        </div>
+        </body>
+        </html>
+        
+        Entering wrong password does not authorize either:
+        
+        >>> browser.getControl('User Name').value = 'tester'
+        >>> browser.getControl('Password').value = 'let me in'
+        >>> browser.getControl('Log in').click()
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/@@loginForm.html?camefrom=%2F%2B%2Bskin%2B%2BPageletTestSkin%2Fcontainer%2F%40%40login.html%3FnextURL%3Dhttp%253A%2F%2Flocalhost%2F%252B%252Bskin%252B%252BPageletTestSkin%2Fcontainer%2F%2540%2540default.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTestLayout</title>
+        </head>
+        <body>
+        <div>
+        <p>
+        Please provide Login Information
+        </p>
+        <form action="" method="post">
+        <div class="row">
+        <div class="label"><label for="login">User Name</label></div>
+        <div class="field">
+        <input type="text" name="login" id="login" />
+        </div>
+        </div>
+        <div class="row">
+        <div class="label"><label for="password">Password</label></div>
+        <div class="field">
+        <input type="password" name="password" id="password" />
+        </div>
+        </div>
+        <div class="row">
+        <input class="form-element" type="submit"
+        name="SUBMIT" value="Log in" />
+        </div>
+        <input type="hidden" name="camefrom"
+        value="/++skin++PageletTestSkin/container/@@login.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html">
+        </form>
+        </div>
+        </body>
+        </html>
+        
+        
+        After entering a correct username and password the user gets
+        authorized:
+        
+        >>> browser.getControl('User Name').value = 'tester'
+        >>> browser.getControl('Password').value = 'tpass'
+        >>> browser.getControl('Log in').click()
+        
+        The user gets redirected to the page where he selected the login
+        link. After logging in the login link is no longer displayed. As we
+        already specified that logout is supported, a logout link is
+        displayed:
+        
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/@@default.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@logout.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html">Logout</a>
+        </body>
+        </html>
+        
+        
+        Calling the login URL again leads directly to the page referred in nextURL:
+        
+        >>> browser.open(login_url)
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/@@default.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@logout.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html">Logout</a>
+        </body>
+        </html>
+        
+        Calling the login URL again without the query parameter leeds to a
+        confirmation page telling that login was successfull:
+        
+        >>> browser.open(login_url.split('?')[0])
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/@@login.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTestLayout</title>
+        </head>
+        <body>
+        <div>
+        <h1>Login successful!</h1>
+        <p style="font-size: 200%"> You are now logged in as <em>Tester</em>. </p>
+        <a href=".">Back to the main page.</a>
+        </div>
+        </body>
+        </html>
+        
+        Selecting the ``Back to the main page.`` link send the user back to
+        the default view of the container. (``ftesting.zcml`` defines
+        ``@@default.html`` as the default view.):
+        
+        >>> browser.getLink('Back to the main page.').click()
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@logout.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html">Logout</a>
+        </body>
+        </html>
+        
+        
+        Selecting the displayed logout link drops authentication information
+        and displays a confirmation page, which redirects to the default page
+        where the login link is displayed again (as redirection is done
+        automatically by testbrowser I have to use the non API call trick
+        again to show the displayed page):
+        
+        >>> browser.mech_browser.set_handle_refresh(False)
+        >>> logout_url = browser.getLink('Logout').url
+        >>> browser.getLink('Logout').click()
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        <script type="text/javascript"><!--
+        // clear HTTP Authentication
+        ...
+        //-->
+        </script>
+        <meta http-equiv="refresh"
+        content="0;url=http://localhost/++skin++PageletTestSkin/container/@@default.html" />
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@logout.html/@@logout.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40logout.html">Logout</a>
+        <div>
+        <h1>You are being redirected!</h1>
+        <BLANKLINE>
+        <p style="font-size: 150%">
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@default.html">
+        If you see this screen for more than 5 seconds, click here.
+        </a>
+        </p>
+        </div>
+        </body>
+        </html>
+        >>> browser.getLink('If you see this screen for more than 5 seconds').click()
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@login.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html">Login</a>
+        </body>
+        </html>
+        >>> browser.mech_browser.set_handle_refresh(True)
+        
+        Calling the logout URL again after logout leads directly to the page
+        referred in nextURL:
+        
+        >>> browser.open(logout_url)
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/@@default.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/@@login.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40default.html">Login</a>
+        </body>
+        </html>
+        
+        Calling the logout URL again without the query parameter leeds to a
+        confirmation page telling that logout was successfull:
+        
+        >>> browser.open(logout_url.split('?')[0])
+        >>> browser.url
+        'http://localhost/++skin++PageletTestSkin/container/@@logout.html'
+        >>> print browser.contents
+        <!DOCTYPE ...>
+        <html ...>
+        <head>
+        <title>PageletTest</title>
+        <script type="text/javascript"><!--
+        // clear HTTP Authentication
+        ...
+        //-->
+        </script>
+        </head>
+        <body>
+        <a href="http://localhost/++skin++PageletTestSkin/container/logout.html/@@login.html?nextURL=http%3A//localhost/%2B%2Bskin%2B%2BPageletTestSkin/container/%40%40logout.html">Login</a>
+        <div>
+        <h1>Logout successful!</h1>
+        <p style="font-size: 200%">
+        You are now logged out.
+        </p>
+        <a href=".">Back to the main page.</a>
+        </div>
+        </body>
+        </html>
+        
+        
+        =======
+        CHANGES
+        =======
+        
+        1.3.0 (2009-03-13)
+        ------------------
+        
+        - Implemented login and logout using pagelets resp. viewlets.
+        
+        - Updated tests to use new ``zope.configuration`` which containts the
+        exclude directive.
+        
+        
+        1.2.1 (2009-02-21)
+        ------------------
+        
+        - Release 1.2.0 was missing the test file for the security issue.
+        
+        
+        1.2.0 (2009-02-21)
+        ------------------
+        
+        - **Security issue:** The traverser defined for
+        ``IPageletBrowserLayer`` was a trusted adapter, so the security
+        proxy got removed from each traversed object. Thus all sub-objects
+        were publically accessable, too.
+        
+        
+        1.1.0 (2009-02-14)
+        ------------------
+        
+        - Bugfix: use IContentTemplate instead of IPageTemplate which avoids to get the
+        layout template if no IPageTemplate is registered.
+        
+        - Using ``zope.location.interfaces.ISite`` instead of
+        ``zope.app.component.interfaces.ISite``.
+        
+        - Using ``zope.container`` instead of ``zope.app.container``.
+        
+        - Cleaned up dependencies.
+        
+        
+        1.0.1 (2008-01-24)
+        ------------------
+        
+        - Bug: Update meta data.
+        
+        
+        1.0.0 (2008-01-21)
+        ------------------
+        
+        - Restructure: Move ``z3c.layer.pagelet`` package to it's own top level
+        package form ``z3c.layer`` to ``z3c.layer.pagelet``.
+        
+        - Restructure: Removed ``zope.app.form`` support from pagelet layer.
+        
+        
+        0.2.3 (2007-11-07)
+        ------------------
+        
+        - Forward-Bug: Due to a bug in mechanize, the testbrowser throws
+        ``httperror_seek_wrapper`` instead of ``HTTPError`` errors. Thanks to RE
+        normalizers, the code will now work whether the bug is fixed or not in
+        mechanize.
+        
+        
+        0.2.2 (2007-10-31)
+        ------------------
+        
+        - Bug: Fixed package meta-data.
+        
+        - Bug: Fixed test failures due to depency updates.
+        
+        - Restructure: Fixed deprecation warninf for ``ZopeSecurityPolicy``.
+        
+        
+        0.2.1 (2007-??-??)
+        ------------------
+        
+        - Changes unknown.
+        
+        
+        0.2.0 (2007-??-??)
+        ------------------
+        
+        - Initial release.
+        
+Keywords: z3c pagelet layer zope zope3
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Framework :: Zope3
