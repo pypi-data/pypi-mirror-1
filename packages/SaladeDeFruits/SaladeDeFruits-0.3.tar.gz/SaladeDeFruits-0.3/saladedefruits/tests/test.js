@@ -1,0 +1,1 @@
+var myFunc = function () {}
