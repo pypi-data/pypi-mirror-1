@@ -1,0 +1,1122 @@
+Metadata-Version: 1.0
+Name: z3c.rest
+Version: 0.2.4
+Summary: A REST Framework for Zope 3 Applications
+Home-page: http://cheeseshop.python.org/pypi/z3c.rest
+Author: Stephan Richter and the Zope Community
+Author-email: zope3-dev@zope.org
+License: ZPL 2.1
+Description: This package provides a framework to build REST APIs on top of Zope 3.
+        
+        
+        Detailed Documentation
+        **********************
+        
+        ===================================================
+        A Framework for Building RESTive Services in Zope 3
+        ===================================================
+        
+        This package implements several components that relate to building RESTive Web
+        services using the Zope publisher. Each set of components is documented in a
+        corresponding text file.
+        
+        * ``client.txt`` [must read]
+        
+        This package also provides a REST Web client, which can be used for testing
+        or for accessing a RESTive API within an application.
+        
+        * ``null.txt`` [advanced user]
+        
+        In order to create new resources, the publisher must be able to traverse to
+        resources/objects that do not yet exist. This file explains how those null
+        resources work.
+        
+        * ``traverser.txt`` [advanced user]
+        
+        The ``traverser`` module contains several traversal helper components for
+        common traversal scenarios, suhc as containers and null resources.
+        
+        * ``rest.txt`` [informative]
+        
+        This document introduces the hooks required to manage RESTive requests in
+        the publisher. It also discusses hwo those components are used by the
+        publisher.
+        
+        ===========
+        REST Client
+        ===========
+        
+        The REST client provides a simple Python API to interact easily with RESTive
+        Web services. It was designed to have a similar API to Zope's test
+        browser.
+        
+        Let's start by instantiating the the client. Of course we have a version of
+        the client that talks directly to the Zope publisher:
+        
+        >>> from z3c.rest import testing
+        >>> client = testing.RESTClient()
+        
+        For testing purposes, we have defined a simple REST API for folders. The
+        simplest call is to retrieve the contents of the root folder:
+        
+        >>> client.open('http://localhost/')
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <title></title>
+        <items>
+        </items>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        You can also instantiate the client providing a URL:
+        
+        >>> client = testing.RESTClient('http://localhost/')
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <title></title>
+        <items>
+        </items>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        HTTPS URLs are also supported
+        
+        >>> client = testing.RESTClient('https://localhost/')
+        Using SSL
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <title></title>
+        <items>
+        </items>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        
+        Getting Resources
+        -----------------
+        
+        The ``open()`` method implicitely uses the "GET" HTTP method. An alternative
+        would be to use this:
+        
+        >>> client.get('http://localhost/')
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <title></title>
+        <items>
+        </items>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        There are several other pieces of information of the response that are
+        available:
+        
+        >>> client.url
+        'http://localhost/'
+        >>> client.status
+        200
+        >>> client.reason
+        'Ok'
+        >>> client.fullStatus
+        '200 Ok'
+        >>> client.headers
+        [('X-Powered-By', 'Zope (www.zope.org), Python (www.python.org)'),
+        ('Content-Length', '204'),
+        ('Content-Type', 'text/xml;charset=utf-8')]
+        
+        If we try to access a non-existent resource, no exception is raised, but the
+        status is '404' (not found) of course:
+        
+        >>> client.get('http://localhost/unknown')
+        >>> client.fullStatus
+        '404 Not Found'
+        >>> client.contents
+        ''
+        >>> client.headers
+        [('X-Powered-By', 'Zope (www.zope.org), Python (www.python.org)'),
+        ('Content-Length', '0')]
+        
+        As in the original test browser, I can turn off the Zope error handling and
+        the Python exception will propagate through the publisher:
+        
+        >>> client.handleErrors = False
+        >>> client.get('http://localhost/unknown')
+        Traceback (most recent call last):
+        ...
+        NotFound: Object: <zope.app.folder.folder.Folder ...>, name: u'unknown'
+        
+        >>> client.handleErrors = True
+        
+        As RESTive APIs often use query string key-value pairs to parameterize the
+        request, this REST client has strong support for it. For example, you can
+        simply specify the parameters in the URL:
+        
+        >>> client.get('http://localhost/?noitems=1')
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <title></title>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        You can also specify the parameter via an argument:
+        
+        >>> client.get('http://localhost/', params={'noitems': 1})
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <title></title>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        You can even combine the two methods of specifying parameters:
+        
+        >>> client.get('http://localhost/?noitems=1', params={'notitle': 1})
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        But our little demo API can do more. Parameters can also be specified as a
+        header with a special prefix. Headers can be globally specified and are then
+        used for every request:
+        
+        >>> client.requestHeaders['demo-noitems'] = 'on'
+        >>> client.get('http://localhost/')
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <title></title>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        There is also a headers argument to the "open" methods that specify the header
+        once:
+        
+        >>> client.get('http://localhost/', headers={'demo-notitle': 1})
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        >>> del client.requestHeaders['demo-noitems']
+        
+        Finally, when dealing with a real site, a socket error might occur. The error
+        is propagated, but the error number and message are recorded:
+        
+        >>> from z3c.rest.client import RESTClient
+        >>> realClient = RESTClient()
+        >>> realClient.open('http://localhost:65000')
+        Traceback (most recent call last):
+        ...
+        error: (111, 'Connection refused')
+        
+        >>> realClient.fullStatus
+        '111 Connection refused'
+        
+        
+        Creating new resources
+        ----------------------
+        
+        Let's now create a new resource in the server root. Our little sample
+        application will simply create another collection:
+        
+        >>> client.put(
+        ...     'http://localhost/folder1',
+        ...     '''<?xml version="1.0" ?>
+        ...        <folder />''')
+        
+        >>> client.fullStatus
+        '401 Unauthorized'
+        
+        Accessing the folder resource is available to everyone. But if you want to
+        modify any resource, you have to log in:
+        
+        >>> client.setCredentials('globalmgr', 'globalmgrpw')
+        
+        So let's try this again:
+        
+        >>> client.put(
+        ...     'http://localhost/folder1',
+        ...     '''<?xml version="1.0" ?>
+        ...        <folder />''')
+        
+        >>> client.fullStatus
+        '201 Created'
+        >>> client.headers
+        [('X-Powered-By', 'Zope (www.zope.org), Python (www.python.org)'),
+        ('Content-Length', '0'),
+        ('Location', 'http://localhost/folder1')]
+        
+        We can now look at the root container and see the item there:
+        
+        >>> client.get('http://localhost/')
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <title></title>
+        <items>
+        <item xlink:type="simple"
+        xlink:href="http://localhost/folder1"
+        xlink:title="folder1"/>
+        </items>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        By the way, you can now use a relative URL to access the `folder1` resource:
+        
+        >>> client.get('folder1')
+        
+        >>> client.url
+        'http://localhost/folder1'
+        
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name>folder1</name>
+        <title></title>
+        <items>
+        </items>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        When we try to create a resource on top of a non-existent resource, we get a
+        404 error:
+        
+        >>> client.put(
+        ...     'http://localhost/folder2/folder21',
+        ...     '''<?xml version="1.0" ?>
+        ...        <folder />''')
+        
+        >>> client.fullStatus
+        '404 Not Found'
+        
+        
+        Modifying Resources
+        -------------------
+        
+        Modifying a given resource can be done via POST or PUT, but they have different
+        semantics. Let's have a look at POST first. We would now like to change the
+        title of the folder; this can be done as follows:
+        
+        >>> client.post(
+        ...     'http://localhost/folder1',
+        ...     '''<?xml version="1.0" ?>
+        ...        <folder>
+        ...          <title>My Folder 1</title>
+        ...        </folder>''')
+        
+        >>> client.fullStatus
+        '200 Ok'
+        
+        >>> client.get()
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name>folder1</name>
+        <title>My Folder 1</title>
+        <items>
+        </items>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        As mentioned above, it must also work for PUT:
+        
+        >>> client.put(
+        ...     'http://localhost/folder1',
+        ...     '''<?xml version="1.0" ?>
+        ...        <folder>
+        ...          <title>Folder 1</title>
+        ...        </folder>''')
+        
+        >>> client.fullStatus
+        '200 Ok'
+        
+        >>> client.get()
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name>folder1</name>
+        <title>Folder 1</title>
+        <items>
+        </items>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        
+        Deleting Resources
+        ------------------
+        
+        Deleting a resource is as simple as all of the other methods. Let's delete our
+        `folder1`:
+        
+        >>> client.delete('http://localhost/folder1')
+        
+        >>> client.fullStatus
+        '200 Ok'
+        
+        So the resource is really gone:
+        
+        >>> client.get()
+        >>> client.fullStatus
+        '404 Not Found'
+        
+        It should not be possible to delete a non-existing resource:
+        
+        >>> client.delete('http://localhost/folder2')
+        >>> client.fullStatus
+        '404 Not Found'
+        
+        Also, we cannot delete the root folder:
+        
+        >>> client.delete('http://localhost/')
+        >>> client.fullStatus
+        '405 Method Not Allowed'
+        
+        
+        Searching the Response Data
+        ---------------------------
+        
+        While not required, most REST services are XML-based. Thus, the client
+        supports inspecting the result XML using XPath. Let's create a couple of
+        folders for this to be more interesting:
+        
+        >>> client.put(
+        ...     'http://localhost/folder1',
+        ...     '''<?xml version="1.0" ?>
+        ...        <folder />''')
+        
+        >>> client.put(
+        ...     'http://localhost/folder2',
+        ...     '''<?xml version="1.0" ?>
+        ...        <folder />''')
+        
+        Next we get the root folder resource:
+        
+        >>> client.get('http://localhost/')
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <title></title>
+        <items>
+        <item xlink:type="simple"
+        xlink:href="http://localhost/folder1"
+        xlink:title="folder1"/>
+        <item xlink:type="simple"
+        xlink:href="http://localhost/folder2"
+        xlink:title="folder2"/>
+        </items>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        But in general, inspecting the XML output on the string level is tedious. So
+        let's write a cool XPath expression that extracts the xlink title of all
+        items:
+        
+        >>> nsmap = {'xlink': "http://www.w3.org/1999/xlink"}
+        >>> client.xpath('//folder/items/item/@xlink:title', nsmap)
+        ['folder1', 'folder2']
+        
+        Oftentimes, however, we specifically query for one result. In those cases we
+        do not want to receive a list:
+        
+        >>> client.xpath('//folder/items/item[@xlink:title="folder1"]', nsmap, True)
+        <Element item ...>
+        
+        Now, if multiple matches are detected, even though we only expect one, then a
+        ``ValueError`` is raised:
+        
+        >>> client.xpath('//folder/items/item', nsmap, True)
+        Traceback (most recent call last):
+        ...
+        ValueError: XPath expression returned more than one result.
+        
+        
+        Accessing Links
+        ---------------
+        
+        Since we want the REST client to behave like a browser -- at least a little
+        bit -- we can also use the ``getLink()`` method to access links:
+        
+        >>> client.getLink('folder1')
+        <XLink title='folder1' url='http://localhost/folder1'>
+        
+        By default, the link is looked up by title. But you can also look it up by
+        URL:
+        
+        >>> client.getLink(url='http://localhost/folder1')
+        <XLink title='folder1' url='http://localhost/folder1'>
+        
+        If you forget to specify a title or URL, you receive a ``ValueError``:
+        
+        >>> client.getLink()
+        Traceback (most recent call last):
+        ...
+        ValueError: You must specify a title or URL.
+        
+        Links can also be relative, such as the one for ACL:
+        
+        >>> client.open('http://localhost/folder1')
+        >>> client.getLink('ACL')
+        <XLink title='ACL' url='http://localhost/folder1/acl'>
+        
+        >>> client.open('http://localhost/folder1/')
+        >>> client.getLink('ACL')
+        <XLink title='ACL' url='http://localhost/folder1/acl'>
+        
+        The cool part about the link is that you can click it:
+        
+        >>> client.open('http://localhost/')
+        >>> client.url
+        'http://localhost/'
+        
+        >>> client.getLink('folder1').click()
+        
+        >>> client.url
+        'http://localhost/folder1'
+        
+        
+        Moving through time
+        -------------------
+        
+        Like in a real browser, you can go back to a previous state. For example,
+        currently we are looking at `folder1`, ...
+        
+        >>> client.url
+        'http://localhost/folder1'
+        
+        but if I go back one step, I am back at the root folder:
+        
+        >>> client.goBack()
+        
+        >>> client.url
+        'http://localhost/'
+        
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <title></title>
+        <items>
+        <item xlink:type="simple"
+        xlink:href="http://localhost/folder1"
+        xlink:title="folder1"/>
+        <item xlink:type="simple"
+        xlink:href="http://localhost/folder2"
+        xlink:title="folder2"/>
+        </items>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        But going back in history is only cool, if you can also reload. So let's
+        delete `folder2`:
+        
+        >>> client.getLink('folder2').click()
+        >>> client.delete()
+        
+        Now we go back 2 steps:
+        
+        >>> client.goBack(2)
+        
+        >>> client.url
+        'http://localhost/'
+        
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <title></title>
+        <items>
+        <item xlink:type="simple"
+        xlink:href="http://localhost/folder1"
+        xlink:title="folder1"/>
+        <item xlink:type="simple"
+        xlink:href="http://localhost/folder2"
+        xlink:title="folder2"/>
+        </items>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        As expected, the contents has not changed yet. So let's reload:
+        
+        >>> client.reload()
+        
+        >>> client.url
+        'http://localhost/'
+        
+        >>> print client.contents
+        <?xml version="1.0" ?>
+        <folder xmlns:xlink="http://www.w3.org/1999/xlink">
+        <name></name>
+        <title></title>
+        <items>
+        <item xlink:type="simple"
+        xlink:href="http://localhost/folder1"
+        xlink:title="folder1"/>
+        </items>
+        <acl xlink:type="simple" xlink:href="acl" xlink:title="ACL"/>
+        </folder>
+        
+        Note that going back zero steps does nothing:
+        
+        >>> client.url
+        'http://localhost/'
+        
+        >>> client.getLink('folder1').click()
+        >>> client.goBack(0)
+        
+        >>> client.url
+        'http://localhost/folder1'
+        
+        Also, if you try to go back beyond the beginning of time, a value error is
+        raised:
+        
+        >>> client.goBack(1000)
+        Traceback (most recent call last):
+        ...
+        ValueError: There is not enough history.
+        
+        ==============
+        Null Resources
+        ==============
+        
+        It is sometimes necessary to traverse to resources that do not yet exist. In
+        particular, this is needed when creating resources using "PUT" or "POST". It
+        is the responsibility of the traverser to handle those cases correctly and
+        produce the null resources. This document only describes their behavior.
+        
+        A null resource is easily instantiated using the container and the name of the
+        resource:
+        
+        >>> class Folder(object):
+        ...     __parent__ = __name__ = None
+        ...     child = None
+        ...
+        ...     def __init__(self, name=''):
+        ...         self.name = self.__name__ = name
+        ...
+        ...     def __repr__(self):
+        ...         return '<Folder %r>' %self.name
+        >>> folder = Folder()
+        
+        >>> from z3c.rest import null
+        >>> resource = null.NullResource(folder, 'resource')
+        
+        >>> from zope.app.http.interfaces import INullResource
+        >>> INullResource.providedBy(resource)
+        True
+        
+        Null resources are locations, so security is available:
+        
+        >>> from zope.location.interfaces import ILocation
+        >>> ILocation.providedBy(resource)
+        True
+        
+        The container is also the parent:
+        
+        >>> resource.container
+        <Folder ''>
+        >>> resource.__parent__
+        <Folder ''>
+        
+        The name of the resource is available at:
+        
+        >>> resource.name
+        'resource'
+        >>> resource.__name__
+        'resource'
+        
+        There is a special implementation of "PUT" for null resources. It works by
+        looking up a view called "NullPUT" for the container. This way, one null
+        resource implementation can be used for all container implementations.
+        
+        >>> import StringIO
+        >>> from z3c.rest import rest
+        >>> request = rest.RESTRequest(StringIO.StringIO(), {})
+        
+        >>> nullPut = null.NullPUT(resource, request)
+        >>> nullPut.PUT()
+        
+        Since no view called "NullPUT" exists for our `Folder` class, we get a 501
+        return status:
+        
+        >>> request.response.getStatusString()
+        '501 Not Implemented'
+        
+        Let's now register a simple NullPUT view:
+        
+        >>> class FolderAPI(rest.RESTView):
+        ...
+        ...     def NullPUT(self, resource):
+        ...         self.context.child = Folder(resource.name)
+        ...         self.context.child.__parent__ = self.context
+        ...         return self.context.child
+        
+        >>> import zope.component
+        >>> from z3c.rest import interfaces
+        >>> zope.component.provideAdapter(
+        ...     FolderAPI, (Folder, interfaces.IRESTRequest), name='NullPUT')
+        
+        Let's make sure our location structure is correctly setup, so that absolute
+        URL will work:
+        
+        >>> from zope.traversing.interfaces import IContainmentRoot
+        >>> import zope.interface
+        >>> zope.interface.alsoProvides(folder, IContainmentRoot)
+        
+        Now we are ready to PUT the new resource:
+        
+        >>> request = rest.RESTRequest(
+        ...     StringIO.StringIO(), {'SERVER_URL': 'http://localhost/'})
+        
+        >>> nullPut = null.NullPUT(resource, request)
+        >>> nullPut.PUT()
+        
+        >>> request.response.getStatusString()
+        '201 Created'
+        >>> request.response.getHeader('Location')
+        'http://localhost/resource'
+        
+        >>> folder.child
+        <Folder 'resource'>
+        
+        =========================
+        REST Traverser Components
+        =========================
+        
+        Being able to control and extend traversal is essential to any RESTive
+        API. This package uses the pluggable traverser implementation of the
+        ``z3c.traverser`` package to provide a flexible traversal mechanism.
+        
+        
+        REST Pluggable Traverser
+        ------------------------
+        
+        The REST pluggable traverser is registered for all types of components. Its
+        implementation is fully tested in the ``z3c.traverser`` package.
+        
+        >>> from z3c.rest import traverser
+        
+        >>> import StringIO
+        >>> from z3c.rest import rest
+        >>> request = rest.RESTRequest(StringIO.StringIO(), {})
+        
+        >>> pluggable = traverser.RESTPluggableTraverser(object(), request)
+        >>> pluggable
+        <z3c.rest.traverser.RESTPluggableTraverser object at ...>
+        
+        
+        Item Container Traverser Plugin
+        -------------------------------
+        
+        The item mapping interface -- from which item container inherits -- is the
+        most minimal mapping interface in Python. Thus, once traversing through this
+        item container is implemented, it can be used by all other container
+        interfaces and implementations.
+        
+        Let's start by creating a very simple item container implementation:
+        
+        >>> import zope.interface
+        >>> from zope.app.container.interfaces import IItemContainer
+        
+        >>> class SimpleContainer(dict):
+        ...     zope.interface.implements(IItemContainer)
+        ...     def __init__(self, name=''):
+        ...         self.name = name
+        ...     def __repr__(self):
+        ...         return '<Container name=%s>' %self.name
+        
+        >>> container = SimpleContainer()
+        
+        >>> container['sub1'] = SimpleContainer('sub1')
+        >>> container['sub2'] = SimpleContainer('sub2')
+        
+        After creating a traverser plugin instance,
+        
+        >>> request = rest.RESTRequest(StringIO.StringIO(), {})
+        
+        >>> containerTraverser = traverser.ContainerItemTraverserPlugin(
+        ...     container, request)
+        
+        we can traverse to a sub-object of that container:
+        
+        >>> containerTraverser.publishTraverse(request, 'sub1')
+        <Container name=sub1>
+        
+        If no proper sub-item can be found, some interesting can happen. In a normal
+        case, ``NotFound`` is raised:
+        
+        >>> containerTraverser.publishTraverse(request, 'unknown')
+        Traceback (most recent call last):
+        ...
+        NotFound: Object: <Container name=>, name: 'unknown'
+        
+        However, if the request is a PUT request, we must generate a null resource:
+        
+        >>> request.method = 'PUT'
+        >>> containerTraverser.publishTraverse(request, 'unknown')
+        <NullResource 'unknown'>
+        
+        However, a null resource is only created, if the current resource is the last
+        one in the traversal stack:
+        
+        >>> request.setTraversalStack(('sub11',))
+        >>> containerTraverser.publishTraverse(request, 'unknown')
+        Traceback (most recent call last):
+        ...
+        NotFound: Object: <Container name=>, name: 'unknown'
+        
+        And that's it.
+        
+        =================================
+        Publisher Hooks for REST Requests
+        =================================
+        
+        Reading this document requires -- to some extend -- that the reader is
+        familiar with the basic steps of the publication process.
+        
+        
+        The Publication Request Factory
+        -------------------------------
+        
+        The Zope publication process starts when a WSGI server sends the request
+        environment and response initialization callable to the Zope WSGI Publisher
+        application _[1]. The WSGI publisher application is then responsible for
+        processing the request in the publisher and stream out the result.
+        
+        In order to process a request in the publisher, we have to create a valid
+        publisher request object. The WSGI publisher application uses a request
+        factory for this purpose. This package implements this factory to ensure that
+        a special REST request (based on HTTP Request) is created at all times.
+        
+        The request factory is instantiated using a ZODB database object:
+        
+        >>> from ZODB.DB import DB
+        >>> from ZODB.DemoStorage import DemoStorage
+        >>> db = DB(DemoStorage())
+        
+        Let's now create the factory:
+        
+        >>> from z3c.rest import rest
+        >>> RequestFactory = rest.RESTPublicationRequestFactory(db)
+        
+        When a request comes in from the server, the request is created as follows:
+        
+        >>> import StringIO
+        >>> inStream = StringIO.StringIO('Input stream')
+        
+        >>> env = {'HTTP_ACCEPT_LANGUAGE': 'en-US,en',
+        ...        'SERVER_URL': 'http://localhost:8080/'}
+        
+        >>> request = RequestFactory(inStream, env)
+        
+        We now got a valid request that we can send through the publisher:
+        
+        >>> request
+        <z3c.rest.rest.RESTRequest instance URL=http://localhost:8080>
+        
+        The request, however, is only responsible for representing the network request
+        in the publisher and has no direct knowledge of the application. But the
+        request connects to an application-specific -- in this case Zope 3 --
+        component known as the publication.
+        
+        >>> request.publication
+        <zope.app.publication.http.HTTPPublication object at ...>
+        
+        Since we do not need a special REST publication, we are simply reusing the
+        more generic HTTP version. The publication will be the same for all
+        requests. It also contains the reference to the database:
+        
+        >>> request.publication.db
+        <ZODB.DB.DB object at ...>
+        
+        Unfortunately, it takes a lot more setup to send the request through the
+        publisher successfully. The publication requires many other aspects of
+        publishing to be available, including traversal, security, and a properly
+        constructed database. However, we can still see a failure:
+        
+        >>> from zope.publisher import publish
+        >>> publish.publish(request)
+        <z3c.rest.rest.RESTRequest instance URL=http://localhost:8080>
+        >>> print request.response.consumeBody()
+        <?xml version="1.0" ?>
+        <error>
+        <name>ComponentLookupError</name>
+        <explanation>(&lt;InterfaceClass ...IAuthentication&gt;, u'')</explanation>
+        </error>
+        
+        Let' unwind a bit. Originally, we started with the desire to create a
+        Publisher WSGI Application instance that internally uses a REST request. All
+        that you need to do is:
+        
+        >>> from zope.app import wsgi
+        >>> app = wsgi.WSGIPublisherApplication(
+        ...     db, rest.RESTPublicationRequestFactory)
+        >>> app
+        <zope.app.wsgi.WSGIPublisherApplication object at ...>
+        
+        When the WSGI server sends a request to the WSGI application, the following
+        happens:
+        
+        >>> status = None
+        >>> headers = None
+        >>> def start_response(s, h):
+        ...     global status
+        ...     global headers
+        ...     status, headers = s, h
+        
+        >>> wsgiEnv = {'wsgi.input': inStream}
+        >>> wsgiEnv.update(env)
+        
+        >>> print '\n'.join(app(wsgiEnv, start_response))
+        <?xml version="1.0" ?>
+        <error>
+        <name>ComponentLookupError</name>
+        <explanation>(&lt;InterfaceClass ...IAuthentication&gt;, u'')</explanation>
+        </error>
+        
+        
+        .. [1]: ``zope.app.wsgi.WSGIPublisherApplication.__call__``
+        
+        
+        The REST Request
+        ----------------
+        
+        For most parts, the REST request is identical to the HTTP request, so I won't
+        go into too much detail about the HTTP request API.
+        
+        The REST request mainly extends the HTTP request in that it parses the query
+        string of the URL into a set of parameters. This happens during
+        ``processInputs()``.
+        
+        If there is no query string, the paramaters mapping is empty:
+        
+        >>> request = RequestFactory(
+        ...     StringIO.StringIO(), {})
+        >>> request.processInputs()
+        >>> request.parameters
+        {}
+        
+        So let's now pass a few parameters:
+        
+        >>> request = RequestFactory(
+        ...     StringIO.StringIO(),
+        ...     {'QUERY_STRING': 'format=html&action=delete&item=1&item=3'})
+        >>> request.processInputs()
+        >>> pprint(request.parameters)
+        {'action': 'delete',
+        'format': 'html',
+        'item': ['1', '3']}
+        
+        We also override some of the request's mapping methods, so that the parameters
+        and environment values are available as part of the request:
+        
+        >>> sorted(request.keys())
+        ['QUERY_STRING', 'action', 'format', 'item']
+        
+        >>> request.get('QUERY_STRING')
+        'format=html&action=delete&item=1&item=3'
+        >>> request.get('action')
+        'delete'
+        >>> request.get('unknwon', 'default')
+        'default'
+        
+        
+        The REST Response
+        -----------------
+        
+        The REST Response is pretty much identical to the HTTP Response, except that
+        its exception handler returns XML instead of HTML. This method, however, is
+        only used for classic and string exceptions.
+        
+        Starting with a response, ...
+        
+        >>> response = rest.RESTResponse()
+        
+        ... we can now call the handler:
+        
+        >>> class MyException(Exception):
+        ...     pass
+        
+        >>> response.handleException((MyException, MyException(), None))
+        >>> response._status
+        500
+        >>> response._reason
+        'Internal Server Error'
+        >>> print '\n'.join(response._result)
+        <?xml version="1.0" ?>
+        <error>
+        <name>MyException</name>
+        <explanation></explanation>
+        </error>
+        
+        Let's try a string exception too:
+        
+        >>> response.handleException(('StringException', 'Some details', None))
+        >>> response._status
+        500
+        >>> response._reason
+        'Internal Server Error'
+        >>> print '\n'.join(response._result)
+        <?xml version="1.0" ?>
+        <error>
+        <name>StringException</name>
+        <explanation>Some details</explanation>
+        </error>
+        
+        The `Redirect` exception is special. It actuaually causes the request to be
+        redirected.
+        
+        >>> response._request = rest.RESTRequest(None, {})
+        
+        >>> from zope.publisher.interfaces import Redirect
+        >>> response.handleException((Redirect, Redirect('http://localhost'), None))
+        >>> response._status
+        302
+        >>> response._reason
+        'Moved Temporarily'
+        >>> response._headers['location']
+        ['http://localhost']
+        
+        
+        REST Views
+        ----------
+        
+        Unlike browser views, a REST view does *not* represent its own sub-resource
+        (such as "index.html"). Instead it merely defines the behavior of the HTTP
+        methods for a particular content component.
+        
+        Here is an example:
+        
+        >>> class ObjectAPI(rest.RESTView):
+        ...
+        ...     def GET(self):
+        ...          return str(self.context)
+        
+        The ``RESTView`` base class provides a suitable constructor:
+        
+        >>> class Object(object):
+        ...     def __repr__(self):
+        ...         return '<Object>'
+        >>> myobj = Object()
+        
+        >>> request = RequestFactory(
+        ...     StringIO.StringIO(), {'SERVER_URL': 'http://localhost:8080/myobj'})
+        
+        >>> view = ObjectAPI(myobj, request)
+        
+        When the publisher traverses to `myobj`, it will look up a view based on the
+        HTTP mehtod, such as "GET". It then also expects to find a method of that same
+        name and calls it _[2].
+        
+        >>> view.GET()
+        '<Object>'
+        
+        The REST View, like all other views, exposes its context and the request:
+        
+        >>> view.context
+        <Object>
+        >>> view.request
+        <z3c.rest.rest.RESTRequest instance URL=http://localhost:8080/myobj>
+        
+        Also, a view must be located, so it has a parent as well:
+        
+        >>> view.__parent__
+        <Object>
+        
+        You can set it to something else of course:
+        
+        >>> view.__parent__ = 1
+        >>> view.__parent__
+        1
+        
+        .. [2]: ``zope.app.publication.HTTPPublication.callObject``
+        
+        
+        =======
+        CHANGES
+        =======
+        
+        0.2.4 (2008-09-04)
+        ------------------
+        
+        - RESTClient() now correctly interprets https:// URLs.
+        
+        
+        0.2.3 (2008-03-20)
+        ------------------
+        
+        - Bug/Misfeature: Sigh, getting the trailing slash handled correctly turned
+        out to be a big pain. I really hope I got it working the way it should be
+        for a REST client now.
+        
+        
+        0.2.2 (2008-03-19)
+        ------------------
+        
+        - Bug/Misfeature: The client always added a slash to the end of the URL. But
+        some REST APIs are very sensitive to this. Now the slash is only preserved
+        if present, but nothing will be added otherwise.
+        
+        
+        0.2.1 (2008-03-06)
+        ------------------
+        
+        - Bug: Sometimes the response body was not read and the contents of the client
+        was empty. Unfortunately, this problem could not be reliably reproduced, but
+        debugging showed that the connection was closed to early. (Roy Mathew)
+        
+        - Feature: Make the package Python 2.4 and 2.5 compatible.
+        
+        - Feature: Require lxml 2.0 for z3c.rest.
+        
+        
+        0.2.0 (2008-03-03)
+        ------------------
+        
+        - Feature: Made the HTTP caller pluggable for the REST client, allowing
+        request types other than ``RESTRequest``.
+        
+        
+        0.1.0 (2008-03-03)
+        ------------------
+        
+        - Initial Release
+        
+        * Publisher hooks to build dedicated REST servers
+        
+        * Error view support
+        
+        * Pluggable REST traverser based on `z3c.traverser`
+        
+        * REST client
+        
+        * Minimal sample application
+        
+Keywords: zope3 form widget
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Framework :: Zope3
