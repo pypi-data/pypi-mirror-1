@@ -1,0 +1,78 @@
+==============
+nose-pathmunge
+==============
+
+* Project hosting: <http://bitbucket.org/jnoller/nose-pathmunge/>
+
+.. contents::
+
+About
+------------------
+
+Written by Jesse Noller
+
+Licensed under the Apache Software License, 2.0
+
+You can install it with ``easy_install nose-pathmunge``
+
+What It Does
+------------
+
+nose-pathmunge is a plugin to the nose test framework which provides a method
+to add directories to the sys.path of nose, which is inherited by the tests
+running within nose.
+
+This itch stems from in many of my own cases, the need to add modules to a 
+given run (dependencies) that I don't want to install because they're synced 
+from a source control system, and change frequently.
+
+This plugin is extremely simple. It's meant to be.
+
+Usage
+----------
+
+Usage is simple - install the package, and then execute nosetests like this::
+
+    nosetests --with-path=/home/jesse/src --with-path=/other/dir
+
+Remember the rules when appending directories to your path - you should add
+the directory above a module - not the module directory itself, and there 
+needs to be a valid __init__.py file. For example, the following project 
+layout in subversion::
+
+    myproj/
+        src/
+            mymodule/
+                __init__.py
+                foobar.py
+
+You would add this like this::
+
+    nosetests --with-path=/home/jesse/src/myproj/src
+
+This would add ``mymodule/...`` to the sys.path for the tests to be able to
+import.
+
+Command line options
+--------------------
+
+After it is installed, the plugin adds the following command line flags to 
+nosetests::
+
+    --with-path=TESTCONFIG  Additional directories to add to the nose sys.path
+                            [NOSE_ADDITIONAL_PATHS]
+
+You can pass in as many paths as you like. I suggest 3, as that's a pleasant 
+number.
+
+TODO
+----
+
+* Verify works/doesn't work with multiprocess plugin
+* Add tests
+
+Changes & News
+--------------
+
+0.1:
+    Initial release.  May contain bits of glass.
