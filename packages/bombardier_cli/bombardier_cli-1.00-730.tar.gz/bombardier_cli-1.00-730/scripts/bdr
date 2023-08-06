@@ -1,0 +1,223 @@
+#!/usr/bin/python
+
+# BSD License
+# Copyright (c) 2009, Peter Banka et al
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# * Redistributions of source code must retain the above copyright notice,
+#   this list of conditions and the following disclaimer.
+# * Redistributions in binary form must reproduce the above copyright notice,
+#   this list of conditions and the following disclaimer in the documentation
+#   and/or other materials provided with the distribution.
+# * Neither the name of the GE Security nor the names of its contributors may
+#   be used to endorse or promote products derived from this software without
+#   specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+'''This is the command-line itself. This brings up the shell, pulls all of
+the PinshCmds in and creates an environment where commands can be executed
+'''
+
+import os, sys
+sys.path.append('.')
+from bombardier_core.static_data import OK, FAIL
+try:
+    from bombardier_cli.Exceptions import ServerTracebackException
+except ImportError:
+    # TO SUPPORT UNIT TESTING:
+    from Exceptions import ServerTracebackException
+
+
+HISTORY_FILE = "%s/.bomsh_history" % os.environ['HOME']
+LOG_PATH = "%s/.bomsh_log" % os.environ['HOME']
+COMMANDS = ["Show", "Terminal", "Machine", "CliTest", "Package",
+            "Exit", "Set", "Dispatcher", "Edit", "Ssh", "Job", "Create"]
+
+
+##########################################################################
+## Adding new commands:
+##
+## 0. Create a class that extends PinshCmd
+## 1. Import the class.
+## 2. add the class to the following vector of command or add it to
+##    the Configure.py class
+
+
+def try_import(module):
+    try:
+        exec("import %s" % module)
+    except ImportError:
+        return FAIL
+    return OK
+
+def test_modules():
+    missing_modules = []
+    for module in ["yaml", "pycurl"]:
+        if try_import(module) == FAIL:
+            missing_modules.append(module)
+    if missing_modules:
+        print " %% ERROR: This system does not have the necessary Python libraries."
+        print " %%%% You are missing these modules: %s" % ','.join(missing_modules)
+        print
+        sys.exit(1)
+
+
+test_modules()
+import exceptions
+import sys, os, readline, signal
+try:
+    # UNIT TESTING
+    import bombardier_cli.libUi as libUi
+    import bombardier_cli.Slash as Slash
+    from bombardier_cli.SystemStateSingleton import SystemState
+except ImportError:
+    import libUi
+    import Slash
+    from SystemStateSingleton import SystemState
+
+import optparse
+
+# READLINE CONFIGS
+readline.parse_and_bind('tab: complete')
+readline.parse_and_bind('C-z: "end\n"')
+#readline.parse_and_bind('?: "\C-v?\t\d"')
+readline.parse_and_bind('set bell-style none')
+readline.set_completer_delims(' ')
+
+# DEPRICATED:
+def run_scripts(scripts):
+    status = OK
+    file_name = scripts[0]
+    lines = open(file_name, 'r').readlines()
+    system_state.batch = True
+    for line in lines:
+        cmd_status, cmd_output = slash.process_command(line.strip())
+        if status == OK:
+            status = cmd_status
+    return status
+
+def cleanup(system_state, slash):
+    print
+    if system_state.ask_to_disconnect:
+        question = "Disconnect all clients"
+        cleanup = libUi.ask_yes_no(question, libUi.NO)
+        if cleanup:
+            libUi.info("cleaning up")
+            url = "json/machine/cleanup_connections"
+            data = system_state.cnm_connector.service_yaml_request(url, post_data={})
+        print
+    while system_state.child_processes:
+        os.kill(system_state.child_processes.pop(), signal.SIGTERM)
+    readline.write_history_file(HISTORY_FILE)
+    if system_state.comment_commands:
+        makeComment() # MISSING
+    sys.exit(0)
+    print
+
+def initialize(system_state, slash):
+    status, output = system_state.cnm_connector.dispatcher_control("status")
+    if status == FAIL:
+        config_url = "/json/server/config"
+        config = system_state.cnm_connector.service_yaml_request(config_url)
+        if not config.get("server configuration", {}).get("server_home"):
+            prompt = "Server home is not set. Please enter the value"
+            server_home = libUi.get_default(prompt, "/var/deploy")
+            system_state.cnm_connector.sync_server_home(server_home)
+        
+        question = "Dispatcher is offline; enter CI decryption password: "
+        password = libUi.pwd_input(question)
+        status, output = system_state.cnm_connector.dispatcher_control("start")
+        libUi.user_output(output, status)
+        try:
+            status, output = system_state.cnm_connector.set_password(password)
+            libUi.user_output(output, status)
+        except ServerTracebackException, ste:
+            libUi.process_traceback(ste)
+
+def main_loop(system_state, slash):
+    clean = False
+    while True:
+        try:
+            system_state.set_prompt()
+            readline.set_completer(slash.complete)
+            if clean:
+                command = raw_input(system_state.get_prompt())
+                clean = False
+            else:
+                command = raw_input(system_state.get_prompt() + readline.get_line_buffer())
+            slash.process_command(command)
+        except EOFError, eof:
+            if system_state.pop_prompt() == FAIL:
+                cleanup(system_state, slash)
+            else:
+                print
+        except exceptions.KeyboardInterrupt, key:
+            print
+            clean = True
+
+if __name__ == "__main__":
+    system_state = SystemState()
+    system_state.load_config()
+
+    parser = optparse.OptionParser("usage: %prog <-u user-name> <-n> <bomsh-script>")
+    parser.add_option("-n", "--no_login", dest="no_login", action="store_const", const=True,
+                      help="do not log in to the cnm")
+    parser.add_option("-s", "--server", dest="server",
+                      help="set the Bombardier Server URL to connect to")
+    parser.add_option("-u", "--user", dest="user",
+                      help="set the username associated with this session")
+
+    (options, scripts) = parser.parse_args()
+    username = None
+    server   = None
+    if options.user:
+        username = options.user
+    if options.server:
+        system_state.cnm_url = options.server
+
+    command_classes = []
+    for command in COMMANDS:
+        try:
+            module = __import__('bombardier_cli.%s' % command, globals(), locals(), [command])
+        except ImportError:
+            module = __import__('%s' % command, globals(), locals(), [command])
+        if not hasattr(module, command):
+            print "%s is not a properly formatted module" % command
+            continue
+        cls = getattr(module, command)
+        command_classes.append(cls())
+
+    slash = Slash.Slash(command_classes)
+
+    if options.no_login:
+        system_state.username = username
+        system_state.prompt = ['$']
+        system_state.set_prompt()
+    else:
+        libUi.login(username)
+        initialize(system_state, slash)
+
+    if scripts:
+        status = run_scripts(scripts)
+        sys.exit(status)
+    libUi.motd()
+    if os.path.isfile(HISTORY_FILE):
+        try:
+            readline.read_history_file(HISTORY_FILE)
+        except:
+            print "%% Unable to read history file %s" % HISTORY_FILE
+    main_loop(system_state, slash)
