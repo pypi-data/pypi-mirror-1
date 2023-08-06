@@ -1,0 +1,106 @@
+Add the default profile and check the test users are present
+============================================================
+
+Integration and functional tests for users, groups and security
+allocations created by the test profile install 
+by Ed Crewe, ILRT (University of Bristol) January 2009
+
+This test uses the default profile which just installs ten users
+and two groups with two users in each. Along with a local role allocation.
+
+Confirm it has the default user group and role allocation
+---------------------------------------------------------
+
+Get the acl_user folder
+
+    >>> userfolder = getattr(portal,'acl_users',None)
+    >>> userfolder.getId()
+    'acl_users'
+
+Check that the userfolder contains ten users plus the one test user that is created by the 
+test harness
+
+    >>> users = userfolder.getUsers()
+    >>> len(users)
+    11
+
+Check that there are two groups
+
+    >>> allgroups = userfolder.searchGroups()
+    >>> groupids = []
+    >>> for group in allgroups:
+    ...     if group['groupid'] not in ['Administrators','Reviewers','AuthenticatedUsers']:
+    ...         groupids.append(group['groupid'])
+    >>> len(groupids)
+    2
+
+... each with one or more members 
+
+    >>> members = userfolder.getGroup(groupids[0]).getGroupMembers(groupids[0])
+    >>> len(members) > 1
+    True
+
+... and confirm that the members were all users in the users list
+
+    >>> members = list(members)
+    >>> for user in users:
+    ...    uid = user.getId()
+    ...    if uid in members:
+    ...        members.remove(uid)
+    >>> members
+    []
+
+Now test for the local role assignments ... ie population of ZODB security assignments
+Get the subfolder 
+
+    >>> subfolder = portal.default1.subfolder1
+
+... then check that the first group has a local role assignment on it
+
+    >>> rolemap = getattr(subfolder, '__ac_local_roles__', {})
+    >>> rolemap.has_key(groupids[0])
+    True
+
+Functional test that everything is really there as expected via a browser
+-------------------------------------------------------------------------
+
+
+First, we must perform some setup of the test browser.
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> portal_url = portal.absolute_url()
+    >>> browser = Browser()
+
+The default profile installs a minimum folder with a document and image which 
+is then duplicated to a second folder.
+Hence a browser test that the above content exists confirms that the core 
+functionality of contentgenerator is in place. 
+
+Next we need to login using the default user from PloneTestCase:
+
+    >>> from Products.PloneTestCase.setup import portal_owner, default_password
+    >>> browser.open(portal_url)
+
+We have the login portlet, so let's use that:
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+
+We check that we get the logged-in message:
+
+    >>> "You are now logged in" in browser.contents
+    True
+
+Now do a search for all users via the manage users screen
+
+    >>> browser.open(portal_url + '/prefs_users_overview')
+    >>> ctrl = browser.getControl('Show all')
+    >>> ctrl.click()
+
+Check the user list contains some of the users
+
+    >>> 'aanderson' in browser.contents
+    True
+    >>> 'aabarnes' in browser.contents
+    True
