@@ -1,0 +1,301 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>modjy &mdash; PyAMF - AMF for Python</title>
+    <link rel="stylesheet" href="../../_static/default.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../',
+        VERSION:     '0.5.1',
+        COLLAPSE_MODINDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <link rel="search" type="application/opensearchdescription+xml"
+          title="Search within PyAMF - AMF for Python"
+          href="../../_static/opensearch.xml"/>
+    <link rel="shortcut icon" href="../../_static/pyamf.ico"/>
+    <link rel="author" title="About these documents" href="../../about.html" />
+    <link rel="copyright" title="Copyright" href="../../copyright.html" />
+    <link rel="top" title="PyAMF - AMF for Python" href="../../index.html" />
+    <link rel="up" title="Jython" href="index.html" />
+    <link rel="next" title="Apache" href="../apache/index.html" />
+    <link rel="prev" title="Swing" href="swing.html" /> 
+  </head>
+  <body>  
+
+    <div class="document">
+<div>
+<a class="toplogo" href="../../index.html"><img src="../../_static/logo.png" border="0"/></a>
+</div>
+
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  <div class="section" id="modjy">
+<h1>modjy<a class="headerlink" href="#modjy" title="Permalink to this headline">¶</a></h1>
+<img alt="../../_images/modjy-pyamf.png" src="../../_images/modjy-pyamf.png" />
+<div class="topic">
+<p class="topic-title first">Introduction</p>
+<p>This howto shows you how to easily publish your PyAMF applications with
+Apache <a class="reference external" href="http://tomcat.apache.org">Tomcat</a> and
+<a class="reference external" href="http://opensource.xhaus.com/projects/modjy/wiki">modjy</a>. modjy is an
+implementation of a WSGI compliant gateway/server for
+<a class="reference external" href="http://jython.org">Jython</a>, built on Java/J2EE servlets. This allows
+you to run Jython WSGI applications inside a Java/J2EE servlet container,
+e.g. Apache Tomcat. modjy is part of the Jython project.</p>
+<p>We&#8217;re going to assume you downloaded Apache Tomcat and are able to run
+it on <tt class="docutils literal"><span class="pre">http://localhost:8080</span></tt>, which is the default for Tomcat.
+Flash applications will be able to access your PyAMF remoting gateway
+on <tt class="docutils literal"><span class="pre">http://localhost:8080/pyamf/</span></tt>.</p>
+<p>This was tested with <a class="reference external" href="http://jython.org">Jython</a> 2.5, Apache
+<a class="reference external" href="http://tomcat.apache.org">Tomcat</a> 6.0.20, and Java 1.6 on Mac OS X
+10.5.7.</p>
+</div>
+<div class="section" id="deploying-modjy">
+<h2>Deploying modjy<a class="headerlink" href="#deploying-modjy" title="Permalink to this headline">¶</a></h2>
+<p>Start by simply taking a copy of the <tt class="docutils literal"><span class="pre">modjy_webapp</span></tt> directory in the
+<tt class="docutils literal"><span class="pre">Demo</span></tt> subdirectory of the Jython distribution, and drop it in the
+location where your container expects to find web applications.</p>
+<p>The default installation of Apache Tomcat 6 has a subdirectory called
+<tt class="docutils literal"><span class="pre">webapps</span></tt>. If you&#8217;re running Tomcat 6, simply drop the <tt class="docutils literal"><span class="pre">modjy_webapp</span></tt>
+directory in there and rename it to <tt class="docutils literal"><span class="pre">pyamf</span></tt>:</p>
+<div class="highlight-bash"><div class="highlight"><pre><span class="nb">cd </span>apache-tomcat-6.0.20
+cp -R /path/to/jython2.5.0/Demo/modjy_webapp webapps/pyamf
+</pre></div>
+</div>
+<p>If you&#8217;re using a different J2EE container, or a non-default installation
+of Tomcat, you&#8217;ll need to read your container documentation to find out
+where web applications should live.</p>
+<p>Now place the <tt class="docutils literal"><span class="pre">jython.jar</span></tt> file in the servlet container hierarchy so
+that it is available when the modjy servlet class is being loaded.
+Standard J2EE classloading behaviour when looking for support resources
+is to look first inside the <tt class="docutils literal"><span class="pre">WEB-INF/lib</span></tt> directory for a web
+application, so place the <tt class="docutils literal"><span class="pre">jython.jar</span></tt> file in there:</p>
+<div class="highlight-bash"><div class="highlight"><pre>cp -R /path/to/jython2.5.0/jython.jar webapps/pyamf/WEB-INF/lib
+</pre></div>
+</div>
+<p>Modify the <tt class="docutils literal"><span class="pre">webapps/pyamf/WEB-INF/web.xml</span></tt> file so it contains:</p>
+<div class="highlight-xml"><table class="highlighttable"><tr><td class="linenos"><pre> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43</pre></td><td class="code"><div class="highlight"><pre><span class="cp">&lt;?xml version=&quot;1.0&quot; encoding=&quot;ISO-8859-1&quot;?&gt;</span>
+<span class="cp">&lt;!DOCTYPE web-app</span>
+<span class="cp">     PUBLIC &quot;-//Sun Microsystems, Inc.//DTD Web Application 2.3//EN&quot;</span>
+<span class="cp">    &quot;http://java.sun.com/dtd/web-app_2_3.dtd&quot;&gt;</span>
+<span class="nt">&lt;web-app&gt;</span>
+
+  <span class="nt">&lt;display-name&gt;</span>PyAMF/modjy demo application<span class="nt">&lt;/display-name&gt;</span>
+  <span class="nt">&lt;description&gt;</span>
+     modjy PyAMF demo application
+  <span class="nt">&lt;/description&gt;</span>
+
+  <span class="nt">&lt;servlet&gt;</span>
+    <span class="nt">&lt;servlet-name&gt;</span>modjy<span class="nt">&lt;/servlet-name&gt;</span>
+    <span class="nt">&lt;servlet-class&gt;</span>com.xhaus.modjy.ModjyJServlet<span class="nt">&lt;/servlet-class&gt;</span>
+    <span class="nt">&lt;init-param&gt;</span>
+      <span class="nt">&lt;param-name&gt;</span>python.home<span class="nt">&lt;/param-name&gt;</span>
+      <span class="nt">&lt;param-value&gt;</span>/path/to/jython2.5.0<span class="nt">&lt;/param-value&gt;</span>
+    <span class="nt">&lt;/init-param&gt;</span>
+    <span class="nt">&lt;init-param&gt;</span>
+      <span class="nt">&lt;param-name&gt;</span>app_filename<span class="nt">&lt;/param-name&gt;</span>
+      <span class="nt">&lt;param-value&gt;</span>demo_app.py<span class="nt">&lt;/param-value&gt;</span>
+    <span class="nt">&lt;/init-param&gt;</span>
+    <span class="nt">&lt;init-param&gt;</span>
+      <span class="nt">&lt;param-name&gt;</span>cache_callables<span class="nt">&lt;/param-name&gt;</span>
+      <span class="nt">&lt;param-value&gt;</span>1<span class="nt">&lt;/param-value&gt;</span>
+    <span class="nt">&lt;/init-param&gt;</span>
+    <span class="nt">&lt;init-param&gt;</span>
+      <span class="nt">&lt;param-name&gt;</span>reload_on_mod<span class="nt">&lt;/param-name&gt;</span>
+      <span class="nt">&lt;param-value&gt;</span>1<span class="nt">&lt;/param-value&gt;</span>
+    <span class="nt">&lt;/init-param&gt;</span>
+    <span class="nt">&lt;init-param&gt;</span>
+      <span class="nt">&lt;param-name&gt;</span>log_level<span class="nt">&lt;/param-name&gt;</span>
+      <span class="nt">&lt;param-value&gt;</span>debug<span class="nt">&lt;/param-value&gt;</span>
+    <span class="nt">&lt;/init-param&gt;</span>
+    <span class="nt">&lt;load-on-startup&gt;</span>1<span class="nt">&lt;/load-on-startup&gt;</span>
+  <span class="nt">&lt;/servlet&gt;</span>
+
+  <span class="nt">&lt;servlet-mapping&gt;</span>
+    <span class="nt">&lt;servlet-name&gt;</span>modjy<span class="nt">&lt;/servlet-name&gt;</span>
+    <span class="nt">&lt;url-pattern&gt;</span>/*<span class="nt">&lt;/url-pattern&gt;</span>
+  <span class="nt">&lt;/servlet-mapping&gt;</span>
+
+<span class="nt">&lt;/web-app&gt;</span>
+</pre></div>
+</td></tr></table></div>
+<p>Make sure you replace <tt class="docutils literal"><span class="pre">python.home</span></tt> in the example <tt class="docutils literal"><span class="pre">web.xml</span></tt> above
+(see line 17) and point in to your local Jython installation.</p>
+<p>Now start Tomcat and browse to <a class="reference external" href="http://localhost:8080/pyamf/">http://localhost:8080/pyamf/</a> and you
+should see Jython is up and running:</p>
+<div class="highlight-python"><pre>Modjy servlet running correctly: jython 2.5.0 (Release_2_5_0:6476, Jun 16 2009, 13:33:26)
+[Java HotSpot(TM) 64-Bit Server VM (Apple Inc.)] on java1.6.0_13</pre>
+</div>
+</div>
+<div class="section" id="create-your-pyamf-application">
+<h2>Create your PyAMF application<a class="headerlink" href="#create-your-pyamf-application" title="Permalink to this headline">¶</a></h2>
+<p>First drop a copy of the <tt class="docutils literal"><span class="pre">pyamf</span></tt> source folder in
+<tt class="docutils literal"><span class="pre">webapps/pyamf/WEB-INF/lib-python</span></tt>:</p>
+<div class="highlight-python"><pre>cp -R /path/to/pyamf/trunk/pyamf webapps/pyamf/WEB-INF/lib-python</pre>
+</div>
+<p>Open <tt class="docutils literal"><span class="pre">webapps/pyamf/demo_app.py</span></tt> and replace it&#8217;s contents with:</p>
+<div class="highlight-python"><table class="highlighttable"><tr><td class="linenos"><pre> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12</pre></td><td class="code"><div class="highlight"><pre><span class="kn">import</span> <span class="nn">logging</span>
+
+<span class="k">def</span> <span class="nf">echo</span><span class="p">(</span><span class="n">data</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">data</span>
+
+<span class="k">def</span> <span class="nf">handler</span><span class="p">(</span><span class="n">environ</span><span class="p">,</span> <span class="n">start_response</span><span class="p">):</span>
+    <span class="kn">from</span> <span class="nn">pyamf.remoting.gateway.wsgi</span> <span class="kn">import</span> <span class="n">WSGIGateway</span>
+
+    <span class="n">services</span> <span class="o">=</span> <span class="p">{</span><span class="s">&#39;my_service.echo&#39;</span><span class="p">:</span> <span class="n">echo</span><span class="p">}</span>
+    <span class="n">gw</span> <span class="o">=</span> <span class="n">WSGIGateway</span><span class="p">(</span><span class="n">services</span><span class="p">,</span> <span class="n">logger</span><span class="o">=</span><span class="n">logging</span><span class="p">,</span> <span class="n">debug</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">gw</span><span class="p">(</span><span class="n">environ</span><span class="p">,</span> <span class="n">start_response</span><span class="p">)</span>
+</pre></div>
+</td></tr></table></div>
+<p>That&#8217;s it! Your Adobe Flash Player and AMF clients will now be able to
+access your PyAMF application through <a class="reference external" href="http://localhost:8080/pyamf">http://localhost:8080/pyamf</a>.</p>
+</div>
+<div class="section" id="client">
+<h2>Client<a class="headerlink" href="#client" title="Permalink to this headline">¶</a></h2>
+<p>You can test the application with this Python AMF client:</p>
+<div class="highlight-python"><table class="highlighttable"><tr><td class="linenos"><pre> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13</pre></td><td class="code"><div class="highlight"><pre><span class="kn">import</span> <span class="nn">logging</span>
+
+<span class="kn">from</span> <span class="nn">pyamf.remoting.client</span> <span class="kn">import</span> <span class="n">RemotingService</span>
+<span class="kn">from</span> <span class="nn">pyamf.remoting</span> <span class="kn">import</span> <span class="n">RemotingError</span>
+
+<span class="n">url</span> <span class="o">=</span> <span class="s">&#39;http://localhost:8080/pyamf&#39;</span>
+<span class="n">client</span> <span class="o">=</span> <span class="n">RemotingService</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">logger</span><span class="o">=</span><span class="n">logging</span><span class="p">,</span> <span class="n">debug</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+<span class="n">service</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">getService</span><span class="p">(</span><span class="s">&#39;my_service&#39;</span><span class="p">)</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="k">print</span> <span class="n">service</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="s">&#39;Hello World!&#39;</span><span class="p">)</span>
+<span class="k">except</span> <span class="n">RemotingError</span><span class="p">,</span> <span class="n">e</span><span class="p">:</span>
+    <span class="k">print</span> <span class="n">e</span>
+</pre></div>
+</td></tr></table></div>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+
+      <div class="sphinxsidebar">
+        <div class="sphinxsidebarwrapper">
+            <h3><a href="../../contents.html">Table Of Contents</a></h3>
+            <ul>
+<li><a class="reference external" href="">modjy</a><ul>
+<li><a class="reference external" href="#deploying-modjy">Deploying modjy</a></li>
+<li><a class="reference external" href="#create-your-pyamf-application">Create your PyAMF application</a></li>
+<li><a class="reference external" href="#client">Client</a></li>
+</ul>
+</li>
+</ul>
+
+            <h4>Previous topic</h4>
+            <p class="topless"><a href="swing.html"
+                                  title="previous chapter">Swing</a></p>
+            <h4>Next topic</h4>
+            <p class="topless"><a href="../apache/index.html"
+                                  title="next chapter">Apache</a></p>
+            <h3>This Page</h3>
+            <ul class="this-page-menu">
+              <li><a href="../../_sources/tutorials/jython/modjy.txt"
+                     rel="nofollow">Show Source</a></li>
+            </ul>
+          <div id="searchbox" style="display: none">
+            <h3>Quick search</h3>
+              <form class="search" action="../../search.html" method="get">
+                <input type="text" name="q" size="18" />
+                <input type="submit" value="Go" />
+                <input type="hidden" name="check_keywords" value="yes" />
+                <input type="hidden" name="area" value="default" />
+              </form>
+              <p class="searchtip" style="font-size: 90%">
+              Enter search terms or a module, class or function name.
+              </p>
+          </div>
+          <script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+<div class="footer">
+Copyright &#169; 2007-2009 The <a href='http://pyamf.org'>PyAMF</a> Project
+</div>
+
+  </body>
+</html>

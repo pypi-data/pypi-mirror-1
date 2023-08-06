@@ -1,0 +1,426 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Attribute Control &mdash; PyAMF - AMF for Python</title>
+    <link rel="stylesheet" href="../_static/default.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../',
+        VERSION:     '0.5.1',
+        COLLAPSE_MODINDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <link rel="search" type="application/opensearchdescription+xml"
+          title="Search within PyAMF - AMF for Python"
+          href="../_static/opensearch.xml"/>
+    <link rel="shortcut icon" href="../_static/pyamf.ico"/>
+    <link rel="author" title="About these documents" href="../about.html" />
+    <link rel="copyright" title="Copyright" href="../copyright.html" />
+    <link rel="top" title="PyAMF - AMF for Python" href="../index.html" />
+    <link rel="up" title="Architecture" href="index.html" />
+    <link rel="next" title="About these documents" href="../about.html" />
+    <link rel="prev" title="Adapter Framework" href="adapters.html" /> 
+  </head>
+  <body>  
+
+    <div class="document">
+<div>
+<a class="toplogo" href="../index.html"><img src="../_static/logo.png" border="0"/></a>
+</div>
+
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  <div class="section" id="attribute-control">
+<h1>Attribute Control<a class="headerlink" href="#attribute-control" title="Permalink to this headline">¶</a></h1>
+<div class="topic">
+<p class="topic-title first">Introduction</p>
+<p>This document explains how to have more fine grain control over what
+gets encoded by PyAMF 0.5 and newer.</p>
+</div>
+<div class="section" id="control-what-gets-encoded">
+<h2>Control What Gets Encoded<a class="headerlink" href="#control-what-gets-encoded" title="Permalink to this headline">¶</a></h2>
+<p>A simple example is that of a user object. This <tt class="docutils literal"><span class="pre">User</span></tt> class has
+<tt class="docutils literal"><span class="pre">username</span></tt> and <tt class="docutils literal"><span class="pre">password</span></tt> attributes as well a number of meta
+properties.</p>
+<p>We are going to use the Google App Engine adapter for this example,
+but the ideas apply in all situations.</p>
+<div class="highlight-python"><table class="highlighttable"><tr><td class="linenos"><pre> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16</pre></td><td class="code"><div class="highlight"><pre><span class="c"># models.py</span>
+
+<span class="kn">from</span> <span class="nn">google.appengine.ext</span> <span class="kn">import</span> <span class="n">db</span>
+
+<span class="kn">import</span> <span class="nn">pyamf</span>
+
+
+<span class="k">class</span> <span class="nc">User</span><span class="p">(</span><span class="n">db</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="n">username</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">StringProperty</span><span class="p">()</span>
+    <span class="n">password</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">StringProperty</span><span class="p">()</span>
+
+    <span class="n">name</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">StringProperty</span><span class="p">()</span>
+    <span class="n">dob</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">DateProperty</span><span class="p">()</span>
+
+
+<span class="n">pyamf</span><span class="o">.</span><span class="n">register_class</span><span class="p">(</span><span class="n">User</span><span class="p">,</span> <span class="s">&#39;com.acme.app.User&#39;</span><span class="p">)</span>
+</pre></div>
+</td></tr></table></div>
+<p>This class is used in a (theoretical) PyAMF application to represent
+<tt class="docutils literal"><span class="pre">User</span></tt> objects through a gateway:</p>
+<div class="highlight-python"><table class="highlighttable"><tr><td class="linenos"><pre> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22</pre></td><td class="code"><div class="highlight"><pre><span class="kn">import</span> <span class="nn">logging</span>
+
+<span class="kn">from</span> <span class="nn">google.appengine.ext</span> <span class="kn">import</span> <span class="n">db</span>
+
+<span class="kn">from</span> <span class="nn">pyamf.remoting.gateway.wsgi</span> <span class="kn">import</span> <span class="n">WSGIGateway</span>
+
+<span class="kn">from</span> <span class="nn">models</span> <span class="kn">import</span> <span class="n">User</span>
+
+
+<span class="k">class</span> <span class="nc">UserService</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">saveUser</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">user</span><span class="p">):</span>
+        <span class="n">user</span><span class="o">.</span><span class="n">put</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">getUsers</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">User</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+
+
+<span class="n">services</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s">&#39;user&#39;</span><span class="p">:</span> <span class="n">UserService</span>
+<span class="p">}</span>
+
+<span class="n">gw</span> <span class="o">=</span> <span class="n">WSGIGateway</span><span class="p">(</span><span class="n">services</span><span class="p">,</span> <span class="n">logger</span><span class="o">=</span><span class="n">logging</span><span class="p">)</span>
+</pre></div>
+</td></tr></table></div>
+<div class="section" id="loading-users">
+<h3>Loading Users<a class="headerlink" href="#loading-users" title="Permalink to this headline">¶</a></h3>
+<p>Lets examine <tt class="docutils literal"><span class="pre">getUsers</span></tt>. Assuming that <tt class="docutils literal"><span class="pre">User.all()</span></tt> worked as expected
+a list of <tt class="docutils literal"><span class="pre">User</span></tt> objects would be returned to PyAMF for encoding which
+is the expected behaviour. What is not the desired behaviour is that the
+<tt class="docutils literal"><span class="pre">password</span></tt> attribute will be encoded with each <tt class="docutils literal"><span class="pre">User</span></tt> object, thereby
+handing all user passwords out to whomever desires them. Definitely <strong>not</strong>
+a good idea! The best solution would be to completely remove the <tt class="docutils literal"><span class="pre">password</span></tt>
+attribute from each <tt class="docutils literal"><span class="pre">User</span></tt> object as it is encoded.</p>
+<div class="highlight-python"><table class="highlighttable"><tr><td class="linenos"><pre> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19</pre></td><td class="code"><div class="highlight"><pre><span class="c"># models.py</span>
+
+<span class="kn">from</span> <span class="nn">google.appengine.ext</span> <span class="kn">import</span> <span class="n">db</span>
+
+<span class="kn">import</span> <span class="nn">pyamf</span>
+
+
+<span class="k">class</span> <span class="nc">User</span><span class="p">(</span><span class="n">db</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="k">class</span> <span class="nc">__amf__</span><span class="p">:</span>
+        <span class="n">exclude</span> <span class="o">=</span> <span class="p">(</span><span class="s">&#39;password&#39;</span><span class="p">,)</span>
+
+    <span class="n">username</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">StringProperty</span><span class="p">()</span>
+    <span class="n">password</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">StringProperty</span><span class="p">()</span>
+
+    <span class="n">name</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">StringProperty</span><span class="p">()</span>
+    <span class="n">dob</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">DateProperty</span><span class="p">()</span>
+
+
+<span class="n">pyamf</span><span class="o">.</span><span class="n">register_class</span><span class="p">(</span><span class="n">User</span><span class="p">,</span> <span class="s">&#39;com.acme.app.User&#39;</span><span class="p">)</span>
+</pre></div>
+</td></tr></table></div>
+<p>Notice the class attribute <tt class="docutils literal"><span class="pre">__amf__</span></tt>. PyAMF looks for attributes on the
+object class that contain instructions on how to handle encoding and
+decoding instances.</p>
+<p>The <tt class="docutils literal"><span class="pre">exclude</span></tt> property is a list of attributes that will be excluded from
+encoding and removed from the instance if it exists in decoding. Setting
+<tt class="docutils literal"><span class="pre">exclude</span> <span class="pre">=</span> <span class="pre">('password',)</span></tt> gives us the desired effect of not sending
+the passwords of each <tt class="docutils literal"><span class="pre">User</span></tt> in the <tt class="docutils literal"><span class="pre">user.getUsersservice</span></tt> call.</p>
+</div>
+<div class="section" id="saving-a-user">
+<h3>Saving a User<a class="headerlink" href="#saving-a-user" title="Permalink to this headline">¶</a></h3>
+<p>The first argument of the <tt class="docutils literal"><span class="pre">UserService.saveUser</span></tt> method is a <tt class="docutils literal"><span class="pre">User</span></tt> object
+that has been decoded by PyAMF and applied to the service method. Some type
+checking might be in order here, because anything could be sent as the <tt class="docutils literal"><span class="pre">user</span></tt>
+payload.</p>
+<div class="highlight-python"><table class="highlighttable"><tr><td class="linenos"><pre>1
+2
+3
+4
+5</pre></td><td class="code"><div class="highlight"><pre> <span class="k">def</span> <span class="nf">saveUser</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">user</span><span class="p">):</span>
+     <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">user</span><span class="p">,</span> <span class="n">User</span><span class="p">):</span>
+         <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s">&#39;User expected&#39;</span><span class="p">)</span>
+
+     <span class="n">db</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">user</span><span class="p">)</span>
+</pre></div>
+</td></tr></table></div>
+<p>So now we can ensure that any call to <tt class="docutils literal"><span class="pre">user.put</span></tt> will be an instance
+(or subclass) of <tt class="docutils literal"><span class="pre">User</span></tt>. Since we plan to persist the <tt class="docutils literal"><span class="pre">User</span></tt> object,
+some validation is in order. If the correct attribute (<tt class="docutils literal"><span class="pre">_key</span></tt>) is sent
+to PyAMF, the GAE Adapter will load the instance from the datastore and it
+then applies the object attributes on top of this instance. This means that
+if the <tt class="docutils literal"><span class="pre">_key</span></tt> is known to a malicious hacker, a malformed client request
+could attempt to change the <tt class="docutils literal"><span class="pre">username</span></tt> property (or indeed change any
+other property on the model). The same thing could apply to the <tt class="docutils literal"><span class="pre">password</span></tt>
+field, but that has been solved by excluding it in the previous section.</p>
+<p>Certainly something we don&#8217;t want to happen!</p>
+<div class="highlight-python"><table class="highlighttable"><tr><td class="linenos"><pre> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20</pre></td><td class="code"><div class="highlight"><pre><span class="c"># models.py</span>
+
+<span class="kn">from</span> <span class="nn">google.appengine.ext</span> <span class="kn">import</span> <span class="n">db</span>
+
+<span class="kn">import</span> <span class="nn">pyamf</span>
+
+
+<span class="k">class</span> <span class="nc">User</span><span class="p">(</span><span class="n">db</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+    <span class="k">class</span> <span class="nc">__amf__</span><span class="p">:</span>
+        <span class="n">exclude</span> <span class="o">=</span> <span class="p">(</span><span class="s">&#39;password&#39;</span><span class="p">,)</span>
+        <span class="n">readonly</span> <span class="o">=</span> <span class="p">(</span><span class="s">&#39;username&#39;</span><span class="p">,)</span>
+
+    <span class="n">username</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">StringProperty</span><span class="p">()</span>
+    <span class="n">password</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">StringProperty</span><span class="p">()</span>
+
+    <span class="n">name</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">StringProperty</span><span class="p">()</span>
+    <span class="n">dob</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">DateProperty</span><span class="p">()</span>
+
+
+<span class="n">pyamf</span><span class="o">.</span><span class="n">register_class</span><span class="p">(</span><span class="n">User</span><span class="p">,</span> <span class="s">&#39;com.acme.app.User&#39;</span><span class="p">)</span>
+</pre></div>
+</td></tr></table></div>
+<p>Notice the new <tt class="docutils literal"><span class="pre">readonly</span></tt> property. This should be pretty self-explanatory
+but it is a list of attributes that are considered read-only when applying an
+attribute collection to an instance, just after they have been decoded.</p>
+</div>
+</div>
+<div class="section" id="other-things">
+<h2>Other Things<a class="headerlink" href="#other-things" title="Permalink to this headline">¶</a></h2>
+<p>Those are probably the two most used properties out of the way, so what else
+is there?</p>
+<ul class="simple">
+<li>Static Attributes</li>
+<li>Proxied attributes</li>
+<li><tt class="docutils literal"><span class="pre">IExternalizable</span></tt> classes</li>
+</ul>
+<div class="section" id="static-attributes">
+<h3>Static Attributes<a class="headerlink" href="#static-attributes" title="Permalink to this headline">¶</a></h3>
+<p>A static attribute is an attribute that is expected to be on every instance
+of a given class. A good example would be the primary key for an ORM object.
+It allows the AMF payloads to be reduced substantially (using AMF3 only).</p>
+<div class="highlight-python"><table class="highlighttable"><tr><td class="linenos"><pre>1
+2
+3
+4
+5
+6
+7</pre></td><td class="code"><div class="highlight"><pre><span class="kn">import</span> <span class="nn">pyamf</span>
+
+<span class="k">class</span> <span class="nc">Person</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="k">class</span> <span class="nc">__amf__</span><span class="p">:</span>
+        <span class="n">static</span> <span class="o">=</span> <span class="p">(</span><span class="s">&#39;gender&#39;</span><span class="p">,</span> <span class="s">&#39;dob&#39;</span><span class="p">)</span>
+
+<span class="n">pyamf</span><span class="o">.</span><span class="n">register_class</span><span class="p">(</span><span class="n">Person</span><span class="p">,</span> <span class="s">&#39;com.acme.app.Person&#39;</span><span class="p">)</span>
+</pre></div>
+</td></tr></table></div>
+<p>This means that the <tt class="docutils literal"><span class="pre">gender</span></tt> and <tt class="docutils literal"><span class="pre">dob</span></tt> attributes <strong>must</strong> be on every
+instance of the <tt class="docutils literal"><span class="pre">Person</span></tt> class. Decoding an instance that does not have
+these attributes will cause an <tt class="docutils literal"><span class="pre">AttributeError</span></tt> whilst decoding/encoding.</p>
+</div>
+<div class="section" id="proxied-attributes">
+<h3>Proxied Attributes<a class="headerlink" href="#proxied-attributes" title="Permalink to this headline">¶</a></h3>
+<p>Flex provides two classes that are &#8216;bindable&#8217; (<tt class="docutils literal"><span class="pre">ArrayCollection</span></tt> and
+<tt class="docutils literal"><span class="pre">ObjectProxy</span></tt>), making things easier for Flex developers (plenty of
+info/tutorial on the web!). A proxied attribute is purely AMF3 specific -
+when encoding an attribute, if it is labeled as proxy then a proxied
+version will be encoded. The reverse happens on decode, if a proxied
+version is encountered then the unproxied version is returned. This
+allows transparent proxying without having to disturb the underlying
+&#8216;raw&#8217; attribute.</p>
+<div class="highlight-python"><table class="highlighttable"><tr><td class="linenos"><pre>1
+2
+3
+4
+5
+6
+7</pre></td><td class="code"><div class="highlight"><pre><span class="kn">import</span> <span class="nn">pyamf</span>
+
+<span class="k">class</span> <span class="nc">Person</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="k">class</span> <span class="nc">__amf__</span><span class="p">:</span>
+        <span class="n">proxy</span> <span class="o">=</span> <span class="p">(</span><span class="s">&#39;address&#39;</span><span class="p">,)</span>
+
+<span class="n">pyamf</span><span class="o">.</span><span class="n">register_class</span><span class="p">(</span><span class="n">Person</span><span class="p">,</span> <span class="s">&#39;com.acme.app.Person&#39;</span><span class="p">)</span>
+</pre></div>
+</td></tr></table></div>
+</div>
+<div class="section" id="iexternalizable">
+<h3>IExternalizable<a class="headerlink" href="#iexternalizable" title="Permalink to this headline">¶</a></h3>
+<p>AMF provides the opportunity for the developer to customise the
+(de)serialisation of instances through the implementation of
+<tt class="docutils literal"><span class="pre">IExternalizable</span></tt> (once again, plenty of docs and tuts on the web).
+PyAMF makes no exception.</p>
+<p>To implement <tt class="docutils literal"><span class="pre">IExternalizable</span></tt>:</p>
+<div class="highlight-python"><table class="highlighttable"><tr><td class="linenos"><pre> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15</pre></td><td class="code"><div class="highlight"><pre><span class="kn">import</span> <span class="nn">pyamf</span>
+
+<span class="k">class</span> <span class="nc">Person</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="k">class</span> <span class="nc">__amf__</span><span class="p">:</span>
+        <span class="n">external</span> <span class="o">=</span> <span class="bp">True</span>
+
+    <span class="k">def</span> <span class="nf">__writeamf__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">output</span><span class="p">):</span>
+        <span class="c"># Implement the encoding here</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span> <span class="nf">__readamf__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">):</span>
+        <span class="c"># Implement the decoding here</span>
+        <span class="k">pass</span>
+
+<span class="n">pyamf</span><span class="o">.</span><span class="n">register_class</span><span class="p">(</span><span class="n">Person</span><span class="p">,</span> <span class="s">&#39;com.acme.app.Person&#39;</span><span class="p">)</span>
+</pre></div>
+</td></tr></table></div>
+</div>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+
+      <div class="sphinxsidebar">
+        <div class="sphinxsidebarwrapper">
+            <h3><a href="../contents.html">Table Of Contents</a></h3>
+            <ul>
+<li><a class="reference external" href="">Attribute Control</a><ul>
+<li><a class="reference external" href="#control-what-gets-encoded">Control What Gets Encoded</a><ul>
+<li><a class="reference external" href="#loading-users">Loading Users</a></li>
+<li><a class="reference external" href="#saving-a-user">Saving a User</a></li>
+</ul>
+</li>
+<li><a class="reference external" href="#other-things">Other Things</a><ul>
+<li><a class="reference external" href="#static-attributes">Static Attributes</a></li>
+<li><a class="reference external" href="#proxied-attributes">Proxied Attributes</a></li>
+<li><a class="reference external" href="#iexternalizable">IExternalizable</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            <h4>Previous topic</h4>
+            <p class="topless"><a href="adapters.html"
+                                  title="previous chapter">Adapter Framework</a></p>
+            <h4>Next topic</h4>
+            <p class="topless"><a href="../about.html"
+                                  title="next chapter">About these documents</a></p>
+            <h3>This Page</h3>
+            <ul class="this-page-menu">
+              <li><a href="../_sources/architecture/attributecontrol.txt"
+                     rel="nofollow">Show Source</a></li>
+            </ul>
+          <div id="searchbox" style="display: none">
+            <h3>Quick search</h3>
+              <form class="search" action="../search.html" method="get">
+                <input type="text" name="q" size="18" />
+                <input type="submit" value="Go" />
+                <input type="hidden" name="check_keywords" value="yes" />
+                <input type="hidden" name="area" value="default" />
+              </form>
+              <p class="searchtip" style="font-size: 90%">
+              Enter search terms or a module, class or function name.
+              </p>
+          </div>
+          <script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+<div class="footer">
+Copyright &#169; 2007-2009 The <a href='http://pyamf.org'>PyAMF</a> Project
+</div>
+
+  </body>
+</html>
