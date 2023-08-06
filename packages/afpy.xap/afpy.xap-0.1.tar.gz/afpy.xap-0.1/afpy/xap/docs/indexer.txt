@@ -1,0 +1,201 @@
+=======
+indexer
+=======
+
+The indexer provides:
+
+- client-side modules : API for client to ask for indexations and query the
+  Xapian database. When an indexation is asked, it is stored in a sql
+  database;
+
+- server-side application: a standalone thread that indexes what has been
+  asked by reading the sql database.
+
+
+Let's import the modules used by the client-side::
+
+    >>> import indexer
+    >>> import searcher
+
+Let's reset the SQL DB first::
+
+    >>> indexer.reset()
+
+Let's also reset the Xapian DB::
+
+    >>> from xapindexer import force_reset
+    >>> force_reset()
+
+The Xapian DB should be empty now::
+
+    >>> searcher.corpus_size()
+    0
+
+Indexation
+==========
+
+Each indexable content has a unique id, and a text to index::
+
+    >>> uid = '1'
+    >>> text = 'my taylor is not rich anymore'
+
+Let's index it::
+
+    >>> indexer.index_document(uid, text)
+    >>> indexer.index_document(uid, text)    # shouldn't break
+
+Another one::
+
+    >>> indexer.index_document('2', 'pluto is a dog')
+
+Let's start the worker that is in charge of asynchronous indexation::
+
+    >>> from xapindexer import start_server
+    >>> start_server()
+
+Let's wait a bit so the worker has the time to read the SQL Database
+and do the work::
+
+    >>> import time
+    >>> while indexer.is_working():
+    ...     time.sleep(0.2)
+
+`is_working` looks in the SQL DB if there is some work left.
+
+The Xapian DB has two documents now::
+
+    >>> searcher.corpus_size()
+    2
+
+You could also use some fonctionnality of the librairy for pre-process the
+text before the indexing and use the stemming alghorithm.
+You just need to pass the iso language of the text into attributes::
+
+    >>>	uid = '3'
+    >>> text = "Stemming is the process for reducing inflected (or sometimes"\
+    ... " derived) words to their stem, base or root form."
+    >>> indexer.index_document(uid, text, language='en')
+
+We can also try with french sentence, with some accents::
+    >>> uid = '4'
+    >>> text = "La lexémisation d'un mot est la fonction qui associe un"\
+    ... " lexème à celui-ci."
+    >>> indexer.index_document(uid, text, language='fr')
+
+Let's wait a bit so the worker has the time to read the SQL Database
+and do the work::
+
+    >>> import time
+    >>> while indexer.is_working():
+    ...     time.sleep(0.2)
+
+Searching
+=========
+
+Let's search now, with `searcher`. Operator is AND by default::
+
+    >>> res = searcher.search('rich')
+    >>> list(res)
+    ['1']
+    >>> res = searcher.search('pluto')
+    >>> list(res)
+    ['2']
+    >>> res = searcher.search('dog')
+    >>> list(res)
+    ['2']
+    >>> res = searcher.search('rich dog')
+    >>> list(res)
+    []
+
+Or operator::
+
+    >>> res = searcher.search('rich dog', or_=True)
+    >>> res = list(res)
+    >>> res.sort()
+    >>> res
+    ['1', '2']
+
+Like the indexer, you could use the stemming fonction for search a word.
+For exemple if you try to search the word `reducer` it will be refere to the
+stem `reduc` like the word `reducing` in the exemple n°3::
+
+    >>> res = searcher.search('reducer', language='en')
+    >>> list(res)
+    ['3']
+
+In french::
+    >>> res = searcher.search('lexemiser', language='fr')
+    >>> list(res)
+    ['4']
+
+We have an API to detect if a document is present::
+
+    >>> searcher.document_exists('2')
+    True
+    >>> searcher.document_exists('ttt')
+    False
+
+And another one to retrieve indexed terms::
+
+    >>> list(searcher.document_terms('2'))
+    ['dog', 'is', 'pluto']
+
+Reindexation
+============
+
+The document can also be reindexed::
+
+    >>> indexer.index_document('2', 'pluto is a cat')
+    >>> indexer.work_in_process()
+    ([u'2'], [])
+
+Let's wait a bit::
+
+    >>> while indexer.is_working():
+    ...     time.sleep(0.2)
+
+Let's make sure the document has been reindexed::
+
+    >>> list(searcher.document_terms('2'))
+    ['cat', 'is', 'pluto']
+
+Then check the indexation has changed::
+
+    >>> res = searcher.search('rich dog', or_=True)
+    >>> list(res)
+    ['1']
+
+Or deleted::
+
+    >>> res = searcher.search('pluto')
+    >>> list(res)
+    ['2']
+    >>> indexer.delete_document('2')
+    >>> while indexer.is_working():
+    ...     time.sleep(0.2)
+    >>> res = searcher.search('pluto')
+    >>> list(res)
+    []
+
+statistics
+==========
+
+We can also do a bit of statistics::
+
+    >>> #import stats
+    >>> #stats.query_count('pluto') > 1
+    True
+
+And provide search suggestions, let's do a few search::
+
+    >>> searcher.search('platon')
+    <generator object at 0x...>
+    >>> searcher.search('plisser')
+    <generator object at 0x...>
+
+    >>> #list(stats.query_suggestions('pl'))
+    [(u'pluto', ...), (u'platon', ...), (u'plisser', ...)]
+
+This is useful for example, to provide an ajaxified search box,
+were we display suggestions as the user types...
+
