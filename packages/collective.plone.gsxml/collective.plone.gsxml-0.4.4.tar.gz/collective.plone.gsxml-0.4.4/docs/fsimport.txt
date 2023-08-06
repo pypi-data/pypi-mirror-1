@@ -1,0 +1,257 @@
+Import of ATContentTypes with GSXML
+===================================
+
+Ramon Bartl <ramonski@ramonski.de>
+Copyright (c) 2006-2007 InQuant GmbH
+
+Abstract
+--------
+In the export example we described already what the GSXML Product is and what
+we need to export content out of Plone using the Marshaller and GenericSetup.
+Now we try to import xml content to our test plone instance.
+
+Introduction
+------------
+The import of content from the filesystem describes the first usecase for our
+GSXML Product. This method has many advantages for persistent storage::
+
+    1. We can create the same structure like we have on the filesystem,
+       documents, subfolder...
+    2. Mostly we have enough free space and mostly even the rights to
+       read/write data to
+    3. we can see the result directly
+
+Ok, sounds nice, but for our little test here, we don't use the filesystem to
+read/write data. Instead we take a dictionary that holds our data. With the
+filename as key and the content as value.
+
+
+A simple export context that holds the exported data in a dictionary
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The context implements GenericSetup's IExportContext::
+
+    >>> import os
+    >>> from zope.interface import implements
+    >>> from Products.GenericSetup.interfaces import IExportContext
+
+The writeDataFile() Function writes the Data into a dictionary. In this case
+the filename will be the key and the text, which is the content of the file,
+will be the value:
+
+'filename' -- the unqualified name of the file
+
+'text' -- the content of the file
+
+'content_type' -- the MIMEtype of the file
+
+'subdir' -- if passed, is a path to a subdirectory / folder in which to write
+    the file; if not passed, write the file to the root of the target
+
+Ok, now the code::
+
+    >>> class DummyExportContext(object):
+    ...     implements( IExportContext )
+    ...
+    ...     def __init__(self):
+    ...         self.brain={}
+    ...
+    ...     def writeDataFile(self, filename, text, content_type, subdir=None):
+    ...         if subdir is not None:
+    ...             fn = os.path.join( subdir, filename )
+    ...         else:
+    ...             fn = filename
+    ...
+    ...         self.brain[fn] = text
+
+
+Some Dummy Content
+------------------
+
+We need some data that we can export: let's put everything in a "export"
+folder::
+
+    >>> self.setRoles(('Manager'),)
+    >>> self.portal.invokeFactory("Folder", "export")
+    'export'
+    >>> ef = self.portal["export"]
+
+    >>> ef.invokeFactory('Document', id='doc1', title='Test Page 1',
+    ... text='<html> <body> a test page </body> </html>')
+    'doc1'
+
+    >>> ef.invokeFactory('Document', id='doc2', title='Test Page 2',
+    ... text='<html> <body> another test page </body> </html>')
+    'doc2'
+
+    >>> ef.invokeFactory('Folder', id='subfolder', title='Test Folder 1')
+    'subfolder'
+
+    >>> ef.subfolder.invokeFactory('Document', id='doc3', title='Test Page 3',
+    ... text='<html> <body> a test page in a subfolder </body> </html>')
+    'doc3'
+
+    >>> ef.subfolder.invokeFactory('Document', id='doc4', title='Test Page 4',
+    ... text='<html> <body> a test page in a subfolder </body> </html>')
+    'doc4'
+
+    >>> ef.subfolder.invokeFactory('Document', id='doc5', title='Test Page 5',
+    ... text='<html> <body> a test page in a subfolder </body> </html>')
+    'doc5'
+
+    >>> ef.objectIds()
+    ['doc1', 'doc2', 'subfolder']
+    >>> ef.subfolder.objectIds()
+    ['doc3', 'doc4', 'doc5']
+
+The Export Step
+---------------
+
+Now that we have a context that saves our data into a dictionary, we need an
+exporter that generates the XML out of our dummy ATContentTypes and uses our
+context to save the data::
+
+    >>> from collective.plone.gsxml.content import XMLContentFSExporter
+    >>> ex = XMLContentFSExporter( ef )
+
+The XMLContentFSExporter implements GenericSetup's IGSXMLFilesystemExporter
+interface::
+
+    >>> from collective.plone.gsxml.interfaces import IGSXMLFilesystemExporter
+    >>> IGSXMLFilesystemExporter.providedBy( ex )
+    True
+
+    >>> from zope.interface.verify import verifyObject
+    >>> verifyObject( IGSXMLFilesystemExporter, ex )
+    True
+
+
+The final step::
+
+    >>> ec = DummyExportContext()
+    >>> ex.export(ec, "structure", False)
+    >>> ec.brain.keys()
+    ['structure/export/doc2.xml', 'structure/export/subfolder.xml', ...'structure/export/subfolder/doc3.xml']
+
+
+The Import Step
+---------------
+
+Our DummyExportContext holds now in the Attribute 'brain' the exported stuff. If we want to import
+the data from this source, we have to write a import context which is able to read this data.
+
+
+A simple import context that reads the exported data from a dictionary
+----------------------------------------------------------------------
+
+The context implements GenericSetup's IExportContext::
+
+    >>> import os
+    >>> from zope.interface import implements
+    >>> from Products.GenericSetup.interfaces import IImportContext
+
+The readDataFile() Function reads the Data from a dictionary. In this case
+the filename will be the key and the subdir.
+
+'filename' -- is the name (without path elements) of the file.
+
+'subdir' -- is an optional subdirectory;  if not supplied, search
+only the "root" directory.
+
+returns -- the file contents as a string, or None if the
+file cannot be found.
+
+Ok, now the code::
+
+    >>> class DummyImportContext(object):
+    ...     implements( IImportContext )
+    ...
+    ...     def __init__(self, brain):
+    ...         self.brain=brain
+    ...         self.queried=[]
+    ...
+    ...     def readDataFile(self, filename, subdir=None):
+    ...         if subdir is not None:
+    ...             fn = os.path.join( subdir, filename )
+    ...         else:
+    ...             fn = filename
+    ...
+    ...         self.queried.append(fn)
+    ...
+    ...         if self.brain.has_key(fn):
+    ...             return self.brain[fn]
+    ...         else:
+    ...             return None
+
+
+First of all, we delete the content we created in our Plone instance::
+
+    >>> ef.objectIds()
+    ['doc1', 'doc2', 'subfolder']
+    >>> self.portal.manage_delObjects( ["export"] )
+
+Now we create a context where we can import our stuff::
+
+    >>> self.portal.invokeFactory("Folder", "import")
+    'import'
+    >>> f = self.portal["import"]
+    >>> f.invokeFactory("Folder", "export")
+    'export'
+    >>> f = f.export
+    >>> f.objectIds()
+    []
+
+
+Now that we have a context that reads our data from a dictionary, we need an
+importer that generates the Content out of our XML::
+
+    >>> from collective.plone.gsxml.content import XMLContentFSImporter
+    >>> im = XMLContentFSImporter( f )
+
+The XMLContentFSImporter implements GenericSetup's IFilesystemImporter
+interface::
+
+    >>> from Products.GenericSetup.interfaces import IFilesystemImporter
+    >>> IFilesystemImporter.providedBy( im )
+    True
+
+    >>> from zope.interface.verify import verifyObject
+    >>> verifyObject( IFilesystemImporter, im )
+    True
+
+The final step::
+
+    >>> ic = DummyImportContext( ec.brain )
+    >>> im.import_(ic, "structure", False)
+    >>> f.objectIds()
+    ['doc1', 'doc2', 'subfolder']
+
+
+Let's see what we have imported::
+
+    >>> f.doc1.getText()
+    ' a test page '
+    >>> f.doc1.Title()
+    'Test Page 1'
+
+    >>> f.doc2.getText()
+    ' another test page '
+    >>> f.doc2.Title()
+    'Test Page 2'
+
+    >>> f.subfolder.objectIds()
+    ['doc3', 'doc4', 'doc5']
+    >>> sf = f.subfolder
+    >>> sf.doc3.getText()
+    ' a test page in a subfolder '
+    >>> sf.doc3.Title()
+    'Test Page 3'
+
+TODO: What is going on here::
+
+    >>> ic.queried
+    [...]
+
+::
+
+  vim: set ts=4 sw=4 expandtab filetype=rst:
