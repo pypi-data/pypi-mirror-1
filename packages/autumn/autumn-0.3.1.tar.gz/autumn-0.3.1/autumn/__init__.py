@@ -1,0 +1,1 @@
+__copyright__ = 'Copyright (c) 2008 Jared Kuolt'
