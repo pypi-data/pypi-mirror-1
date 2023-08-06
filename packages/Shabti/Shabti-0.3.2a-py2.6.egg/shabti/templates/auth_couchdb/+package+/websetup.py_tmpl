@@ -1,0 +1,59 @@
+"""Setup the test application"""
+import logging
+
+from {{package}}.config.environment import load_environment
+
+log = logging.getLogger(__name__)
+import pylons
+from couchdb.design import ViewDefinition
+from {{package}}.model import *
+from {{package}} import model
+
+def setup_app(command, conf, vars):
+    """Place any commands to setup {{package}} here"""
+    load_environment(conf.global_conf, conf.local_conf)
+    import datetime
+    import hashlib
+    server = pylons.config['{{package}}.server']
+
+    # Change teardown to True if the database
+    # exists and is to be torn down and re-created
+    teardown = True
+    if teardown and '{{package}}' in server:
+        del server['{{package}}']
+        db = server.create('{{package}}')
+    elif not '{{package}}' in server:
+        db = server.create('{{package}}')
+    else:
+        db = pylons.config['{{package}}.db']
+
+    gadmin = model.user.Group(
+            name = "Administrators",
+            description = u"Administration group",
+            created = datetime.datetime.utcnow(),
+            active = True)
+    gadmin.store(db)
+
+    gadmin_retrieved = Group.load(db, gadmin.id)
+    # Check the status
+    assert gadmin_retrieved.name == gadmin.name
+    admin = model.user.User(
+                displayname = u"admin", 
+                password=hashlib.sha1("admin").hexdigest(),
+                password_check=hashlib.sha1("admin").hexdigest(), 
+                email="admin@example.com",
+                created = datetime.datetime.utcnow(),
+                active = True)
+    admin.groups.append(gadmin.id)
+    admin.store(db)
+    gadmin_retrieved.users.append(admin.id)
+    gadmin_retrieved.store(db)
+    # Check the status
+    admin_retrieved = User.load(db, admin.id)
+    assert admin_retrieved.displayname == admin.displayname
+    ViewDefinition.sync_many(db, [
+        User.by_displayname,
+        User.by_email,
+        Group.by_name, 
+        Permission.by_name,
+    ])

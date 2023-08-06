@@ -1,0 +1,344 @@
+# -*- coding: utf-8 -*-
+
+import formencode
+from tw.forms.validators import *
+from formencode.schema import Schema
+
+from tw.api import WidgetsList, CSSLink, JSLink
+from tw.core.js import js_function
+from tw.forms import *
+
+from {{package}}.forms.validators.unique import Unique
+from {{package}}.forms.validators.related_fetcher import RelatedFetcher
+from {{package}} import model as model
+
+
+__all__ = ["UserForm", "NewUserForm", 
+           "GroupForm", "NewGroupForm", 
+           "PermissionForm", "NewPermissionForm"]
+
+def get_groups():
+    return model.Session.query(model.Group).order_by(model.Group.name).all()
+
+
+# Standard settings for cmxforms
+css = CSSLink(link="/css/cmxform.css", media="screen", title="cmxform")
+functions = JSLink(link="/js/cmxform.js")
+alert = js_function('alert')
+focus_element = js_function('focus_element')
+
+# Strip spurious variables.
+class FilteringSchema(Schema):
+    filter_extra_fields = True
+    allow_extra_fields = True
+
+class NewUserForm(ListForm):
+    class fields(WidgetsList):
+        username = TextField(
+            label_text = "Username"
+            )
+        email = TextField(
+            validator = Email(not_empty=True),
+            label_text = "Email")
+        active = CheckBox(
+            label = "Active?",
+            default = True,
+            validator = Bool(if_missing=False)
+            )
+        password = PasswordField(
+            validator = String(not_empty=True), 
+            max_size = 10
+            )
+        password_check = PasswordField(
+            validator = String(not_empty=True), 
+            max_size=10
+            )
+        groups = CheckBoxList(
+            validator = RelatedFetcher(model.Group),
+            options = get_groups,
+            )
+
+    # allow adding js calls dynamically for a request
+    include_dynamic_js_calls = True
+
+    css = [css]
+    # Add cmxform styling to the form
+    css_classes = ['cmxform']
+    javascript = [functions]
+    # Note usage of the chained test "CheckAgreed" validator, of 
+    # which Alberto observes: "What might be tripping you is that the
+    # chained validator approach only raises the Invalid when there 
+    # are no other errors in the form."
+    validator = Schema(
+        username = formencode.All(
+                    UnicodeString(not_empty=True, max=50, strip=True),
+                    Unique(model.User, "username", context_name="username")),
+        chained_validators = [FieldsMatch('password','password_check')],
+        )
+
+
+    def update_params(self, d):
+        super(NewUserForm, self).update_params(d)
+        # Focus and select the 'name' field on the form
+        # The adapter we just wrote lets us pass formfields 
+        # as parameters and the right thing will be done.
+        if not d.error:
+            self.add_call(focus_element(d.c.username))
+        else:
+            self.add_call(
+                alert('The form contains invalid data\n%s' % \
+                                                unicode(d.error))
+                )
+
+class UserForm(ListForm):
+    class fields(WidgetsList):
+        rest_method = HiddenField(
+            default = "PUT",
+            name = "_method")
+        username = TextField(
+            validator = UnicodeString(not_empty=True, 
+                                      max=50, strip=True),
+            label_text = "Username"
+            )
+        email = TextField(
+            validator = Email(),
+            label_text = "Email")
+        active = CheckBox(
+            validator = Bool(if_missing=False),
+            label = "Active?",
+            )
+        created = CalendarDateTimePicker(
+            label_text="Created"),
+        password = PasswordField(
+            validator = String(), 
+            max_size = 10,
+            label_text="Enter new password"
+            )
+        password_check = PasswordField(
+            validator = String(), 
+            max_size=10,
+            label_text="Repeat new password"
+            )
+        groups = CheckBoxList(
+            validator = RelatedFetcher(model.Group),
+            options = get_groups,
+            )
+
+    # allow adding js calls dynamically for a request
+    include_dynamic_js_calls = True
+
+    css = [css]
+    # Add cmxform styling to the form
+    css_classes = ['cmxform']
+    javascript = [functions]
+    # Note usage of the chained test "CheckAgreed" validator, of 
+    # which Alberto observes: "What might be tripping you is that the
+    # chained validator approach only raises the Invalid when there 
+    # are no other errors in the form."
+    validator = Schema(
+        chained_validators = [FieldsMatch('password',
+                                          'password_check')],
+        )
+
+
+    def update_params(self, d):
+        super(UserForm, self).update_params(d)
+        # Focus and select the 'name' field on the form
+        # The adapter we just wrote lets us pass formfields 
+        # as parameters and the right thing will be done.
+        d.value['password'] = ""
+        d.value['password_check'] = ""
+        if not d.error:
+            self.add_call(focus_element(d.c.username))
+        else:
+            self.add_call(
+                alert('The form contains invalid data\n%s' % \
+                                                unicode(d.error))
+                )
+
+class NewGroupForm(ListForm):
+    class fields(WidgetsList):
+        name = TextField(
+            label_text = "Group name"
+            )
+        description = TextArea(
+            validator = UnicodeString(not_empty=True),
+            label_text = "Description"
+            )
+        active = CheckBox(
+            validator = Bool(if_missing=False),
+            label = "Active?",
+            default = True,
+            )
+
+    # allow adding js calls dynamically for a request
+    include_dynamic_js_calls = True
+
+    css = [css]
+    # Add cmxform styling to the form
+    css_classes = ['cmxform']
+    javascript = [functions]
+    # Note usage of the chained test "CheckAgreed" validator, of 
+    # which Alberto observes: "What might be tripping you is that the
+    # chained validator approach only raises the Invalid when there 
+    # are no other errors in the form."
+    validator = Schema(
+        name = formencode.All(
+                    UnicodeString(not_empty=True, max=50, strip=True),
+                    Unique(model.Group, "name", context_name="name")),
+        chained_validators = [],
+        )
+
+
+    def update_params(self, d):
+        super(NewGroupForm, self).update_params(d)
+        # Focus and select the 'name' field on the form
+        # The adapter we just wrote lets us pass formfields
+        # as parameters and the right thing will be done.
+        if not d.error:
+            self.add_call(focus_element(d.c.name))
+        else:
+            self.add_call(
+                alert('The form contains invalid data\n%s' % \
+                                                unicode(d.error))
+                )
+
+class GroupForm(ListForm):
+    class fields(WidgetsList):
+        rest_method = HiddenField(
+            default = "PUT",
+            name = "_method")
+        name = TextField(
+            validator = UnicodeString(not_empty=True, 
+                                      max=50, strip=True),
+            label_text = "Group name"
+            )
+        description = TextArea(
+            validator = UnicodeString(not_empty=True),
+            label_text = "Description"
+            )
+        active = CheckBox(
+            validator = Bool(if_missing=False),
+            label = "Active?",
+            )
+
+    # allow adding js calls dynamically for a request
+    include_dynamic_js_calls = True
+
+    css = [css]
+    # Add cmxform styling to the form
+    css_classes = ['cmxform']
+    javascript = [functions]
+    # Note usage of the chained test "CheckAgreed" validator, of 
+    # which Alberto observes: "What might be tripping you is that the
+    # chained validator approach only raises the Invalid when there 
+    # are no other errors in the form."
+    validator = Schema(
+        chained_validators = [],
+        )
+
+    def update_params(self, d):
+        super(GroupForm, self).update_params(d)
+        # Focus and select the 'name' field on the form
+        # The adapter we just wrote lets us pass formfields
+        # as parameters and the right thing will be done.
+        if not d.error:
+            self.add_call(focus_element(d.c.name))
+        else:
+            self.add_call(
+                alert('The form contains invalid data\n%s' % \
+                                                unicode(d.error))
+                )
+
+class NewPermissionForm(ListForm):
+    class fields(WidgetsList):
+        name = TextField(
+            label_text = "Permission name"
+            )
+        description = TextArea(
+            validator = UnicodeString(not_empty=True),
+            label_text = "Description"
+            )
+        groups = CheckBoxList(
+            validator = RelatedFetcher(model.Group),
+            options = get_groups,
+            )
+
+    # allow adding js calls dynamically for a request
+    include_dynamic_js_calls = True
+
+    css = [css]
+    # Add cmxform styling to the form
+    css_classes = ['cmxform']
+    javascript = [functions]
+    # Note usage of the chained test "CheckAgreed" validator, of 
+    # which Alberto observes: "What might be tripping you is that the
+    # chained validator approach only raises the Invalid when there 
+    # are no other errors in the form."
+    validator = Schema(
+        name = formencode.All(
+                    UnicodeString(not_empty=True, max=50, strip=True),
+                    Unique(model.Permission, "name", context_name="name")),
+        chained_validators = [],
+        )
+
+
+    def update_params(self, d):
+        super(NewPermissionForm, self).update_params(d)
+        # Focus and select the 'name' field on the form
+        # The adapter we just wrote lets us pass formfields
+        # as parameters and the right thing will be done.
+        if not d.error:
+            self.add_call(focus_element(d.c.name))
+        else:
+            self.add_call(
+                alert('The form contains invalid data\n%s'% unicode(d.error))
+                )
+
+class PermissionForm(ListForm):
+    class fields(WidgetsList):
+        rest_method = HiddenField(
+            default = "PUT",
+            name = "_method")
+        name = TextField(
+            validator = UnicodeString(not_empty=True, 
+                                      max=50, strip=True),
+            label_text = "Permission name"
+            )
+        description = TextArea(
+            validator = UnicodeString(not_empty=True),
+            label_text = "Description"
+            )
+        groups = CheckBoxList(
+            validator = RelatedFetcher(model.Group),
+            options = get_groups,
+            )
+
+
+    # allow adding js calls dynamically for a request
+    include_dynamic_js_calls = True
+
+    css = [css]
+    # Add cmxform styling to the form
+    css_classes = ['cmxform']
+    javascript = [functions]
+    # Note usage of the chained test "CheckAgreed" validator, of 
+    # which Alberto observes: "What might be tripping you is that the
+    # chained validator approach only raises the Invalid when there 
+    # are no other errors in the form."
+    validator = Schema(
+        chained_validators = [],
+        )
+
+    def update_params(self, d):
+        super(PermissionForm, self).update_params(d)
+        # Focus and select the 'name' field on the form
+        # The adapter we just wrote lets us pass formfields
+        # as parameters and the right thing will be done.
+        if not d.error:
+            self.add_call(focus_element(d.c.name))
+        else:
+            self.add_call(
+                alert('The form contains invalid data\n%s' % \
+                                                unicode(d.error))
+                )

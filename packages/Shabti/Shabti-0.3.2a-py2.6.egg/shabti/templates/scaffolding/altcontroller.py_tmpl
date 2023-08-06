@@ -1,0 +1,134 @@
+# -*- coding: utf-8 -*-
+import logging
+
+from pylons import url, request, tmpl_context as c
+from pylons.controllers.util import abort, redirect_to
+
+from {{package}}.lib.base import BaseController, render
+import {{package}}.lib.helpers as h
+import {{package}}.model as model
+
+from datetime import datetime
+from sqlalchemy.exc import IntegrityError 
+from formencode import htmlfill
+from formencode.api import Invalid
+
+log = logging.getLogger(__name__)
+
+class {{pluralclassname}}Controller(BaseController):
+    """REST Controller styled on the Atom Publishing Protocol"""
+    # To properly map this controller, ensure your config/routing.py file has
+    # a resource setup:
+    #     map.resource('{{singularname}}, '{{pluralname}}')
+
+
+    def index(self, format='html'):
+        """GET /{{pluralname}}: All items in the collection."""
+        q = model.Session.query(model.{{classname}})
+        c.entries = q.all()
+        c.entry_columns = {{columns_list}}
+        return render('/{{pluralname}}/index.mak')
+	
+    def create(self):
+        """POST /{{pluralname}}: Create a new item."""
+        # url('{{pluralname}}')
+        entry = model.{{classname}}()
+        for col in {{editable_columns_list}}: 
+            if request.params[col]:
+                setattr(entry,col,request.params[col])
+        model.Session.save(entry)
+        try:
+            model.Session.commit()
+            h.flash('{{classname}} successfully created!')
+            redirect_to(url('{{pluralname}}'))
+        except (Invalid,IntegrityError),e:
+            c.model_tags = h.ModelTags(c.entry)
+            if type(e) == Invalid:
+                errors = e.errors_dict
+            else:
+                errors = {}
+                h.flash(e.message)
+            return htmlfill.render(\
+                    render('/{{pluralname}}/new.mak'), \
+                    errors = errors, 
+                    defaults = request.params)  
+
+    def new(self, format='html'):
+        """GET /{{pluralname}}/new: Form to create a new item."""
+        # url('new_{{singularname}}')
+        c.entry = model.{{classname}}()
+        c.model_tags = h.ModelTags(c.entry)
+        return render('/{{pluralname}}/new.mako') 
+
+    def update(self, id):
+        """PUT /{{pluralname}}/id: Update an existing item."""
+        # url('{{singularname}}', id=ID)
+        if not id:
+            abort(404)
+        q = model.Session.query(model.{{classname}})
+        entry = q.get(id)
+        updated = False
+        for col in {{editable_columns_list}}:
+            if str(getattr(entry,col)) != request.params[col]:
+                if col not in ('created_at','updated_at'):
+                    setattr(entry,col,request.params[col])
+                    updated = True
+                    
+        if updated:
+            entry.updated_at = datetime.now()
+            try:
+                model.Session.commit()
+                h.flash('{{classname}} successfully updated!')
+                redirect_to('{{singularname}}', id = id)	            
+            except (Invalid,IntegrityError),e:
+                model.meta.Session.rollback()
+                c.entry = entry
+                c.model_tags = h.ModelTags(c.entry)
+                if type(e) == Invalid:
+                    errors = e.errors_dict
+                else:
+                    errors = {}
+                    h.flash(e.message)
+                return htmlfill.render(\
+                        render('/{{pluralname}}/edit.mako'), \
+                        errors = errors, 
+                        defaults = request.params)
+        #    h.form(h.url('{{singularname}}', id=ID),
+        #           method='put')
+
+    def delete(self, id):
+        """DELETE /{{pluralname}}/id: Delete an existing item."""
+        # Forms posted to this method should contain a hidden field:
+        #    <input type="hidden" name="_method" value="DELETE" />
+        # Or using helpers:
+        #    h.form(h.url('{{singularname}}', id=ID),
+        #           method='delete')
+        # url('{{singularname}}', id=ID)
+        if not id:
+            abort(404)
+        q = model.Session.query(model.{{classname}})
+        entry = q.get(id)
+        model.Session.delete(entry)
+        model.Session.commit()
+        h.flash('{{classname}} id = ' + str(entry.id) + ' was succesfully deleted!')
+        redirect_to(h.url('{{pluralname}}'))
+
+    def show(self, id, format='html'):
+        """GET /{{pluralname}}/id: Show a specific item."""
+        # url('{{singularname}}', id=ID)
+        if not id:
+            abort(404)
+        q = model.Session.query(model.{{classname}})
+        c.entry = q.get(id)
+        return render('/{{pluralname}}/show.mak')
+
+
+    def edit(self, id, format='html'):
+        """GET /{{pluralname}}/id;edit: Form to edit an existing item."""
+        # url('edit_{{singularname}}', id=ID)
+        if not id:
+            abort(404)
+        q = model.Session.query(model.{{classname}})
+        c.entry = q.get(id)
+        c.model_tags = h.ModelTags(c.entry)
+        return render('/{{pluralname}}/edit.mak')
