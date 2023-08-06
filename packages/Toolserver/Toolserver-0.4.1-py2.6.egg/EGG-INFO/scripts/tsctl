@@ -1,0 +1,202 @@
+#!/home/gb/Projects/PythonPlay/bin/python
+
+# Toolserver Framework for Python
+#
+#     tsctl: Server controller
+#     Copyright (c) 2004, Georg Bauer <gb@rfc1437.de>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of 
+# the Software, and to permit persons to whom the Software is furnished to do so, 
+# subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all 
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS 
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR 
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER 
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+import os
+import sys
+import getopt
+
+from Toolserver.Config import config, hasCrypto
+from Toolserver.Tool import getTools
+
+if os.name == 'posix':
+	from Toolserver.Monitor import startMonitorClient
+else:
+	from Toolserver.MonitorWin32 import startMonitorClient
+
+if len(sys.argv) == 1:
+	print """
+usage: tsctl -fvdrca start/stop/debug/init
+
+The following commands are defined:
+
+start      - starts a toolserver
+
+stop       - stops a running toolserver
+
+debug      - connects to the monitoring port of a running toolserver. This
+             only works if the server is configured for monitoring.
+
+init       - initializes a new toolserver with default directories and files.
+             If executed after a config is already there, the config will
+	     be updated with new settings and current documentation.
+
+keygen     - this generates the RSA key pair you need for RSA authentication.
+             You can give a different servername with the -s directive.
+	     The default keysize is 1024 - generating one of those beasts
+	     takes a while. Key generation relies on /dev/urandom or
+	     some other means supported by pycrypto to generate random data.
+	     So you better generate keys only on systems where this works
+	     (this is at most Windows, Linux and OS X - maybe even more).
+
+A basic configuration takes place in ~/.Toolserver/etc/ToolserverConfig.py -
+many option values can be defined there, too. Corresponding options and
+config values are given.
+
+Defined options are:
+
+    -f     - this starts the daemon allways in the foreground. The same can
+	     be done by setting the daemon variable in the config to 0.
+    -v     - this activates verbose logging. This is the same as setting
+	     the verbose variable in the config to 1. It can be repeated, each
+	     iteration raises verbosity one level. Currently only levels
+	     0, 1 and 2 are defined.
+    -d     - this activates libwadpy if you have installed this tool.
+    -r     - this activates the RPC debugging. The same can be done by
+	     setting the debugrpc config variable to 1
+    -c     - this toggles contract checking. Depending on the contract
+	     config variable this will enable or disable contract checking.
+    -a     - this option toggles basic authentication checking on static
+	     content. Depending on the basicauth config setting this will
+	     either disable or enable the authentication code.
+    -s     - this is followed by a servername that overrides the servername
+	     configuration option
+    -l     - this enables automatic reloading of changed code - no need to
+             restart the toolserver for changes, but due to the way it works
+	     you better use it only with development servers.
+
+"""
+
+(opts, args) = getopt.getopt(sys.argv[1:], 'fvdrcals:')
+
+cmds = ['start', 'stop', 'debug', 'init']
+if hasCrypto: cmds.append('keygen')
+
+if len(args) == 0:
+	raise ValueError('Only argument allowed is %s' % '/'.join(cmds))
+
+if args[0] not in cmds:
+	raise ValueError('Allowed commands are %s' % '/'.join(cmds))
+
+for o in opts:
+	if o[0] == '-f':
+		config.daemon = 0
+	elif o[0] == '-v':
+		config.verbose += 1
+	elif o[0] == '-a':
+		config.basicauth = not config.basicauth
+		if config.basicauth:
+			print "Switching on basic authentication ..."
+		else:
+			print "Switching off basic authentication ..."
+	elif o[0] == '-c':
+		config.contract = not config.contract
+		if config.contract:
+			print "Switching on contracts ..."
+		else:
+			print "Switching off contracts ..."
+	elif o[0] == '-d':
+		import libwadpy
+	elif o[0] == '-r':
+		config.debugrpc = 1
+	elif o[0] == '-s':
+		config.serverhostname = o[1]
+	elif o[0] == '-l':
+		config.autoreload = 1
+
+# Now import the Toolserver engine. Don't import it earlier,
+# as the switches patch tool exports!
+from Toolserver.Server import start_server, stop_server, load_dynamic_tools, configure_tools
+
+if args[0] == 'start':
+	print "Loading toolserver ..."
+	start_server(daemon=config.daemon)
+elif args[0] == 'stop':
+	print "killing toolserver ..."
+	stop_server()
+elif args[0] == 'init':
+	config.write(os.path.join(config.ETCDIR, 'ToolserverConfig.py'))
+	load_dynamic_tools()
+	configure_tools()
+	for tool in getTools():
+		tool._writeConfig()
+	hostsallow = os.path.join(config.ETCDIR, 'hosts.allow')
+	hostsdeny = os.path.join(config.ETCDIR, 'hosts.deny')
+	passwd = os.path.join(config.ETCDIR, 'passwd')
+	groups = os.path.join(config.ETCDIR, 'groups')
+	if not os.path.exists(hostsallow):
+		open(hostsallow, 'w').write("""# ip based access authentication
+#
+# use lines of the format <clientname>:<ip> to give
+# clients the right to access systems. Allowed clients are
+# passed on to the tool in the context.client variable
+#
+# sample entry, uncomment to activate
+# localhost:127.0.0.1
+""")
+	if not os.path.exists(hostsdeny):
+		open(hostsdeny, 'w').write("""# ip based access authentication
+#
+# use lines of the format <clientname>:<ip> to revoke
+# clients the right to access the system. Denied clients
+# are directly revoked with ForbiddenError exceptions.
+#
+# sample entry, uncomment to activate
+# localhost:127.0.0.1
+""")
+	if not os.path.exists(passwd):
+		open(passwd, 'w').write("""# password based access authentication
+#
+# Entries of the form <user>:<password> with the password as
+# clear text (to enable digest type authentications)
+""")
+	if not os.path.exists(groups):
+		open(groups, 'w').write("""# groups for clients
+#
+# Entries of the form <group>:<user>[,<user>]* - just a group name
+# and a list of clients that are in this groups. Clients can be authenticated
+# by any means - IP based, password based or RSA based. context.groups will
+# contain the list of groups a client is in
+""")
+elif args[0] == 'debug':
+	startMonitorClient()
+elif hasCrypto and args[0] == 'keygen':
+	from Crypto.PublicKey import RSA
+	from Crypto.Util.randpool import RandomPool
+	from cPickle import dump
+	print "building random pool ..."
+	rp = RandomPool(600)
+	rp.stir()
+	print "generating key ..."
+	rsa = RSA.generate(config.rsakeysize, rp.get_bytes)
+	pkname = os.path.join(config.PRIVKEYDIR, '%s.key' % config.serverhostname)
+	privkey = open(pkname, 'w')
+	dump(rsa, privkey, 1)
+	privkey.close()
+	print "private key written to %s" % pkname
+	pkname = os.path.join(config.PUBKEYDIR, '%s.key' % config.serverhostname)
+	pubkey = open(pkname, 'w')
+	dump(rsa.publickey(), pubkey, 1)
+	pubkey.close()
+	print "public key written to %s" % pkname
+
