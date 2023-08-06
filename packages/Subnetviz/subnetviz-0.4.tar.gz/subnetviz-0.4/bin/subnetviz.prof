@@ -1,0 +1,27 @@
+#!/usr/bin/env python
+
+from __future__ import with_statement
+
+import os, sys, cProfile, subnetviz.cli, tempfile
+prof = cProfile.Profile ()
+ret = prof.runcall (subnetviz.cli.main, sys.argv[1:])
+print >>sys.stderr, "Exit code: %r" % (ret,)
+tmp_fd, tmp_fn = tempfile.mkstemp (prefix = "subnetviz-", suffix = ".prof")
+os.close (tmp_fd)
+prof.dump_stats (tmp_fn)
+print >>sys.stderr, "Wrote profile statistics to %r." % (tmp_fn,)
+try:
+    import lsprofcalltree
+except ImportError:
+    lsprofcalltree = None
+if lsprofcalltree is not None:
+    kcg = lsprofcalltree.KCacheGrind (prof)
+    # Don't use {Named,}TemporaryFile: it will be deleted upon close,
+    # so when Python exits before kcachegrind loads the file, the file
+    # will be gone.
+    tmp_fd, tmp_fn = tempfile.mkstemp ()
+    with os.fdopen (tmp_fd, "wb") as tmp_f:
+        kcg.output (tmp_f)
+    import subprocess
+    subprocess.Popen (["kcachegrind", tmp_fn])
+sys.exit (ret)
