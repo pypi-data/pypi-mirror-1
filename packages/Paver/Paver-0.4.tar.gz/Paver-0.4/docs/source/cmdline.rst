@@ -1,0 +1,23 @@
+.. _cmdline:
+
+Paver Command Line
+==================
+
+The paver command line tool is very simple::
+
+  paver [-q] [-n] [-v] [target] [target...]
+
+The command line options are:
+
+-q
+  quiet... don't display much info (info and debug messages are not shown)
+
+-n
+  dry run... don't actually run destructive commands
+
+-v
+  verbose... display debug level output
+
+
+If you run paver without a target, it will default to the "help" target which 
+lists the available targets.
