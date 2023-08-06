@@ -1,0 +1,147 @@
+Testing the configuration subsystem
+===================================
+
+We use the ConfigParser as the basic module for specifying configuration of
+the replybot.  We parse the configuration file into a configuration object and
+then make that object avialable available via a global object.  However we
+won't use the global object so that we can test multiple different versions of
+configuration files.
+
+    >>> from botlib.configuration import Configuration
+    >>> config = Configuration()
+
+Load one test configuration file.
+
+    >>> from pkg_resources import resource_filename
+    >>> config.load(resource_filename('botlib.testing', 'test_01.cfg'))
+
+Check some system values.
+
+    >>> config.database_url
+    'sqlite:///var/replybot/replybot.db'
+    >>> config.log_file
+    '/var/log/replybot.log'
+
+This value gets post-processed, so check the actual value.
+
+    >>> import logging
+    >>> config.log_level == logging.INFO
+    True
+    >>> config.mail_server
+    'localhost'
+    >>> config.mail_port
+    25
+    >>> config.mail_user is None
+    True
+    >>> config.mail_password is None
+    True
+
+These are values which are overridable by other section.  For now, we're just
+checking their default values.
+
+    >>> config.replybot_from
+    'noreply@localhost'
+    >>> config.replybot_who
+    'The Python Replybot'
+
+Remember that the grace period and cache period are coerced to
+datetime.timeinterval objects.
+
+    >>> config.grace_period
+    datetime.timedelta(90)
+    >>> config.cache_period
+    datetime.timedelta(0, 14400)
+
+    >>> config.cache_directory
+    '/var/replybot/cache'
+    >>> config.reply_url
+    'file:///etc/replybot_notice.txt'
+    >>> config.content_type
+    'text/plain; charset=us-ascii'
+    >>> config.reply_context
+    'all'
+
+Now try to load up another test configuration file and make sure 1) all the
+normal SYSTEM values still work, and 2) that the two selector sections work.
+
+    >>> config = Configuration()
+    >>> config.load(resource_filename('botlib.testing', 'test_02.cfg'), 'foo')
+
+    >>> config.database_url
+    'sqlite:///var/replybot/replybot.db'
+    >>> config.log_file
+    '/var/log/replybot.log'
+    >>> config.log_level == logging.INFO
+    True
+    >>> config.mail_server
+    'localhost'
+    >>> config.mail_port
+    25
+    >>> config.mail_user is None
+    True
+    >>> config.mail_password is None
+    True
+
+# These are not overridden in the 'foo' section, so they should have the same
+# values as in the DEFAULT section.
+
+    >>> config.replybot_from
+    'noreply@localhost'
+    >>> config.replybot_who
+    'The Python Replybot'
+    >>> config.grace_period
+    datetime.timedelta(90)
+    >>> config.cache_period
+    datetime.timedelta(0, 14400)
+    >>> config.cache_directory
+    '/var/replybot/cache'
+
+These are overridden in 'foo'.
+
+    >>> config.reply_url
+    'http://www.example.com/notices/foo_response.txt'
+    >>> config.content_type
+    'text/plain; charset=us-ascii'
+    >>> config.reply_context
+    'foo'
+
+Reload, but this time use the 'bar' section.
+
+    >>> config = Configuration()
+    >>> config.load(resource_filename('botlib.testing', 'test_02.cfg'), 'bar')
+
+    >>> config.reply_url
+    'http://www.example.com/notices/bar_response.html'
+    >>> config.content_type
+    'text/html'
+    >>> config.reply_context
+    'bar'
+
+Now try all the various period suffixes
+
+    >>> config = Configuration()
+    >>> config.load(
+    ...     resource_filename('botlib.testing', 'test_03.cfg'), 'minutes')
+    >>> config.grace_period
+    datetime.timedelta(0, 600)
+
+    >>> config = Configuration()
+    >>> config.load(resource_filename('botlib.testing', 'test_03.cfg'), 'hours')
+    >>> config.grace_period
+    datetime.timedelta(0, 14400)
+
+    >>> config = Configuration()
+    >>> config.load(resource_filename('botlib.testing', 'test_03.cfg'), 'days')
+    >>> config.grace_period
+    datetime.timedelta(12)
+
+    >>> config = Configuration()
+    >>> config.load(resource_filename('botlib.testing', 'test_03.cfg'), 'weeks')
+    >>> config.grace_period
+    datetime.timedelta(21)
+
+    >>> config = Configuration()
+    >>> config.load(
+    ...     resource_filename('botlib.testing', 'test_03.cfg'), 'nothing')
+    >>> config.grace_period
+    datetime.timedelta(7)
