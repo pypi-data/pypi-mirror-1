@@ -1,0 +1,60 @@
+xxxreport
+=========
+
+`xxxreport` is a tools to extract all TODO/XXX comments to generate one plain text or html summary document.
+
+`xxxreport` is inspired by Zope xxxreport tools (http://svn.zope.org/Zope3/trunk/utilities/).
+
+How to use :
+
+::
+
+    $ easy_install xxxreport
+
+Extract comments :
+
+::
+
+    $ xxxreport --title=WsgiDAV ~/my_python_projects/
+    ===================================
+    TODO/XXX Comment report for WsgiDAV
+    ===================================
+
+
+    Generated on Sun, 01 Nov 2009 19:27:33 CET
+
+    Summary
+    =======
+
+    There are currently 3 TODO/XXX comments.
+
+    Listing
+    =======
+
+    File : wsgidav/addons/virtual_dav_provider.py:220
+
+            # TODO: this is just for demonstration:
+            self.resourceData = _resourceData
+
+
+
+    File : wsgidav/addons/virtual_dav_provider.py:350
+
+    #            dict["etag"] = util.getETag(file path), # TODO: should be using the file path here
+                dict["contentType"] = res.getContentType()
+                dict["contentLength"] = res.getContentLength()
+                dict["supportRanges"] = True
+
+    File : wsgidav/addons/mysql_dav_provider.py:335
+
+            # TODO: calling exists() makes directory browsing VERY slow.
+            #       At least compared to PyFileServer, which simply used string 
+            #       functions to get displayType and displayRemarks  
+            if not self.exists(path):
+
+
+More information :
+
+::
+
+    $ xxxreport --help
