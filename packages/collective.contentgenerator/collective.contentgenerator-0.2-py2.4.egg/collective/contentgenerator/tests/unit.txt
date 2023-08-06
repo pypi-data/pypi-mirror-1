@@ -1,0 +1,169 @@
+Unit tests for collective.contentgenerator
+==========================================
+
+Unit tests by Ed Crewe, ILRT 
+(University of Bristol) January 2009
+
+These unit tests currently do not provide full coverage ... 
+they could really do with a set of utility functions to create mock
+portal and content objects etc. to allow for testing content
+and user creation methods.
+However those methods are tested via the integration
+and functional tests in content.txt and user.txt
+
+Currently the unit tests at least test elements that those 
+other tests do not. Those are the content crawl and data creation, 
+user / group data creation and the zexp paths. 
+
+1. Test the content crawler and data creation
+---------------------------------------------
+
+Get an instance of the content generator class
+
+    >>> from collective.contentgenerator.ContentGenerator import ContentSetup
+    >>> cs=ContentSetup()
+
+Create a dictionary of content settings
+
+    >>> content = { 'sectioncount':1,
+    ...             'foldercount':1,
+    ...             'itemcount':1,
+    ...             'imagecount':1,
+    ...             'bigimagecount':0,               
+    ...             'multiply':1,
+    ...             'profile':'default'
+    ...            }
+
+Run the crawl method with these settings
+
+NB: Ideally we should be able to test this without the internet but since its a crawl
+that would require generating a website data source ... instead we have a separate rss.txt 
+dependency test so if that passes, then so should this: 
+
+    >>> cs.leechSomeData(content)
+
+This should of populated the somedata dictionary with crawled data so lets see...
+
+First check the textual data ... minimum five feeds with short (title), 
+medium (description) and long (full content) text components
+
+    >>> short = cs.somedata.get('shorttexts',None)
+    >>> len(short)
+    5
+    >>> medium = cs.somedata.get('mediumtexts',None)
+    >>> len(medium)
+    5
+    >>> long = cs.somedata.get('longtexts',None)
+    >>> len(long)
+    5
+
+Now check that their sizes are as proclaimed and that they all contain at 
+least some text
+
+    >>> len(short[0]) > 5
+    True
+    >>> len(medium[2]) > len(short[1]) 
+    True
+    >>> len(long[3]) > len(medium[2])
+    True
+
+Next check that the image feed content is crawled OK
+
+    >>> images = cs.somedata.get('images',None)
+    >>> img = images[0][0].getvalue()
+
+Check the image is at least 1Kb in size
+
+    >>> len(img) > 1000
+    True
+
+Test the link injection
+
+    >>> text = 'This is my sample text it has to be at least one hundred '     
+    >>> text += 'characters long for links to be injected within it'
+    >>> linkedtext = cs.injectLinks('/',text,['here','here'])
+    >>> linkedtext.endswith('long for lin<a href="/here">ks to be i</a>njected within it')
+    True
+
+2. Check the zexp paths and check works OK
+------------------------------------------
+
+Make sure the paths for zexp are found OK
+
+    >>> cs.fspaths = None
+    >>> importpath,exportpath = cs.getFSPaths()
+
+Check that the paths returned are correct by their default contents ...
+
+    >>> import os
+    >>> os.path.exists(os.path.join(exportpath,'pts'))
+    True
+    >>> os.path.exists(os.path.join(importpath,'README.txt'))
+    True
+
+See if the import instead of crawl checkZEXP test works
+
+OK it should fail at first ...
+
+    >>> cs.checkZEXP('dummy',1)
+    False
+
+Now copy the dummy zexp file
+
+    >>> import shutil
+    >>> dummy = os.path.join(importpath,'dummy1.zexp')
+    >>> shutil.copy(os.path.join(importpath,'README.txt'),dummy)
+
+... and it should work
+
+    >>> cs.checkZEXP('dummy',1)
+    True
+
+clean up
+
+    >>> os.remove(dummy)
+
+3. Test user and group data creation
+------------------------------------
+
+Get an instance of the user generator class
+
+    >>> from collective.contentgenerator.UserGenerator import UserSetup
+    >>> cu = UserSetup()
+
+Generate some user data
+
+    >>> cu.generateUsers(users=5)
+
+Check the user data is of the right length
+
+    >>> len(cu.userid) == 5
+    True
+    >>> len(cu.fullname) == 5
+    True
+
+Inspect the first user's name to confirm it is as expected
+
+    >>> cu.userid[0]
+    'aaanderson'
+    >>> cu.fullname[0]
+    'Alex Alex Anderson'
+
+Generate some group data
+
+    >>> cu.generateGroups(groups=5)
+
+Check the group data is of the right length
+
+    >>> len(cu.groupid) == 5
+    True
+    >>> len(cu.grouptitle) == 5
+    True
+
+Inspect the first group's title to confirm it is as expected
+
+    >>> cu.groupid[0]
+    'antaa'
+    >>> cu.grouptitle[0]
+    'ant group section aa'
+
