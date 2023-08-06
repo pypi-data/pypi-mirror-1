@@ -1,0 +1,104 @@
+sc.base.hotsites
+===================
+
+Overview
+--------
+
+Allows, via p4a.subtyper, the user tranforms a folder in a hot site.
+
+What is a Hot Site here ?
+-------------------------
+
+When you set a folder as a hot site :
+
+    1. Removes viewlets around the content: footer, header and top
+
+    2. Block all portlets (from parents, from group and from content type), you can re-enable manually, if you want
+
+    3. Enable a new skin, via access rule, so you can customize the look'n'feel of your Hot Site
+
+    4. Enable a local workflow, defaults to one-state workflow, to simplify the management of Hot Site
+
+    5. Limits the addable content types in the Hot Site folder, you can configure the content types
+
+    6. Use a content as a template to Hot Site index
+
+    7. Optionally, create a page (document) as accessibility content, useful when the hot sites is a Flash content
+
+Options you can setup
+---------------------
+
+In Site Setup, access the menu Hot Sites 
+
+    1. Addable content type on Hot Sites folder
+
+    2. Skin name used in the Hot Sites folder
+
+    3. Default view id, that will be setted in the Hot Sites folder
+
+    4. Default view path, a content template that will be copied and used as the default view of Hot Sites folder
+
+    5. Workflow id, workflow used in the Hot Site, will be setted using the Placeful Workflow, defaults to one-state workflow
+
+    6. Use accessibility content, if selected will be created a page (document) as a alternate (accessibility) view, you will must provide the link to this content. It's useful when the default view is a Flash content.
+
+
+Requirements
+------------
+
+
+    - Plone 3.2.x (http://plone.org/products/plone)
+    
+Installation
+------------
+    
+To enable this product,on a buildout based installation:
+
+    1. Edit your buildout.cfg and add ``sc.base.hotsites``
+       to the list of eggs to install ::
+
+        [buildout]
+        ...
+        eggs = 
+            sc.base.hotsites
+
+    2. Tell the plone.recipe.zope2instance recipe to install a ZCML slug::
+
+        [instance]
+        ...
+        zcml = 
+            ...
+            sc.base.hotsites
+    
+
+If another package depends on the sc.base.hotsites egg or 
+includes its zcml directly you do not need to specify anything in the 
+buildout configuration: buildout will detect this automatically.
+
+After updating the configuration you need to run the ''bin/buildout'',
+which will take care of updating your system.
+
+Go to the 'Site Setup' page in the Plone interface and click on the
+'Add/Remove Products' link.
+
+Choose the product (check its checkbox) and click the 'Install' button.
+
+Uninstall -- This can be done from the same management screen, but only
+if you installed it from the quick installer.
+
+Note: You may have to empty your browser cache and save your resource registries
+in order to see the effects of the product installation.
+
+Sponsoring
+----------
+
+Development of this product was sponsored by `Simples Consultoria 
+<http://www.simplesconsultoria.com.br/>`_.
+
+
+Credits
+-------
+
+    * Simples Consultoria (products at simplesconsultoria dot com dot br) - 
+      Implementation
+    
