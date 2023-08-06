@@ -1,0 +1,23 @@
+MemoryProfiler
+
+  MemoryProfiler provides Memory profiling support for Zope.
+  
+  It use heapy (http://guppy-pe.sourceforge.net/#Heapy) in internal. It's just an interface to this tool.
+
+  When you start profiling, you take an snapshot of the memory at instant t.
+  When you click to updateSnapshot, memory profiling  tell you what object are added between the start and the click to updateSnashot. It will be usefull to detect Memory Leak.
+  
+  Each snapshot is store (as string) in MemoryProfiler to be consult later (link to the date).
+  
+  The button clear db cache clear all zeo cache of all mounting point so you can see the impact of the memory of those cache.
+ 
+  You can see reference of a particular class in memory with the button reference detail. 
+  
+  - Index is the index of the table of the last snapshot
+  - depth is the depth in the tree of reference and 
+  - limit is the number of results that the reference method should be return.
+
+  For windows users, you must compile guppy. There is egg for python 2.6 but
+no for python 2.4. I have fatal error with Mingw to compile guppy. I hope that we have soon a binary egg to for python 2.4.
+
+   I hope that this tool give to us usefull  informations to the memory consume by zope.
