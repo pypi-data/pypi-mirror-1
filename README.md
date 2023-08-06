@@ -3,36 +3,10 @@
 This repo contains 40000 packages uploaded to PyPI between 
 2005-03-21 15:59 and 2010-03-12 08:24.
 
-The repo is 46% (18677/40000) complete.
+The repo is 51% (20480/40000) complete.
 
-## Packages:
+Package contents can be found [in the code branch](https://github.com/pypi-data/pypi-mirror-1/tree/code/packages).
 
-| Name  | Count |
-| ----- | ----- |
-| lxml | 340 |
-| SQLObject | 249 |
-| ll-xist | 216 |
-| improviser | 210 |
-| ll-orasql | 207 |
-| pytz | 194 |
-| minitage.paste | 181 |
-| pymongo | 174 |
-| Whoosh | 170 |
-| ZODB3 | 163 |
-| mingus | 124 |
-| jsonlib | 120 |
-| softwarefabrica.django.utils | 116 |
-| ll-core | 113 |
-| cmd2 | 106 |
-| AWSpider | 103 |
-| cssutils | 102 |
-| pisa | 100 |
-| numscons | 93 |
-| setuptools | 91 |
-| zopyx.convert | 88 |
-| minitage.core | 87 |
-| minitage.recipe | 84 |
-| dap | 84 |
-| Editra | 84 |
+A browsable package list for all repositories [all packages here](https://pypi-data.github.io/website/repositories/pypi-mirror-1).
 
 
