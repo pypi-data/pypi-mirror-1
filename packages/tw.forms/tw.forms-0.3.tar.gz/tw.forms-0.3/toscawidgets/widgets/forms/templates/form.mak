@@ -1,0 +1,18 @@
+<%namespace name="tw" module="toscawidgets.mako_util"/>\
+<form ${tw.attrs(
+    [('id', context.get('id')),
+     ('name', name),
+     ('action', action),
+     ('method', method),
+     ('class', css_class)],
+    attrs=attrs
+)}>
+    <div>
+    % for field in ihidden_fields:
+        ${field.display(value_for(field), **args_for(field))}
+    % endfor
+    % for field in ifields:
+        ${field.display(value_for(field), **args_for(field))} <br />
+    % endfor
+    </div>
+</form>\
