@@ -1,0 +1,189 @@
+psj.content.metadataregistry
+****************************
+
+A tool for creating metadata schemas.
+
+:Test-Layer: integration
+
+
+psj.content provides a `metadataschemas_registry` which manages
+metadata schemata for content objects::
+
+  >>> from pprint import pprint as pp
+  >>> reg = self.portal['metadataschemas_registry']
+  >>> reg
+  <MetadataSchemaRegistry at /plone/metadataschemas_registry>
+
+This registry stores available schemata and knows, which content types
+are linked to a specific schema. It comes with some ready-for-use
+schemata out of the box::
+
+  >>> reg.listSchemas()
+  [...]
+
+Metadata schemata are connected to special content types in the
+metadata registry. The registry therefore manages a list of supported
+object types::
+
+  >>> sorted(reg.listContentTypes())
+  ['psjbook', 'psjdocument', 'psjfile', 'psjissue', 'psjmagazine',
+  ...'psjpostprint', 'psjretroarticle', 'psjretromagazine',
+  ...'psjreview', 'psjvolume']
+
+We can get dict of content types directly::
+
+  >>> reg.contentTypes()
+  {'psjfile': {...}, ...}
+
+XXX: Apparently, pprint does not work here. Why?
+
+A special content type can also be looked up by id::
+
+  >>> pp(reg.lookupContentType('psjdocument'), width=10)
+  {'dotted_path': ..., 
+   'schema': None,
+   'title': ...}
+
+
+Adding schemata
+===============
+
+We can add a new schema::
+
+  >>> reg.manage_addMetadataSchema(
+  ...   'myschema', objecttypes='psjissue',
+  ...   fields=(dict(title='title',
+  ...                type='TextLine',
+  ...                default=None),
+  ...           dict(title='is great',
+  ...                type='Boolean',
+  ...                default=True),
+  ...           dict(title='A link',
+  ...                type='Relation'),
+  ...          )
+  ...   )
+
+  >>> reg.listSchemas()
+  ['myschema']
+
+The new schema can be retrieved directly::
+
+  >>> schema = reg.schemas()['myschema']
+  >>> pp(schema, width=5)
+  {'is_great': <psj.content.metadata.metadata.BooleanField object at 0x...>,
+   'a_link': <psj.content.metadata.metadata.RelationField object at 0x...>,
+   'title': <psj.content.metadata.metadata.TextLineField object at 0x...>}
+
+
+The link to the objecttype is not stored with the schema, but in the
+list of object types::
+
+  >>> reg.lookupContentType('psjissue')['schema']
+  'myschema'
+
+
+Editing schemata
+================
+
+We can edit existing metadata sets::
+
+  >>> reg.manage_editMetadataSchema(
+  ...   'myschema', name='My new schema',
+  ...   objecttypes=['psjdocument',],
+  ...   fields=(dict(title='title',
+  ...                type='TextLine',
+  ...                default=None),
+  ...           dict(title='is great',
+  ...                type='Boolean',
+  ...                default=True),
+  ...           dict(title='A link',
+  ...                type='Relation'),
+  ...          )
+  ...   )
+
+  >>> schema = reg.schemas()['myschema']
+  >>> schema.name
+  u'My new schema'
+
+  >>> schema.id
+  'myschema'
+
+We can also ask, which content types are connected to a special schema::
+
+  >>> reg.getContentTypesForSchema('myschema')
+  ['psjdocument']
+
+
+Retrieving MetadataSets
+=======================
+
+
+For the handling of object attributes (see extenders.txt), it is
+crucial to have a possibility, to retrieve a metadata sets for a
+certain object type. Typically, the object handler will pass a certain
+object and ask for a metadata schema that 'fits'::
+
+  >>> from psj.content.content.psjdocument import PSJDocument
+  >>> d = PSJDocument('Wierd Title')
+
+  >>> data = reg.getSchemaForObject(d)
+  >>> data
+  {'is_great': <psj.content.metadata.metadata.BooleanField object at 0x...>,
+   'a_link': <psj.content.metadata.metadata.RelationField object at 0x...>,
+   'title': <psj.content.metadata.metadata.TextLineField object at 0x...>}
+
+  <psj.content.metadata.metadata.MetadataSet object at 0x...>
+
+  >>> sorted(list(data))
+  ['a_link', 'is_great', 'title']
+
+
+Exporting Metadatasets
+----------------------
+
+We can export metadatasets as XML. This can be done for any
+metadata-registry by using the appropriate `export` function::
+
+  >>> from psj.content.metadata.metadataregistry import export
+
+We have to tell, which registry data we want::
+
+  >>> result = export(reg)
+  >>> print result
+  <metadataregistry version="0.1"><schemata><schema id="myschema"><field type="Boolean"><default>True</default><description /><id>is_great</id><title>is great</title></field><field type="Relation"><id>a_link</id><allowed /><description /><title>A link</title></field><field type="TextLine"><default>None</default><description /><id>title</id><title>title</title></field><registered_for content_type="psjdocument" /></schema></schemata></metadataregistry>
+
+We can also handle umlauts as our document is utf-8 encoded::
+
+  >>> reg.manage_editMetadataSchema(
+  ...   'myschema', name='My new schema',
+  ...   objecttypes=['psjdocument',],
+  ...   fields=(dict(title='A title with ümläüts',
+  ...                type='TextLine',
+  ...                default=None),
+  ...           dict(title='is great',
+  ...                type='Boolean',
+  ...                default=True),
+  ...           dict(title='A link',
+  ...                type='Relation'),
+  ...          )
+  ...   )
+  >>> print export(reg)
+  <metadataregistry version="0.1"><schemata><schema id="myschema"><field type="Boolean"><default>True</default><description /><id>is_great</id><title>is great</title></field><field type="TextLine"><default>None</default><description /><id>a_title_with_mlts</id><title>A title with ümläüts</title></field><field type="Relation"><id>a_link</id><allowed /><description /><title>A link</title></field><registered_for content_type="psjdocument" /></schema></schemata></metadataregistry>
+
+If we want, we can also export to a file::
+
+  >>> result = export(reg, filename='myregistry.xml')
+  >>> contents = open('myregistry.xml', 'rb').read()
+  >>> print contents
+  <metadataregistry version="0.1"><schemata><schema id="myschema"><field type="Boolean"><default>True</default><description /><id>is_great</id><title>is great</title></field><field type="TextLine"><default>None</default><description /><id>a_title_with_mlts</id><title>A title with ümläüts</title></field><field type="Relation"><id>a_link</id><allowed /><description /><title>A link</title></field><registered_for content_type="psjdocument" /></schema></schemata></metadataregistry>
+
+We can also get the result as an elementtree for use with other
+exporter tools that want to build more complete data sets::
+
+  >>> print export(reg, as_tree=True)
+  <Element metadataregistry at ...>
+
+Clean up::
+
+  >>> import os
+  >>> os.unlink('myregistry.xml')
