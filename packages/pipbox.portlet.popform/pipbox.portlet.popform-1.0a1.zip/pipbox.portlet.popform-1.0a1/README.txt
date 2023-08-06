@@ -1,0 +1,19 @@
+Introduction
+============
+
+popform is an add on to pipbox that enables timed popups of 
+PloneFormGen forms.
+
+popform is configured as a portlet. When you add it, you specify
+a PFG form and the time delay (in 1/10th seconds). The form will
+then be shown as an AJAX popup form.
+
+popform sets a cookie with a 1-year expiration, and will not display
+the popup unless the cookie is absent. That prevents it from annoying
+users more than once. popform also checks to see if cookies are enabled;
+the form will not be displayed if cookies aren't enabled. Again, the
+idea is to avoid annoying users.
+
+popform is a very small product that's mainly used to control a bit
+of pipbox functionality. If there are visual display or AJAX problems,
+please file a bug report against pipbox.
