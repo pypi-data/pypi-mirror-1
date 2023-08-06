@@ -1,0 +1,87 @@
+====================
+A functional doctest
+====================
+
+This is a full-blown functional test. The emphasis here is on testing what
+the user may input and see, and the system is largely tested as a black box.
+We use PloneTestCase to set up this test as well, so we have a full Plone site
+to play with. We *can* inspect the state of the portal, e.g. using
+self.portal and self.folder, but it is often frowned upon since you are not
+treating the system as a black box. Also, if you, for example, log in or set
+roles using calls like self.setRoles(), these are not reflected in the test
+browser, which runs as a separate session.
+
+Being a doctest, we can tell a story here.
+
+First, we must perform some setup. We use the testbrowser that is shipped
+with Five, as this provides proper Zope 2 integration. Most of the
+documentation, though, is in the underlying zope.testbrower package.
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+
+The following is useful when writing and debugging testbrowser tests. It lets
+us see all error messages in the error_log.
+
+    >>> self.portal.error_log._ignored_exceptions = ()
+
+With that in place, we can go to the portal front page and log in. We will
+do this using the default user from PloneTestCase:
+
+    >>> from Products.PloneTestCase.setup import portal_owner, default_password
+
+    >>> import string
+    >>> from zope.component import getUtility
+    >>> from Products.Archetypes.atapi import *
+    >>> from Products.ATContentTypes.content.base import ATCTContent
+    >>> from icsemantic.core.interfaces import IContentTypesMultilingualPatcher, \
+    ...										  IMultilingualContentMarker, \
+    ...										  IMultilingualGettersMarker
+
+    >>> class MyContent(ATCTContent):
+    ...     portal_type = meta_type = 'MyContent'
+    ...     schema = Schema((
+    ...         StringField('some_field', storage=AnnotationStorage()),
+    ...         StringField('_other_field'),
+    ...         ))
+
+    >>> registerType(MyContent, 'Archetypes')
+
+    >>> hasattr(MyContent, 'getSome_field')
+    True
+    >>> hasattr(MyContent, 'getMultilingualSome_field')
+    False
+
+    >>> original_getter = getattr(MyContent, 'getSome_field')
+    >>> ccpatcher = getUtility(IContentTypesMultilingualPatcher)
+    >>> ccpatcher.patch(MyContent)
+
+    >>> IMultilingualContentMarker.implementedBy(MyContent)
+    True
+    >>> IMultilingualGettersMarker.implementedBy(MyContent)
+    False
+    >>> hasattr(MyContent, 'getSome_field')
+    True
+    >>> hasattr(MyContent, 'getMultilingualSome_field')
+    True
+    >>> original_getter == getattr(MyContent, 'getSome_field')
+    True
+
+    >>> ccpatcher.unpatch(MyContent)
+    >>> ccpatcher.patch(MyContent, replace_accessors=True)
+
+    >>> IMultilingualContentMarker.implementedBy(MyContent)
+    True
+    >>> IMultilingualGettersMarker.implementedBy(MyContent)
+    True
+    >>> hasattr(MyContent, 'getSome_field')
+    True
+    >>> hasattr(MyContent, 'getMultilingualSome_field')
+    True
+    >>> original_getter == getattr(MyContent, 'getSome_field')
+    False
+    >>> getattr(MyContent, 'getSome_field') == getattr(MyContent, 'getMultilingualSome_field')
+    True
+    >>> original_getter == getattr(MyContent, '_old_getSome_field')
+    True
