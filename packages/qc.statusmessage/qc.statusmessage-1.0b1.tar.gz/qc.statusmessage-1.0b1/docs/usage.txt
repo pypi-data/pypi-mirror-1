@@ -1,0 +1,88 @@
+How to use it in your application
+---------------------------------
+
+Once the middleware is setup you are ready to use it. The middleware
+put a new key ``qc.statusmessage`` into the WSGI environment. This is
+a ``MessageList`` object to which you can add ``Message`` objects to.
+It basically is a list like object.
+
+The ``Message`` object can be imported from the ``qc.statusmessage.message``
+module.
+
+Now if you want to store a statusmessage from within your WSGI application
+you do the following::
+
+    from qc.statusmessage.message import Message
+
+    ...
+
+
+    def some_view(environ):
+        ...
+
+        msg = Message(u"Your order has been placed.")
+        environ['qc.statusmessage'].append(msg)
+
+        ...
+
+
+The middleware will then automatically take care of the message and serialize
+it to the cookie.
+
+In the next request (which might happen after a redirect) you might want to display 
+this message again to the user. It will be again available in the ``MessageList`` object
+store under the ``qc.statusmessage`` key in the WSGI environment::
+
+    def other_view(environ):
+        msgs = environ['qc.statusmessage']
+        if len(msgs):
+            msg = msgs.pop()
+
+            text = msg.msg
+
+            ... somehow display the msg ...
+
+As you can see the actual message text is stored in the ``msg`` attribute of the 
+``Message`` object. Moreover you should use the ``pop()`` method of the ``MessageList``
+in order to remove this message from the list. That way it will not be displayed again
+next time because it won't be serialized back to the cookie.
+
+As you can also see from the example you can store more than one status message. It
+simply behaves like a list. What is still in the list on egress will be serialized 
+back to the cookie. If no ``Message`` object is left in the ``MessageList`` object then
+the cookie will be deleted.
+
+
+Storing additional data inside the message
+******************************************
+
+Sometimes you need to store some more data about a message, e.g. you want to store
+whether it's just an informational message, some warning or some error. You can do this
+simply by passing more paramaters into the ``Message`` object::
+
+    from qc.statusmessage.message import Message
+
+    INFO = 0
+    ERROR = 1
+    WARNING = 2
+
+    
+    def some_view(environ):
+        ...
+
+        msg = Message(u"Your order has been placed.", type_ = INFO)
+        environ['qc.statusmessage'].append(msg)
+
+        ...
+
+
+In the next request you can simply use attribute notation to retrieve the
+additional information again::
+
+    msg = environ['qc.statusmessage'].pop()
+    t = msg.type_
+
+You can store any data as long as it does not exceed the maximum size of the cookie
+and can be serialized using JSON.
+
+
