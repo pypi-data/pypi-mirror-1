@@ -1,0 +1,6 @@
+__PACKAGE_NAME__ = "tw.forms"
+__VERSION__ = "0.8"
+__AUTHOR__ = "Alberto Valverde Gonzalez"
+__EMAIL__ = "alberto@toscat.net"
+__COPYRIGHT__ = "Copyright 2006-2007 Alberto Valverde Gonzalez and contributors"
+__LICENSE__ = "MIT"
