@@ -1,0 +1,721 @@
+Metadata-Version: 1.0
+Name: lovely.gae
+Version: 0.5.0a5
+Summary: Appengine related Python Packages from Lovely Systems
+Home-page: http://code.google.com/p/lovely-gae/
+Author: Lovely Systems
+Author-email: office@lovelysystems.com
+License: Apache License 2.0
+Description: Lovely Appengine Packages
+        *************************
+        
+        ===============================
+        Snapshots of GAE Datastore Data
+        ===============================
+        
+        It is possible to create snapshots of pre-defined kinds. Snapshots are
+        created asynchrounously.
+        
+        >>> from lovely.gae.snapshot import api
+        
+        >>> import tempfile, os
+        >>> s1 = api.create_snapshot(['Dummy'])
+        >>> s1
+        <lovely.gae.snapshot.models.Snapshot object at ...>
+        
+        >>> s1.status == s1.STATUS_STARTED
+        True
+        >>> from lovely.gae.async import get_tasks
+        
+        The first task that is created is the batch task. This collects the
+        markers for the snapshot.
+        
+        >>> run_tasks()
+        1
+        
+        The callback is another task, that sets the markers.
+        
+        >>> run_tasks()
+        1
+        
+        >>> from google.appengine.ext import db
+        >>> s1 = db.get(s1.key())
+        >>> s1.status == s1.STATUS_STORING
+        True
+        
+        Markers are stored on the snapshot as a dictionary of kind to
+        markers. We actually have no dummy objects present, so the markers are
+        empty.
+        
+        >>> s1.markers
+        {'Dummy': []}
+        
+        We now should have one job for the whole range of markers.
+        
+        >>> run_tasks()
+        1
+        
+        Let us now have a look at the status, which should be finished.
+        
+        >>> s1 = db.get(s1.key())
+        >>> s1.status == s1.STATUS_FINISHED
+        True
+        
+        Let us do another snapshot with some actual objects in it.
+        
+        >>> class Dummy(db.Model):
+        ...     title = db.StringProperty()
+        >>> class Yummy(db.Model):
+        ...     title = db.StringProperty()
+        
+        >>> for i in range(220):
+        ...     d = Dummy(title=str(i))
+        ...     k=d.put()
+        ...     y = Yummy(title=str(i))
+        ...     k=y.put()
+        
+        If we specify no kind on snapshot creation any available kinds are snapshotted.
+        
+        >>> s2 = api.create_snapshot()
+        >>> s2.kinds
+        ['Dummy', 'Yummy']
+        
+        We have 8 tasks to run
+        
+        - create_ranges 2 times (1 for eache kind)
+        - 2 tines callback of create_ranges
+        - 2x2 times backup range store because > 200
+        
+        >>> run_tasks(recursive=True)
+        8
+        
+        Now there should be backkup range instances and one marker for each kind.
+        
+        >>> from pprint import pprint
+        >>> s2 = db.get(s2.key())
+        >>> len(s2.markers['Dummy'])
+        1
+        >>> len(s2.markers['Yummy'])
+        1
+        >>> s2.rangebackup_set.count()
+        4
+        
+        Note that backups are compressed using bz2, so the data is pretty
+        small. The key names of rangebackup entities contain the id of the
+        snapshot, its kind, position and size.
+        
+        >>> for rb in s2.rangebackup_set:
+        ...     print rb.key().name()
+        RB:442:Dummy:0000000000:1081
+        RB:442:Dummy:0000000001:283
+        RB:442:Yummy:0000000000:1108
+        RB:442:Yummy:0000000001:283
+        
+        Restoring
+        =========
+        
+        We restore snapshot 1, which actually means we delete all "Dummy"
+        objects because this is the only kind in s1. The "Yummy" objects are
+        kept.
+        
+        >>> s1.restore()
+        
+        >>> run_tasks(recursive=True)
+        1
+        
+        >>> Dummy.all().count()
+        0
+        >>> Yummy.all().count()
+        220
+        
+        Let us restore s2.
+        
+        >>> s2.restore()
+        >>> run_tasks(recursive=True)
+        4
+        >>> Dummy.all().count()
+        220
+        >>> Yummy.all().count()
+        220
+        
+        Deleting
+        ========
+        
+        Whe delete is called on a snapshot the range backup objects also get
+        deleted.
+        
+        >>> from lovely.gae.snapshot import models
+        >>> s2k = s2.key()
+        >>> s2.delete()
+        >>> models.RangeBackup.all().filter('snapshot', s2k).count()
+        0
+        
+        Creating Snapshots via http
+        ===========================
+        
+        For testing we setup a wsgi application.
+        
+        >>> from webtest import TestApp
+        >>> from lovely.gae.snapshot import getApp
+        >>> app = TestApp(getApp())
+        
+        We can now create a snapshot via this url::
+        
+        >>> res = app.get('/lovely.gae/snapshot.CreateSnapshotHandler')
+        >>> res.status
+        '200 OK'
+        >>> print res.body
+        Created Snapshot 443
+        Kinds: ['Dummy', 'Yummy']
+        
+        Kinds are specified via query string.
+        
+        >>> res = app.get('/lovely.gae/snapshot.CreateSnapshotHandler?kinds=Yummy')
+        >>> res.status
+        '200 OK'
+        >>> print res.body
+        Created Snapshot 444
+        Kinds: [u'Yummy']
+        
+        >>> res = app.get('/lovely.gae/snapshot.CreateSnapshotHandler?kinds=Yummy&kinds=Dummy')
+        >>> res.status
+        '200 OK'
+        >>> print res.body
+        Created Snapshot 445
+        Kinds: [u'Yummy', u'Dummy']
+        
+        Let us complete all jobs.
+        
+        >>> run_tasks(recursive=True)
+        20
+        
+        Downloading Snapshots
+        =====================
+        
+        Snapshots can be downloaded as a single file, which then can be used
+        directly as a development datastore file.
+        
+        Downloads are done with a client script that uses the remote api to
+        fetch the data. We just test the actual method that get's called
+        here.
+        
+        >>> from lovely.gae.snapshot import client
+        >>> import tempfile, shutil, os
+        >>> tmp = tempfile.mkdtemp()
+        >>> f445 = client.download_snapshot(tmp)
+        Downloading snapshot: 445
+        Downloading RB:445:Dummy:0000000000:1081 pos: 1/4 remaining: 4.0 seconds
+        Downloading RB:445:Dummy:0000000001:283 pos: 2/4 remaining: ... seconds
+        Downloading RB:445:Yummy:0000000000:1108 pos: 3/4 remaining: ... seconds
+        Downloading RB:445:Yummy:0000000001:283 pos: 4/4 remaining: ... seconds
+        Saving to ...snapshot.445
+        >>> os.listdir(tmp)
+        ['snapshot.445']
+        
+        By default the latest snapshot gets downloaded, but we can also
+        specify the id of the snapshot to fetch.
+        
+        >>> file_name = client.download_snapshot(tmp, 443)
+        Downloading snapshot: 443
+        Downloading RB:443:Dummy:0000000000:...
+        Downloading RB:443:Dummy:0000000001:...
+        Downloading RB:443:Yummy:0000000000:...
+        Downloading RB:443:Yummy:0000000001:...
+        Saving to .../snapshot.443
+        >>> os.listdir(tmp)
+        ['snapshot.443', 'snapshot.445']
+        
+        If the file already exists we get an exception.
+        
+        >>> ignored = client.download_snapshot(tmp, 443)
+        Traceback (most recent call last):
+        ...
+        RuntimeError: Out file exists '.../snapshot.443'
+        
+        
+        Let us test if the file works.
+        
+        >>> from google.appengine.api.datastore_file_stub import DatastoreFileStub
+        >>> dfs = DatastoreFileStub('lovely-gae-testing',
+        ...                         f445, None)
+        >>> sum(map(len, dfs._DatastoreFileStub__entities.values()))
+        440
+        
+        ================
+        lovely.gae.async
+        ================
+        
+        This package executes jobs asynchronously, it uses the appengine
+        taskqueue to exectue the jobs.
+        
+        >>> from lovely.gae.async import defer, get_tasks
+        
+        The defer function executes a handler asynchronously as a job. We
+        create 3 jobs that have the same signature.
+        
+        >>> import time
+        >>> for i in range(3):
+        ...     print defer(time.sleep, [0.3])
+        <google.appengine.api.labs.taskqueue.taskqueue.Task object at ...>
+        None
+        None
+        
+        Let us have a look on what jobs are there. Note that there is only one
+        because all the 3 jobs we added were the same.
+        
+        >>> len(get_tasks())
+        1
+        
+        If we change the signature of the job, a new one will be added.
+        
+        >>> added = defer(time.sleep, [0.4])
+        >>> len(get_tasks())
+        2
+        
+        Normally jobs are automatically executed by the taskqueueapi, we have
+        a test method which executes the jobs and returns the number of jobs
+        done.
+        
+        >>> run_tasks()
+        2
+        
+        Now we can add the same signature again.
+        
+        >>> added = defer(time.sleep, [0.4])
+        >>> run_tasks()
+        1
+        
+        We can also set only_once to false to execute a worker many times with
+        the same signature.
+        
+        >>> from pprint import pprint
+        >>> defer(pprint, ['hello'], once_only=False)
+        <google.appengine.api.labs.taskqueue.taskqueue.Task object at ...>
+        >>> defer(pprint, ['hello'], once_only=False)
+        <google.appengine.api.labs.taskqueue.taskqueue.Task object at ...>
+        >>> run_tasks()
+        'hello'
+        'hello'
+        2
+        
+        
+        
+        
+        
+        ==========================
+        DB Custom Property Classes
+        ==========================
+        
+        Typed Lists
+        ===========
+        
+        This property converts model instances to keys and ensures a length.
+        
+        >>> from lovely.gae.db.property import TypedListProperty
+        >>> from google.appengine.ext import db
+        
+        Let us create a model
+        
+        >>> class Yummy(db.Model): pass
+        >>> class Bummy(db.Model): pass
+        
+        We can now reference Yummy instances with our property. Note that we
+        can also use the kind name as an argument of the kind.
+        
+        >>> class Dummy(db.Model):
+        ...     yummies = TypedListProperty(Yummy)
+        ...     bummies = TypedListProperty('Bummy', length=3)
+        
+        The kind arguement needs to be a subclass kind name or a db.Model.
+        
+        >>> TypedListProperty(object)
+        Traceback (most recent call last):
+        ...
+        ValueError: Kind needs to be a subclass of db.Model
+        
+        >>> dummy = Dummy()
+        >>> dummy_key = dummy.put()
+        >>> yummy1 = Yummy()
+        >>> yummy1_key = yummy1.put()
+        >>> dummy.yummies = [yummy1]
+        
+        We cannot set any other type.
+        
+        >>> bummy1 = Bummy()
+        >>> bummy1_key = bummy1.put()
+        >>> dummy.yummies = [bummy1]
+        Traceback (most recent call last):
+        ...
+        BadValueError: Wrong kind u'Bummy'
+        
+        The length needs to match if defined (see above).
+        
+        >>> dummy.bummies = [bummy1]
+        Traceback (most recent call last):
+        ...
+        BadValueError: Wrong length need 3 got 1
+        
+        >>> dummy.bummies = [bummy1, bummy1, bummy1]
+        >>> dummy_key == dummy.put()
+        True
+        
+        Case-Insensitive String Property
+        ================================
+        
+        This property allows searching for the lowercase prefix in a
+        case-insensitive manner. This is usefull for autocomplete
+        implementations where we do not want to have a seperate property just
+        for searching.
+        
+        >>> from lovely.gae.db.property import IStringProperty
+        >>> class Foo(db.Model):
+        ...     title = IStringProperty()
+        
+        >>> f1 = Foo(title='Foo 1')
+        >>> kf1 = f1.put()
+        >>> f2 = Foo(title='Foo 2')
+        >>> kf2 = f2.put()
+        >>> f3 = Foo(title='foo 3')
+        >>> kf3 = f3.put()
+        >>> f4 = Foo(title=None)
+        >>> kf4 = f4.put()
+        
+        The property does not allow the special seperator character which is
+        just one below the  highest unicode character,
+        
+        >>> f3 = Foo(title='Foo 3' + IStringProperty.SEPERATOR)
+        Traceback (most recent call last):
+        ...
+        BadValueError: Not all characters in property title
+        
+        Note that if we want to do an exact search, we have to use a special
+        filter that can be created by the property instance.
+        
+        >>> [f.title for f in Foo.all().filter('title =', 'foo 1')]
+        []
+        
+        The "equal" filter arguments can be computed with a special method on
+        the property.
+        
+        >>> ef = Foo.title.equals_filter('Foo 1')
+        >>> ef
+        ('title =', u'foo 1\xef\xbf\xbcFoo 1')
+        
+        >>> [f.title for f in Foo.all().filter(*ef)]
+        [u'Foo 1']
+        
+        Let us try with inequallity, e.g. prefix search. Prefix search is
+        normally done with two filters using the highest unicode character.
+        
+        Search for all that starts with "fo" case-insensitive.
+        
+        >>> q = Foo.all()
+        >>> q = q.filter('title >=', 'fo')
+        >>> q = q.filter('title <', 'fo' + u'\xEF\xBF\xBD')
+        >>> [f.title for f in q]
+        [u'Foo 1', u'Foo 2', u'foo 3']
+        
+        Search for all that starts with 'foo 1'
+        
+        >>> q = Foo.all()
+        >>> q = q.filter('title >=', 'foo 1')
+        >>> q = q.filter('title <', 'foo 1' + u'\xEF\xBF\xBD')
+        >>> [f.title for f in q]
+        [u'Foo 1']
+        
+        >>> q = Foo.all()
+        >>> q = q.filter('title >=', 'foo 2')
+        >>> q = q.filter('title <=', 'foo 2' + u'\xEF\xBF\xBD')
+        >>> [f.title for f in q]
+        [u'Foo 2']
+        
+        >>> q = Foo.all()
+        >>> q = q.filter('title >=', 'foo 3')
+        >>> q = q.filter('title <=', 'foo 3' + u'\xEF\xBF\xBD')
+        >>> [f.title for f in q]
+        [u'foo 3']
+        
+        
+        Pickle Property
+        ===============
+        
+        A pickle property can hold any pickleable python object.
+        
+        >>> from lovely.gae.db.property import PickleProperty
+        
+        >>> class Pickie(db.Model):
+        ...     data = PickleProperty()
+        
+        >>> pickie = Pickie(data={})
+        >>> pickie.data
+        {}
+        >>> kp = pickie.put()
+        >>> pickie.data
+        {}
+        >>> pickie = db.get(kp)
+        >>> pickie.data
+        {}
+        >>> pickie.data = {'key':501*"x"}
+        >>> kp = pickie.put()
+        >>> pickie.data
+        {'key': 'xx...xx'}
+        
+        If the value is not pickleable we get a validation error.
+        
+        >>> pickie = Pickie(data=dict(y=lambda x:x))
+        Traceback (most recent call last):
+        BadValueError: Property 'data' must be pickleable:
+        (Can't pickle <function <lambda> at ...>:
+        it's not found as __main__.<lambda>)
+        
+        
+        Safe ReferenceProperty
+        ======================
+        
+        >>> from lovely.gae.db.property import SafeReferenceProperty
+        
+        We use a new model with a gae reference and our safe reference.
+        
+        >>> class Refie(db.Model):
+        ...     ref   = db.ReferenceProperty(Yummy, collection_name='ref_ref')
+        ...     sfref = SafeReferenceProperty(Yummy, collection_name='sfref_ref')
+        
+        >>> refie = Refie()
+        >>> refie.sfref is None
+        True
+        >>> refie.ref is None
+        True
+        
+        An object to be referenced.
+        
+        >>> refyummy1 = Yummy()
+        >>> ignore = refyummy1.put()
+        
+        Set the references to our yummy object.
+        
+        >>> refie.sfref = refyummy1
+        >>> refie.sfref
+        <Yummy object at ...>
+        >>> refie.ref = refyummy1
+        >>> refie.ref
+        <Yummy object at ...>
+        
+        >>> refieKey = refie.put()
+        
+        Now we delete the referenced object.
+        
+        >>> refyummy1.delete()
+        
+        And reload our referencing object.
+        
+        >>> refie = db.get(refieKey)
+        
+        The gae reference raises an exception.
+        
+        >>> refie.ref
+        Traceback (most recent call last):
+        Error: ReferenceProperty failed to be resolved
+        
+        We catch the logs here.
+        
+        >>> import logging
+        >>> from StringIO import StringIO
+        >>> log = StringIO()
+        >>> handler = logging.StreamHandler(log)
+        >>> logger = logging.getLogger('lovely.gae.db')
+        >>> logger.setLevel(logging.INFO)
+        >>> logger.addHandler(handler)
+        
+        Our safe reference returns None.
+        
+        >>> pos = log.tell()
+        >>> refie.sfref is None
+        True
+        
+        Let's see what the log contains.
+        
+        >>> log.seek(pos)
+        >>> print log.read()
+        Unresolved Reference for "Refie._sfref" set to None
+        
+        Accessing the stale property once again we will see it was reset to None::
+        
+        >>> pos = log.tell()
+        >>> refie.sfref is None
+        True
+        
+        >>> log.seek(pos)
+        >>> print log.read() == ''
+        True
+        
+        The property get set to None if the reference points to a dead object but only
+        if the property is not required::
+        
+        >>> class Requy(db.Model):
+        ...     sfref = SafeReferenceProperty(Yummy, collection_name='req_sfref_ref',
+        ...                                   required=True)
+        
+        >>> refyummy1 = Yummy()
+        >>> ignore = refyummy1.put()
+        
+        >>> requy = Requy(sfref = refyummy1)
+        >>> requyKey = requy.put()
+        
+        >>> requy.sfref
+        <Yummy object at ...>
+        
+        >>> refyummy1.delete()
+        
+        >>> requy = db.get(requyKey)
+        
+        >>> pos = log.tell()
+        >>> requy.sfref is None
+        True
+        
+        >>> log.seek(pos)
+        >>> print log.read()
+        Unresolved Reference for "Requy._sfref" will remain because it is required
+        
+        =====================
+        Batch marker creation
+        =====================
+        
+        This packages provides the possibility to create markers for every N
+        objects of a given query. This is useful to create batched html pages
+        or to generate jobs for every N objects.
+        
+        A list of attribute values are created that represent the end of a
+        batch at any given position in a given query. The result is stored in
+        memcache and the key is provided to a callback function.
+        
+        >>> from lovely.gae import batch
+        
+        Let us create some test objects.
+        
+        >>> from google.appengine.ext import db
+        >>> class Stub(db.Model):
+        ...     c_time = db.DateTimeProperty(auto_now_add=True, required=True)
+        ...     name = db.StringProperty()
+        ...     age = db.IntegerProperty()
+        ...     state = db.IntegerProperty()
+        ...     def __repr__(self):
+        ...         return '<Stub %s>' % self.name
+        
+        >>> for i in range(1,13):
+        ...     s = Stub(name=str(i), age=i, state=i%2)
+        ...     sk = s.put()
+        
+        >>> Stub.all().count()
+        12
+        
+        First we make sure that we have no tasks in the queue for testing.
+        
+        >>> from lovely.gae.async import get_tasks
+        >>> len(get_tasks())
+        0
+        
+        So for example if we want to know any 100th key of a given kind we
+        could calculate it like shown below. Note that we provide the pprint function
+        as a callback, so we get the memcache key in the output.
+        
+        The calculate_markers function returns the memcache key that will be
+        used to store the result when the calculation is completed.
+        
+        >>> from pprint import pprint
+        >>> mc_key = batch.create_markers('Stub', callback=pprint)
+        >>> mc_key
+        'create_markers:...-...-...'
+        
+        A task gets created.
+        
+        >>> tasks = get_tasks()
+        >>> len(tasks)
+        1
+        
+        Let us run the task.
+        
+        >>> run_tasks(1)
+        1
+        
+        We now have another task left for the callback, which is actually the
+        pprint function.
+        
+        >>> run_tasks()
+        'create_markers:...-...-...'
+        1
+        
+        We should now have a result. The result shows that we need no batches
+        for the given batch size (because we only have 12 objects).
+        
+        >>> from google.appengine.api import memcache
+        >>> memcache.get(mc_key)
+        []
+        
+        Let us use another batch size. This time without callback.
+        
+        >>> mc_key = batch.create_markers('Stub', batchsize=1)
+        >>> run_tasks()
+        1
+        
+        We now have exatly 12 keys, because the batch size was 1.
+        
+        >>> len(memcache.get(mc_key))
+        12
+        
+        The default attributes returned are the keys.
+        
+        >>> memcache.get(mc_key)
+        [datastore_types.Key.fro...
+        
+        We can also use other attributes. Let us get items batched by c_time
+        descending. Note that it is not checked if values are not unique, so
+        if a non-unique attribute is used it might be the case that batch
+        ranges contains objects twice.
+        
+        >>> mc_key = batch.create_markers('Stub',
+        ...                               attribute='c_time',
+        ...                               order='desc',
+        ...                               batchsize=3)
+        >>> run_tasks()
+        1
+        >>> markers = memcache.get(mc_key)
+        >>> markers
+        [datetime.datetime(...
+        >>> len(markers)
+        4
+        >>> sorted(markers, reverse=True) == markers
+        True
+        
+        >>> mc_key = batch.create_markers('Stub',
+        ...                               attribute='c_time',
+        ...                               order='asc',
+        ...                               batchsize=3)
+        >>> run_tasks()
+        1
+        >>> markers = memcache.get(mc_key)
+        >>> markers
+        [datetime.datetime(...
+        >>> len(markers)
+        4
+        >>> sorted(markers) == markers
+        True
+        
+        
+        We can also pass filters to be applied to the query for the batch like this:
+        
+        >>> mc_key = batch.create_markers('Stub',
+        ...                               filters=[('state', 0)],
+        ...                               attribute='c_time',
+        ...                               order='asc',
+        ...                               batchsize=3)
+        >>> run_tasks()
+        1
+        >>> markers = memcache.get(mc_key)
+        >>> len(markers)
+        2
+        
+        
+        
+        
+Keywords: appengine datastore backup batch utilities
+Platform: UNKNOWN
