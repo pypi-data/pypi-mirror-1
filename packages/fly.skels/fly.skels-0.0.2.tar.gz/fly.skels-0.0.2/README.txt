@@ -1,0 +1,23 @@
+=================
+fly.skels package
+=================
+
+This package is used for quickly setup some basic namespace packages.
+
+::
+
+    $ paster create -t fly_mini fly.test
+    $ find fly.test
+    fly.test/
+    fly.test/fly
+    fly.test/fly/__init__.py
+    fly.test/fly/test
+    fly.test/fly/test/__init__.py
+    fly.test/fly/__init__.pyc
+    fly.test/setup.py
+    fly.test/README.txt
+    fly.test/fly.test.egg-info
+    fly.test/setup.cfg
+
+For more information, go to http://www.flyzen.com
+
