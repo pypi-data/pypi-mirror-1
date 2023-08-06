@@ -1,0 +1,145 @@
+Using SchemaBot With Pylons
+===========================
+
+config/environment.py
+---------------------
+
+Replace::
+
+  def load_environment(global_conf, app_conf):
+
+with::
+
+  def load_environment(global_conf, app_conf, check_db_schema=True):
+
+
+Replace::
+
+    
+  # Setup the SQLAlchemy database engine
+  engine = engine_from_config(config, 'sqlalchemy.')
+  init_model(engine)
+
+with::
+
+  # 'schemabot.check_version' in config will override check_db_schema setting.
+  # import pydb;pydb.set_trace()
+  if config.get('schemabot.check_version') is not None:
+      check_db_schema = asbool(config.get('schemabot.check_version'))
+  
+  # Setup the SQLAlchemy database engine
+  engine = engine_from_config(config, 'sqlalchemy.')
+  init_model(engine, check_db_schema)
+
+
+websetup.py
+-----------
+
+
+Change::
+
+  from myproject.model import meta
+  
+  def setup_app(command, conf, vars):
+      """Place any commands to setup ybfrontend here"""
+      load_environment(conf.global_conf, conf.local_conf)
+
+      # Create the tables if they don't already exist
+      meta.metadata.create_all(bind=meta.engine)
+
+To::
+
+  import os
+  from myproject.model import get_schema_changes
+  
+  def setup_app(command, conf, vars):
+      """Place any commands to setup ybfrontend here"""
+
+      if command.command_name == 'setup-app':
+          # skip DB schema check, as we will perform an update below anyway
+          check_db_schema = False
+      else:
+          check_db_schema = True
+
+      load_environment(conf.global_conf, conf.local_conf, check_db_schema)
+
+      # Load the models
+      from ybfrontend.model import meta
+      meta.metadata.bind = meta.engine
+
+      # Perform schema version update, if required.
+      schemabot = get_schema_changes()
+      if os.environ.get('SCHEMA_DOWNGRADE') is not None:
+          # Force schema downgrade by setting environment variable to schema version
+          version = int(os.environ.get('SCHEMA_DOWNGRADE'))
+          log.warn("Forcing a DB schema downgrade to version %d" %version)
+      elif os.environ.get('SCHEMA_UPGRADE') is not None:
+          # Force schema upgrade to specified version
+          version = int(os.environ.get('SCHEMA_UPGRADE'))
+          log.warn("Forcing a DB schema downgrade to version %d" %version)
+      else:
+          log.warn("Forcing a DB schema upgrade to latest version")
+          version = None  # latest
+      schemabot.schema_update(version)
+
+      # Create the tables if they don't already exist
+      # meta.metadata.create_all(bind=meta.engine)
+
+
+model/__init__.py
+-----------------
+
+Add::
+
+  from schemabot import SchemaBot
+  
+  SCHEMA_CHANGES = {}
+
+  # Model Version 0: Always empty.
+
+  # # Model Version 1: Create (or drop for downgrade) all tables listed
+  # VERSION_1_TABLES = [
+  #     table1,
+  #     table2,
+  # ]
+  # SCHEMA_1_UPGRADE = VERSION_1_TABLES
+  # SCHEMA_1_DOWNGRADE = VERSION_1_TABLES
+  # SCHEMA_CHANGES[1] = (SCHEMA_1_UPGRADE, SCHEMA_1_DOWNGRADE)
+  
+  def init_model(engine, check_db_schema=True):
+      # Configure Session with engine
+      meta.Session.configure(bind=engine)
+      meta.engine = engine
+      meta.metadata.bind = engine
+
+      # Use SchemaBot to check the DB schema version
+      if check_db_schema:
+          schemabot = get_schema_changes()
+          model_version, current_DB_version = schemabot.version_check()
+
+          if model_version > current_DB_version:
+              raise Exception("DB schema upgrade is required. Model version=%d; DB version=%d. Try 'paster setup-app config.ini'" %(model_version, current_DB_version))
+          elif model_version < current_DB_version:
+              raise Exception("DB schema version is greater than current model. Model version=%d; DB version=%d. That is not right. Please sort it out."%(model_version, current_DB_version))
+          else:
+              log.debug("SchemaBot: DB schema version (%d) matches model version (%d)." %(current_DB_version, model_version))
+
+  def get_schema_changes():
+      # TODO: schemabot change: define changes in separate object, then pass to SchemaBot constructor.
+      #   SchemaBot shouldn't need meta.metadata until we are actually calling
+      #   version_check() or upgrade/downgrade methods.
+    
+      schemabot = SchemaBot(meta.metadata)
+      if SCHEMA_CHANGES:
+          for version in range(1, max(SCHEMA_CHANGES.keys()) + 1):
+              changes = SCHEMA_CHANGES.get(version)
+              if not changes:
+                  raise ValueError("Schema version %d is undefined. Schema version numbers cannot be skipped." %version)
+              schema_upgrade, schema_downgrade = changes
+              schemabot.define_schema(version, upgrade=schema_upgrade, downgrade=schema_downgrade)
+    
+      return schemabot
+
+
+
+
