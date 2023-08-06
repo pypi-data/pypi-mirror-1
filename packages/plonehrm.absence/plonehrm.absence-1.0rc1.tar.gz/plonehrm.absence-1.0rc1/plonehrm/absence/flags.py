@@ -1,0 +1,7 @@
+NOTIFICATION_PREFIX = u"plonehrm.absence: "
+
+ABSENCEWEEK1_NOTIFICATION = NOTIFICATION_PREFIX + u"week 1 notification"
+ABSENCEWEEK6_NOTIFICATION = NOTIFICATION_PREFIX + u"week 5 notification"
+ABSENCEWEEK8_NOTIFICATION = NOTIFICATION_PREFIX + u"week 7 notification"
+ABSENCE6WEEKREPEAT_NOTIFICATION = NOTIFICATION_PREFIX + \
+                                  u"6 week repeat notification"
