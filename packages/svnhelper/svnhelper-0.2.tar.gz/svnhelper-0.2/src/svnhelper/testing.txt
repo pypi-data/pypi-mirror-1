@@ -1,0 +1,126 @@
+Testing framework
+=================
+
+We need to create a test package. test_package is a directory tests/my.testing.
+This will create the same directory in a temp directory without .svn
+directories::
+
+  >>> init_test_package(test_package)
+  >>> package_dir.endswith('my.testing')
+  True
+
+Creating a .egg-info dir::
+
+  >>> os.mkdir(os.path.join(package_dir, 'my.testing.egg-info'))
+
+Here is the result::
+
+  >>> ls(package_dir)
+  - LICENSE
+  d my
+  d my.testing.egg-info
+  - setup.py
+
+The testing framework initialise a svn directory for you::
+
+  >>> os.chdir(package_dir)
+  >>> print svn('info', repository)
+  Path: test_repos
+  URL: file:///test_repos
+  Repository Root: file:///test_repos
+  Repository UUID: XXXXX-XXXX-XXX 
+  Revision: 0
+  ...
+
+Now we can use the svnhelper on it::
+
+  >>> from svnhelper.core import helper
+  >>> print helper.import_to(package_dir, repository)
+  Adding         my.testing
+  Adding         my.testing/trunk
+  Adding         my.testing/trunk/LICENSE
+  Adding         my.testing/trunk/my
+  Adding         my.testing/trunk/my/__init__.py
+  Adding         my.testing/trunk/my/testing
+  Adding         my.testing/trunk/my/testing/__init__.py
+  Adding         my.testing/trunk/my/testing/README.txt
+  Adding         my.testing/trunk/setup.py
+  Adding         my.testing/branches
+  Adding         my.testing/tags
+  <BLANKLINE>
+  Committed revision 1.
+  <BLANKLINE>
+
+  >>> infos = helper.info('%s/my.testing/trunk/setup.py' % repository)
+  >>> print infos['node kind']
+  file
+
+Create a virtualenv dir::
+
+  >>> dirname = create_tempdir()
+
+Add a bad file in the package::
+
+  >>> os.chdir(dirname)
+  >>> o = svn('co', '%s/my.testing/trunk/my/testing/' % repository, 'gruik')
+  >>> badfile = os.path.join(dirname, 'gruik', '__init__.pyc')
+  >>> open(badfile,'w').write('import os')
+  >>> o = svn('add', badfile)
+  >>> o = svn('ci', badfile, '-m', 'gruikerie')
+
+Checkout a package::
+
+    >>> print helper.develop_from(dirname, '%s/my.testing' % repository, clean=True)
+    A    my.testing/LICENSE
+    A    my.testing/my
+    A    my.testing/my/__init__.py
+    A    my.testing/my/testing
+    A    my.testing/my/testing/__init__.py
+    A    my.testing/my/testing/__init__.pyc
+    A    my.testing/my/testing/README.txt
+    A    my.testing/setup.py
+    Checked out revision 2.
+    <BLANKLINE>
+    Sending        .
+    Sending        my
+    Sending        my/testing
+    Deleting       my/testing/__init__.pyc
+    <BLANKLINE>
+    Committed revision 3.
+    <BLANKLINE>
+    running develop
+    ...
+    creating my.testing.egg-info
+    writing my.testing.egg-info/PKG-INFO
+    writing namespace_packages to my.testing.egg-info/namespace_packages.txt
+    writing top-level names to my.testing.egg-info/top_level.txt
+    writing dependency_links to my.testing.egg-info/dependency_links.txt
+    writing manifest file 'my.testing.egg-info/SOURCES.txt'
+    writing manifest file 'my.testing.egg-info/SOURCES.txt'
+    running build_ext
+    Creating /virtualenv/lib/py.../site-packages/my.testing.egg-link (link to .)
+    Adding my.testing 0.1 to easy-install.pth file
+    <BLANKLINE>
+    Installed /virtualenv/my.testing
+    Processing dependencies for my.testing==0.1
+    Finished processing dependencies for my.testing==0.1
+    <BLANKLINE>
+
+
+Bad file is removed at revision 3::
+
+    >>> print helper.ls('%s/my.testing/trunk/my/testing/' % repository)
+    ['README.txt', '__init__.py']
+
+    >>> print helper.info('%s/my.testing/' % repository)['revision']
+    3
+
+Some ignore are also sets::
+
+    >>> print helper.pget('svn:ignore', '.')
+    ['*.egg.info', '*.pyc', '*.pyo', 'build', 'dist']
+
+    >>> print helper.pget('svn:ignore', 'my')
+    ['*.pyc', '*.pyo']
+
+
