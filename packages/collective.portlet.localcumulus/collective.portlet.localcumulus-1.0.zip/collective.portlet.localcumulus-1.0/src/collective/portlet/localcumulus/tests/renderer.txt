@@ -1,0 +1,96 @@
+Adding some content for testing searches
+::
+
+    >>> self.setRoles(('Manager', ))
+    >>> self.portal['front-page'].edit(subject=['global', 'tags'])
+    >>> if1 = self.folder.invokeFactory('Folder', id='f1')
+    >>> if2 = self.folder.invokeFactory('Folder', id='f2')
+    >>> f1 = self.folder[if1]
+    >>> f2 = self.folder[if2]
+    >>> d1 = f1.invokeFactory('Document', id='blog-entry1')
+    >>> d2 = f1.invokeFactory('Document', id='blog-entry2')
+    >>> d3 = f2.invokeFactory('Document', id='blog-entry3')
+    >>> d4 = f2.invokeFactory('Document', id='blog-entry4')
+    >>> f1[d1].edit(subject=['blog', 'tags'])
+    >>> f1[d2].edit(subject=['foo', 'bar'])
+    >>> f2[d3].edit(subject=['toto', 'titi'])
+    >>> f2[d4].edit(subject=['toto', 'tutu'])
+
+
+
+Looking for our adapter to be in place
+::
+
+    >>> from collective.portlet.localcumulus.interfaces import ILocalTagsRetriever
+    >>> from collective.portlet.localcumulus import catalog
+    >>> data = catalog.DummyData()
+    >>> data.refreshInterval = 1
+
+
+This adapter takes a context and an Assigment as 'data' attribute
+::
+
+    >>> retriever = ILocalTagsRetriever(f1)
+    >>> retriever
+    <collective.portlet.localcumulus.catalog.LocalTags object at ...>
+
+Trying to get the local tags of the f1 folder
+::
+
+    >>> data.path = '/'.join(f1.getPhysicalPath())
+    >>> retriever.data = data
+    >>> print '\n'.join(['%s %s %s'% i for i in retriever.getTags()])
+    blog 1 http://nohost/plone/search?path=/plone/Members/test_user_1_/f1&Subject:list=blog
+    foo 1 http://nohost/plone/search?path=/plone/Members/test_user_1_/f1&Subject:list=foo
+    bar 1 http://nohost/plone/search?path=/plone/Members/test_user_1_/f1&Subject:list=bar
+    tags 1 http://nohost/plone/search?path=/plone/Members/test_user_1_/f1&Subject:list=tags
+
+Trying to get the local tags of the f2 folder
+::
+
+    >>> data.path = '/'.join(f2.getPhysicalPath())
+    >>> print '\n'.join(['%s %s %s'% i for i in retriever.getTags()])
+    tutu 1 http://nohost/plone/search?path=/plone/Members/test_user_1_/f2&Subject:list=tutu
+    titi 1 http://nohost/plone/search?path=/plone/Members/test_user_1_/f2&Subject:list=titi
+    toto 2 http://nohost/plone/search?path=/plone/Members/test_user_1_/f2&Subject:list=toto
+
+
+
+If we have a portlet without path, it goes system wide
+::
+
+    >>> data.path = ''
+    >>> print '\n'.join(['%s %s %s'% i for i in retriever.getTags(data=data)])
+    bar 1 http://nohost/plone/search?Subject:list=bar
+    blog 1 http://nohost/plone/search?Subject:list=blog
+    foo 1 http://nohost/plone/search?Subject:list=foo
+    global 1 http://nohost/plone/search?Subject:list=global
+    tags 2 http://nohost/plone/search?Subject:list=tags
+    titi 1 http://nohost/plone/search?Subject:list=titi
+    toto 2 http://nohost/plone/search?Subject:list=toto
+    tutu 1 http://nohost/plone/search?Subject:list=tutu
+
+
+Testing cache
+::
+
+    >>> import time
+    >>> data.path = '/'.join(f2.getPhysicalPath())
+    >>> data.refreshInterval = 10
+    >>> [o[0] for o in retriever.getTags()]
+    [u'tutu', u'titi', u'toto']
+    >>> f2[d4].edit(subject=['toto', 'tutu', 'tata'])
+    >>> [o[0] for o in retriever.getTags()]
+    [u'tutu', u'titi', u'toto']
+    >>> time.sleep(2)
+    >>> [o[0] for o in retriever.getTags()]
+    [u'tutu', u'titi', u'toto']
+
+After 11 seconds, cache life is up
+::
+
+    >>> time.sleep(9)
+    >>> [o[0] for o in retriever.getTags()]
+    [u'tutu', u'titi', u'toto', u'tata']
+
+.. vim: set ft=doctest:
