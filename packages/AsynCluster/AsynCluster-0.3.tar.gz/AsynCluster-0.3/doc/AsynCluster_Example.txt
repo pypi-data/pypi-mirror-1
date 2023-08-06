@@ -1,0 +1,145 @@
+[[T(Header|!AsynCluster|Asynchronous Cluster Computing)]]
+
+OK, you're probably looking at the !AsynCluster source and thinking, "Hey, this
+is cool, but why can't this guy seem to write any documentation?" The answer,
+as with a lot of free & open source software, is that the ''author'' needs no
+documentation; he understands how to use this code just fine and is busily
+doing so! Explaining it to other people is something that sadly gets put off
+and forgotten. Another reason is that -- let's face it -- it's usually a whole
+lot more fun to write code than to write documentation about it. The one saving
+grace is that the classes and methods in this code do tend to have ample
+docstrings, and those result in pretty decent
+[http://foss.eepatents.com/trac/AsynCluster/api API] documentation.
+
+Anyhow, let's take a look at how ''you'' can put !AsynCluster to work to run
+computing jobs on a cluster of PCs or CPU cores.
+
+
+== Installation ==
+
+Make sure you have [http://twistedmatrix.com Twisted] installed on all the PCs
+that will be running !AsynCluster. Then install !AsynCluster, and customize the
+{{{/etc/asyncluster.conf}}} config file.
+
+One of the PCs will be your master, and the rest will be computing nodes. (If
+you have a multi-core CPU on the master PC, you will probably want to run one
+or more node processes on it, too.) The config file has a common section, a
+section that is only used by the master server, and a section that is used to
+specify how nodes connect to the master as TCP clients.
+
+You can check out the config file template that comes with the package
+[http://foss.eepatents.com/trac/AsynCluster/source/misc/etc_asyncluster.conf here].
+Let's start with the '''server''' section, which is used by the master PC:
+
+{{{
+# AsynCluster Client & Server Common Configuration File 
+
+#--- Server-specific config items -------------------------
+[server]
+
+# URL to Privilege & Usage Database
+database = DEFINE_A_URL
+
+# Comma-separate list of accepted client address definition(s)
+# Example: "subnets = 127.0.0.1, 192.168.1.0/24"
+subnets = 127.0.0.1, 192.168.135.0/24
+
+}}}
+
+Specify a URL of a ''database'' that you'll be using to keep track of the
+privileges and usage of the people using your cluster nodes as
+workstations. The format is explained in the
+[http://www.sqlalchemy.org/docs/04/dbengine.html#dbengine_establishing documentation]
+for the underlying SQLAlchemy package. (Now there's a guy who knows how to
+document his code!) If you don't care about restricting and monitoring user
+access on the nodes, you can use {{{sqlite://:memory:}}} as your URL to have
+things hum away on an in-memory SQLite database that will simply evaporate on
+power-down.
+
+You can specify one or more ''subnets'' that match all clients you expect to
+have connecting to the master. The default permits connections from the master
+PC itself, ''e.g.'', for multi-core usage, and from the localnet IP address
+from 192.168.135.1 to 192.168.135.255.
+
+The '''client''' section is used by the nodes, defining how they connect as TCP clients to
+the master:
+
+{{{
+#--- Client-specific config items -------------------------
+[client]
+
+# Server host for node-master TCP connections
+host = main
+
+# User name for the client connection
+user = test
+
+# Password for the client connection
+password = YOU-MUST-CHANGE-THIS
+}}}
+
+It's pretty self-explanatory. The ''host'' is a qualified hostname or IP
+address. The ''user'' is a user name that is assigned to the node, not to any
+user accessing the node as a workstation. The ''password'' is in plain text.
+
+The '''common''' section is next:
+
+{{{
+#--- Common config items ----------------------------------
+[common]
+
+# Server port for node-master TCP connections
+tcp port = 9080             
+
+# UNIX Socket for master control connections
+socket = /tmp/.ndm
+
+# Server password for reverse login to client
+server password = YOU-MUST-CHANGE-THIS-TOO
+}}}
+
+The nodes connect to the master via the specified ''tcp port''. There is also a
+control client that runs on the master, which we'll be discussing a bit
+later. It connects via a UNIX domain ''socket''.
+
+When running jobs, the nodes will be accepting chunks of unknown Python code
+from the master. To be a bit more comfortable with that leap of faith, the
+nodes require the server to authenticate itself to the client after the client
+has satisfied the server with its own login. Set a ''server password'' for that
+reverse login. Theoretically, a hostile server that you accidentally connect to
+could spit your client login password back to you in a reverse login attempt,
+so use a different password here. (That's all very hypothetical, but why not
+use the extra security?)
+
+Now, if you are going to use the [wiki:NDM Node Display Manager], you'll want
+to configure the '''display''' section:
+
+{{{
+#--- Display manager items --------------------------------
+[display]
+
+# NDM Window size in pixels (fixed)
+size = 300, 200
+
+# The window manager to launch for a new user session
+window manager = /usr/bin/startkde
+
+# Niceness level at which to run the window manager and thus all programs
+# launched by the user from there
+niceness = 10
+}}}
+
+The default window manager is KDE, but I've actually switched to
+[http://icewm.org/ IceWM] for simplicity and ease of maintenance. The correct
+''window manager'' value for that configuration is
+{{{/usr/bin/icewm-session}}}.
+
+You can annoy your workstation users and give your jobs more CPU time by
+setting a low-priority ''niceness'' level for the user code.
+
+
+== A Simple Cluster Computing Job  ==
+
+== Running the Job ==
+
+== Conclusions ==
