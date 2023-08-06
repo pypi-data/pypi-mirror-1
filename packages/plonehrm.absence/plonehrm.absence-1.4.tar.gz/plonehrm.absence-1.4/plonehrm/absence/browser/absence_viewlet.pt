@@ -1,0 +1,467 @@
+<div id="absencelist"
+     i18n:domain="absence"
+     tal:define="toLocalizedTime nocall:context/@@plone/toLocalizedTime;">
+
+  <dl class="module">
+    <dt class="moduleHeader">
+
+      <a class="moduleButton"
+         tal:attributes="href string:${here/absolute_url}/@@absencelist">
+        <img src="folder_icon.gif"
+             title="Show the complete absence list"
+             alt="Show the complete absence list"
+             i18n:attributes="alt show_complete_absencelist;
+                              title show_complete_absencelist;" />
+      </a>
+
+      <a class="moduleButton"
+	 id="update_absence_percentages"
+	 href="#"
+	 tal:condition="python:view.show_close_absence_button()">
+        <img src="percentage_icon.gif"
+             title="Update absence and productivity percentages"
+             alt="Update absence and productivity percentages"
+             i18n:attributes="alt label_update_percentages;
+                              title label_update_percentages;" />
+      </a>	
+
+      <a tal:condition="python:view.show_add_absence_button()"
+         class="moduleButton" id="add_absence_button"
+         href="">
+        <img src="add_icon.gif"
+             alt="Add a new absence"
+             i18n:attributes="alt add_new_absence;
+                              title add_new_absence;" />
+      </a>
+
+      <img tal:condition="python:view.show_close_absence_button()"
+	   class="moduleButton"
+	   src="add_icon_grey.gif"
+           alt="The employee can only be absent once"
+           title="The employee can only be absent once"
+           i18n:attributes="alt label_only_one_absence;
+                            title label_only_one_absence" />
+
+      <span tal:omit-tag="" tal:condition="view/show_absence_list"
+            i18n:translate="head_absencelist">Absences</span>
+      <span tal:omit-tag="" tal:condition="view/show_absence_form"
+            i18n:translate="head_add_absence">Add absence</span>
+      <span tal:omit-tag="" tal:condition="view/show_absence_close_form"
+            i18n:translate="label_close_absence">Close absence</span>
+      <span tal:omit-tag="" tal:condition="view/show_absence_edit_form"
+            i18n:translate="label_edit_absence">Edit absence</span>
+      <span tal:omit-tag="" tal:condition="view/show_absence_percentage_form"
+            i18n:translate="label_edit_absence">Edit absence percentages</span>
+
+    </dt>
+
+    <dd class="moduleItem lastItem">
+      <p class="error" id="absence_viewlet_global_error"></p>
+
+      <!-- Show the form to add or edit an absence. -->
+      <form
+         name="add_absence"
+         method="post"
+         id="addabsenceform"
+         action=""
+	 tal:define="current_absence view/get_current_absence"
+         tal:attributes="action string:${context/absolute_url}/@@add_absence"
+         tal:condition="python: view.show_absence_form() or view.show_absence_edit_form()">
+        <label for="new-absence-text"
+               i18n:translate="label_description">
+	  Description</label>
+	<p class="dont-show"
+	   id="absence_viewlet_error_no_description"
+	   i18n:translate="label_no_description">
+	  You must provide a description for the absence.</p>
+        <input name="text"
+               value=""
+               type="text"
+               size="30"
+               id="new-absence-text"
+               class="absencelistfield"
+	       tal:attributes="value current_absence/title | nothing"/>
+        <br />
+
+	<tal:block tal:condition="view/show_absence_form">
+	  <input type="checkbox"
+		 id="is_accident"
+		 name="is_accident">
+	    <label for="is_accident"
+		   id="is_accident_label"
+		   i18n:translate="heading_accident">
+	      Due to an accident</label>
+	    <br />
+
+	    <label for="first_day_percentage"
+		   i18n:translate="label_first_day_percentage">
+	      Percentage of unworked time on first day
+	    </label>
+	    <p class="dont-show"
+	       id="absence_viewlet_error_invalid_first_day_percentage"
+	       i18n:translate="label_invalid_first_day_percentage">
+	      The provided value is invalid. Valid values are 25,
+	       50, 75 and 100.
+	    </p>
+	    <select name="first_day_percentage"
+		    id="first_day_percentage">
+	      <option tal:repeat="value python:[x/4.0 for x in range(1, 5)]"
+		      tal:attributes="value value"
+		      tal:content="python: int(100*value)" />
+	    </select>
+
+
+	    <label for="percentage_absence"
+		   i18n:translate="head_percentage_absence_long">
+	      Percentage of absence</label>
+	    <p class="dont-show"
+	       id="absence_viewlet_error_invalid_absence_percentage"
+	       i18n:translate="label_invalid_absence_percentage">
+	      Absence percentage must be an integer between 0 and 100.</p>
+
+	    <input type="text"
+		   maxlength="3"
+		   name="percentage_absence"
+		   id="percentage_absence" 
+		   value="100" />
+	    <br />
+
+	    <label for="percentage_productivity"
+		   i18n:translate="head_percentage_productivity_long">
+	      Percentage of productivity</label>
+	    <p class="dont-show"
+	       id="absence_viewlet_error_invalid_productivity_percentage"
+	       i18n:translate="label_invalid_productivity_percentage">
+	      Productivity percentage must be an integer between 0 and 100.</p>
+
+	    <input type="text"
+		   maxlength="3"
+		   name="percentage_productivity"
+		   id="percentage_productivity"
+		   value="0" />
+	    <br />
+
+	</tal:block>
+
+        <label for="new_absence_date" i18n:translate="label_start_date">Start date</label>
+	<p class="dont-show"
+	   id="absence_viewlet_error_invalid_date"
+	   i18n:translate="label_invalid_date">
+	  This date is not valid.</p>
+
+	<p class="dont-show"
+	   id="absence_viewlet_error_conflict_date"
+	   i18n:translate="label_conflict_date">
+	  This date conflicts with a previous absence.</p>
+
+	<p class="dont-show"
+	   id="absence_viewlet_error_date_future"
+	   i18n:translate="label_future_date">
+	  The start date of an absence can not be after tomorrow.</p>
+
+
+        <tal:start
+           define="today python:modules['DateTime'].now();
+                   utils python:modules['Products.CMFPlone.utils'];
+                   uniqueItemIndex python:utils.RealIndexIterator(pos=0);
+                   fieldName string:new_absence_date;
+                   id fieldName;
+                   show_hm python:False;
+                   show_ymd python:True;
+                   starting_year python:today.year() - 1;
+                   ending_year python:today.year();
+                   inputname fieldName;
+                   formname string:add_absence;
+                   inputvalue current_absence/startDate | today;
+                   tabindex python:1;">
+          <metal:box use-macro="here/calendar_macros/macros/calendarDatePickerBox|here/calendar_slot/macros/calendarDatePickerBox">
+            a calendar, hopefully
+          </metal:box>
+        </tal:start>
+
+        <input value="Add absence"
+               id="submit-absence"
+               class="context"
+               i18n:attributes="value head_add_absence;"
+               type="submit" 
+	       tal:condition="view/show_absence_form"/>
+        <input value="Edit absence"
+               id="submit-edit-absence"
+               class="context"
+               i18n:attributes="value head_edit_absence;"
+               type="submit" 
+	       tal:condition="view/show_absence_edit_form"/>
+
+
+        <input value="Cancel"
+               id="cancel-absence-form"
+               class="context"
+               i18n:attributes="value label_cancel;"
+               type="submit"  />
+      </form>
+
+
+      <!-- Show the form to close an absence. -->
+      <form
+         name="close_absence"
+         method="post"
+         id="closeabsenceform"
+         action=""
+         tal:condition="view/show_absence_close_form">
+        <tal:block define="absence view/get_current_absence">
+          <label i18n:translate="label_description">Description:</label>
+          <div id="absence_text" tal:content="absence/text" />
+          <label i18n:translate="label_days_absent">Absence length (days)</label>
+
+	  <p class="dont-show"
+	     id="absence_viewlet_error_length_no_integer"
+	     i18n:translate="label_length_no_integer">
+	    The number of days must be a decimal number.</p>
+
+	  <p class="dont-show"
+	     id="absence_viewlet_error_length_null"
+	     i18n:translate="label_length_null">
+	    The number of days must be greater than zero.</p>
+
+          <input name="absence_length"
+                 value=""
+                 type="text"
+                 size="3"
+                 id="absence_length"
+                 class="absencelistfield"
+		 tal:define="days_absent python:absence.days_absent(view.is_arbo())"
+                 tal:attributes="value days_absent" />
+
+          <br />
+          <label for="close_absence_date"
+                 i18n:translate="label_close_date">Closing date</label>
+
+	  <p class="dont-show"
+	     id="absence_viewlet_error_invalid_date"
+	     i18n:translate="label_invalid_date">
+	    This date is not valid.</p>
+
+	  <p class="dont-show"
+	     id="absence_viewlet_error_end_date_before_start_date"
+	     i18n:translate="label_end_date_before_start_date">
+	    The end date must be after the start date.</p>
+
+          <tal:start
+             define="today python:modules['DateTime'].now();
+                     utils python:modules['Products.CMFPlone.utils'];
+                     uniqueItemIndex python:utils.RealIndexIterator(pos=0);
+                     fieldName string:close_absence_date;
+                     id fieldName;
+                     show_hm python:False;
+                     show_ymd python:True;
+                     starting_year python:today.year() - 1;
+                     ending_year python:today.year();
+                     inputname fieldName;
+                     formname string:add_absence;
+                     inputvalue python:str(today);
+                     tabindex python:1;">
+            <metal:box use-macro="here/calendar_macros/macros/calendarDatePickerBox|here/calendar_slot/macros/calendarDatePickerBox">
+              a calendar, hopefully
+            </metal:box>
+          </tal:start>
+
+
+          <input value="Close absence"
+                 id="submit-close-absence"
+                 class="context"
+                 i18n:attributes="value label_close_absence;"
+                 type="submit"  />
+          <input value="Cancel"
+                 id="cancel-absence-form"
+                 class="context"
+                 i18n:attributes="value label_cancel;"
+                 type="submit"  />
+        </tal:block>
+      </form>
+
+      <!-- Show the form to edit absence percentage. -->
+      <tal:block tal:condition="view/show_absence_percentage_form"
+		 tal:define="current_absence python: view.get_current_absence()">
+
+	<form name="absence_percentage"
+	      tal:define="current_percentage python: current_absence.current_percentage();
+			  percentage_list python: reversed(current_absence.percentage_list);" >
+
+	  <label for="percentage_absence"
+		 i18n:translate="head_percentage_absence_long">
+	    Percentage of absence</label>
+	  <p class="dont-show"
+	     id="absence_viewlet_error_invalid_absence_percentage"
+	     i18n:translate="label_invalid_absence_percentage">
+	    Absence percentage must be an integer between 0 and 100.</p>
+
+	  <input type="text"
+		 maxlength="3"
+		 name="percentage_absence"
+		 id="percentage_absence" 
+		 tal:attributes="value current_percentage/absence"/>
+	  <br />
+
+	  <label for="percentage_productivity"
+		 i18n:translate="head_percentage_productivity_long">
+	    Percentage of productivity</label>
+	  <p class="dont-show"
+	     id="absence_viewlet_error_invalid_productivity_percentage"
+	     i18n:translate="label_invalid_productivity_percentage">
+	    Productivity percentage must be an integer between 0 and 100.</p>
+
+	  <input type="text"
+		 maxlength="3"
+		 name="percentage_productivity"
+		 id="percentage_productivity"
+		 tal:attributes="value current_percentage/productivity"/>
+	  <br />
+
+          <label for="new_absence_date" i18n:translate="label_start_date">Start date</label>
+	  <p class="dont-show"
+	     id="absence_viewlet_error_invalid_date"
+	     i18n:translate="label_invalid_date">
+	    This date is not valid.</p>
+
+	  <p class="dont-show"
+	     id="absence_viewlet_error_date_before_previous_percentage"
+	     i18n:translate="label_date_before_previous_percentage">
+	    You can not specify a date before the last update date.</p>
+
+          <tal:start
+             define="today python:modules['DateTime'].now();
+                     utils python:modules['Products.CMFPlone.utils'];
+                     uniqueItemIndex python:utils.RealIndexIterator(pos=0);
+                     fieldName string:absence_percentage_date;
+                     id fieldName;
+                     show_hm python:False;
+                     show_ymd python:True;
+                     starting_year python:today.year() - 1;
+                     ending_year python:today.year();
+                     inputname fieldName;
+                     formname string:absence_percentage;
+                     inputvalue today;
+                     tabindex python:1;">
+            <metal:box use-macro="here/calendar_macros/macros/calendarDatePickerBox|here/calendar_slot/macros/calendarDatePickerBox">
+              a calendar, hopefully
+            </metal:box>
+          </tal:start>
+	  
+          <input value="Update percentage"
+		 id="submit-absence-percentage"
+		 class="context"
+		 i18n:attributes="value label_absence_percentage;"
+		 type="submit"  />
+          <input value="Cancel"
+		 id="cancel-absence-form"
+		 class="context"
+		 i18n:attributes="value label_cancel;"
+		 type="submit"  /><br />
+
+	  <fieldset>
+	    <legend for="absence_percentage_history"
+		     i18n:translate="label_percentage_history">History
+	    </legend>
+
+	    <table class="listing"
+		   id="absence_percentage_history">
+	      <thead>
+		<tr>
+		  <th i18n:translate="heading_percentage_date">Date</th>
+		  <th i18n:translate="heading_percentage_absence">Absence</th>
+		  <th i18n:translate="heading_percentage_productivity">Productivity</th>
+		  <th i18n:translate="heading_percentage_delete">Delete</th>
+		</tr>
+	      </thead>
+	      <tbody>
+		<tr tal:repeat="percentage percentage_list">
+		  <td tal:content="python:toLocalizedTime(percentage.date.isoformat())" />
+		  <td tal:content="python: str(percentage.absence) + '%'" />
+		  <td tal:content="python: str(percentage.productivity) + '%'" />
+		  <td>
+		    <a href="#"
+		       class="delete_absence_percentage"
+		       tal:attributes="id python: 'absence_percentage_' + str(percentage.id)">
+		      <img src="delete_icon.gif" />
+		    </a>
+		  </td>
+		</tr>
+	      </tbody>
+	    </table>
+	  </fieldset>
+
+	</form>
+      </tal:block>
+
+      <!-- Display the list of absences. -->
+      <div tal:condition="view/show_absence_list"
+           class="absencelist">
+
+        <tal:block define="cropText nocall:context/@@plone/cropText;
+                           absencelist view/get_absence_list;">
+          <table tal:repeat="absence absencelist"
+		 tal:attributes="class python:absence.end_date and 'employee_healthy' or 'employee_sick'"
+		 cellspacing="0"
+		 cellpadding="0">
+            <tbody>
+              <tr class="absencetext">
+                <td colspan="4"  class="absence-bullet">
+                  <a tal:attributes="href absence/absolute_url"
+                     tal:content="absence/text" />
+                </td>
+              </tr>
+              <tr class="absenceinfo">    
+                <td tal:attributes="class python:absence.end_date and 'employee_healthy notedate startdate discreet' or 'employee_sick notedate startdate discreet'">
+                  <span tal:replace="python:toLocalizedTime(absence.start_date.isoformat())">
+                  </span>
+                  <span class="notedate discreet">
+                    <tal:end_date condition="absence/end_date|nothing">
+                      &#8260;
+                      <span tal:replace="python:toLocalizedTime(absence.end_date.isoformat())" />
+                    </tal:end_date>
+                  </span>
+                </td>
+                <td class="notedays"
+		    tal:define="days_absent python:absence.days_absent(view.is_arbo())">
+                  <tal:oneday tal:condition="python:days_absent == 1">
+                    <span i18n:translate="label_one_day">1 day</span>
+                  </tal:oneday>
+                  <tal:days tal:condition="python:days_absent != 1">
+                    <span i18n:translate="label_days">
+                      <span i18n:name="number" tal:content="days_absent"/>
+                      days
+                    </span>
+                  </tal:days>
+                </td>
+                <td class="edit-absence">
+                  <a href="edit link"
+                     class="action-icon"
+		     id="edit_absence_button"
+                     tal:condition="python: absence.is_current_absence"
+                     tal:attributes="href string:${absence/absolute_url}/edit">
+                    <img src="edit.gif"
+                         id="edit-#"
+                         alt="Edit this absence"
+                         tal:attributes="src string:${context/@@plone_portal_state/portal_url}/edit.gif;
+                                         id string:editabsence-${repeat/absence/number};" />
+                  </a>
+                </td>
+                <td class="remove-absence">
+                  <a href="#"
+                     class="action-icon"
+		     id="close_absence_button"
+                     tal:condition="python: absence.is_current_absence" >
+                    <img src="close.gif"
+                         alt="Close the absence"
+                         tal:attributes="src string:${context/@@plone_portal_state/portal_url}/lock_icon.gif;"
+			 i18n:attributes="alt label_close_absence" />
+                  </a>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </tal:block>
+      </div>
+    </dd>
+  </dl>
+</div>
