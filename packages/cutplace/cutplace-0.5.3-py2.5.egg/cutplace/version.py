@@ -1,0 +1,10 @@
+"""
+Cutplace version information.
+"""
+VERSION = 0
+RELEASE = 5
+REVISION = 3
+VERSION_DATE = "2009-07-18"
+
+VERSION_NUMBER = "%d.%d.%d" % (VERSION, RELEASE, REVISION)
+VERSION_TAG = "%s (%s)" % (VERSION_NUMBER, VERSION_DATE)
