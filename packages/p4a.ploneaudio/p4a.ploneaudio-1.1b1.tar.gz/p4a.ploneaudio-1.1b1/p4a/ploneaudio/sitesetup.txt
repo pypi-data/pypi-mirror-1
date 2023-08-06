@@ -1,0 +1,131 @@
+Site Setup
+==========
+
+The ``sitesetup`` module contains logic for configuring a Zope 3
+``ISite`` and Plone portal instance.
+
+Configuring an ISite
+--------------------
+
+    >>> from p4a.audio import interfaces
+    >>> from p4a.common.testing import MockSite
+    >>> from p4a.ploneaudio import sitesetup
+
+First we make sure a fresh site has no ``IAudioSupport`` utility registered.
+
+    >>> site = MockSite()
+    >>> site.queryUtility(interfaces.IAudioSupport) is None
+    True
+
+Once we've run the ``setup_site`` function call, the site now has the
+appropriate utilities registered.
+
+    >>> sitesetup.setup_site(site)
+    >>> site.queryUtility(interfaces.IAudioSupport)
+    <AudioSupport ...>
+
+Indexes
+-------
+
+Running the ``setup_indexes`` function on a given portal will make
+sure that it has all appropriate interfaces.
+
+    >>> class MockCatalog:
+    ...     def __init__(self):
+    ...         self._indexes = {}
+    ...         self._metadata = {}
+    ...     def indexes(self):
+    ...         return self._indexes.keys()
+    ...     def manage_reindexIndex(self, *args, **kwargs): pass
+    ...     def addIndex(self, name, *args, **kwargs):
+    ...         self._indexes[name] = [args, kwargs]
+    ...     manage_addIndex = addIndex
+    ...     def addColumn(self, name, *args, **kwargs):
+    ...         self._metadata[name] = [args, kwargs]
+    ...     manage_addColumn = addColumn
+    ...     def refreshCatalog(self): pass
+    ...     def columns(self): return self._metadata.keys()
+    ...     def __call__(self, **kwargs):
+    ...         return []
+
+    >>> catalog = site.portal_catalog = MockCatalog()
+
+    >>> catalog.indexes()
+    []
+    >>> sitesetup.setup_indexes(site)
+    >>> sorted(catalog.indexes())
+    ['Format', 'audio_artist', 'audio_genre_id', 'audio_track', 'object_provides']
+
+And of course running it a second time should be completely harmless.
+
+    >>> sitesetup.setup_indexes(site)
+    >>> sorted(catalog.indexes())
+    ['Format', 'audio_artist', 'audio_genre_id', 'audio_track', 'object_provides']
+
+Metadata Columns
+----------------
+
+As with the indexes, we have to ensure the metadata columns have been
+configured.
+
+    >>> catalog.columns()
+    []
+    >>> sitesetup.setup_metadata(site)
+    >>> sorted(catalog.columns())
+    ['audio_artist']
+
+Smart Folder Indexes
+--------------------
+
+Several of the new catalog indexes need to get registered with the ATCT
+tool so that they can be selected as Smart Folder criteria.
+
+    >>> class MockATCT:
+    ...     def __init__(self):
+    ...         self._indexes = {}
+    ...         self._metadata = {}
+    ...     def updateIndex(self, index, *args, **kwargs):
+    ...         self._indexes[index] = [args, kwargs]
+    ...     def updateMetadata(self, index, *args, **kwargs):
+    ...         self._metadata[index] = [args, kwargs]
+    >>> atct = site.portal_atct = MockATCT()
+
+    >>> atct._indexes.keys()
+    []
+    >>> atct._metadata.keys()
+    []
+    >>> sitesetup.setup_smart_folder_indexes(site)
+    >>> sorted(atct._indexes.keys())
+    ['Format', 'audio_artist', 'audio_genre_id']
+    >>> sorted(atct._metadata.keys())
+    ['Format', 'audio_artist', 'audio_genre_id']
+
+Putting It Altogether
+---------------------
+
+Now that all of the individual functions have been explored, the last
+step is to simply run the ``setup_portal`` function which runs all the
+previous functions plus uses the quick installer to install CMFonFive.
+
+    >>> class MockInstaller:
+    ...     products = []
+    ...     def installProducts(self, prods): self.products.extend(prods)
+    >>> installer = site.portal_quickinstaller = MockInstaller()
+    >>> installer.products
+    []
+    >>> sitesetup.setup_portal(site)
+    >>> installer.products
+    ['CMFonFive']
+
+And of course the _cleanup_utilities is a placeholder which doesn't do anything
+but raise an exception at this point.
+
+    >>> sitesetup._cleanup_utilities(site)
+    Traceback (most recent call last):
+      ...
+    NotImplementedError...
+
+And we also have the ``unsetup_portal`` function.  So lets see how that
+runs as well.
+
+    >>> sitesetup.unsetup_portal(site)
