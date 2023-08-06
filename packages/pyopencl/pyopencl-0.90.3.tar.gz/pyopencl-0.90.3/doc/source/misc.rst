@@ -1,0 +1,66 @@
+Installation
+============
+
+Installation information is maintained collaboratively on the 
+`PyOpenCL Wiki <http://wiki.tiker.net/PyOpenCL/Installation>`_.
+
+Acknowledgments
+===============
+
+* James Snyder provided a patch to make PyOpenCL work on OS X 10.6.
+* Roger Pau Monné supplied the example :file:`examples/benchmark-all.py`.
+
+User-visible Changes
+====================
+
+Version 0.90.2
+--------------
+
+* Fix :meth:`pyopencl.Platform.get_info`.
+* Fix passing properties to :class:`pyopencl.CommandQueue`.
+  Also fix related documentation.
+
+Version 0.90.1
+--------------
+
+* Fix building on the Mac.
+
+Version 0.90
+------------
+
+* Initial release.
+
+Licensing
+=========
+
+PyOpenCL is licensed to you under the MIT/X Consortium license:
+
+Copyright (c) 2009 Andreas Klöckner and Contributors.
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+Frequently Asked Questions
+==========================
+
+The FAQ is maintained collaboratively on the 
+`Wiki FAQ page <http://wiki.tiker.net/PyOpenCL/FrequentlyAskedQuestions>`_.
+
