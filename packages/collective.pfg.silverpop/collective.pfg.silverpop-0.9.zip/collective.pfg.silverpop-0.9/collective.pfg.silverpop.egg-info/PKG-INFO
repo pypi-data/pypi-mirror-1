@@ -1,0 +1,488 @@
+Metadata-Version: 1.0
+Name: collective.pfg.silverpop
+Version: 0.9
+Summary: Addon for PloneFormGen providing Silverpop integration
+Home-page: https://svn.plone.org/svn/collective/collective.pfg.silverpop/tags/0.9
+Author: Hans-Peter Locher
+Author-email: hans-peter.locher@inquant.de
+License: GPL
+Description: collective.pfg.silverpop
+        ========================
+        
+        Addon for PloneFormGen providing Integration
+        of Silverpop enterprise newslettering.
+        
+        Adds a FormSilverpopAdapter which can be used
+        to create newsletter signup forms to add a recipient
+        to a Silverpop Newsletter.
+        
+        Supports Simple Opt-In /Opt-Out,
+        meaning that a user can sign in to a newletter,
+        by checking a boolean field,
+        and opt-out by unchecking the boolean field.
+        
+        Re Opt-In is not implemented yet.
+        
+        Uses Silverpop Python API
+        
+        Requirements:
+        
+        - Products.PloneFormGen
+        - Products.DataGridField
+        - silverpop
+        
+        Links:
+        
+        - PloneFormGen: http://pypi.python.org/pypi/Products.PloneFormGen
+        - Silverpop: http://www.silverpop.com/
+        - silverpop (Silverpop Python API): http://silverpop.googlecode.com
+        - Code repository: http://svn.plone.org/svn/collective/collective.pfg.silverpop/
+        
+        
+        Changelog
+        *********
+        
+        0.9 (2009-05-18)
+        ----------------
+        
+        - change log levels,
+        now logs to WARNING and ERROR
+        [hplocher]
+        
+        0.8 (2009-05-14)
+        ----------------
+        
+        - handle URLError, HTTPError exceptions
+        [hplocher]
+        - display error message if an error occurs
+        [hplocher]
+        - fix issue (forms which had no custom fields
+        did not lead to a silverpop api request)
+        [hplocher]
+        
+        0.7 (2009-05-13)
+        ----------------
+        
+        - support opt in of an currently opted out
+        recipient
+        - use opt_in_recipient from silverpop
+        - requires silverpop >= 0.4
+        
+        0.6 (2009-05-12)
+        ----------------
+        
+        - requires silverpop python package
+        - refactored, use silverpop api methods from silverpop
+        package
+        [hplocher]
+        
+        0.5 (2009-05-11)
+        ----------------
+        
+        - add support for opt-in/opt-out functionality
+        - define new policy: if the form contains a field with id
+        'silverpop_opt_in' we use this as control for opt in.
+        If the field is True , the user is added to the newsletter.
+        If it is False, the user will be opted our from the
+        newsletter (e.g. usage boolean field checkbox checked=1, unchecked=0)
+        [hplocher]
+        - interpret xml response of silverpop [hplocher]
+        - refactor test to create pretty xml output [hplocher]
+        
+        0.4 (2009-05-06)
+        ----------------
+        
+        - remove workflow for FormSilverpopAdapter [hplocher]
+        
+        - add functionality to define a custom 'field_id' ->
+        'silverpop_column_name' mapping [hplocher]
+        
+        - add a Mapping grid to the FormSilverPopAdapter:
+        (id(readonly), title(readonly), silverpop api key)
+        for configuring the mapping [hplocher]
+        
+        - requires DataGridField [hplocher]
+        
+        0.3 (2009-04-08)
+        ----------------
+        
+        - New policy: filter data fields by prefix.  We're only using field names which
+        start with COLUMN_NAME_PREFIX (**silverpop_**). This saves us from having field
+        names which clash with plone IDs.  Additionally, we've defined a mapping
+        table for column names which are required verbatim as of the SilverPop API --
+        COLUMN_MAPPING.
+        [seletz]
+        
+        - Removed CONFIRMATION logic -- this can be handled better in PFG.
+        [seletz]
+        
+        0.2 (2009-04-08)
+        ----------------
+        
+        - add unicode support,
+        fixes #1 [Hans-Peter Locher]
+        
+        0.1 (2009-04-02)
+        ----------------
+        
+        - Initial release
+        [Hans-Peter Locher]
+        
+        Introduction
+        ************
+        
+        This test shows how a PFG Form folder is added. We
+        also add our custom **FormSilverpopAdapter**, configure
+        it and show how the actual sent XML looks.
+        
+        Setup
+        -----
+        
+        First, we must perform some setup. We use the testbrowser that is shipped
+        with Five, as this provides proper Zope 2 integration. Most of the
+        documentation, though, is in the underlying zope.testbrower package::
+        
+        >>> from Products.Five.testbrowser import Browser
+        >>> browser = Browser()
+        >>> portal_url = self.portal.absolute_url()
+        
+        The following is useful when writing and debugging testbrowser tests. It lets
+        us see all error messages in the error_log::
+        
+        >>> self.portal.error_log._ignored_exceptions = ()
+        
+        With that in place, we can go to the portal front page and log in. We will
+        do this using the default user from PloneTestCase::
+        
+        >>> from Products.PloneTestCase.setup import portal_owner, default_password
+        
+        >>> browser.open(portal_url)
+        
+        We have the login portlet, so let's use that::
+        
+        >>> browser.getControl(name='__ac_name').value = portal_owner
+        >>> browser.getControl(name='__ac_password').value = default_password
+        >>> browser.getControl(name='submit').click()
+        
+        Here, we set the value of the fields on the login form and then simulate a
+        submit click.
+        
+        We also set the roles we want to have::
+        
+        >>> self.setRoles(['Member', 'Manager'])
+        
+        We monkeypatch silverpop to prohibit making requests to silverpop and just
+        display test output::
+        
+        >>> import silverpop
+        >>> def opt_in_recipient(api_url, list_id, email, columns=[]):
+        ...     """opt in a recipient to a list (only email key supported)
+        ...     api_url, list_id, email are required, optionally
+        ...     takes a list of dicts to define additional columns like
+        ...     [{'column_name':'State', 'column_value':'Germany'},]
+        ...     returns True or False
+        ...     """
+        ...     print '**********silverpop-method***************************'
+        ...     print 'opt_in_recipient(api_url, list_id, email, columns=[])'
+        ...     print '**********attributes*********************************'
+        ...     print 'api_url: %s' % api_url
+        ...     print 'list_id: %s' % list_id
+        ...     print 'email: %s' % email
+        ...     print 'columns: %s' % columns
+        ...     return True
+        
+        >>> silverpop.opt_in_recipient = opt_in_recipient
+        
+        >>> def opt_out_recipient(api_url, list_id, email):
+        ...     """opt out a recipient from a list
+        ...     api_url, list_id, email are required
+        ...     returns True or False
+        ...     """
+        ...     print '**********silverpop-method****************'
+        ...     print 'opt_out_recipient(api_url, list_id, email)'
+        ...     print '**********attributes**********************'
+        ...     print 'api_url: %s' % api_url
+        ...     print 'list_id: %s' % list_id
+        ...     print 'email: %s' % email
+        ...     return True
+        
+        >>> silverpop.opt_out_recipient = opt_out_recipient
+        
+        We also define a FakeRequest class to define our request
+        containing just a form::
+        
+        >>> class FakeRequest(dict):
+        ...   def __init__(self, **kwargs):
+        ...     self.form = kwargs
+        
+        Adding content
+        --------------
+        
+        Add a new Form Folder::
+        
+        >>> browser.getLink('Form Folder').click()
+        >>> browser.getControl('Title').value = 'testform'
+        >>> browser.getControl('Save').click()
+        
+        >>> 'testform' in browser.contents
+        True
+        
+        Go to the new Form Folder::
+        
+        >>> browser.getLink('testform').click()
+        
+        
+        We use the 'Add new' menu to add a new content item::
+        
+        >>> browser.getLink('Add new').click()
+        
+        Then we select the type of item we want to add. In this case we select
+        'FormSilverpopAdapter' and click the 'Add' button to get to the add form::
+        
+        >>> browser.getControl('FormSilverpopAdapter').click()
+        >>> browser.getControl(name='form.button.Add').click()
+        >>> 'FormSilverpopAdapter' in browser.contents
+        True
+        
+        Now we fill the form and submit it::
+        
+        >>> browser.getControl(name='title').value = 'testadapter'
+        >>> browser.getControl('Silverpop API URL').value = 'http://url.com'
+        >>> browser.getControl('Silverpop List Id').value = '1'
+        >>> browser.getControl('Save').click()
+        >>> 'Changes saved' in browser.contents
+        True
+        
+        We added a new 'FormSilverpopAdapter' content item to the testform.
+        
+        Field Name Policy
+        -----------------
+        
+        We enforce the following policies regarding the field names which we send to
+        SilverPop via their API:
+        
+        - field names MUST start with a common perfix: "silverpop\_"
+        - there must be one field "silverpop_email"
+        - there can be an additional field "silverpop_opt_in"
+        to control opt-in/opt-out
+        
+        We have a transformation function which does that::
+        
+        >>> from collective.pfg.silverpop.utilities import transform_column_name
+        >>> transform_column_name("silverpop_foo")
+        'foo'
+        >>> transform_column_name("no_prefix") is None
+        True
+        
+        onSuccess
+        ---------
+        
+        On submit of the form, the onSuccess method of
+        our FormSilverpopAdapter will be called.
+        
+        We want to access our testform and testadapter directly::
+        
+        >>> self.testform = self.portal.testform
+        >>> self.testadapter = self.portal.testform.testadapter
+        
+        We create some fields inside our form.
+        
+        First, we create fields which should be regarded by our 'FormSilverpopAdapter'.
+        
+        The special 'sivlerpop_email' field (this field has a fixed mapping)::
+        
+        >>> self.testform.invokeFactory('FormStringField', 'silverpop_email', title='Email')
+        'silverpop_email'
+        
+        A field to insert a name::
+        
+        >>> self.testform.invokeFactory('FormStringField', 'silverpop_name', title='Name')
+        'silverpop_name'
+        
+        We also create a misc field, which shouldn't be regarded, although
+        it is in the same form::
+        
+        >>> self.testform.invokeFactory('FormStringField', 'credits_to_admin', \
+        ... title='Give your credits to the admin of the site')
+        'credits_to_admin'
+        
+        USER DEFINED MAPPING
+        ++++++++++++++++++++
+        
+        We offer the ability, to define a mapping from
+        field ids to Silverpop API Keys.
+        
+        NO MAPPING
+        ..........
+        
+        First, we check what happens when we don't change the mapping.
+        
+        We go to the 'FormSilverpopAdapter' s edit form::
+        
+        >>> browser.open(portal_url+'/testform/testadapter/edit')
+        
+        The current mapping should only contain one record
+        (with columns id, title, silverpop api key),
+        so we check all columns.
+        
+        id::
+        
+        >>> browser.getControl(name='mapping.id:records').value
+        'silverpop_name'
+        
+        title::
+        
+        >>> browser.getControl(name='mapping.title:records').value
+        'Name'
+        
+        silverpop api key::
+        
+        >>> browser.getControl(name='mapping.silverpop api key:records', index=0).value
+        ''
+        
+        We set up the list of fields::
+        
+        >>> fields = [self.testform.silverpop_email, \
+        ... self.testform.silverpop_name, self.testform.credits_to_admin,]
+        
+        We set up a minimal request, containing the user's input::
+        
+        >>> request = FakeRequest(silverpop_email='x@x.com', silverpop_name='Hans', \
+        ... credits_to_admin='I like the high availability')
+        
+        We now call the adapter's onSuccess method::
+        
+        >>> self.testadapter.onSuccess(fields,request)
+        **********silverpop-method***************************
+        opt_in_recipient(api_url, list_id, email, columns=[])
+        **********attributes*********************************
+        api_url: http://url.com
+        list_id: 1
+        email: x@x.com
+        columns: [{'column_value': 'Hans', 'column_name': 'name'}]
+        
+        CUSTOM MAPPING
+        ..............
+        
+        Now, we check what happens when we change
+        the mapping.
+        We want to use 'FIRST NAME' as COLUMN
+        for silverpop, for the 'silverpop_name'
+        field.
+        
+        We go to the 'FormSilverpopAdapter' s edit form::
+        
+        >>> browser.open(portal_url+'/testform/testadapter/edit')
+        
+        We change the value inside the mapping::
+        
+        >>> browser.getControl(name='mapping.silverpop api key:records', index=0).value = 'FIRST NAME'
+        >>> browser.getControl('Save').click()
+        
+        The list of fields, is still the same.
+        
+        We set up a minimal request, containing the user's input::
+        
+        >>> request = FakeRequest(silverpop_email='x@x.com', silverpop_name='Hans', \
+        ... credits_to_admin='I like the high availability')
+        
+        We now call the adapter's onSuccess method::
+        
+        >>> self.testadapter.onSuccess(fields,request)
+        **********silverpop-method***************************
+        opt_in_recipient(api_url, list_id, email, columns=[])
+        **********attributes*********************************
+        api_url: http://url.com
+        list_id: 1
+        email: x@x.com
+        columns: [{'column_value': 'Hans', 'column_name': 'FIRST NAME'}]
+        
+        OPT-IN/OPT-OUT
+        ++++++++++++++
+        
+        We create a boolean field with the special id 'silverpop_opt_in'
+        in our form::
+        
+        >>> self.testform.invokeFactory('FormBooleanField', 'silverpop_opt_in', \
+        ... title='Yes I want to get the newsletter')
+        'silverpop_opt_in'
+        
+        This field mustn't occur in the testadapter's mapping grid.
+        
+        We go to the 'FormSilverpopAdapter's edit form::
+        
+        >>> browser.open(portal_url+'/testform/testadapter/edit')
+        
+        The current mapping should still only contain one record, so
+        we check the id column::
+        
+        >>> browser.getControl(name='mapping.id:records').value
+        'silverpop_name'
+        
+        OPT-IN
+        ......
+        
+        The user wants to get the newsletter. A checked boolean field
+        will lead to a 'True' in the request.
+        We set up a minimal request, containing the user's input::
+        
+        >>> request = FakeRequest(silverpop_email='x@x.com', silverpop_name='Hans', \
+        ... silverpop_opt_in='True')
+        
+        The list of fields now looks as follows::
+        
+        >>> fields = [self.testform.silverpop_email, self.testform.silverpop_name, \
+        ... self.testform.silverpop_opt_in]
+        
+        We now call the adapter's onSuccess method::
+        
+        >>> self.testadapter.onSuccess(fields,request)
+        **********silverpop-method***************************
+        opt_in_recipient(api_url, list_id, email, columns=[])
+        **********attributes*********************************
+        api_url: http://url.com
+        list_id: 1
+        email: x@x.com
+        columns: [{'column_value': 'Hans', 'column_name': 'FIRST NAME'}]
+        
+        OPT-OUT
+        .......
+        
+        The user doesn't want to get the newsletter, or
+        doesn't want it anymore. An unchecked boolean field
+        will lead to a 'False' in the request.
+        
+        We set up a minimal request, containing the user's input::
+        
+        >>> request = FakeRequest(silverpop_email='x@x.com', silverpop_name='Hans', \
+        ... silverpop_opt_in='False')
+        
+        The list of fields is still the same.
+        
+        We now call the adapter's onSuccess method::
+        
+        
+        >>> self.testadapter.onSuccess(fields,request)
+        **********silverpop-method****************
+        opt_out_recipient(api_url, list_id, email)
+        **********attributes**********************
+        api_url: http://url.com
+        list_id: 1
+        email: x@x.com
+        
+        Contributors
+        ************
+        
+        Hans-Peter Locher, Author
+        Stefan Eletzhofer
+        
+        
+        Download
+        ********
+        
+Keywords: Plone PloneFormGen Silverpop
+Platform: UNKNOWN
+Classifier: Framework :: Plone
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: License :: OSI Approved :: GNU General Public License (GPL)
