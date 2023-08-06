@@ -1,0 +1,136 @@
+#!/usr/bin/env python
+"""
+Module LISTVIEW -- GUI Tree/List View Widgets
+Sub-Package GUI.WIDGETS of Package PLIB -- Python GUI Framework
+Copyright (C) 2008-2009 by Peter A. Donis
+
+Released under the GNU General Public License, Version 2
+See the LICENSE and README files for more information
+
+Defines the widget classes for tree view/list view widgets.
+"""
+
+import sys
+
+from plib.gui.defs import *
+from plib.gui._widgets import _control, _helpers, _signal
+
+class PListViewItemCols(_helpers._PTreeHelperItemCols):
+    """ Exposes columns of a list view item as a sequence. """
+    
+    def _get_listviewitem(self):
+        return self._helperitem
+    
+    listviewitem = property(_get_listviewitem)
+    
+    def _get_data(self, index):
+        return self.listviewitem._get_col(index)
+    
+    def _set_data(self, index, value):
+        self.listviewitem._set_col(index, value)
+
+class PListViewItemBase(_helpers._PTreeHelperItem):
+    """
+    List view item that looks like a sequence of tuples of the
+    form (column-values, [list of child items]). The column-value
+    is a list of strings; if the list view has only one column,
+    the list has a single element.
+    """
+    
+    colsclass = PListViewItemCols
+    
+    def __init__(self, parent, index, data=None):
+        self._parent = parent
+        self._listview = self._listview_from_parent(parent)
+        _helpers._PTreeHelperItem.__init__(self, parent, index, data)
+    
+    def _listview_from_parent(self, p):
+        while not isinstance(p, self.listviewclass):
+            p = p._parent
+        return p
+    
+    def _get_listview(self):
+        return self._listview
+    
+    listview = property(_get_listview)
+    
+    def colcount(self):
+        return self.listview.colcount()
+    
+    def _get_col(self, col):
+        """ Placeholder for derived classes to implement. """
+        raise NotImplementedError
+    
+    def _set_col(self, col, value):
+        """ Placeholder for derived classes to implement. """
+        raise NotImplementedError
+    
+    def expand(self):
+        """ Placeholder for derived classes to implement. """
+        raise NotImplementedError
+
+class PListViewLabelsBase(_helpers._PHelperColLabels):
+    
+    def _get_listview(self):
+        return self._helper
+    
+    listview = property(_get_listview)
+
+class PListViewMixin(_helpers._PTreeHelper):
+    """
+    Mixin class for PListViewBase and PListBoxBase, to implement
+    common behaviors.
+    """
+    
+    signal = SIGNAL_LISTVIEWCHANGED
+    
+    def __init__(self, parent, labels=None, data=None):
+        self._parent = parent
+        if not hasattr(self.itemclass, 'listviewclass'):
+            self.itemclass.listviewclass = self.__class__
+        _helpers._PTreeHelper.__init__(self, labels, data)
+    
+    def colcount(self):
+        """ Placeholder for derived classes to implement. """
+        raise NotImplementedError
+
+class PListViewBase(PListViewMixin, _signal._PNotifyControl):
+    """
+    List view that looks like a list of child list view items.
+    """
+    
+    def __init__(self, parent, labels=None, data=None, target=None):
+        PListViewMixin.__init__(self, parent, labels, data)
+        _signal._PNotifyControl.__init__(self, target)
+
+class PListBoxBase(PListViewMixin, _control._PDialogControl):
+    """
+    List view specialized for use as a dialog control. Includes
+    convenience methods to handle common special cases.
+    """
+    
+    def __init__(self, parent, labels=None, data=None, target=None, geometry=None):
+        PListViewMixin.__init__(self, parent, labels, data)
+        _control._PDialogControl.__init__(self, target, geometry)
+    
+    if sys.version_info < (2, 4):
+        
+        def extend_flat(self, items):
+            """ Adds list of items to list box; assumes no children, but multiple columns. """
+            for item in items:
+                self.append((item, []))
+        
+        def extend_list(self, items):
+            """ Adds list of items to list box; assumes a single column list box with no children. """
+            for item in items:
+                self.append(([item], []))
+    
+    else:
+        
+        def extend_flat(self, items):
+            """ Adds list of items to list box; assumes no children, but multiple columns. """
+            self.extend((item, []) for item in items)
+        
+        def extend_list(self, items):
+            """ Adds list of items to list box; assumes a single column list box with no children. """
+            self.extend(([item], []) for item in items)
