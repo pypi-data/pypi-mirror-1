@@ -1,0 +1,42 @@
+import atexit
+import logging
+import StringIO
+import sys
+
+class ProgressStreamHandler(logging.StreamHandler):
+    def __init__(self, *args, **kwargs):
+        self._stdout = sys.stdout
+        self._capture_stdout = StringIO.StringIO()
+        self.spinner = '-/|\\'
+        self.msg = ''
+        self.max_length = 0
+        logging.StreamHandler.__init__(self, *args, **kwargs)
+
+    def capture_stdout(self):
+        self._stdout = sys.stdout
+        sys.stdout = self._capture_stdout
+
+    def uncapture_stdout(self):
+        sys.__stdout__.write(''.ljust(self.max_length))
+        sys.__stdout__.write('\n')
+        sys.stdout = self._stdout
+        self._capture_stdout.seek(0)
+        print self._capture_stdout.read()
+
+    def emit(self, record):
+        if self.msg != record.msg:
+            self.msg = record.msg
+            msg = ' %s   %s' % (self.spinner[0], self.msg)
+            self.max_length = max(len(msg), self.max_length)
+            self.spinner = self.spinner[1:] + self.spinner[:1]
+            sys.__stdout__.write(msg.ljust(self.max_length))
+            sys.__stdout__.write('\r')
+
+def enable_progress():
+    handler = ProgressStreamHandler()
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    handler.capture_stdout()
+    atexit.register(handler.uncapture_stdout)
+
+log = logging.getLogger('progress')
