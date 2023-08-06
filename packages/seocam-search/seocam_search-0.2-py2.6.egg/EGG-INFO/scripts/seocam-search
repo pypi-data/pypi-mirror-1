@@ -1,0 +1,88 @@
+#!/usr/bin/python
+
+import os
+import sys
+import subprocess 
+from optparse import OptionParser
+
+USAGE = """%prog [args] pattern
+Search for a pattern recursively inside files in the current folder 
+ignoring development redundancies (svn, links, etc.)"""
+
+VERSION = '0.1'
+
+DEFAULT_EXCLUDE = ['.svn', 'develop-link', 'build/', 'extjs/', '.egg-info']
+
+
+def search(search_pattern, exclude_pattern, case_insensitive, use_colors=True):
+    
+    grep_args = '-RI'
+    if case_insensitive:
+        grep_args += 'i'
+
+    search = ['egrep', '-n', search_pattern, grep_args, './*']
+    exclude = ['egrep', '-v', exclude_pattern]
+    colorize = ['egrep', '--color=auto', grep_args, search_pattern]
+
+    cmd = ' '.join(search)  
+    cmd += ' | ' + ' '.join(exclude) 
+    if use_colors:
+        cmd += ' | ' + ' '.join(colorize)
+    
+    p = subprocess.Popen(cmd, shell=True)
+    try:
+        sts = os.waitpid(p.pid, 0)
+    except KeyboardInterrupt:
+        sys.exit(-1)
+
+def main():
+    
+    # TODO: Check if egrep is available
+
+    parser = OptionParser(usage=USAGE, version=VERSION)
+        
+    parser.add_option('-j', '--js', dest='include_js',
+                      action='store_true',
+                      help='Include js files (Default: False)')
+
+    parser.add_option('-b', '--branches', dest='include_branches', 
+                      action='store_true',
+                      help='Include branches (Default: False)')
+    
+    parser.add_option('-t', '--tags', dest='include_tags', 
+                      action='store_true',
+                      help='Include tags (Default: False)')
+    
+    parser.add_option('-e', '--exclude', dest='exclude',
+                      action="append",
+                      default=DEFAULT_EXCLUDE,
+                      help="Exclude this pattern from search (Multiple)")
+
+    parser.add_option('-i', '--ignore-case', dest='case_insensitive',
+                      action='store_true',
+                      help='Case insentive')
+
+    (options, args) = parser.parse_args()
+
+    if not options.include_branches:
+        options.exclude.append('branches/')
+    
+    if not options.include_tags:
+        options.exclude.append('tags/')
+    
+    if not options.include_js:
+        options.exclude.append('js/')
+   
+    exclude_pattern = '|'.join(options.exclude)
+    exclude_pattern = '"' + exclude_pattern + '"'
+    
+    if not len(args):
+        parser.print_help()
+        return
+ 
+    search_pattern = '"' + args[0] + '"'
+    
+    search(search_pattern, exclude_pattern, options.case_insensitive) 
+
+if __name__ == '__main__':
+    main()
