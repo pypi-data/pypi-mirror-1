@@ -1,0 +1,72 @@
+==================
+bda.resultduplexer
+==================
+
+Overview
+========
+
+bda.resultduplexer provides duplexing of search results in plone. The original
+intention were the needs to modify the url for proxied contents
+(see bda.contentproxy package). This is also the behaviour of the default
+duplexer. It looks if the user is authenticated, and if so, leave the object url
+as is, otherwise modify the url pointing to the content proxy view of the
+object.
+ 
+To implement your own duplexing logic, you have to provide an IResultDuplexer
+implementing object. See bda.resultduplexer.interfaces for the API documentation
+and bda.resultduplexer.duplexer how such an implementation can look like.
+ 
+To describe duplexed results, brain wrapper objects are used. The default
+implementation modifies the URL of an object, if you want to modify
+anything else of the result, you have to provide such an IBrainWrapper
+implementing object as well.
+
+
+Note
+====
+
+This module patches ATTopic!. This must be done to make the result duplexer
+work on topics by calling::
+ 
+ results = IResultDuplexer(self).prepareResults(results)
+ 
+For the common search behaviour, livesearch_reply and queryCatalog are replaced.
+To be able to call the duplexer in restricted code, there is a browser view
+implementation simply loops the call through::
+ 
+ duplexer = context.restrictedTraverse('@@restrictedresultduplexer')
+ results = duplexer.prepareResults(results)
+
+
+Installation
+============
+
+1. Make the egg available in your instance,
+  
+2. Import the bda.resultduplexer extension profile in your plone instance.
+
+3. Write your own duplexer. Look at bda.contenbtproxy
+
+This Product is tested with Plone 3.0
+
+
+Copyright
+=========
+
+Copyright 2008, BlueDynamics Alliance, Austria - 
+` bluedynamics.com <http:// bluedynamics.com>`_
+
+
+Credits
+=======
+
+- Written by `Robert Niederreiter <mailto:rnix@squarewave.at>`_
+  Squarewave Computing, BlueDynamics Alliance, Austria
+
+- Refactorings: `Jens Klein <mailto:jens@bluedynamics.com>`_
+  BlueDynamics Alliance, Klein & Partner KEG, Innsbruck, Austria
+
+Licence
+=======
+
+- GNU General Public Licence 2.0 or later
