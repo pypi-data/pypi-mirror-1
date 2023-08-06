@@ -1,0 +1,247 @@
+======================
+MCREPOGEN User's Guide
+======================
+
+MCREPOGEN is a program to simulate the history of software projects.  It does
+this by using a random process to change one directory tree into another.  It
+keeps track of the successive states of these directory trees and this forms
+the history of a "project".  In particular, the directory trees and their
+contents are the states in a Markov Chain, which is a process that moves from
+state to state in a random, but well-controlled fashion.
+
+MCREPOGEN arose out of a desire to investigate the effects of certain
+characteristics of project histories on the performance of version control
+systems (VCS).  Most VCS performance testing is done on existing open source
+projects, which provides relevant data, but is limited in the range of
+possibilities it can explore and the factors that can be controlled.  The
+motivation then was to make a tunable system for generating version control
+histories where a full range of factors could be manipulated.
+
+MCREPOGEN does so by using a Markov Chain framework, where the probabilities
+and parameters of various types of changes to the directory tree are
+controlled by the user.  Currently, these values are chosen in an ad hoc
+manner, but with further research, the parameter values corresponding to
+existing projects could be estimated.
+
+
+Usage
+=====
+
+MCREPOGEN simulates a specified number of revisions (time steps in the Markov
+Chain) and outputs the resulting history in the fast-export format
+(http://www.kernel.org/pub/software/scm/git/docs/git-fast-import.html).  The
+main script is ``gen_random_history.py``.  For example::
+
+  gen_random_history.py -r 100 -o test_history.fi
+
+produces a history of 100 revisions in the file ``test_history.fi``.  A
+separate configuration file specifies the parameters of the Markov Chain, or
+if it is absent, default values are used.
+
+Options
+-------
+
+`-r`, `--revisions` 
+  This controls how many revisions will be created.  The default value is 100.
+
+`-o`, `--output`
+  This can be given to specify a filename for the output.  If it is absent,
+  the output is sent to the standard output.
+
+`-f`, `--config-file`
+  This specifies an *optional* configuration file containing parameter
+  values.  By default, it looks for a file named ``mcrepogen.conf`` in the
+  current directory and if it doesn't find it, it uses default values
+  of the parameters.
+
+Configuration
+-------------
+
+The probabilistic parameters that control the evolution of the tree can be
+specified via a configuration file.  The file has two sections [mutators] and
+[editors].  Within each section, the subsections represent instances a
+`Mutator` subclass.  The class of that instance is specified by the ``class``
+key in the subsection.  (For more on the objects that MCREPOGEN uses to
+manipulate the directory tree, see Theory_ below.)  Within those subsections,
+the other values given override the default value of that parameter.
+
+For example, to evolve trees that only ever create files with very short
+lines, a configuration such as the following could be used::
+
+    [mutators]
+
+      [[create]]
+      class = FileCreator
+      max_line_length = 12
+
+    [editors]
+
+Note that both sections are mandatory, but they may be empty.  The default
+configuration is
+
+::
+
+    [mutators]
+      
+      [[create files]]
+      class = FileCreator
+      lambda = 1.9
+      max_line_length = 72
+      p_last_line = 0.025
+
+      [[create directories]]
+      class = DirectoryCreator
+      lambda = 0.6
+
+      [[remove files]]
+      class = FileRemover
+      p = 0.01
+
+      [[remove directories]]
+      class = DirectoryRemover
+      p = 0.001
+      
+      [[move files]]
+      class = FileMover
+      p = 0.01
+      
+      [[move directories]]
+      class = DirectoryMover
+      p = 0.001
+
+    [editors]
+      
+      [[edit files]]
+      class = Patcher
+      lambda = 2
+      p_line_changed = 0.01
+      max_line_length = 72
+
+A sample configuration file is provided as ``mcrepogen.conf.example`` and more
+examples of what is possible are in the ``examples/`` directory.
+
+
+Theory
+======
+
+MCREPOGEN simulates a trajectory of a Markov chain whose states are directory
+trees.  Abstractly, a directory tree is a rooted tree with two types of labeled
+nodes: file nodes and directory nodes.  The label is the name of the file or
+directory.  Each file node has a text associated with it and has no children. 
+
+In this abstract framework, changing the connectivity of a node
+corresponds to a `move`, changing the text of a file node is an `edit`,
+eliminating a node is a `deletion` and changing the label of a node is a
+`rename`.  Note that this framework distinguishes moves and renames
+(that is, nodes have a unique identity apart from their label).
+
+The parameters of the generator are the probabilities of the various types of
+tree changes in the previous paragraph.  MCREPOGEN currently simulates
+`stationary` Markov Chains, that is, the parameters are constant throughout the
+simulation.  It is an open research question whether actual software projects
+are significantly non-stationary in their evolution.
+
+Directory Trees
+---------------
+
+In an effort to be VCS agnostic, MCREPOGEN implements a very abstract
+interface to a directory tree and to a history of directory trees,
+called a branch.  The abstract interface is in ``treebranch.py`` and those
+wishing to use MCREPOGEN on top of another VCS need only implement
+that abstract interface, which includes the following methods
+
+* Branch
+    - checkpoint
+    - get_checkpoint
+    - serialize
+* Tree
+    - id2path
+    - path2id
+    - iter_files
+    - iter_subdirs
+    - iter_all_files
+    - iter_all_subdirs
+    - add_file
+    - add_directory
+    - remove_file
+    - remove_directory
+    - move
+    - open_file
+    - open_file_by_id
+
+See the docstrings in ``treebranch.py`` for specifications of the behavior
+of these methods.  A reference implementation using Bazaar as the underlying
+branch and tree objects is in ``bzrtreebranch.py``.
+
+Mutators
+--------
+
+The transitions in the Markov Chain are implemented by subclasses of the
+`Mutator` class which act on a directory tree to change it.  They have a
+`mutate` method which takes a directory tree as an argument.  That
+method returns the directory tree after it has been affected by the type
+of change that is implemented.  A trivial example would be the following
+destructive mutator::
+
+  class DeleteAllFiles(Mutator):
+
+      def mutate(self, input_tree):
+          for filename in input_tree.iter_all_files():
+              input_tree.remove_file(filename)
+          return input_tree
+
+Note that although the ``mutate`` method returns the new directory tree, it
+may make those changes by changing its argument directly.  The ``mutate``
+method may have side effect on its argument.
+
+A default set of Mutators is provided that implements the basic
+tree manipulations that are possible
+
+* FileCreator
+* DirectoryCreator
+* FileRemover
+* FileMover
+* DirectoryRemover
+* DirectoryMover
+
+The probabilistic model used by each class is described in its
+docstring.
+
+Editors
+-------
+
+Changing the contents of files is a special type of transition that
+doesn't affect the tree structure.  These are implemented by subclasses
+of `Editor` (which is itself a subclass of `Mutator`) that implement an
+``edit`` method.  Similar to a mutator, it takes an input tree as an
+argument and returns the changed tree, while not necessarily preserving
+its input.  Here is an example of a very intrusive `Editor`::
+
+  class AddTagline(Editor):
+
+      def edit(self, input_tree):
+          for filename in input_tree.iter_all_files():
+              f_open = input_tree.open_file(filename, 'a')
+              f_open.write("This file has been tagged\n")
+              f_open.close()
+          return input_tree
+
+which appends a tag line to the end of every file in the tree.
+
+The only probabilistic model implemented currently for `Ediotr`\s is the
+generation of a random patch.  This chooses a random number of hunks and then
+makes a random change to each of those hunks.  It is possible to implement
+different types of `Editor`\s to represent different kinds of textual changes:
+TypoFixer, Refactoring, Appending, etc.
+
+TransitionKernel
+----------------
+
+The particular markov chain being simulated is specified by a
+`TransitionKernel` which holds a list of mutator instances and a list of
+editor instances.  The `step` method takes a directory tree as input and
+returns the next state in the markov chain starting from that point.  It
+gets there by applying the mutators in order and then the editors.  It
+is possible to specify multiple instances of a mutator or editor, but in
+many cases this is equivalent to a single instance of the mutator or
+editor with different parameter values.
