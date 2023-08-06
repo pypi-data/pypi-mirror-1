@@ -1,0 +1,161 @@
+Translation
+===========
+
+This document contains functional template tests.
+
+  >>> from z3c.pt.testing import render_xhtml
+
+XHTML
+-----
+
+:: Plain HTML document
+
+  >>> print render_xhtml("""\
+  ... <div xmlns="http://www.w3.org/1999/xhtml">
+  ...   Hello World!
+  ... </div>""")
+    <div>
+      Hello World!
+    </div>
+
+:: Setting DOCTYPE
+
+  >>> print render_xhtml("""\
+  ... <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" 
+  ...    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  ... <html xmlns="http://www.w3.org/1999/xhtml">
+  ...   Hello World!
+  ... </html>""")
+    <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+    <html>
+      Hello World!
+    </html>
+
+:: Unicode 
+
+  >>> print render_xhtml("""\
+  ... <div xmlns="http://www.w3.org/1999/xhtml">
+  ...   La Peña
+  ...   <img alt="La Peña" />
+  ... </div>""")
+    <div>
+      La Peña
+      <img alt="La Peña" />
+    </div>
+
+:: CDATA blocks
+  >>> print render_xhtml("""\
+  ... <div xmlns="http://www.w3.org/1999/xhtml">
+  ...   /* <![CDATA[ */
+  ...   This is protected
+  ...   /* ]]> */
+  ...   <span>Not protected</span> <![CDATA[ This is protected ]]>
+  ... </div>""")
+    <div>
+      /* <![CDATA[ */
+      This is protected
+      /* ]]> */
+      <span>Not protected</span> <![CDATA[ This is protected ]]>
+    </div>
+
+Literals
+--------
+
+:: Named entities output literally (note doctype is required to prevent
+   lxml from raising a XMLSyntaxError :-( )
+
+  >>> print render_xhtml("""\
+  ... <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" 
+  ...    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  ... <html xmlns="http://www.w3.org/1999/xhtml">
+  ...   Hello &nbsp; World!
+  ... </html>""")
+    <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+    <html>
+      Hello &nbsp; World!
+    </html>
+
+:: Processing instructions output literally
+
+  >>> print render_xhtml("""\
+  ... <html xmlns="http://www.w3.org/1999/xhtml">
+  ...   <?xml-stylesheet href="classic.xsl" type="text/xml"?>
+  ...   Hello World!
+  ... </html>""")
+    <html>
+      <?xml-stylesheet href="classic.xsl" type="text/xml"?>
+      Hello World!
+    </html>
+
+:: Literal comments (without embedded expressions) output literally
+
+  >>> print render_xhtml("""\
+  ... <html xmlns="http://www.w3.org/1999/xhtml">
+  ...   <!-- hello world -->
+  ... </html>""")
+    <html>
+      <!-- hello world -->
+    </html>
+  
+Text templates
+--------------
+
+  >>> from z3c.pt.testing import render_text
+
+An example with a CSS stylesheet document:
+  
+  >>> css = """\
+  ... #some-region {
+  ...    background: url(${'http://nohost/plone'}/logo.gif) no-repeat;
+  ... }"""
+
+  >>> print render_text(css)
+  #some-region {
+     background: url(http://nohost/plone/logo.gif) no-repeat;
+  }
+
+A javascript document that prints out HTML:
+
+  >>> js = """\
+  ... print '<div class="description">Hello ${'World!'}</div>';"""
+
+  >>> print render_text(js)
+  print '<div class="description">Hello World!</div>';
+
+Error handling
+--------------
+
+This section demonstrates how the package handles templates that
+contain errors.
+
+No default namespace declaration:
+  A default namespace must be explicitly declared for the parser to work.
+  
+  >>> body = '<br />'
+  >>> render_xhtml(body)
+  Traceback (most recent call last):
+    ...
+  ValueError: Must define valid namespace for tag: 'br.'
+    
+Bad XML
+  We expect the xml-parser to raise an exception.
+  
+  >>> body = '<div xmlns="http://www.w3.org/1999/xhtml"'
+  >>> render_xhtml(body)
+  Traceback (most recent call last):
+    ...
+  XMLSyntaxError: Couldn't find end of Start Tag div line 1, line 1, column 11
+
+Missing namespace definition:
+    We expect the engine to raise an exception*
+
+*) This test only passes on lxml 2.x.
+
+  >>> body = """\
+  ... <div xmlns="http://www.w3.org/1999/xhtml" tal:content="'Hello World'" />
+  ... """
+
+  >>> print render_xhtml(body)
+  Traceback (most recent call last):
+    ...
+  XMLSyntaxError: Namespace prefix tal for content on div is not defined, line 1, column 23
