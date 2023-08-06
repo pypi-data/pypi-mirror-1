@@ -1,0 +1,64 @@
+Introduction
+============
+
+The sentence "*Plone is slow*" can open a very big dicussion thread (and is commonly *false*!).
+What is often true is this: "*Work with Plone UI is slow*".
+
+The Plone interface need the user to click many times to do (or repeat) common tasks.
+This is how the World Wide Web works: click on a link, move to a page, click on another link...
+
+Is clear to all that the presence of Javascript can speed up (sometimes dramatically) the speed
+of working with CMS.
+
+What SpeedUpUI Pathbar does
+===========================
+
+The common static breadcrumb viewlet of Plone can be replaced with a new one.
+
+Why work with static and poor-of-features links in the pathbar when we can replace those links
+with a command interface, to perform directly common operation on the elements inside the pathbar?
+
+So the pathbar will change in a dropdown menu with inside common operation like:
+
+* View the content (what stardard pathbar viewlet does normally)
+* Edit the content directly
+* Go to *folder_contents* view of the element
+* Add new content inside the pathbar element, as you are inside the element itself where you
+  can normally use the "Add new ..." menu.
+
+All those new features are nothing special right now, but can free the user from performing
+additional clicks.
+
+.. figure:: http://keul.it/images/plone/redturtle_speedui_pathbar0.2.0.png
+   :scale: 50
+
+Installation
+============
+
+Just register redturtle.speedupui.pathbar in your buildout *.cfg* file.
+
+::
+
+    [instance]
+    ...
+    eggs =
+        ...
+        redturtle.speedupui.pathbar
+    ...
+    
+    zcml =
+        ...
+        redturtle.speedupui.pathbar
+        redturtle.speedupui.pathbar-overrides
+    ...
+
+TODO
+====
+
+* Dropdown are now done using basic Plone javascript; think about relying on jQuery Tools
+  (plone.app.jqtools)
+* No test with Internet Explorer done right now!
+* Think about add some Manager action (like */manage*, */manage_security*) but inside submenu
+  to keep clean the current UI
+
+ 
