@@ -1,0 +1,28 @@
+"""JSON schema defintion & validation
+
+Example:
+
+>>> from json_schema import SchemaCollection, AnyString, AnyInteger
+>>> class Foo(SchemaCollection):
+...     abc = [u"hello", {u"world": AnyString}]
+...     bla = [u"hello", {u"world": AnyInteger}]
+...     bli = [u"foo", AnyInteger, u"bar"]
+... 
+>>> Foo.abc  # doctest: +ELLIPSIS
+<json_schema.schema.Schema object at ...
+>>> Foo.match_to_schema([u"hello", {u"world": u"Hey"}])
+'abc'
+>>> Foo.match_to_schema([u"hello", {u"world": 123}])
+'bla'
+>>> Foo.match_to_schema([u"hey there", {u"world": 123}])
+>>> Foo.match_to_schema([u"foo", 1337, u"bar"])
+'bli'
+"""
+
+from json_schema.defs import *
+from json_schema.validator import validate as validate_json_schema
+from json_schema.schema import SchemaCollection, Schema
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testmod()
