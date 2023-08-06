@@ -1,0 +1,84 @@
+Introduction
+============
+
+openc.excludesearch is designed to make it possible for an administrator to easily mark content as being hidden to searches.   
+
+
+NB:  Requires dm's AdvancedQuery from http://www.dieter.handshake.de/pyprojects/zope/#AdvancedQuery
+
+
+First off, install myself::
+    
+    >>> self.addProduct("openc.excludesearch")
+
+
+We set up an object that will show in searches for "foo"::
+
+    >>> self.folder.invokeFactory('Document', 'foo', 'Foo Page')
+    'foo'
+    >>> self.folder['foo']
+    <ATDocument at .../foo>
+    >>> self.folder['foo'].setText("I am a foo object from foosville.")
+
+
+We name it foo for convenience::
+        
+    >>> foo = self.folder['foo']
+
+
+We can see its text fine::
+    
+    >>> foo.getText()
+    '<p>I am a foo object from foosville.</p>'
+    >>> foo.reindexObject()
+
+
+If we search for it, we find it::
+    
+    >>> app.plone.restrictedTraverse("queryCatalog")({"SearchableText":"foo"})
+    [<Products.ZCatalog.Catalog.mybrains object at ...>]
+
+
+Once we activate the hiding functionality we don't::
+    
+    >>> foo.getField('hidesearch').get(foo)
+    False
+    >>> foo.getField('hidesearch').set(foo, value=True)
+    >>> foo.reindexObject()
+    >>> foo.getField('hidesearch').get(foo)
+    True
+    >>> app.plone.restrictedTraverse("queryCatalog")({"SearchableText":"foo"})
+    []
+
+
+This is because it has a new marker interface::
+    
+    >>> from openc.excludesearch.interfaces import IExcludeFromSearch
+    >>> IExcludeFromSearch(foo)
+    <ATDocument at .../foo>
+
+
+If we remove this marker, we find it again::
+    
+    >>> foo.getField('hidesearch').get(foo)
+    True
+    >>> foo.getField('hidesearch').set(foo, value=False)
+    >>> foo.reindexObject()
+    >>> foo.getField('hidesearch').get(foo)
+    False
+    >>> app.plone.restrictedTraverse("queryCatalog")({"SearchableText":"foo"})
+    [<Products.ZCatalog.Catalog.mybrains object at ...>]
+
+
+As we no longer provide that interface::
+    
+    >>> IExcludeFromSearch(foo)
+    Traceback (most recent call last):
+    ...
+    TypeError: ('Could not adapt', <ATDocument at .../foo>, <InterfaceClass openc.excludesearch.interfaces.IExcludeFromSearch>)
+
+Todo
+====
+
+ 1) Subclass/monkeypatch collections so they know to ignore things with the
+    IExcludeFromSearch marker interface
