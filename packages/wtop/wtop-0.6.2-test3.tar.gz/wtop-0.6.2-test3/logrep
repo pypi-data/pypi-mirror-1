@@ -1,0 +1,375 @@
+#!/usr/bin/python
+
+cmd_options = """
+A handy tool for sophisticated, ad-hoc analysis of webserver logs.
+
+logrep  [--mode MODE] [--include | --exclude CLASSES] [-H | -R]
+        [--output FIELDS] [--filter FILTERS] [--last LAST_N] 
+        [--sort LIM:FIELDS:DIRECTION] [--config CFG_FILE] [--quiet] 
+        [LOG_FILE]
+
+
+   -m MODE           There are three modes:
+   --mode              - "grep" parses an entire log file (default).
+                       - "tail" reads from the end of the file.
+                       - "top"  shows running performance stats.
+
+   -i, -e CLASSES    Include or exclude the given URL "classes". You can
+   --include         configure logrep to classify URLs by a set of 
+   --exclude         regular expressions. See the installation docs and
+                     /etc/wtop.cfg for how to configure your own classes.
+                     --include and --exclude are mutually exclusive. 
+
+                     Examples: 
+                        --include "home,search,wiki"
+                        --exclude "img,xml,js"
+
+   -f FILTERS        -f filters act on named fields.
+   --filter          There is support for strings & numbers, greater 
+                     than (>), less than (<), equals (=), not-equals 
+                     (!=), and regular expression match (~ and !~).
+
+                     For example: Filter successful requests that were 
+                     over 10kB in size that do not have 'example.com'
+                     in the Referer field:
+
+                        -f "status=200,bytes>10000,refdom!~example.com" 
+
+                     AVAILABLE FIELDS:
+                        msec       millisecond response time
+                        ip         The IP address of the client
+                        url        The path of the request, eg '/home'
+                        ref        'Referer' header
+                        refdom     domain part of the 'Referer' header
+                        bytes      Bytes sent 
+                        ua         User-agent header
+                        uas        First 30 characters of ua
+                        class      URL class, configurable in wtop.cfg
+                        status     HTTP status code, eg 200, 301, 404
+                        proto      Protocol version, eg 'HTTP/1.1'
+                        method     HTTP method, eg 'GET', 'POST'
+                        bot        Is a robot? 1 or 0. Only a guess.
+                        botname    eg 'Googlebot', 'Nutch', 'Slurp', etc
+                        ts         Unix timestamp of the request
+                        year
+                        month
+                        day
+                        hour
+                        minute
+                        country    country name (see Geocoding, below)
+                        cc         ISO-639 country code (see below)
+
+
+   -H, -R            Shorthand for a useful but incomplete filter of 
+                     robot user-agents. Equivalent to --filter 'bot=0'
+                     or --filter 'bot=1'
+
+
+   -o FIELDS         Output only the given fields, tab-delimited. All
+   --output          of the fields listed for --filter are available.
+
+                     Example:
+                     $ logrep -o 'cc,msec,url'
+                        UK      34      /Madonna.jpg
+                        CA      34      /Padma-Lakshmi.jpg
+                        UK      34      /Shaun-Woo.jpg
+                        US      184     /Ben-Stiller.jpg
+                        ...
+
+                     AGGREGATE FUNCTIONS:
+                     In -m grep mode you can use aggregate functions
+                     on numeric fields such as bytes and msec. Any
+                     non-aggregate fields in the list will be used to
+                     group records together.
+                        count(*)     
+                        avg(FIELD)   mean average
+                        min(FIELD)   lowest seen value
+                        max(FIELD)   highest seen value
+                        sum(FIELD)   summation of all values
+                        var(FIELD)   population variance
+                        dev(FIELD)   deviation (square root of variance)
+
+                     Example (grouped by status):
+                     $ logrep -o 'status,count(*),avg(msec)'
+                        200 4196    242.58
+                        302 5       79.75
+                        404 1       9.00
+                        304 798     15.76
+
+   -s LIM:FIELDS:DIRECTION
+   --sort            Use this option to sort & limit aggregate records. 
+                     LIMIT is the number of records to return, FIELDS 
+                     is a comma-delimited list of column positions 
+                     starting with 1, and DIRECTION is either 
+                     'descending' (default) or 'ascending'.
+
+                     Example (total bytes sent, by hour & minute)
+                     $ logrep -o 'hour,minute,sum(bytes)' -s'3600:1,2:a'
+                        12	0	1895927
+                        12	1	7418972
+                        12	2	2103828
+                        12	3	7419371
+                        12	4	1680468
+                        ...
+
+                     Example (the 10 most popular URLs):
+                     $ logrep -o 'url,count(*)' -s '10:2'
+                        /home    23718
+                        /wiki    8211
+                        /about   2703
+                        ...
+
+   -l LAST_N         (grep mode) Only read the last N log lines.
+   --last
+
+
+   -c CFG_FILE       Feed logrep a custom config file. By default it 
+   --config          will use:
+                        /etc/wtop.cfg         (Linux, BSD, OSX, etc)
+                        %HOMEPATH%\wtop.cfg   (Windows)
+
+
+   -q, --quiet       Quiet mode. Does not print warnings to stderr.
+
+   LOG_FILE          The path to a log file. By default logrep will
+                     read from the file path specified in wtop.cfg
+                     If you specify '-', logrep will read from STDIN.
+
+ GEOCODING:
+    logrep will use the MaxMind GeoIP library if it is installed. This
+    will enable two extra fields for filtering and output: country 
+    (eg "United Kingdom"), and cc (ISO-639 country code, eg "UK"). These
+    are a *guess* at the country the HTTP client is from.
+   
+ KNOWN BUG: 
+    If you have HostnameLookups On in your Apache settings geocoding 
+    will not work.
+
+    There is an experimental option --x-host-hack that will tell logrep
+    to perform DNS lookups on hostnames. This is a hack and will
+    result in lots of network traffic. It is better to turn 
+    HostnameLookups Off, or to add the %a directive to your LogFormat.
+
+
+ EXAMPLES:
+ 
+ "wtop" for all human traffic:   
+     $ logrep -m top -f 'bot=0' access.log
+
+ Status code & response times for all Googlebot homepage hits:
+     $ logrep -f 'botname=Googlebot' -i home -o status,msec
+
+ Tail for pages about Angelina Jolie or Brad Pitt sent from example.com
+     $ logrep -m tail -f 'url~jolie|pitt,ref~example.com' access.log
+
+ Get maximum response size and average response time for requests 
+ grouped by URL class:
+     $ logrep -o 'class,max(bytes),avg(msec)' access.log
+
+
+0.6.2   1 Sep 2008    carlos@bueno.org   http://code.google.com/p/wtop
+"""
+
+import logrep
+import cPickle, tempfile, re
+
+def runit():
+    from sets import Set
+    import getopt, sys, os.path, random
+    opts, args = getopt.getopt(sys.argv[1:], "q?hHRdm:i:e:o:g:v:l:f:c:s:", (
+            'output=', 'filter=', 'sort=', 'quiet', 'config=', 'last=', 'help', 
+            'humans-only', 'robots-only', 'mode=', 'filter=', 'include=', 'exclude=',
+            'x-tmp-dir=', 'x-host-hack'))
+ 
+    last_n                   = None
+    include_classes          = []
+    exclude_classes          = []
+
+    uncompiled_field_filters = []
+    field_filter_fn          = None
+    filtered_fields          = []
+
+    output_fields            = None
+    agg_fields               = []
+    has_agg                  = False
+    group_by                 = []
+    order_by                 = None
+    order_descending         = True
+    agg_limit                = 0
+    x_tmp_file               = None
+
+    MODE                     = 'grep'
+    cfg                      = '/etc/wtop.cfg'
+
+    grep_excludes            = []     # deprecated
+    grep_filters             = []     # deprecated
+
+    for o,v in opts:
+        if o in ('-h', '-?', '--help'):
+            print cmd_options; sys.exit(0)
+        elif o in ('-m', '--mode'): 
+            MODE = v
+        elif o in ('-i', '--include'):
+            include_classes = Set(v.split(','))
+        elif o in ('-e', '--exclude'):
+            exclude_classes = Set(v.split(','))
+        elif o in ('-o', '--output'):
+            output_fields, agg_fields, group_by, has_agg = logrep.compile_aggregates(v)
+        elif o in ('-H', '--humans-only'):
+            uncompiled_field_filters.append('bot=0')
+        elif o in ('-R', '--robots-only'):
+            uncompiled_field_filters.append('bot=1')
+        elif o in ('-l', '--last'):
+            last_n = int(v)
+        elif o in ('-f', '--filter'):
+            uncompiled_field_filters.append(v)
+        elif o == '-d':
+            logrep.LOG_LEVEL = 2
+        elif o in ('-q', '--quiet'):
+            logrep.LOG_LEVEL = 0
+        elif o in ('-s', '--sort'):
+            agg_limit, order_by, order_descending = logrep.compile_orderby(v)
+        elif o in ('-c', '--config'):
+            if v:
+                if not os.path.exists(v):
+                    raise Exception("can't read config file: '%s'" % v)
+                cfg = v
+
+        # experimental
+        elif o == '--x-tmp-dir':
+            if not os.path.exists(v) or not(os.path.isdir(v)):
+                raise Exception("'%s' is not a directory" % v)
+            x_tmp_file = os.path.join(v, 'logrep-%d' % random.randint(1, 9999999999999))
+
+        elif o == '--x-host-hack':
+            logrep.hostname_hack()
+
+        # deprecated
+        elif o == '-g': grep_filters.append(v)
+        elif o == '-v': grep_excludes.append(v)
+
+
+    ## check all the config options are sane, etc.
+    logrep.configure(cfg)
+
+    if MODE == 'top':
+        output_fields = ['status', 'msec', 'ts', 'class']
+
+    if not output_fields:
+        output_fields = logrep.DEFAULT_OUTPUT_FIELDS
+
+    if uncompiled_field_filters:
+        field_filter_fn, filtered_fields = logrep.compile_filter(','.join(uncompiled_field_filters))
+
+    if ('country' in output_fields or 'cc' in output_fields) and (not logrep.geocoder):
+        raise Exception("I can't load the geoip library, yet you asked for cc or country fields.")
+
+    if has_agg and MODE != 'grep':
+        raise Exception("aggregate functions like 'avg(msec)' are only allowed in grep mode")
+
+    if has_agg and not group_by:
+        logrep.warn('warn: -o has agg functions but no group by fields. This means I will print one record only.')
+
+    if (not has_agg) and agg_limit > 0:
+        logrep.warn('warn: --sort is ignored if there are no aggregate functions in -o')
+
+    if last_n and MODE != 'grep':
+        logrep.warn("warn: -l LAST_N is only relevant in grep mode")
+
+    # open the log(s) as a generator that yields raw lines
+    log = None
+    if MODE in ('top', 'tail', 'rrd'):
+        if not args:
+            log = logrep.follow(open(logrep.latest_log()[0]))
+        else:
+            log = logrep.follow(open(args[0]))
+
+    else: # grep/agg mode
+        logfiles = None
+        if not args or args[0] == 'today' or args[0] == 't':
+            logfiles = logrep.todays_logs()
+
+        elif args[0] == 'yesterday' or args[0] == 'y':
+            logfiles = logrep.yesterdays_logs()
+
+        elif args[0] == '-':
+            log = sys.stdin
+
+        else: # explicit file.
+            logfiles = [args[0]]
+            
+        if not log:
+            if last_n:
+                log = logrep.tail_n(logfiles[-1], last_n)
+            else:       
+                log = logrep.gen_cat(logrep.gen_open(logfiles))
+
+
+    # various raw log line filters. deprecated?
+    for e in grep_excludes: log = logrep.line_exclude(log, e)
+    for f in grep_filters:  log = logrep.line_filter(log, f)
+
+
+    minimum_fields = []    
+    if include_classes or exclude_classes:
+        minimum_fields = ['class']
+    relevant_fields = Set(output_fields + filtered_fields + minimum_fields)
+
+    if (logrep.LOG_FILE_TYPE == 'apache'):
+        # recompile the log format regexp given the relevant fields. 
+        # This can yield a big performance boost.
+        relevant_fields = logrep.field_dependencies(relevant_fields)
+        LOG_PATTERN,LOG_COLUMNS = logrep.format2regexp(logrep.config.get('main', 'log_format'), relevant_fields)
+        # parse the raw log lines into records & do any needed massage and derivation
+        reqs = logrep.apache_log(log, LOG_PATTERN, LOG_COLUMNS, relevant_fields)
+
+    else: ## iis is a bit more parser-friendly.
+        relevant_fields.add('url')
+        relevant_fields.add('query')
+        log = logrep.line_exclude(log, re.compile(r'^#|^[\s]+$'))
+        reqs = logrep.iis_log(log, relevant_fields)
+
+    # pure classist discrimination
+    if include_classes or exclude_classes:
+        reqs = logrep.filter_by_class(reqs, include_classes, exclude_classes)
+
+    # apply the filter function compiled from -f
+    if field_filter_fn: 
+        reqs = field_filter_fn(reqs)
+    
+    # feed the surviving records into the proper mode function
+    try:
+        if MODE=='top':
+            logrep.apache_top_mode(reqs)
+
+        elif MODE == 'rrd':
+            logrep.rrd_mode(reqs)
+
+        else:
+            if has_agg:
+                # todo: these arg signatures are fugly
+                records, fmt, tmpfile, table = logrep.calculate_aggregates(reqs, agg_fields, group_by, order_by, agg_limit, order_descending, x_tmp_file)
+                
+                if agg_limit:
+                    sort_fn = logrep.sort_fn(order_by, order_descending, agg_limit)
+                    rows = sort_fn(records)
+                else:
+                    rows = records.values()
+
+                logrep.agg_mode(rows, fmt)
+
+                if tmpfile:
+                    table.close()
+                    # hack: shelve module has no way to delete, and does not tell you it adds '.db'
+                    # on some systems, and .dir / .pag on other systems... it's a mess.
+                    os.remove(tmpfile + '.db') 
+
+            else:
+                logrep.print_mode(reqs, output_fields)
+
+    except KeyboardInterrupt:
+        sys.stderr.write("Interrupted! Mein leiben!\n")
+
+if __name__ == '__main__':
+#    import cProfile; cProfile.run('runit()')
+    runit()
