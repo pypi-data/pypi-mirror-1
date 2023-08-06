@@ -1,0 +1,131 @@
+    We also handle the updating of reference fields in a similar way
+    to links in text fields.
+
+    >>> import transaction
+    >>> from pprint import pprint
+    >>> self.loginAsPortalOwner()
+
+    For this test we use the example content Refnode from Products.Archetypes.examples
+
+    >>> from Products.Archetypes.atapi import ReferenceField
+    >>> from Products.Archetypes.examples.RefNode import Refnode
+
+    What reference fields do we have on a refnode?
+
+    >>> pprint([x for x in Refnode.schema.fields() if isinstance(x, ReferenceField)])
+    [<Field link(reference:rw)>,
+     <Field links(reference:rw)>,
+     <Field adds(reference:rw)>]
+
+
+    >>> structure = """
+    ... <cs:contentstructure
+    ...   xmlns:cs="http://www.elyt.com/cs"
+    ...   xmlns:z="http://www.zope.org/">
+    ...   <cs:leaf z:portal_type="Document" z:id="document_1" z:title="Document 1"/>
+    ...   <cs:leaf z:portal_type="Refnode" z:id="refnode_1" z:title="Refnode 1"/>
+    ...   <cs:container z:portal_type="Folder" z:id="folder_1" z:title="Folder 1">
+    ...     <cs:leaf z:portal_type="Refnode" z:id="refnode_2" z:title="Refnode 2"/>
+    ...     <cs:container z:portal_type="Folder" z:id="folder_2" z:title="Folder 2">
+    ...       <cs:container z:portal_type="Folder" z:id="folder_3" z:title="Folder 3">
+    ...          <cs:leaf z:portal_type="Refnode" z:id="refnode_3" z:title="Refnode 3"/>
+    ...       </cs:container>
+    ...     </cs:container>
+    ...   </cs:container>
+    ... </cs:contentstructure>"""
+
+    >>> from ely.contentgenerator import PloneContentGenerator, PloneContentSniffer
+    >>> generator = PloneContentGenerator(structure,
+    ...                                   self.folder)
+    >>> generator.generate()
+    >>> sniffer = PloneContentSniffer(self.folder)
+    >>> pprint(sniffer.tree)
+    [<ATFolder at /plone/Members/test_user_1_>,
+     [<ATDocument at /plone/Members/test_user_1_/document_1>],
+     [<Refnode at /plone/Members/test_user_1_/refnode_1>],
+     [<ATFolder at /plone/Members/test_user_1_/folder_1>,
+      [<Refnode at /plone/Members/test_user_1_/folder_1/refnode_2>],
+      [<ATFolder at /plone/Members/test_user_1_/folder_1/folder_2>,
+       [<ATFolder at /plone/Members/test_user_1_/folder_1/folder_2/folder_3>,
+        [<Refnode at /plone/Members/test_user_1_/folder_1/folder_2/folder_3/refnode_3>]]]]]
+
+
+    >>> refnode_1 = self.folder.refnode_1
+    >>> folder_1 = self.folder.folder_1
+    >>> refnode_2 = folder_1.refnode_2
+    >>> refnode_3 = folder_1.folder_2.folder_3.refnode_3
+
+    >>> refnode_1.setLink(refnode_2.UID())
+    >>> refnode_3.setLink(refnode_2.UID())
+
+    We leave the refnode_2 'Link' field empty on one of the copied objects to
+    test empty reference fields
+
+    >>> refnode_1.setLinks([refnode_2.UID(), refnode_3.UID()])
+    >>> refnode_2.setLinks([refnode_1.UID(), refnode_3.UID()])
+    >>> refnode_3.setLinks([refnode_1.UID(), refnode_2.UID()])
+
+    >>> refnode_1.getLink()
+    <Refnode at /plone/Members/test_user_1_/folder_1/refnode_2>
+    >>> pprint(refnode_1.getLinks())
+    [<Refnode at /plone/Members/test_user_1_/folder_1/refnode_2>,
+     <Refnode at /plone/Members/test_user_1_/folder_1/folder_2/folder_3/refnode_3>]
+
+    >>> refnode_2.getLink()
+
+    >>> pprint(refnode_2.getLinks())
+    [<Refnode at /plone/Members/test_user_1_/refnode_1>,
+     <Refnode at /plone/Members/test_user_1_/folder_1/folder_2/folder_3/refnode_3>]
+
+    >>> refnode_3.getLink()
+    <Refnode at /plone/Members/test_user_1_/folder_1/refnode_2>
+    >>> pprint(refnode_3.getLinks())
+    [<Refnode at /plone/Members/test_user_1_/refnode_1>,
+     <Refnode at /plone/Members/test_user_1_/folder_1/refnode_2>]
+
+    Do a copy and paste
+
+    >>> transaction.savepoint(optimistic=True)
+    <transaction._transaction.Savepoint instance at ...>
+    >>> self.folder.manage_pasteObjects(self.folder.manage_copyObjects(['folder_1']))
+    [{'new_id': 'copy_of_folder_1', 'id': 'folder_1'}]
+
+    >>> pprint(sniffer.tree)
+    [<ATFolder at /plone/Members/test_user_1_>,
+     [<ATDocument at /plone/Members/test_user_1_/document_1>],
+     [<Refnode at /plone/Members/test_user_1_/refnode_1>],
+     [<ATFolder at /plone/Members/test_user_1_/folder_1>,
+      [<Refnode at /plone/Members/test_user_1_/folder_1/refnode_2>],
+      [<ATFolder at /plone/Members/test_user_1_/folder_1/folder_2>,
+       [<ATFolder at /plone/Members/test_user_1_/folder_1/folder_2/folder_3>,
+        [<Refnode at /plone/Members/test_user_1_/folder_1/folder_2/folder_3/refnode_3>]]]],
+     [<ATFolder at /plone/Members/test_user_1_/copy_of_folder_1>,
+      [<Refnode at /plone/Members/test_user_1_/copy_of_folder_1/refnode_2>],
+      [<ATFolder at /plone/Members/test_user_1_/copy_of_folder_1/folder_2>,
+       [<ATFolder at /plone/Members/test_user_1_/copy_of_folder_1/folder_2/folder_3>,
+        [<Refnode at /plone/Members/test_user_1_/copy_of_folder_1/folder_2/folder_3/refnode_3>]]]]]
+
+    >>> copy_of_folder_1 = self.folder.copy_of_folder_1
+    >>> copy_of_refnode_2 = copy_of_folder_1.refnode_2
+    >>> copy_of_refnode_3 = copy_of_folder_1.folder_2.folder_3.refnode_3
+
+    check refnode_1 stays the same
+
+    >>> refnode_1.getLink()
+    <Refnode at /plone/Members/test_user_1_/folder_1/refnode_2>
+    >>> pprint(refnode_1.getLinks())
+    [<Refnode at /plone/Members/test_user_1_/folder_1/refnode_2>,
+     <Refnode at /plone/Members/test_user_1_/folder_1/folder_2/folder_3/refnode_3>]
+
+    check links in copy tree updated
+
+    >>> copy_of_refnode_2.getLink()
+    >>> pprint(copy_of_refnode_2.getLinks())
+    [<Refnode at /plone/Members/test_user_1_/refnode_1>,
+     <Refnode at /plone/Members/test_user_1_/copy_of_folder_1/folder_2/folder_3/refnode_3>]
+
+    >>> copy_of_refnode_3.getLink()
+    <Refnode at /plone/Members/test_user_1_/copy_of_folder_1/refnode_2>
+    >>> pprint(copy_of_refnode_3.getLinks())
+    [<Refnode at /plone/Members/test_user_1_/refnode_1>,
+     <Refnode at /plone/Members/test_user_1_/copy_of_folder_1/refnode_2>]

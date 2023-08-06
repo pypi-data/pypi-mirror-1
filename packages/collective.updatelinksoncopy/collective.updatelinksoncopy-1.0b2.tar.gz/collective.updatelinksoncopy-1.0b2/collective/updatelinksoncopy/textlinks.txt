@@ -1,0 +1,419 @@
+The idea behind this copy handler is to inspect text fields on an
+object or objects in its decendent tree for links to these objects and
+to update them to point to the new objects in the copy. This problem
+arises if the links in these objects' text fields
+
+1) use kupu's resolveid mechanism - links in the copied objects will
+resolve to the originalobject in the copied-from subtree.
+
+2) are absolute urls and point into objects in the copied-from
+subtree.
+
+3) are relatuve urls that point outside of CopyRoot, e.g. to a site
+root relative location but using ../* as the path mechanism.
+
+Tests:
+
+    Make sure we have the right portal transform chain in place, since
+    we have kupu installed and link using uids turned on then we will
+    be using resolveuid references here and expecting a transform of
+    these in our output
+
+    >>> from Products.CMFCore.utils import getToolByName
+    >>> portal_transforms = getToolByName(self.portal, 'portal_transforms')
+    >>> requirements = portal_transforms._policies.get('text/x-html-safe', [])
+    >>> portal_transforms._findPath('text/html', 'text/x-html-safe', list(requirements))
+    [<Transform at html-to-captioned>, <Transform at /plone/portal_transforms/captioned-to-html>, <Transform at safe_html>]
+
+    Add in a test content type with reference fields
+
+    >>> import transaction
+    >>> self.loginAsPortalOwner()
+
+    Nest some topics in each other. (Topics are interesting in that
+    they are containers that also have a rich text field. Which
+    matches a feature of the original content type that this code was
+    developed with.)
+
+    >>> structure = """
+    ... <cs:contentstructure
+    ...   xmlns:cs="http://www.elyt.com/cs"
+    ...   xmlns:z="http://www.zope.org/">
+    ...   <cs:leaf z:portal_type="Document" z:id="document_1" z:title="Document 1"/>
+    ...   <cs:container z:portal_type="Topic" z:id="topic_1" z:title="Topic 1">
+    ...     <cs:container z:portal_type="Topic" z:id="topic_2" z:title="Topic 2">
+    ...       <cs:container z:portal_type="Topic" z:id="topic_3" z:title="Topic 3">
+    ...       </cs:container>
+    ...     </cs:container>
+    ...   </cs:container>
+    ... </cs:contentstructure>"""
+
+    >>> from ely.contentgenerator import PloneContentGenerator, PloneContentSniffer
+    >>> generator = PloneContentGenerator(structure,
+    ...                                   self.folder)
+    >>> generator.generate()
+    >>> sniffer = PloneContentSniffer(self.folder)
+    >>> from pprint import pprint
+    >>> pprint(sniffer.tree)
+    [<ATFolder at /plone/Members/test_user_1_>,
+     [<ATDocument at /plone/Members/test_user_1_/document_1>],
+     [<ATTopic at /plone/Members/test_user_1_/topic_1>,
+      [<SyndicationInformation at /plone/Members/test_user_1_/topic_1/syndication_information>],
+      [<ATTopic at /plone/Members/test_user_1_/topic_1/topic_2>,
+       [<SyndicationInformation at /plone/Members/test_user_1_/topic_1/topic_2/syndication_information>],
+       [<ATTopic at /plone/Members/test_user_1_/topic_1/topic_2/topic_3>,
+        [<SyndicationInformation at /plone/Members/test_user_1_/topic_1/topic_2/topic_3/syndication_information>]]]]]
+
+    >>> document_1 = self.folder.document_1
+    >>> topic_1 = self.folder.topic_1
+    >>> topic_2 = topic_1.topic_2
+    >>> topic_3 = topic_2.topic_3
+
+    we also handle reference fields, so lets reference an object that
+    will be in the copy tree and therefore updated to point to the
+    copied object and lets also reference an object outside of the
+    copy tree since this should not be updated. One side effect of
+    copy and paste in default plone is that related items are cleaned
+    out, so this effectively restores these again too.
+
+    >>> topic_1.setRelatedItems([topic_2.UID(), document_1.UID()])
+    >>> print topic_1.getRelatedItems()
+    [<ATTopic at /plone/Members/test_user_1_/topic_1/topic_2>, <ATDocument at /plone/Members/test_user_1_/document_1>]
+
+    update the text of topic-1 to point to topic-2 and topic-3 using the
+    resolveuid urls that kupu will plant when "link using uids" is on.
+    Note, as is the intention of resolveid/$uid syntax, we can have
+    additional traversal paths after the resolveuid/$uid part.
+
+    >>> txt = """<p>this is <a href="resolveuid/%s">topic 2</a> and
+    ... <a href="resolveuid/%s">topic 3</a>
+    ... <a href="resolveuid/%s/another_path_element">topic 3</a>
+    ... <img src="resolveuid/%s/image_thumb">image 3</img>
+    ... <a href="topic_2/topic_3">relative reference to topic 3</a>
+    ... <a href="%s">siteroot relative path to topic 3</a>
+    ... <img src="%s/image_thumb">image siteroot relative path to topic 3</img>
+    ... <a href="%s/view">siteroot relative path to topic 3 with view path added</a>
+    ... <a href="%s">absolute url reference to topic 3</a></p>
+    ... """ %(topic_2.UID(),
+    ...       topic_3.UID(),
+    ...       topic_3.UID(),
+    ...       topic_3.UID(),
+    ...       '/'.join(topic_3.getPhysicalPath()),
+    ...       '/'.join(topic_3.getPhysicalPath()),
+    ...       '/'.join(topic_3.getPhysicalPath()),
+    ...       topic_3.absolute_url())
+
+    >>> topic_1.update(text=txt)
+    >>> text_field = topic_1.Schema()['text']
+    >>> print text_field.get(topic_1, mimetype='text/x-html-safe')
+    <p>this is <a href="/plone/Members/test_user_1_/topic_1/topic_2">topic 2</a> and
+    <a href="/plone/Members/test_user_1_/topic_1/topic_2/topic_3">topic 3</a>
+    <a href="/plone/Members/test_user_1_/topic_1/topic_2/topic_3/another_path_element">topic 3</a>
+    <img src="/plone/Members/test_user_1_/topic_1/topic_2/topic_3/image_thumb" />image 3
+    <a href="topic_2/topic_3">relative reference to topic 3</a>
+    <a href="/plone/Members/test_user_1_/topic_1/topic_2/topic_3">siteroot relative path to topic 3</a>
+    <img src="/plone/Members/test_user_1_/topic_1/topic_2/topic_3/image_thumb" />image siteroot relative path to topic 3
+    <a href="/plone/Members/test_user_1_/topic_1/topic_2/topic_3/view">siteroot relative path to topic 3 with view path added</a>
+    <a href="http://nohost/plone/Members/test_user_1_/topic_1/topic_2/topic_3">absolute url reference to topic 3</a></p>
+    <BLANKLINE>
+
+    Do a copy and paste
+
+    >>> transaction.savepoint(optimistic=True)
+    <transaction._transaction.Savepoint instance at ...>
+    >>> self.folder.manage_pasteObjects(self.folder.manage_copyObjects(['topic_1']))
+    [{'new_id': 'copy_of_topic_1', 'id': 'topic_1'}]
+
+    >>> pprint(sniffer.tree)
+    [<ATFolder at /plone/Members/test_user_1_>,
+     [<ATDocument at /plone/Members/test_user_1_/document_1>],
+     [<ATTopic at /plone/Members/test_user_1_/topic_1>,
+      [<SyndicationInformation at /plone/Members/test_user_1_/topic_1/syndication_information>],
+      [<ATTopic at /plone/Members/test_user_1_/topic_1/topic_2>,
+       [<SyndicationInformation at /plone/Members/test_user_1_/topic_1/topic_2/syndication_information>],
+       [<ATTopic at /plone/Members/test_user_1_/topic_1/topic_2/topic_3>,
+        [<SyndicationInformation at /plone/Members/test_user_1_/topic_1/topic_2/topic_3/syndication_information>]]]],
+     [<ATTopic at /plone/Members/test_user_1_/copy_of_topic_1>,
+      [<SyndicationInformation at /plone/Members/test_user_1_/copy_of_topic_1/syndication_information>],
+      [<ATTopic at /plone/Members/test_user_1_/copy_of_topic_1/topic_2>,
+       [<SyndicationInformation at /plone/Members/test_user_1_/copy_of_topic_1/topic_2/syndication_information>],
+       [<ATTopic at /plone/Members/test_user_1_/copy_of_topic_1/topic_2/topic_3>,
+        [<SyndicationInformation at /plone/Members/test_user_1_/copy_of_topic_1/topic_2/topic_3/syndication_information>]]]]]
+
+    Check out results
+
+    >>> copy_of_topic_1 = getattr(self.folder,'copy_of_topic_1')
+    >>> text_field = copy_of_topic_1.Schema()['text']
+    >>> print text_field.get(copy_of_topic_1, mimetype='text/x-html-safe')
+    <p>this is <a href="/plone/Members/test_user_1_/copy_of_topic_1/topic_2">topic 2</a> and
+    <a href="/plone/Members/test_user_1_/copy_of_topic_1/topic_2/topic_3">topic 3</a>
+    <a href="/plone/Members/test_user_1_/copy_of_topic_1/topic_2/topic_3/another_path_element">topic 3</a>
+    <img src="/plone/Members/test_user_1_/copy_of_topic_1/topic_2/topic_3/image_thumb" />image 3
+    <a href="topic_2/topic_3">relative reference to topic 3</a>
+    <a href="/plone/Members/test_user_1_/copy_of_topic_1/topic_2/topic_3">siteroot relative path to topic 3</a>
+    <img src="/plone/Members/test_user_1_/copy_of_topic_1/topic_2/topic_3/image_thumb" />image siteroot relative path to topic 3
+    <a href="/plone/Members/test_user_1_/copy_of_topic_1/topic_2/topic_3/view">siteroot relative path to topic 3 with view path added</a>
+    <a href="http://nohost/plone/Members/test_user_1_/topic_1/topic_2/topic_3">absolute url reference to topic 3</a></p>
+    <BLANKLINE>
+
+    Lets make sure that the related items reference field has updated
+    as expected
+
+    >>> copy_of_topic_1.getRelatedItems()
+    [<ATTopic at /plone/Members/test_user_1_/copy_of_topic_1/topic_2>, <ATDocument at /plone/Members/test_user_1_/document_1>]
+
+    For more on handling reference fields see referencefields.txt
+
+    The case above is quite simple, we are checking the text field on
+    the CopyRoot object which points into direct decendants. We may
+    also have the following kind of scenario
+
+    /CopyRoot-a/page-in-a
+    /CopyRoot-a/b/page-in-b
+    where page-in-b has a text field that links to page-in-a, we would
+    expect that
+
+    /PasteRoot-a/b/page-in-b would now link to /PasteRoot-a/page-in-a
+
+
+    >>> structure = """
+    ... <cs:contentstructure
+    ...   xmlns:cs="http://www.elyt.com/cs"
+    ...   xmlns:z="http://www.zope.org/">
+    ...   <cs:container z:portal_type="Folder" z:id="folder_a" z:title="Folder A">
+    ...     <cs:leaf z:portal_type="Document" z:id="document_in_a" z:title="Document in a"/>
+    ...     <cs:container z:portal_type="Folder" z:id="folder_b" z:title="Folder B">
+    ...       <cs:leaf z:portal_type="Document" z:id="document_in_b" z:title="Document in b"/>
+    ...     </cs:container>
+    ...   </cs:container>
+    ...   <cs:container z:portal_type="Folder" z:id="folder_x" z:title="Folder X">
+    ...       <cs:leaf z:portal_type="Document" z:id="document_in_x" z:title="Document in x"/>
+    ... </cs:container>
+    ... </cs:contentstructure>"""
+
+    >>> generator = PloneContentGenerator(structure,
+    ...                                   self.folder)
+    >>> generator.generate()
+    >>> sniffer = PloneContentSniffer(self.folder)
+    >>> from pprint import pprint
+    >>> pprint(sniffer.tree)
+    [<ATFolder at /plone/Members/test_user_1_>,
+    ...
+     [<ATFolder at /plone/Members/test_user_1_/folder_a>,
+      [<ATDocument at /plone/Members/test_user_1_/folder_a/document_in_a>],
+      [<ATFolder at /plone/Members/test_user_1_/folder_a/folder_b>,
+       [<ATDocument at /plone/Members/test_user_1_/folder_a/folder_b/document_in_b>]]],
+     [<ATFolder at /plone/Members/test_user_1_/folder_x>,
+      [<ATDocument at /plone/Members/test_user_1_/folder_x/document_in_x>]]]
+
+    >>> document_in_a = self.folder.folder_a.document_in_a
+    >>> document_in_b = self.folder.folder_a.folder_b.document_in_b
+    >>> txt_for_document_b = """
+    ... <a href="resolveuid/%s">document in a</a>
+    ... <a href="resolveuid/%s/another_path_element">document in a</a>
+    ... <a href="resolveuid/%s/another_path_element?&x=3">document in a with query</a>
+    ... <a href="../%s">relative reference to document in a</a>
+    ... <a href="../../folder_z/document_in_z">relative reference to document in z ... this will be outside CopyRoot and subtree</a>
+    ... <a href="%s">absolute path reference to document in a</a>
+    ... <a href="%s/listresults?&x=1&y=2">absolute path reference to document in a with additional path and query</a>
+    ... <a href="/different/root%s">a reference to a document in a from another root</a>
+    ... """ %(document_in_a.UID(),
+    ...       document_in_a.UID(),
+    ...       document_in_a.UID(),
+    ...       document_in_a.id,
+    ...       '/'.join(document_in_a.getPhysicalPath()),
+    ...       '/'.join(document_in_a.getPhysicalPath()),
+    ...       '/'.join(document_in_a.getPhysicalPath()))
+
+    >>> document_in_b.setText(txt_for_document_b)
+    >>> text_field = document_in_b.Schema()['text']
+    >>> print text_field.get(document_in_b, mimetype='text/x-html-safe')
+    <BLANKLINE>
+    <a href="/plone/Members/test_user_1_/folder_a/document_in_a">document in a</a>
+    <a href="/plone/Members/test_user_1_/folder_a/document_in_a/another_path_element">document in a</a>
+    <a href="/plone/Members/test_user_1_/folder_a/document_in_a/another_path_element?&x=3">document in a with query</a>
+    <a href="../document_in_a">relative reference to document in a</a>
+    <a href="../../folder_z/document_in_z">relative reference to document in z ... this will be outside CopyRoot and subtree</a>
+    <a href="/plone/Members/test_user_1_/folder_a/document_in_a">absolute path reference to document in a</a>
+    <a href="/plone/Members/test_user_1_/folder_a/document_in_a/listresults?&x=1&y=2">absolute path reference to document in a with additional path and query</a>
+    <a href="/different/root/plone/Members/test_user_1_/folder_a/document_in_a">a reference to a document in a from another root</a>
+    <BLANKLINE>
+
+    Copy and paste folder-a
+
+    >>> transaction.savepoint(optimistic=True)
+    <transaction._transaction.Savepoint instance at ...>
+    >>> self.folder.manage_pasteObjects(self.folder.manage_copyObjects(['folder_a']))
+    [{'new_id': 'copy_of_folder_a', 'id': 'folder_a'}]
+
+    Make sure we have the right structure
+
+    >>> pprint(sniffer.tree)
+    [<ATFolder at /plone/Members/test_user_1_>,
+    ...
+     [<ATFolder at /plone/Members/test_user_1_/folder_a>,
+      [<ATDocument at /plone/Members/test_user_1_/folder_a/document_in_a>],
+      [<ATFolder at /plone/Members/test_user_1_/folder_a/folder_b>,
+       [<ATDocument at /plone/Members/test_user_1_/folder_a/folder_b/document_in_b>]]],
+     [<ATFolder at /plone/Members/test_user_1_/folder_x>,
+      [<ATDocument at /plone/Members/test_user_1_/folder_x/document_in_x>]],
+     [<ATFolder at /plone/Members/test_user_1_/copy_of_folder_a>,
+      [<ATDocument at /plone/Members/test_user_1_/copy_of_folder_a/document_in_a>],
+      [<ATFolder at /plone/Members/test_user_1_/copy_of_folder_a/folder_b>,
+       [<ATDocument at /plone/Members/test_user_1_/copy_of_folder_a/folder_b/document_in_b>]]]]
+
+    thie links to document_in_a in document_in_b should now point to
+    the new document_in_a in copy_of_folder_a
+
+    >>> new_document_in_b = self.folder.copy_of_folder_a.folder_b.document_in_b
+    >>> text_field = new_document_in_b.Schema()['text']
+    >>> print text_field.get(new_document_in_b, mimetype='text/x-html-safe')
+    <BLANKLINE>
+    <a href="/plone/Members/test_user_1_/copy_of_folder_a/document_in_a">document in a</a>
+    <a href="/plone/Members/test_user_1_/copy_of_folder_a/document_in_a/another_path_element">document in a</a>
+    <a href="/plone/Members/test_user_1_/copy_of_folder_a/document_in_a/another_path_element?&amp;x=3">document in a with query</a>
+    <a href="../document_in_a">relative reference to document in a</a>
+    <a href="../../folder_z/document_in_z">relative reference to document in z ... this will be outside CopyRoot and subtree</a>
+    <a href="/plone/Members/test_user_1_/copy_of_folder_a/document_in_a">absolute path reference to document in a</a>
+    <a href="/plone/Members/test_user_1_/copy_of_folder_a/document_in_a/listresults?&amp;x=1&amp;y=2">absolute path reference to document in a with additional path and query</a>
+    <a href="/different/root/plone/Members/test_user_1_/folder_a/document_in_a">a reference to a document in a from another root</a>
+    <BLANKLINE>
+
+
+Nested copying:
+
+A few things useful to look at here:
+
+1) that copying CopyRoot into itself does all the right things with
+links
+
+2) that relative URLs to items outside of CopyRoot get updated with
+extra levels of ../ in their paths. Kupu will use urls relative to the
+existing object if "link by uids" is off and the editor links to even
+a site root relative object.
+
+3) that copying the parent of the new nested copy (i.e. in this case
+copying CopyRoot again) and pasting it at say a sibling level will
+also update the links in the nested copy to what we expect.
+
+    start with as above:
+
+    /CopyRoot-a/b/document-in-b points to /CopyRoot-a/document-in-a
+
+    Then copy into itself so we have
+
+    /CopyRoot-a/b/PasteRoot-a/document-in-a
+    /CopyRoot-a/b/PasteRoot-a/b/document-in-b
+
+    Where /CopyRoot-a/b/PasteRoot-a/b/document-in-b should now point
+    to /CopyRoot-a/b/PasteRoot-a/document-in-a
+
+    >>> folder_b = self.folder.folder_a.folder_b
+    >>> transaction.savepoint(optimistic=True)
+    <transaction._transaction.Savepoint instance at ...>
+
+    Make another copy of folder_a for this test
+
+    >>> info = self.folder.manage_pasteObjects(self.folder.manage_copyObjects(['folder_a']))
+    >>> print info
+    [{'new_id': 'copy2_of_folder_a', 'id': 'folder_a'}]
+    >>> new_folder_id = info[0]['new_id']
+    >>> new_folder = getattr(self.folder, new_folder_id)
+
+    Check the links in document b
+
+    >>> document_in_b = new_folder.folder_b.document_in_b
+    >>> text_field = document_in_b.Schema()['text']
+    >>> print text_field.get(document_in_b, mimetype='text/x-html-safe')
+    <BLANKLINE>
+    <a href="/plone/Members/test_user_1_/copy2_of_folder_a/document_in_a">document in a</a>
+    <a href="/plone/Members/test_user_1_/copy2_of_folder_a/document_in_a/another_path_element">document in a</a>
+    <a href="/plone/Members/test_user_1_/copy2_of_folder_a/document_in_a/another_path_element?&amp;x=3">document in a with query</a>
+    <a href="../document_in_a">relative reference to document in a</a>
+    <a href="../../folder_z/document_in_z">relative reference to document in z ... this will be outside CopyRoot and subtree</a>
+    <a href="/plone/Members/test_user_1_/copy2_of_folder_a/document_in_a">absolute path reference to document in a</a>
+    <a href="/plone/Members/test_user_1_/copy2_of_folder_a/document_in_a/listresults?&amp;x=1&amp;y=2">absolute path reference to document in a with additional path and query</a>
+    <a href="/different/root/plone/Members/test_user_1_/folder_a/document_in_a">a reference to a document in a from another root</a>
+    <BLANKLINE>
+
+    Now copy this new folder into itself at the folder_b point
+
+    >>> new_folder.folder_b.manage_pasteObjects(self.folder.manage_copyObjects([new_folder_id]))
+    [{'new_id': 'copy2_of_folder_a', 'id': 'copy2_of_folder_a'}]
+
+    Make sure we have the right structure
+
+    >>> pprint(sniffer.tree)
+    [<ATFolder at /plone/Members/test_user_1_>,
+    ...
+     [<ATFolder at /plone/Members/test_user_1_/copy2_of_folder_a>,
+      [<ATDocument at /plone/Members/test_user_1_/copy2_of_folder_a/document_in_a>],
+      [<ATFolder at /plone/Members/test_user_1_/copy2_of_folder_a/folder_b>,
+       [<ATDocument at /plone/Members/test_user_1_/copy2_of_folder_a/folder_b/document_in_b>],
+       [<ATFolder at /plone/Members/test_user_1_/copy2_of_folder_a/folder_b/copy2_of_folder_a>,
+        [<ATDocument at /plone/Members/test_user_1_/copy2_of_folder_a/folder_b/copy2_of_folder_a/document_in_a>],
+        [<ATFolder at /plone/Members/test_user_1_/copy2_of_folder_a/folder_b/copy2_of_folder_a/folder_b>,
+         [<ATDocument at /plone/Members/test_user_1_/copy2_of_folder_a/folder_b/copy2_of_folder_a/folder_b/document_in_b>]]]]]]
+
+    >>> new_document_in_b = new_folder.folder_b.copy2_of_folder_a.folder_b.document_in_b
+    >>> text_field = new_document_in_b.Schema()['text']
+    >>> print text_field.get(new_document_in_b, mimetype='text/x-html-safe')
+    <BLANKLINE>
+    <a href="/plone/Members/test_user_1_/copy2_of_folder_a/folder_b/copy2_of_folder_a/document_in_a">document in a</a>
+    <a href="/plone/Members/test_user_1_/copy2_of_folder_a/folder_b/copy2_of_folder_a/document_in_a/another_path_element">document in a</a>
+    <a href="/plone/Members/test_user_1_/copy2_of_folder_a/folder_b/copy2_of_folder_a/document_in_a/another_path_element?&amp;x=3">document in a with query</a>
+    <a href="../document_in_a">relative reference to document in a</a>
+    <a href="../../../../folder_z/document_in_z">relative reference to document in z ... this will be outside CopyRoot and subtree</a>
+    <a href="/plone/Members/test_user_1_/copy2_of_folder_a/folder_b/copy2_of_folder_a/document_in_a">absolute path reference to document in a</a>
+    <a href="/plone/Members/test_user_1_/copy2_of_folder_a/folder_b/copy2_of_folder_a/document_in_a/listresults?&amp;x=1&amp;y=2">absolute path reference to document in a with additional path and query</a>
+    <a href="/different/root/plone/Members/test_user_1_/folder_a/document_in_a">a reference to a document in a from another root</a>
+    <BLANKLINE>
+
+
+    Now copy this nested shebang again and make sure all documents
+    have updated their links correctly
+
+    >>> self.folder.manage_pasteObjects(self.folder.manage_copyObjects(['copy2_of_folder_a']))
+    [{'new_id': 'copy3_of_folder_a', 'id': 'copy2_of_folder_a'}]
+    >>> pprint(sniffer.tree)
+    [<ATFolder at /plone/Members/test_user_1_>,
+    ...
+     [<ATFolder at /plone/Members/test_user_1_/copy3_of_folder_a>,
+      [<ATDocument at /plone/Members/test_user_1_/copy3_of_folder_a/document_in_a>],
+      [<ATFolder at /plone/Members/test_user_1_/copy3_of_folder_a/folder_b>,
+       [<ATDocument at /plone/Members/test_user_1_/copy3_of_folder_a/folder_b/document_in_b>],
+       [<ATFolder at /plone/Members/test_user_1_/copy3_of_folder_a/folder_b/copy2_of_folder_a>,
+        [<ATDocument at /plone/Members/test_user_1_/copy3_of_folder_a/folder_b/copy2_of_folder_a/document_in_a>],
+        [<ATFolder at /plone/Members/test_user_1_/copy3_of_folder_a/folder_b/copy2_of_folder_a/folder_b>,
+         [<ATDocument at /plone/Members/test_user_1_/copy3_of_folder_a/folder_b/copy2_of_folder_a/folder_b/document_in_b>]]]]]]
+
+    >>> document_in_b = self.folder.copy3_of_folder_a.folder_b.document_in_b
+    >>> text_field = document_in_b.Schema()['text']
+    >>> print text_field.get(document_in_b, mimetype='text/x-html-safe')
+    <BLANKLINE>
+    <a href="/plone/Members/test_user_1_/copy3_of_folder_a/document_in_a">document in a</a>
+    <a href="/plone/Members/test_user_1_/copy3_of_folder_a/document_in_a/another_path_element">document in a</a>
+    <a href="/plone/Members/test_user_1_/copy3_of_folder_a/document_in_a/another_path_element?&amp;x=3">document in a with query</a>
+    <a href="../document_in_a">relative reference to document in a</a>
+    <a href="../../folder_z/document_in_z">relative reference to document in z ... this will be outside CopyRoot and subtree</a>
+    <a href="/plone/Members/test_user_1_/copy3_of_folder_a/document_in_a">absolute path reference to document in a</a>
+    <a href="/plone/Members/test_user_1_/copy3_of_folder_a/document_in_a/listresults?&amp;x=1&amp;y=2">absolute path reference to document in a with additional path and query</a>
+    <a href="/different/root/plone/Members/test_user_1_/folder_a/document_in_a">a reference to a document in a from another root</a>
+    <BLANKLINE>
+
+    >>> document_in_b = self.folder.copy3_of_folder_a.folder_b.copy2_of_folder_a.folder_b.document_in_b
+    >>> text_field = document_in_b.Schema()['text']
+    >>> print text_field.get(document_in_b, mimetype='text/x-html-safe')
+    <BLANKLINE>
+    <a href="/plone/Members/test_user_1_/copy3_of_folder_a/folder_b/copy2_of_folder_a/document_in_a">document in a</a>
+    <a href="/plone/Members/test_user_1_/copy3_of_folder_a/folder_b/copy2_of_folder_a/document_in_a/another_path_element">document in a</a>
+    <a href="/plone/Members/test_user_1_/copy3_of_folder_a/folder_b/copy2_of_folder_a/document_in_a/another_path_element?&amp;x=3">document in a with query</a>
+    <a href="../document_in_a">relative reference to document in a</a>
+    <a href="../../../../folder_z/document_in_z">relative reference to document in z ... this will be outside CopyRoot and subtree</a>
+    <a href="/plone/Members/test_user_1_/copy3_of_folder_a/folder_b/copy2_of_folder_a/document_in_a">absolute path reference to document in a</a>
+    <a href="/plone/Members/test_user_1_/copy3_of_folder_a/folder_b/copy2_of_folder_a/document_in_a/listresults?&amp;x=1&amp;y=2">absolute path reference to document in a with additional path and query</a>
+    <a href="/different/root/plone/Members/test_user_1_/folder_a/document_in_a">a reference to a document in a from another root</a>
+    <BLANKLINE>
+
+
+    >>> 
