@@ -1,0 +1,1 @@
+"""Grouparchy schema extensions."""

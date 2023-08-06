@@ -1,0 +1,86 @@
+;-*-Doctest-*-
+
+============
+Field Events
+============
+
+EventProperty is a zope.schema FieldProperty that fires an event when
+the field is modified and sends the old and new values to the event.
+
+    >>> from zope import interface, schema
+    >>> import grouparchy.schema.event
+    >>> class IFoo(interface.Interface):
+    ...     field = schema.Field()
+    >>> class Foo(object):
+    ...     interface.implements(IFoo)
+    ...     field = grouparchy.schema.event.EventProperty(
+    ...         IFoo['field'])
+    >>> foo = Foo()
+
+Before configuring a handler for the event nothing will happen::
+
+    >>> foo.field
+    >>> foo.field = 'foo'
+    >>> foo.field
+    'foo'
+
+When we provide a handler for the event, it will be triggered when we
+change the value::
+
+    >>> from zope import component
+    >>> def handler(event):
+    ...     print 'event: %s' % event
+    ...     print 'object: %s' % event.object
+    ...     print 'event.old: %s' % event.old
+    ...     print 'event.new: %s' % event.new
+    >>> component.provideHandler(
+    ...     handler, (grouparchy.schema.event.IFieldModifiedEvent,))
+
+    >>> foo.field = 'bar'
+    event: <grouparchy.schema.event.FieldModifiedEvent object at ...>
+    object: <Foo object at ...>
+    event.old: foo
+    event.new: bar
+
+If the new value is equal to the existing value, the event isn't
+triggered::
+
+    >>> foo.field
+    'bar'
+    >>> foo.field = 'bar'
+
+A different event can also be passed in to the property::
+
+    >>> class FooEvent(grouparchy.schema.event.FieldModifiedEvent):
+    ...     pass
+    >>> Foo.field = grouparchy.schema.event.EventProperty(
+    ...     IFoo['field'], event=FooEvent)
+    >>> foo.field = 'foo'
+    event: <FooEvent object at ...>
+    object: <Foo object at ...>
+    event.old: bar
+    event.new: foo
+
+If the event is None, no event will be triggered::
+
+    >>> Foo.field = grouparchy.schema.event.EventProperty(
+    ...     IFoo['field'], event=None)
+    >>> foo.field = 'bar'
+
+Descriptors that subclass EventProperty can override the notify()
+method for further control.  For example, the descriptor below will
+trigger the event even if the field value is unchanged::
+
+    >>> from zope import event
+    >>> class AlwaysEventProperty(
+    ...     grouparchy.schema.event.EventProperty):
+    ...     def notify(self, instance, new, old):
+    ...         event.notify(self.event(instance, new, old))
+    >>> Foo.field = AlwaysEventProperty(IFoo['field'])
+    >>> foo.field
+    'bar'
+    >>> foo.field = 'bar'
+    event: <grouparchy.schema.event.FieldModifiedEvent object at ...>
+    object: <Foo object at ...>
+    event.old: bar
+    event.new: bar

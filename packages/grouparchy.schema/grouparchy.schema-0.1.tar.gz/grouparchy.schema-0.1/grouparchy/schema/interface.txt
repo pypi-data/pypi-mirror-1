@@ -1,0 +1,379 @@
+;-*-Doctest-*-
+
+================
+Interface Fields
+================
+
+grouparchy.schema.interface includes zope.schema fields for
+manipulating the interfaces provided by the context.
+
+An implementation is included for managing the interfaces directly
+provided by an object::
+
+    >>> from zope import interface
+    >>> from grouparchy.schema.bbb import component_iface
+    >>> class IFoo(interface.Interface): pass
+    >>> component_iface.provideInterface('', IFoo)
+
+    >>> class Context(object):
+    ...     interface.implements(interface.Interface)
+
+    >>> from zope import component
+    >>> import grouparchy.schema.interface
+    >>> component.provideAdapter(
+    ...     factory=grouparchy.schema.interface.DirectlyProvided)
+
+    >>> provider = Context()
+    >>> directlyProvided = (
+    ...     grouparchy.schema.interface.IDirectlyProvided(
+    ...         provider))
+    >>> tuple(directlyProvided.directlyProvided)
+    ()
+
+    >>> directlyProvided.directlyProvided = (IFoo,)
+
+    >>> tuple(directlyProvided.directlyProvided)
+    (<InterfaceClass __builtin__.IFoo>,)
+
+The individual components offer much more flexibility.
+
+Fields
+------
+
+InterfacesField describes a set of interfaces provided by the
+context.
+
+An InterfacesField must have an InterfaceField or Choice value_type::
+
+    >>> from zope import schema
+    >>> grouparchy.schema.interface.InterfacesField()
+    Traceback (most recent call last):
+    ...
+    ValueError: 'value_type' must be an InterfaceField or a Choice.
+    >>> grouparchy.schema.interface.InterfacesField(
+    ...     value_type=schema.Field())
+    Traceback (most recent call last):
+    ...
+    ValueError: 'value_type' must be an InterfaceField or a Choice.
+    >>> field = grouparchy.schema.interface.InterfacesField(
+    ...     value_type=schema.InterfaceField())
+
+Valid values are sequences of interfaces::
+
+    >>> foo = object()
+    >>> bound = field.bind(foo)
+    >>> bound.validate(interface.Interface)
+    Traceback (most recent call last):
+    ...
+    WrongType: (<InterfaceClass zope.interface.Interface>,
+                (<type 'set'>, <type 'tuple'>, <type 'list'>))
+    >>> bound.validate((None,))
+    Traceback (most recent call last):
+    ...
+    WrongContainedType: []
+    >>> bound.validate((interface.Interface,))
+    >>> bound.validate([interface.Interface])
+
+Like any Set field, it accepts a Choice field with a vocabulary or
+source to narrow the set of interfaces::
+
+    >>> field = grouparchy.schema.interface.InterfacesField(
+    ...     value_type=schema.Choice(values=(IFoo,)))
+    >>> bound = field.bind(foo)
+    >>> bound.validate((interface.Interface,))
+    Traceback (most recent call last):
+    ...
+    WrongContainedType: [<InterfaceClass zope.interface.Interface>]
+    >>> bound.validate((IFoo,))
+
+A Choice field cannot circumvent the validation::
+
+    >>> field = grouparchy.schema.interface.InterfacesField(
+    ...     value_type=schema.Choice(values=(None,)))
+    >>> bound = field.bind(foo)
+    >>> bound.validate((None,))
+    Traceback (most recent call last):
+    ...
+    WrongContainedType: []
+
+Sources
+-------
+
+A source is also provided which can be used with an interface type
+used to determine set of valid interfaces for the field::
+
+    >>> [i for i in grouparchy.schema.interface.InterfacesSource()]
+    [<InterfaceClass __builtin__.IFoo>]
+
+Subsets of interfaces can be specified by passing an interface type::
+
+    >>> import zope.interface.interfaces
+    >>> class IIBar(zope.interface.interfaces.IInterface): pass
+    >>> class IBar(interface.Interface): pass
+    >>> component_iface.provideInterface('', IBar)
+    >>> component_iface.provideInterface('', IBar, IIBar)
+    >>> [i for i in grouparchy.schema.interface.InterfacesSource()]
+    [<InterfaceClass __builtin__.IFoo>,
+     <InterfaceClass __builtin__.IBar>]
+    >>> source = grouparchy.schema.interface.InterfacesSource(IIBar)
+    >>> [i for i in source]
+    [<InterfaceClass __builtin__.IBar>]
+
+Properties
+----------
+
+Two properties are also provided for getting and setting the field
+value for either interface objects or dotted names for interfaces::
+
+    >>> class IFoo(interface.Interface):
+    ...     all = grouparchy.schema.interface.InterfacesField(
+    ...         value_type=schema.InterfaceField())
+    ...     bar = grouparchy.schema.interface.InterfacesField(
+    ...         value_type=schema.Choice(source=source))
+    ...     dotted = grouparchy.schema.interface.InterfacesField(
+    ...         value_type=schema.InterfaceField())
+    >>> class Foo(object):
+    ...     all = grouparchy.schema.interface.InterfacesProperty(
+    ...         IFoo['all'])
+    ...     bar = grouparchy.schema.interface.InterfacesProperty(
+    ...         IFoo['bar'])
+    ...     dotted = (
+    ...         grouparchy.schema.interface.InterfaceIdentsProperty(
+    ...             IFoo['dotted']))
+    >>> foo = Foo()
+
+The properties return an IDeclaration::
+
+    >>> isinstance(foo.all, interface.Declaration)
+    True
+
+Before the object provides anything, the declarations are empty::
+
+    >>> tuple(foo.all)
+    ()
+    >>> tuple(foo.bar)
+    ()
+    >>> tuple(foo.dotted)
+    ()
+
+    >>> interface.alsoProvides(foo, interface.Interface)
+    >>> tuple(foo.all)
+    (<InterfaceClass zope.interface.Interface>,)
+    >>> tuple(foo.dotted)
+    ('zope.interface.Interface',)
+
+    >>> interface.alsoProvides(foo, IBar)
+    >>> tuple(foo.all)
+    (<InterfaceClass zope.interface.Interface>,
+     <InterfaceClass __builtin__.IBar>)
+    >>> tuple(foo.bar)
+    (<InterfaceClass __builtin__.IBar>,)
+
+    >>> IBar.providedBy(foo)
+    True
+    >>> foo.bar = ()
+    >>> tuple(foo.bar)
+    ()
+    >>> IBar.providedBy(foo)
+    False
+    >>> foo.bar = (IBar,)
+    >>> tuple(foo.bar)
+    (<InterfaceClass __builtin__.IBar>,)
+    >>> IBar.providedBy(foo)
+    True
+
+The properties need to know how to get the context providing the
+interfaces from the object the property lives on.  This is
+accomplished with an adapter to the object.  The following checks some
+names where the context is often found on adapters and fallsback to
+the object itself::
+
+    >>> context = foo.context = Foo()
+    >>> interface.alsoProvides(foo.context, interface.Interface)
+    >>> tuple(foo.all)
+    (<InterfaceClass zope.interface.Interface>,
+     <InterfaceClass __builtin__.IBar>)
+
+    >>> component.provideAdapter(
+    ...     grouparchy.schema.interface.getInterfacesContext)
+
+    >>> tuple(foo.all)
+    (<InterfaceClass zope.interface.Interface>,)
+    >>> del foo.context
+    >>> tuple(foo.all)
+    (<InterfaceClass zope.interface.Interface>,
+     <InterfaceClass __builtin__.IBar>)
+    >>> foo.object = context
+    >>> tuple(foo.all)
+    (<InterfaceClass zope.interface.Interface>,)
+    >>> del foo.object
+
+Events
+------
+
+The properties trigger an event by default::
+
+    >>> import zope.interface.interfaces
+    >>> def getIfacesStr(ifaces):
+    ...     return ', '.join((str(i) for i in sorted(ifaces)))
+    >>> def printInterfacesModified(event):
+    ...     print 'Event: %s' % event
+    ...     print 'Object: %s' % event.object
+    ...     print 'New: ' + getIfacesStr(event.new)
+    ...     print 'Old: ' + getIfacesStr(event.old)
+    ...     print 'Added: ' + getIfacesStr(event.added)
+    ...     print 'Removed: ' + getIfacesStr(event.removed)
+    >>> component.provideHandler(
+    ...     factory=printInterfacesModified,
+    ...     adapts=(
+    ...         grouparchy.schema.interface.IInterfacesModified,))
+
+    >>> class IBaz(interface.Interface): pass
+    >>> component_iface.provideInterface('', IBaz)
+    >>> component_iface.provideInterface('', IBaz, IIBar)
+
+The default events all provide IInterfacesModified, but the event
+triggered provides one of the more specific IInterfacesPopulated,
+IInterfacesCleared, IInterfacesAdded, IInterfacesRemoved, or
+IInterfacesChanged as apporpriate::
+
+    >>> foo.bar = ()
+    Event:
+    <grouparchy.schema.interface.InterfacesCleared object at ...>
+    Object: <Foo object at ...>
+    New: 
+    Old: <InterfaceClass __builtin__.IBar>
+    Added: 
+    Removed: <InterfaceClass __builtin__.IBar>
+    >>> foo.bar = (IBar,)
+    Event:
+    <grouparchy.schema.interface.InterfacesPopulated object at ...>
+    Object: <Foo object at ...>
+    New: <InterfaceClass __builtin__.IBar>
+    Old: 
+    Added: <InterfaceClass __builtin__.IBar>
+    Removed: 
+    >>> foo.bar = (IBar, IBaz)
+    Event:
+    <grouparchy.schema.interface.InterfacesAdded object at ...>
+    Object: <Foo object at ...>
+    New: <InterfaceClass __builtin__.IBar>,
+    <InterfaceClass __builtin__.IBaz>
+    Old: <InterfaceClass __builtin__.IBar>
+    Added: <InterfaceClass __builtin__.IBaz>
+    Removed: 
+    >>> foo.bar = (IBar,)
+    Event:
+    <grouparchy.schema.interface.InterfacesRemoved object at ...>
+    Object: <Foo object at ...>
+    New: <InterfaceClass __builtin__.IBar>
+    Old: <InterfaceClass __builtin__.IBar>,
+    <InterfaceClass __builtin__.IBaz>
+    Added:
+    Removed: <InterfaceClass __builtin__.IBaz>
+    >>> foo.bar = (IBaz,)
+    Event:
+    <grouparchy.schema.interface.InterfacesChanged object at ...>
+    Object: <Foo object at ...>
+    New: <InterfaceClass __builtin__.IBaz>
+    Old: <InterfaceClass __builtin__.IBar>
+    Added: <InterfaceClass __builtin__.IBaz>
+    Removed: <InterfaceClass __builtin__.IBar>
+
+IInterfacesPopulated and IInterfacesCleared extend IInterfacesAdded
+and IInterfacesRemoved respectively.  IInterfacesChanged extends
+both::
+
+    >>> def printInterfacesAdded(event): print 'Interfaces Added'
+    >>> component.provideHandler(
+    ...     factory=printInterfacesAdded,
+    ...     adapts=(
+    ...         grouparchy.schema.interface.IInterfacesAdded,))
+
+    >>> def printInterfacesRemoved(event): print 'Interfaces Removed'
+    >>> component.provideHandler(
+    ...     factory=printInterfacesRemoved,
+    ...     adapts=(
+    ...         grouparchy.schema.interface.IInterfacesRemoved,))
+
+    >>> foo.bar = ()
+    Event:
+    <grouparchy.schema.interface.InterfacesCleared object at ...>
+    Object: <Foo object at ...>
+    New: 
+    Old: <InterfaceClass __builtin__.IBaz>
+    Added: 
+    Removed: <InterfaceClass __builtin__.IBaz>
+    Interfaces Removed
+    >>> foo.bar = (IBar,)
+    Event:
+    <grouparchy.schema.interface.InterfacesPopulated object at ...>
+    Object: <Foo object at ...>
+    New: <InterfaceClass __builtin__.IBar>
+    Old: 
+    Added: <InterfaceClass __builtin__.IBar>
+    Removed: 
+    Interfaces Added
+    >>> foo.bar = (IBaz,)
+    Event:
+    <grouparchy.schema.interface.InterfacesChanged object at ...>
+    Object: <Foo object at ...>
+    New: <InterfaceClass __builtin__.IBaz>
+    Old: <InterfaceClass __builtin__.IBar>
+    Added: <InterfaceClass __builtin__.IBaz>
+    Removed: <InterfaceClass __builtin__.IBar>
+    Interfaces Removed
+    Interfaces Added
+
+An event class can be passed to the property as with
+grouparchy.schema.event.EventProperty::
+
+    >>> import grouparchy.schema.event
+    >>> class IBarInterfacesModified(
+    ...     grouparchy.schema.event.IFieldModifiedEvent): pass
+    >>> class BarInterfacesModified(
+    ...     grouparchy.schema.event.FieldModifiedEvent):
+    ...         interface.implements(IBarInterfacesModified)
+
+    >>> def printBarInterfacesModified(event):
+    ...     print 'Event: %s' % event
+    ...     print 'Object: %s' % event.object
+    ...     print 'New: ' + getIfacesStr(event.new)
+    ...     print 'Old: ' + getIfacesStr(event.old)
+    >>> component.provideHandler(
+    ...     factory=printBarInterfacesModified,
+    ...     adapts=(IBarInterfacesModified,))
+
+    >>> foo.bar = ()
+    Event:
+    <grouparchy.schema.interface.InterfacesCleared object at ...>
+    Object: <Foo object at ...>
+    New: 
+    Old: <InterfaceClass __builtin__.IBaz>
+    Added: 
+    Removed: <InterfaceClass __builtin__.IBaz>
+    Interfaces Removed
+    >>> foo.bar = (IBar,)
+    Event:
+    <grouparchy.schema.interface.InterfacesPopulated object at ...>
+    Object: <Foo object at ...>
+    New: <InterfaceClass __builtin__.IBar>
+    Old: 
+    Added: <InterfaceClass __builtin__.IBar>
+    Removed: 
+    Interfaces Added
+
+    >>> Foo.bar = grouparchy.schema.interface.InterfacesProperty(
+    ...     IFoo['bar'],
+    ...     event=BarInterfacesModified)
+
+    >>> foo.bar = ()
+    Event: <BarInterfacesModified object at ...>
+    Object: <Foo object at ...>
+    New: 
+    Old: <InterfaceClass __builtin__.IBar>
+    >>> foo.bar = (IBar,)
+    Event: <BarInterfacesModified object at ...>
+    Object: <Foo object at ...>
+    New: <InterfaceClass __builtin__.IBar>
+    Old: 
