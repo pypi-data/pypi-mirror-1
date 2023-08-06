@@ -1,0 +1,140 @@
+========================
+ A functional doctest
+========================
+
+Check Plone Root
+---------------------
+    >>> app
+    <Application at >
+
+Setting up and logging in
+-------------------------
+
+We use zope.testbrowser to simulate browser interaction in order to show
+the main flow of pages. This is not a true functional test, because we also
+inspect and modify the internal state of the ZODB, but it is a useful way of
+making sure we test the full end-to-end process of creating and modifying
+content.
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+
+The following is useful when writing and debugging testbrowser tests. It lets
+us see error messages properly.
+
+    >>> browser.handleErrors = True
+    >>> self.portal.error_log._ignored_exceptions = ()
+
+We then turn off the various portlets, because they sometimes duplicate links
+and text (e.g. the navtree, the recent recent items listing) that we wish to
+test for in our own views. Having no portlets makes things easier.
+
+    >>> from zope.component import getUtility, getMultiAdapter
+    >>> from plone.portlets.interfaces import IPortletManager
+    >>> from plone.portlets.interfaces import IPortletAssignmentMapping
+
+    >>> left_column = getUtility(IPortletManager, name=u"plone.leftcolumn")
+    >>> left_assignable = getMultiAdapter((self.portal, left_column), IPortletAssignmentMapping)
+    >>> for name in left_assignable.keys():
+    ...     del left_assignable[name]
+
+    >>> right_column = getUtility(IPortletManager, name=u"plone.rightcolumn")
+    >>> right_assignable = getMultiAdapter((self.portal, right_column), IPortletAssignmentMapping)
+    >>> for name in right_assignable.keys():
+    ...     del right_assignable[name]
+
+Finally, we need to log in as the portal owner, i.e. an administrator user. We
+do this from the login page.
+
+    >>> browser.open(portal_url)
+    >>> from Products.PloneTestCase.setup import portal_owner, default_password
+    >>> browser.open(portal_url + '/login_form?came_from=' + portal_url)
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+
+    >>> browser.open(portal_url)
+    >>> browser.getLink(id='topic').url.endswith("createObject?type_name=Topic")
+    True
+
+Add Collection
+    >>> browser.open(portal_url)
+    >>> try:
+    ...     browser.getLink(id='topic').click()
+    ... except:
+    ...     print self.portal.error_log.getLogEntries()[0]['tb_text']
+    >>> browser.getControl(name='title').value = 'Collection01'
+    >>> browser.getControl('Save').click()
+
+Edit Collection Criteria
+    >>> browser.getLink('Criteria').click()
+    >>> browser.getControl(name='field', index=0).value = ['Type']
+    >>> browser.getControl(name='criterion_type', index=0).value = ['ATPortalTypeCriterion']
+    >>> browser.getControl('Add criteria').click()
+    >>> 'Added criterion ATPortalTypeCriterion for field Type.' in browser.contents
+    True
+
+Verify that Page is an option, with value Page as well.
+    >>> browser.getControl('Page')
+    <ItemControl ...optionValue='Page'...>
+
+We select Page and save our selection.
+    >>> browser.getControl(name='crit__Type_ATPortalTypeCriterion_value:list').value = ['Page']
+    >>> browser.getControl('Save', index=0).click() 
+    >>> 'Changes saved.' in browser.contents
+    True
+
+Add Pages
+    >>> browser.open(portal_url)
+    >>> try:
+    ...     browser.getLink(id='document').click()
+    ... except:
+    ...     print self.portal.error_log.getLogEntries()[0]['tb_text']
+    >>> browser.getControl(name='title').value = 'AAA'
+    >>> browser.getControl(name='subject_keywords:lines').value = 'AAA'
+    >>> browser.getControl('Save').click()
+
+    >>> browser.open(portal_url)
+    >>> try:
+    ...     browser.getLink(id='document').click()
+    ... except:
+    ...     print self.portal.error_log.getLogEntries()[0]['tb_text']
+    >>> browser.getControl(name='title').value = 'aaA'
+    >>> browser.getControl(name='subject_keywords:lines').value = 'BBB'
+    >>> browser.getControl('Save').click()
+
+    >>> browser.open(portal_url)
+    >>> try:
+    ...     browser.getLink(id='document').click()
+    ... except:
+    ...     print self.portal.error_log.getLogEntries()[0]['tb_text']
+    >>> browser.getControl(name='title').value = 'Baa'
+    >>> browser.getControl(name='subject_keywords:lines').value = 'ÄÄÄ'
+    >>> browser.getControl('Save').click()
+
+Change Collection view
+    >>> browser.getLink('Collection01').click()
+    >>> browser.getLink('topic-alphabetic-view').click()
+
+Check alphabet view
+    >>> browser.getLink('A').click()
+    >>> 'aaA' in browser.contents
+    True
+
+Check if there are Character Options page
+    >>> browser.open(portal_url)
+    >>> browser.getLink('Site Setup').click()
+    >>> try:
+    ...     browser.getLink('Character Options').click()
+    ... except:
+    ...     print self.portal.error_log.getLogEntries()[0]['tb_text']
+    >>> try:
+    ...     browser.getControl('Save').click()
+    ... except:
+    ...     print self.portal.error_log.getLogEntries()[0]['tb_text']
+    >>> browser.getControl(name="form.character_tokens").value = 'ÄÖÅ'
+    >>> try:
+    ...     browser.getControl('Save').click()
+    ... except:
+    ...     print self.portal.error_log.getLogEntries()[0]['tb_text']
