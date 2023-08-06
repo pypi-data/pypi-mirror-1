@@ -1,0 +1,102 @@
+Test martini.config
+=====================
+
+The obligatory imports:
+
+    >>> import sys
+    >>> from pprint import pprint
+    >>> from martini.config import ConfigMunger
+    >>> from ConfigParser import InterpolationMissingOptionError
+    >>> from StringIO import StringIO
+
+Make the munger and some .ini files:
+
+     >>> munger = ConfigMunger()
+     >>> foo = StringIO("[foo]\nbar = fleem")
+     
+Test basic reading + writing functionality:
+
+     >>> munger.read(foo)
+     >>> munger.write(sys.stdout)
+     [foo]
+     bar = fleem
+
+Test overriding:
+     
+     >>> munger.read("[foo]\nblah = florg\nbar=thorg")
+     >>> munger.write(sys.stdout)
+     [foo]
+     bar = thorg
+     blah = florg
+
+Test variable interpolation:
+
+     >>> munger.read("[variable]\nvar=%(value)s")
+     >>> buffer = StringIO()
+     >>> try:
+     ...	munger.write(buffer)
+     ... except InterpolationMissingOptionError, e:
+     ... 	print e.reference
+     value
+     >>> munger.write(sys.stdout, vars=dict(value='interpolated'))
+     [foo]
+     bar = thorg
+     blah = florg
+     <BLANKLINE>
+     [variable]
+     var = interpolated
+
+Testing dict-like functionality:
+
+	>>> munger = ConfigMunger()
+	>>> munger.read("[foo]\nblah = florg\nbar=thorg")
+	>>> munger['foo']['bar']
+	'thorg'
+	>>> pprint(munger.dict())
+	{'foo': {'bar': 'thorg', 'blah': 'florg'}}
+	>>> pprint(munger['foo'])
+	{'bar': 'thorg', 'blah': 'florg'}
+
+You can read from a dictionary too:
+    
+    >>> munger = ConfigMunger()
+    >>> munger.read({'foo': {'bar': 'baz'}})
+    >>> munger['foo']['bar']
+    'baz'
+    >>> munger.write(sys.stdout)
+    [foo]
+    bar = baz
+	
+Test the ability to parse sectionless .ini files:
+
+    >>> munger = ConfigMunger()
+    >>> munger.read("foo = bar\nbaz=fleem")
+    >>> munger.sections()
+    ['DEFAULTS']
+    >>> munger['DEFAULTS']
+    {'foo': 'bar', 'baz': 'fleem'}
+    >>> munger.write(sys.stdout)
+    [DEFAULTS]
+    baz = fleem
+    foo = bar
+    >>> munger = ConfigMunger()
+    >>> munger.read("foo = bar\n\n[foo]\nbaz=fleem")
+    >>> sorted(munger.sections())
+    ['DEFAULTS', 'foo']
+    >>> munger['DEFAULTS']['foo']
+    'bar'
+    >>> munger['foo']['baz']
+    'fleem'
+
+Move a secton around:
+     
+     >>> munger.rename_section('foo', 'oof')
+     >>> sorted(munger.sections())
+     ['DEFAULTS', 'oof']
+     >>> munger['oof']
+     {'baz': 'fleem'}
+
+Test the ability to parse multi-line .ini files [TODO]:
+
+     >>> munger = ConfigMunger()
+     >>> # munger.read("[Jeff Hammel]\naddress = 639 W. 173 St.\nApt. 11D\nNew York, NY  10032")
