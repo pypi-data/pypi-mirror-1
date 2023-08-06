@@ -1,0 +1,114 @@
+==============
+Adding members
+==============
+
+You can add members to a mailing list from the command line.
+
+    >>> mlist = create_list('test@example.com')
+
+    >>> class FakeArgs:
+    ...     filename = None
+    ...     listname = None
+    >>> args = FakeArgs()
+
+    >>> from mailman.commands.cli_members import Members
+    >>> command = Members()
+
+To do so, you need a file containing email addresses and full names that can
+be parsed by email.utils.parseaddr().
+
+    >>> addresses = [
+    ...     ]
+
+    >>> import os
+    >>> path = os.path.join(config.VAR_DIR, 'addresses.txt')
+    >>> with open(path, 'w') as fp:
+    ...     for address in ('aperson@example.com',
+    ...                     'Bart Person <bperson@example.com>',
+    ...                     'cperson@example.com (Cate Person)',
+    ...                     ):
+    ...         print >> fp, address
+
+    >>> args.filename = path
+    >>> args.listname = [mlist.fqdn_listname]
+    >>> command.process(args)
+
+    >>> sorted(address.address for address in mlist.members.addresses)
+    [u'aperson@example.com', u'bperson@example.com', u'cperson@example.com']
+
+You can also specify '-' as the filename, in which case the addresses are
+taken from standard input.
+
+    >>> from StringIO import StringIO
+    >>> fp = StringIO()
+    >>> for address in ('dperson@example.com',
+    ...                 'Elly Person <eperson@example.com>',
+    ...                 'fperson@example.com (Fred Person)',
+    ...                 ):
+    ...         print >> fp, address
+    >>> fp.seek(0)
+    >>> import sys
+    >>> sys.stdin = fp
+
+    >>> args.filename = '-'
+    >>> command.process(args)
+    >>> sys.stdin = sys.__stdin__
+
+    >>> sorted(address.address for address in mlist.members.addresses)
+    [u'aperson@example.com', u'bperson@example.com', u'cperson@example.com',
+     u'dperson@example.com', u'eperson@example.com', u'fperson@example.com']
+
+Blank lines and lines that begin with '#' are ignored.
+
+    >>> with open(path, 'w') as fp:
+    ...     for address in ('gperson@example.com',
+    ...                     '# hperson@example.com',
+    ...                     '   ',
+    ...                     '',
+    ...                     'iperson@example.com',
+    ...                     ):
+    ...         print >> fp, address
+
+    >>> args.filename = path
+    >>> command.process(args)
+    >>> sorted(address.address for address in mlist.members.addresses)
+    [u'aperson@example.com', u'bperson@example.com', u'cperson@example.com',
+     u'dperson@example.com', u'eperson@example.com', u'fperson@example.com',
+     u'gperson@example.com', u'iperson@example.com']
+
+Addresses which are already subscribed are ignored, although a warning is
+printed.
+
+    >>> with open(path, 'w') as fp:
+    ...     for address in ('gperson@example.com',
+    ...                     'aperson@example.com',
+    ...                     'jperson@example.com',
+    ...                     ):
+    ...         print >> fp, address
+
+    >>> command.process(args)
+    Already subscribed (skipping): gperson@example.com
+    Already subscribed (skipping): aperson@example.com
+
+    >>> sorted(address.address for address in mlist.members.addresses)
+    [u'aperson@example.com', u'bperson@example.com', u'cperson@example.com',
+     u'dperson@example.com', u'eperson@example.com', u'fperson@example.com',
+     u'gperson@example.com', u'iperson@example.com', u'jperson@example.com']
+
+
+Displaying members
+==================
+
+With no arguments, the command displays all members of the list.
+
+    >>> args.filename = None
+    >>> command.process(args)
+    aperson@example.com
+    Bart Person <bperson@example.com>
+    Cate Person <cperson@example.com>
+    dperson@example.com
+    Elly Person <eperson@example.com>
+    Fred Person <fperson@example.com>
+    gperson@example.com
+    iperson@example.com
+    jperson@example.com
