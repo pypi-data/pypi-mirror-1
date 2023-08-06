@@ -1,0 +1,272 @@
+Imports
+    >>> from Products.CMFCore.utils import getToolByName
+
+Setting up and logging in
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+    >>> portal_url
+    'http://nohost/plone'
+
+The following is useful when writing and debugging testbrowser tests. It lets
+us see error messages properly.
+    >>> browser.handleErrors = True
+    >>> self.portal.error_log._ignored_exceptions = ()
+
+We then turn off the various portlets, because they sometimes duplicate links
+and text (e.g. the navtree, the recent recent items listing) that we wish to
+test for in our own views. Having no portlets makes things easier.
+    >>> from zope.component import getUtility, getMultiAdapter
+    >>> from plone.portlets.interfaces import IPortletManager
+    >>> from plone.portlets.interfaces import IPortletAssignmentMapping
+
+    >>> left_column = getUtility(IPortletManager, name=u"plone.leftcolumn")
+    >>> left_assignable = getMultiAdapter((self.portal, left_column), IPortletAssignmentMapping)
+    >>> for name in left_assignable.keys():
+    ...     del left_assignable[name]
+
+    >>> right_column = getUtility(IPortletManager, name=u"plone.rightcolumn")
+    >>> right_assignable = getMultiAdapter((self.portal, right_column), IPortletAssignmentMapping)
+    >>> for name in right_assignable.keys():
+    ...     del right_assignable[name]
+
+Finally, we need to log in as the portal owner, i.e. an administrator user. We
+do this from the login page.
+    >>> browser.open(portal_url)
+    >>> from Products.PloneTestCase.setup import portal_owner, default_password
+    >>> browser.open(portal_url + '/login_form?came_from=' + portal_url)
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+
+    >>> browser.open(portal_url)
+
+=============================================================================================
+Verify that we have the links to categorycontainer from the add item menu, but not category.
+ShippingMethod can be added inside categorycontainer.
+    >>> browser.getLink(id='categorycontainer').url.endswith("createObject?type_name=CategoryContainer")
+    True
+    >>> browser.getLink(id='category').url.endswith("createObject?type_name=Category")
+    Traceback (most recent call last):
+    ...
+    LinkNotFoundError
+
+Add Folder: We will add CategoryContainer here.
+    >>> browser.getLink(id='folder').click()
+    >>> browser.getControl(name='title').value = "Folder01"
+    >>> browser.getControl('Save').click()
+    >>> folder01_url = self.portal.folder01.absolute_url()
+
+Add Document under Folder01.
+    >>> browser.open(folder01_url)
+    >>> browser.getLink(id='document').click()
+    >>> browser.getControl(name='title').value = "Document02"
+    >>> browser.getControl(name='description').value = "Description of Document02."
+    >>> browser.getControl('Save').click()
+    >>> 'CategoryContainer' in browser.contents
+    False
+    >>> document02_url = self.portal.folder01.document02.absolute_url()
+
+Add CategoryContainer
+    >>> browser.open(folder01_url)
+    >>> browser.getLink(id='categorycontainer').click()
+    >>> browser.getControl(name='title').value = "CategoryContainer"
+    >>> browser.getControl(name='description').value = "Description of CategoryContainer."
+    >>> browser.getControl(name="type_categorized:list").value = ['Document']
+    >>> browser.getControl(name="level").value = "3"
+    >>> browser.getControl('Save').click()
+    >>> browser.url
+    'http://nohost/plone/folder01/categorycontainer/'
+
+    >>> container = self.portal.folder01.categorycontainer
+    >>> container_url = container.absolute_url()
+    >>> container.title
+    'CategoryContainer'
+    >>> container.description
+    'Description of CategoryContainer.'
+    >>> container.type_categorized
+    ['Document']
+    >>> container.level
+    3
+
+Document content type has new action.
+    >>> uid = self.portal.folder01.categorycontainer.UID()
+    >>> type_tool = getToolByName(portal, 'portal_types')
+    >>> ids = [action.id for action in type_tool.getTypeInfo('Document').listActions()]
+    >>> uid in ids
+    True
+
+Add one type_categorized
+    >>> browser.open(container_url)
+    >>> browser.getLink('Edit').click()
+    >>> browser.getControl(name="type_categorized:list").value = ['Document', 'News Item']
+    >>> browser.getControl('Save').click()
+
+News Item content type has new action.
+    >>> ids = [action.id for action in type_tool.getTypeInfo('News Item').listActions()]
+    >>> uid in ids
+    True
+
+Deleting CategoryContainer should delete those newly added action to type.
+    >>> browser.getLink(id="delete").click()
+    >>> browser.getControl("Delete").click()
+
+No More actions should be there.
+    >>> ids = [action.id for action in type_tool.getTypeInfo('Document').listActions()]
+    >>> uid in ids
+    False
+    >>> ids = [action.id for action in type_tool.getTypeInfo('News Item').listActions()]
+    >>> uid in ids
+    False
+
+Add CategoryContainer back.
+    >>> browser.open(folder01_url)
+    >>> browser.getLink(id='categorycontainer').click()
+    >>> browser.getControl(name='title').value = "CategoryContainer"
+    >>> browser.getControl(name='description').value = "Description of CategoryContainer."
+    >>> browser.getControl(name="type_categorized:list").value = ['Document']
+    >>> browser.getControl(name="level").value = "3"
+    >>> browser.getControl('Save').click()
+
+Check Document02 categories-view.
+    >>> browser.open(document02_url)
+    >>> 'CategoryContainer' in browser.contents
+    True
+    >>> browser.getLink('CategoryContainer').click()
+
+Create Category under CategoryContainer.
+    >>> browser.open(container_url)
+    >>> browser.getLink(id='category').click()
+    >>> browser.getControl(name='title').value = "Category01"
+    >>> browser.getControl(name='description').value = "Description of Category01."
+    >>> browser.getControl('Save').click()
+    >>> browser.url
+    'http://nohost/plone/folder01/categorycontainer/category01/'
+
+    >>> category01 = self.portal.folder01.categorycontainer.category01
+    >>> category01_url = category01.absolute_url()
+    >>> category01.title
+    'Category01'
+    >>> category01.getId()
+    'category01'
+    >>> category01.description
+    'Description of Category01.'
+    >>> category01.content
+    []
+    >>> category01.subcategory
+    []
+
+Category Title validation
+    >>> browser.getLink(id='category').click()
+    >>> browser.getControl(name='title').value = "Category01"
+    >>> browser.getControl('Save').click()
+    >>> 'The Title is already in use under the CategoryContainer.' in browser.contents
+    True
+
+Delete Category.
+    >>> browser.open(category01_url)
+    >>> browser.getLink(id="delete").click()
+    >>> browser.getControl("Delete").click()
+
+Add Category back.
+    >>> browser.getLink(id='category').click()
+    >>> browser.getControl(name='title').value = "Category01"
+    >>> browser.getControl(name='description').value = "Description of Category01."
+    >>> browser.getControl('Save').click()
+    >>> category01 = self.portal.folder01.categorycontainer.category01
+    >>> category01_url = category01.absolute_url()
+    >>> category01_uid = category01.UID()
+
+Check Document02 categories-view.
+    >>> browser.open(document02_url)
+    >>> 'CategoryContainer' in browser.contents
+    True
+    >>> browser.getLink('CategoryContainer').click()
+
+Add Category02 under CategoryContainer.
+    >>> browser.open(container_url)
+    >>> browser.getLink(id='category').click()
+    >>> browser.getControl(name='title').value = "Category02"
+    >>> browser.getControl('Save').click()
+    >>> category02 = self.portal.folder01.categorycontainer.category02
+    >>> category02_url = category02.absolute_url()
+    >>> category02_uid = category02.UID()
+
+Copy Category02 to Category01 validation.
+    >>> browser.getLink(id="copy").click()
+    >>> browser.open(category01_url)
+    >>> browser.getLink(id="paste").click()
+    >>> "category of the same title already exists." in browser.contents
+    True
+
+Move Category01 to Category02 and back.
+    >>> browser.getLink(id="cut").click()
+    >>> browser.open(category02_url)
+    >>> browser.getLink(id="paste").click()
+    >>> "Item(s) pasted." in browser.contents
+    True
+
+Check Document02 categories-view.
+    >>> browser.open(document02_url)
+    >>> 'CategoryContainer' in browser.contents
+    True
+    >>> browser.getLink('CategoryContainer').click()
+
+Add Category03 under Category02.
+    >>> browser.open(category02_url)
+    >>> browser.getLink(id='category').click()
+    >>> browser.getControl(name='title').value = "Category03"
+    >>> browser.getControl('Save').click()
+    >>> category03 = self.portal.folder01.categorycontainer.category02.category03
+    >>> category03_url = category03.absolute_url()
+
+Check Document02 categories-view.
+    >>> browser.open(document02_url)
+    >>> 'CategoryContainer' in browser.contents
+    True
+    >>> browser.getLink('CategoryContainer').click()
+
+Add Categocy04 under CategoryContainer.
+    >>> browser.open(container_url)
+    >>> browser.getLink(id='category').click()
+    >>> browser.getControl(name='title').value = "Category04"
+    >>> browser.getControl('Save').click()
+    >>> category04 = self.portal.folder01.categorycontainer.category04
+    >>> category04_url = category04.absolute_url()
+
+Set Category02 as a subcategory of Category04
+    >>> category04.subcategory = [category02_uid,]
+    >>> category04.getRawSubcategory() == [category02_uid]
+    True
+
+Check Document02 categories-view.
+    >>> browser.open(document02_url)
+    >>> 'CategoryContainer' in browser.contents
+    True
+    >>> browser.getLink('CategoryContainer').click()
+
+Check CategoryContainer View
+    >>> browser.open(container_url)
+
+Check Document02 categories-view.
+    >>> browser.open(document02_url)
+    >>> 'CategoryContainer' in browser.contents
+    True
+    >>> browser.getLink('CategoryContainer').click()
+    >>> 'checked' in browser.contents
+    False
+    >>> browser.getControl(name="category:list").getControl(value=category01.UID()).selected = True
+    >>> browser.getControl(name="form.button.Update").click()
+    >>> 'checked' in browser.contents
+    True
+    >>> category01.content[0].Title() == "Document02"
+    True
+
+Now we add "Document" content type to portal root.
+    >>> browser.open(portal_url)
+    >>> browser.getLink(id='document').click()
+    >>> browser.getControl(name='title').value = "Document01"
+    >>> browser.getControl(name='description').value = "Description of Document01."
+    >>> browser.getControl('Save').click()
+    >>> 'CategoryContainer' in browser.contents
+    False
