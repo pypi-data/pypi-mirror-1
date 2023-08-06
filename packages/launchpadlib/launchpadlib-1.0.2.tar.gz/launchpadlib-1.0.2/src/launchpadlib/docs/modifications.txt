@@ -1,0 +1,351 @@
+= Modifications =
+
+Objects available through the web interface, such as people, have a readable
+interface which is available through direct attribute access.
+
+    >>> from launchpadlib.testing.helpers import salgado_with_full_permissions
+    >>> launchpad = salgado_with_full_permissions.login()
+
+    >>> salgado = launchpad.people['salgado']
+    >>> print salgado.display_name
+    Guilherme Salgado
+
+These objects may have a number of attributes, as well as associated
+collections and entries. Introspection methods give you access to this
+information.
+
+    >>> sorted(dir(salgado))
+    [...'acceptInvitationToBeMemberOf', 'addMember', 'admins', ...]
+    >>> sorted(salgado.lp_attributes)
+    ['date_created', 'display_name', 'hide_email_addresses', ...]
+    >>> sorted(salgado.lp_entries)
+    ['archive', 'mugshot', 'preferred_email_address', 'team_owner']
+    >>> sorted(salgado.lp_collections)
+    ['admins', 'confirmed_email_addresses', 'deactivated_members', ...]
+    >>> sorted(salgado.lp_operations)
+    ['acceptInvitationToBeMemberOf', 'addMember', ...]
+
+Some of these attributes can be changed.  For example, Salgado can change his
+display name.  When changing attribute values though, the changes are not
+pushed to the web service until the entry is explicitly saved.  This allows
+Salgado to batch the changes over the wire for efficiency.
+
+    >>> salgado.display_name = u'Salgado'
+    >>> print launchpad.people['salgado'].display_name
+    Guilherme Salgado
+
+Once the changes are saved though, they are saved on the web service.
+
+XXX BarryWarsaw 12-Jun-2008 We currently make no guarantees about the
+synchronization between the local object's state and the remote
+object's state.  Future development will add a "conditional PATCH"
+feature based on Last-Modified/ETag headers; this will serve as a
+transction number, so that if the two objects get out of sync, the
+.lp_save() would fail.  Since this is not yet implemented, we will do
+a [] lookup every time we want to guarantee that we have the
+up-to-date state of the object.  The only other time we can make this
+guarantee is when we change an attribute that causes a 301 'Moved
+permanently' HTTP error, because we implicitly re-fetch the object's
+state in that case.  However, this latter condition is not exposed
+through the web service.
+
+    >>> salgado.lp_save()
+    >>> print launchpad.people['salgado'].display_name
+    Salgado
+
+The entry object is a normal Python object like any other. Attributes
+of the entry, like 'display_name', are available as attributes on the
+resource, and may be set. Only the attributes of the entry can be set
+or read as Python attributes.
+
+    >>> salgado.display_name = u'Guilherme Salgado'
+    >>> salgado.is_great = True
+    Traceback (most recent call last):
+    ...
+    AttributeError: 'Entry' object has no attribute 'is_great'
+
+    >>> salgado.is_great
+    Traceback (most recent call last):
+    ...
+    AttributeError: 'Entry' object has no attribute 'is_great'
+
+The client can set more than one attribute on Salgado at a time:
+they'll all be changed when the entry is saved.
+
+    >>> print salgado.homepage_content
+    None
+    >>> salgado.hide_email_addresses
+    False
+    >>> print salgado.mailing_list_auto_subscribe_policy
+    Ask me when I join a team
+
+    >>> salgado.homepage_content = u'This is my home page.'
+    >>> salgado.hide_email_addresses = True
+    >>> salgado.mailing_list_auto_subscribe_policy = (
+    ...     u'Never subscribe to mailing lists')
+    >>> salgado.lp_save()
+    >>> salgado = launchpad.people['salgado']
+
+    >>> print salgado.homepage_content
+    This is my home page.
+    >>> salgado.hide_email_addresses
+    True
+    >>> print salgado.mailing_list_auto_subscribe_policy
+    Never subscribe to mailing lists
+
+Salgado cannot set his time zone to an illegal value.
+
+    >>> from launchpadlib.errors import HTTPError
+    >>> def print_error_on_save(entry):
+    ...     try:
+    ...         entry.lp_save()
+    ...     except HTTPError, error:
+    ...         for line in sorted(error.content.splitlines()):
+    ...             print line
+    ...     else:
+    ...         print 'Did not get expected HTTPError!'
+
+    >>> salgado.time_zone = 'SouthPole'
+    >>> print_error_on_save(salgado)
+    time_zone: u'SouthPole' isn't a valid token
+
+Teams also have attributes that can be changed.  For example, Salgado creates
+the most awesome team in the world.
+
+    >>> bassists = launchpad.people.newTeam(
+    ...     name='bassists', display_name='Awesome Rock Bass Players')
+
+Then Salgado realizes he wants to express the awesomeness of this team in its
+description.  Salgado also understands that anybody can achieve awesomeness.
+
+    >>> print bassists.team_description
+    None
+    >>> print bassists.subscription_policy
+    Moderated Team
+
+    >>> bassists.team_description = (
+    ...     u'The most important instrument in the world')
+    >>> bassists.subscription_policy = u'Open Team'
+    >>> bassists_copy = launchpad.people['bassists']
+    >>> bassists.lp_save()
+
+A resource object is automatically refreshed after saving.
+
+    >>> print bassists.team_description
+    The most important instrument in the world
+
+Any other version of that resource will still have the old data.
+
+    >>> print bassists_copy.team_description
+    None
+
+But you can also refresh a resource object manually.
+
+    >>> bassists_copy.lp_refresh()
+    >>> print bassists.team_description
+    The most important instrument in the world
+    >>> print bassists.subscription_policy
+    Open Team
+
+Some of a resource's attributes may take other resources as values.
+
+    >>> ubuntu = launchpad.distributions['ubuntu']
+    >>> print ubuntu.driver
+    None
+    >>> ubuntu.driver = salgado
+    >>> ubuntu.lp_save()
+    >>> print ubuntu.driver
+    http://api.launchpad.dev:8085/beta/~salgado
+
+Resources may also be used as arguments to named operations.
+
+    >>> bug_one = launchpad.bugs[1]
+    >>> task = [task for task in bug_one.bug_tasks][0]
+    >>> print task.assignee.display_name
+    Mark Shuttleworth
+    >>> task.transitionToAssignee(assignee=salgado)
+    >>> print task.assignee.display_name
+    Guilherme Salgado
+
+    # XXX: salgado, 2008-08-01: Commented because method has been Unexported;
+    # it should be re-enabled after the operation is exported again.
+    # >>> salgado.inTeam(team=bassists)
+    # True
+
+
+== Server-side data massage ==
+
+Send bad data and your request will be rejected. But if you send data
+that's not quite what the server is expecting, the server may accept
+it while tweaking it. This means that the state of your object after
+you call lp_save() may be slightly different from the object before
+you called lp_save().
+
+    >>> firefox = launchpad.projects['firefox']
+    >>> print firefox.wiki_url
+    None
+    >>> firefox.wiki_url = '   http://foo.com '
+    >>> firefox.wiki_url
+    '   http://foo.com '
+    >>> firefox.lp_save()
+    >>> firefox.wiki_url
+    'http://foo.com/'
+
+
+== Moving an entry ==
+
+Salgado can actually rename and move his person by changing the 'name'
+attribute.
+
+    >>> salgado = launchpad.people['salgado']
+    >>> salgado.name = u'guilherme'
+    >>> salgado.lp_save()
+
+Once this is done, he can no longer access his data through the old name.  But
+Salgado's person is available through the new name.
+
+    >>> launchpad.people['salgado']
+    Traceback (most recent call last):
+    ...
+    KeyError: 'salgado'
+
+    >>> print launchpad.people['guilherme'].display_name
+    Guilherme Salgado
+
+Under the covers though, a refresh of the original object has been retrieved
+from Launchpad, so it's save to continue using, and changing it.
+
+    >>> salgado.display_name = u'Salgado!'
+    >>> salgado.lp_save()
+    >>> print launchpad.people['guilherme'].display_name
+    Salgado!
+
+It's just as easy to move Salgado back to the old name.
+
+    >>> salgado.name = u'salgado'
+    >>> salgado.lp_save()
+    >>> launchpad.people['guilherme']
+    Traceback (most recent call last):
+    ...
+    KeyError: 'guilherme'
+
+    >>> print launchpad.people['salgado'].display_name
+    Salgado!
+
+
+== Read-only attributes ==
+
+Some attributes are read-only, such as a person's karma.
+
+    >>> salgado.karma
+    0
+    >>> salgado.karma = 1000000
+    >>> print_error_on_save(salgado)
+    karma: You tried to modify a read-only attribute.
+
+If Salgado tries to change several read-only attributes at the same time, he
+gets useful feedback about his error.
+
+    >>> salgado.date_created = u'2003-06-06T08:59:51.596025+00:00'
+    >>> salgado.is_team = True
+    >>> print_error_on_save(salgado)
+    date_created: You tried to modify a read-only attribute.
+    is_team: You tried to modify a read-only attribute.
+    karma: You tried to modify a read-only attribute.
+
+
+== Avoiding conflicts ==
+
+Launchpad and launchpadlib work together to try to avoid situations
+where one person unknowingly overwrites another's work. Here, two
+different clients are interested in the same Launchpad object.
+
+    >>> first_launchpad = salgado_with_full_permissions.login()
+    >>> first_firefox = first_launchpad.projects['firefox']
+    >>> first_firefox.description
+    'The Mozilla Firefox web browser'
+
+    >>> second_launchpad = salgado_with_full_permissions.login()
+    >>> second_firefox = second_launchpad.projects['firefox']
+    >>> second_firefox.description
+    'The Mozilla Firefox web browser'
+
+The first client decides to change the description.
+
+    >>> first_firefox.description = 'A description.'
+    >>> first_firefox.lp_save()
+
+The second client tries to make a conflicting change, but the server
+detects that the second client doesn't have the latest information,
+and rejects the request.
+
+    >>> second_firefox.description = 'A conflicting description.'
+    >>> second_firefox.lp_save()
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 412: Precondition Failed
+
+Now the second client has a chance to look at the changes that were
+made, before making their own changes.
+
+    >>> second_firefox.lp_refresh()
+    >>> print second_firefox.description
+    A description.
+
+    >>> second_firefox.description = 'A conflicting description.'
+    >>> second_firefox.lp_save()
+
+Conflict detection works even when you operate on an object you
+retrieved from a collection.
+
+    >>> first_user = first_launchpad.people[:10][0]
+    >>> second_user = second_launchpad.people[:10][0]
+    >>> first_user.name == second_user.name
+    True
+
+    >>> first_user.display_name = "A display name"
+    >>> first_user.lp_save()
+
+    >>> second_user.display_name = "A conflicting display name"
+    >>> second_user.lp_save()
+    Traceback (most recent call last):
+    ...
+    HTTPError: HTTP Error 412: Precondition Failed
+
+    >>> second_user.lp_refresh()
+    >>> print second_user.display_name
+    A display name
+
+    >>> second_user.display_name = "A conflicting display name"
+    >>> second_user.lp_save()
+
+    >>> first_user.lp_refresh()
+    >>> print first_user.display_name
+    A conflicting display name
+
+
+== Data types ==
+
+From the perspective of the launchpadlib user, date and date-time
+fields always look like Python datetime objects or None.
+
+    >>> firefox = launchpad.projects['firefox']
+    >>> for milestone in firefox.all_milestones:
+    ...     if milestone.name == '1.0':
+    ...         break
+    >>> milestone.date_targeted
+    datetime.datetime(2056, 10, 16,...)
+
+These fields can be changed and written back to the server, just like
+objects of other types.
+
+    >>> from datetime import datetime
+    >>> milestone.date_targeted = datetime(2009, 1, 1)
+    >>> milestone.lp_save()
+
+A datetime object may also be used as an argument to a named operation.
+
+    >>> series = firefox.series[0]
+    >>> series.newMilestone(
+    ...     name="test", date_targeted=datetime(2009, 1, 1))
+    <milestone at ...>
