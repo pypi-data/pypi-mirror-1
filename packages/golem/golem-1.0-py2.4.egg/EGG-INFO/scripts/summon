@@ -1,0 +1,216 @@
+#!/opt/local/Library/Frameworks/Python.framework/Versions/2.4/Resources/Python.app/Contents/MacOS/Python
+# -*- coding: utf-8 -*-
+#
+
+import csv
+import sys
+import os
+import ConfigParser
+import re
+import optparse
+#INSTALLDIR
+
+import golem
+
+dictHeader = """
+<dictionary
+  namespace="http://www.lexical.org.uk/golem/summon/"
+  xmlns="http://www.xml-cml.org/schema"
+  xmlns:golem="http://www.lexical.org.uk/golem">
+"""
+
+dictRefEntry = """
+  <entry id="%(term)s">
+    <golem:synonym namespace="%(uri)s">%(id)s</golem:synonym>
+  </entry>
+"""
+
+xpathEntry = """
+  <entry id="%(term)s">
+    <golem:xpath>%(xpath)s</golem:xpath>
+    <golem:template namespace="http://www.lexical.org.uk/golem/dictionary/" call="%(type)s" role="getvalue" binding="pygolem_serialization" >
+      <golem:implements>value</golem:implements>
+      <golem:implements>absolute</golem:implements>
+    </golem:template>
+  </entry>
+"""
+
+dictFooter = """
+</dictionary>
+"""
+
+def parse_options():
+    usage = "usage: %prog options file1.xml [file2.xml ...]"
+    parser = optparse.OptionParser(usage=usage, version="golem (%prog) v."+golem.__version__)
+    parser.add_option("-t", "--term", action="append", help="terms to look up")
+    parser.add_option("-d", "--dictionary", help="dictionary to use")
+    parser.add_option("-c", "--config", help="config file to use")
+    parser.add_option("-f", "--final", action="store_true", help="take only last value in file?")
+    parser.add_option("-o", "--outfile", help="dump output to csv file")
+
+    (options, filenames) = parser.parse_args()
+    if len(filenames) == 0:
+        parser.error("No filenames supplied.")
+    elif not options.dictionary and not options.config:        
+        parser.error("No dictionary supplied.")
+    elif not options.term:
+        parser.error("No terms requested.")
+    return (options, filenames)
+
+def parse_summon_file(f):
+    cp = ConfigParser.ConfigParser()
+    cp.readfp(f)
+    tempDict = [dictHeader]
+    dictPaths = []
+    for s in cp.sections():
+        try:
+            if s=="global":
+                d = cp.get(s, "dictionary")
+                if os.path.exists(d):
+                    dictPaths.append(d)
+                else:
+                    try:
+                        basedir = os.environ["CMLDICTIONARIES"]
+                    except KeyError:
+                        if os.name=="posix":
+                            try:
+                                basedir = os.environ["CMLDICTIONARIES"]
+                            except KeyError:
+                                try:
+                                    basedir = os.environ["HOME"] + "/.cmldictionaries/"
+                                except KeyError:
+                                    sys.stderr.write("Dictionary load failure: POSIX but no home directory\n")
+                                    sys.exit(3)
+                        elif os.name=="nt":
+                            basedir = "c:\\cmldictionaries\\"
+                    path = os.path.join(basedir, d)
+                    if os.path.exists(path):
+                        dictPaths.append(path)
+                    else:
+                        sys.exit("Dictionary missing: not found on path or in $CMLDICTIONARIES.")
+                        sys.exit(2)
+            else:
+                # fall through
+                raise ConfigParser.NoOptionError
+                
+        except ConfigParser.NoOptionError:                        
+            try:
+                d = cp.get(s, "dictref")
+                try:
+                    uri, id = re.compile("{(.*)}(.*)").match(d.strip()).groups()
+
+                except AttributeError:
+                    print >> sys.stderr, "Invalid dictref found in section "+s
+                    sys.exit(1)
+                tempDict.append(dictRefEntry % {"term":s, "uri":uri, "id":id})
+
+            except ConfigParser.NoOptionError:
+                try:
+                    x = cp.get(s, "xpath")
+                except ConfigParser.NoOptionError:
+                    print >> sys.stderr, "No dictref or xpath found in section "+s
+                    sys.exit(1)
+                try:
+                    t = cp.get(s, "type")
+                except ConfigParser.NoOptionError:
+                    print >> sys.stderr, "Missing type for section "+s
+                    sys.exit(1)
+                tempDict.append(xpathEntry % {"term":s, "xpath":x, "type":t})
+            
+    tempDict.append(dictFooter)
+    return "".join(tempDict), dictPaths
+
+def grab(entries, f, options):
+    # We key off options.term in here as well to maintain the order of terms asked for ...
+    e_l = [entries[t].findin(f) for t in options.term]
+    if options.final:
+        values = ([entries[t].findin(f)[-1].getvalue()] for t in options.term)
+    else:
+        values = ([ei.getvalue() for ei in entries[t].findin(f)] for t in options.term)
+    return values
+            
+def main():
+    from tempfile import TemporaryFile
+    (options, filenames) = parse_options()
+    golem.setDataWarning(False)
+    golem.setTypeWarning(False)
+    d = golem.EntryCollection(default=True)
+    extra_namespaces = []
+
+    if options.config:
+        default_namespace = "http://www.lexical.org.uk/golem/summon/"
+        td, dps = parse_summon_file(file(options.config))
+        d.add_entries_from_string(td)
+        dnamespace = "http://www.lexical.org.uk/golem/summon/"
+        # load the dictionaries specified in the Summon config
+        for f in dps:
+            extra_namespaces.append(d.add_entries_from_file(f))
+    # and if a dictionary's specified...
+    elif options.dictionary:
+        dnamespace = d.add_entries_from_file(options.dictionary)
+    
+    # get the namespaces from the default dictionaries too
+    # (but we want to check these *last*)
+    extra_namespaces.extend(d.extra_namespaces)
+    
+    # We could be using multiple namespaces here, so we have
+    # to be a little bit careful. This is the default namespace for
+    # the dictionary we construct on the fly.
+
+    entries = {}
+    for t in options.term:
+        try:
+            entries[t] = d["{%s}%s" % (dnamespace, t)]
+        except KeyError:
+            c = 0
+            while t not in entries and c < len(extra_namespaces):
+                # first declared dictionary wins here!
+                try:
+                    entries[t] = d["{%s}%s" % (extra_namespaces[c], t)]
+                except KeyError:
+                    c += 1
+            if t not in entries:
+                print >> sys.stderr, "No such term defined:", t
+                sys.exit(1)
+
+    if options.outfile:
+        try:
+            fCSV = open(options.outfile, "w")
+        except IOError:
+            print >> sys.stderr, "Couldn't open output file"
+            sys.exit(1)
+        writer = csv.writer(fCSV)
+    else:
+        fCSV = None
+        writer = None
+
+    # stdout should be formatted
+    csvout = csv.writer(sys.stdout)
+
+    if writer: 
+        writer.writerow(options.term)
+    
+    csvout.writerow(options.term)
+
+    rows = (grab(entries, f, options) for f in filenames)
+
+    for row in rows:
+        # NB csv module refuses to take generators directly
+        # What should we do with nested sets of values?
+        # if there is only one value (containing a list)
+        # then output that list directly,
+        # rather than a length-1 list of a list.
+        row_ = [r for r in row]
+        if len(row_)==1 and len(row_[0])>1:
+            # there is only one entry, but it itself is a list
+            row_ = [str(r) for r in row_[0]]
+        else:
+            row_ = [",".join([str(r_) for r_ in r]) for r in row_]
+        if writer: writer.writerow(row_)
+        csvout.writerow(row_)
+    
+    if fCSV:
+        fCSV.close()
+
+if __name__ == "__main__":
+    main()
