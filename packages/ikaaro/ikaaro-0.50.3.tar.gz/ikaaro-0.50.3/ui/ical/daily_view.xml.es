@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<stl:block xmlns="http://www.w3.org/1999/xhtml" xmlns:stl="http://www.hforge.org/xml-namespaces/stl">
+
+<div id="cal_daily_view">
+  <form method="get" action=";daily_view" id="attributes">
+    Fecha:
+    <input value="${date}" id="date" size="11" name="date" type="text"></input>
+    <input value="..." id="trigger_date" type="button"></input>
+    <input value="Aceptar" class="button_ok" type="submit"></input>
+  </form>
+
+  <table cellpadding="0" cellspacing="0">
+    <tr class="header_timetables">
+      <td></td>
+      <td stl:repeat="tt header_timetables">
+        <span stl:if="tt">${tt}</span>
+      </td>
+    </tr>
+    <stl:block stl:repeat="calendar calendars">
+      <tr class="header_columns">
+        <th rowspan="${calendar/rowspan}">
+          <a href="${calendar/url}">${calendar/name}</a>
+        </th>
+        <td stl:repeat="col calendar/header_columns" align="center">
+          <a href="${col}" class="add_event">+</a>
+        </td>
+      </tr>
+      <tr stl:repeat="row calendar/rows">
+        <td colspan="${col/colspan}" rowspan="${col/rowspan}" stl:repeat="col row/columns" class="${col/class}" align="center">
+          <a href="${col/evt_url}" class="evt_value" stl:omit-tag="not col/evt_url">${col/SUMMARY}</a>  <span stl:if="col/DTSTART">${col/DTSTART}</span>  <span stl:if="col/DTEND">${col/DTEND}</span>
+        </td>
+      </tr>
+    </stl:block>
+    <tr class="header_timetables">
+      <td></td>
+      <td stl:repeat="tt header_timetables">
+        <span stl:if="tt">${tt}</span>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<script language="javascript">
+  $("#date").focus();
+  Calendar.setup({
+    inputField: "date",
+    ifFormat: "%Y-%m-%d",
+    firstDay: ${firstday},
+    button: "trigger_date"});
+</script>
+
+</stl:block>

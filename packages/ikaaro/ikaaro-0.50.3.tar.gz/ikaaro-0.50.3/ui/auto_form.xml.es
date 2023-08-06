@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<stl:block xmlns="http://www.w3.org/1999/xhtml" xmlns:stl="http://www.hforge.org/xml-namespaces/stl">
+
+<form stl:omit-tag="not submit_value" name="autoform" enctype="multipart/form-data" id="autoform" method="post" action="${action}">
+  <fieldset>
+    <legend>${title}</legend>
+    <p class="field-required" stl:if="has_required_widget">${required_msg}</p>
+    <dl>
+      <stl:block stl:repeat="widget widgets">
+        <dt class="${widget/class}">
+          <label for="${widget/name}" class="${widget/class}"> ${widget/title} </label>  <span class="field-mandatory" stl:if="widget/mandatory">(obligatorio)</span>  <span class="field-multiple" stl:if="widget/multiple">(multiple)</span>  <span class="field-format" stl:if="widget/is_date">Formato: 'yyyy-mm-dd'</span>
+        </dt>
+        <dd>
+          ${widget/widget}
+        </dd>
+      </stl:block>
+    </dl>
+    <p stl:if="submit_value">
+    <input value="${submit_value}" class="${submit_class}" type="submit"></input>
+    </p>
+  </fieldset>
+  <script language="javascript">
+    $("#${first_widget}").focus();
+  </script>
+</form>
+
+</stl:block>

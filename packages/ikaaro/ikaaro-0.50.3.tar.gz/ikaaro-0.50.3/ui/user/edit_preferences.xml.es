@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<stl:block xmlns="http://www.w3.org/1999/xhtml" xmlns:stl="http://www.hforge.org/xml-namespaces/stl">
+
+<form action=";edit_preferences" method="post">
+  <fieldset>
+    <legend>Edit Preferences</legend>
+    <dl>
+      <dt><label for="user_language">Preferred Language</label></dt>
+      <dd>
+        <select name="user_language" id="user_language">
+          <option>-- not defined --</option>
+          <option value="${language/code}" selected="${language/is_selected}" stl:repeat="language languages">${language/name}</option>
+        </select>
+      </dd>
+    </dl>
+    <input value="Save Changes" class="button_ok" type="submit"></input>
+  </fieldset>
+</form>
+
+</stl:block>
