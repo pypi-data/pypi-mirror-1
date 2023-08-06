@@ -1,0 +1,401 @@
+Metadata-Version: 1.0
+Name: collective.buildbot
+Version: 0.1.0
+Summary: A set of zc.buildout recipe and package to easy install buildbot
+Home-page: UNKNOWN
+Author: Gael Pasgrimaud
+Author-email: gael.pasgrimaud@ingeniweb.com
+License: ZPL
+Description: .. contents::
+        
+        - Code repository: https://svn.plone.org/svn/collective/collective.buildbot
+        .. - Questions and comments to somemailing_list
+        .. - Report bugs at http://bug.somewhere.com/..
+        
+        
+        Change history
+        **************
+        
+        trunk (2008-04-30)
+        ==================
+        
+        - xxx [Ingeniweb]
+        
+        0.1.0 (xxxx-xx-xx)
+        ==================
+        
+        - Created recipe with ZopeSkel [Gael Pasgrimaud].
+        
+        Package description
+        *******************
+        
+        This package provide a set of zc.buildout_ recipes to easy install a buildbot_
+        
+        .. _zc.buildout: http://pypi.python.org/pypi/zc.buildout
+        .. _buildbot: http://pypi.python.org/pypi/buildbot
+        
+        
+        The master recipe
+        *****************
+        
+        Supported options
+        =================
+        
+        The recipe supports the following options:
+        
+        port
+        The port buildbot listens to. Called by slaves.
+        
+        wport
+        The web port buildbot use to display the fountain.
+        
+        project-name
+        Project name. Displayed in the web pages.
+        
+        project-url
+        Project url, used in the web pages.
+        
+        url
+        buildbot url.
+        
+        build-slaves
+        Lists the slaves, with the name and the password for each.
+        
+        Example usage
+        =============
+        
+        We'll start by creating a buildout that uses the recipe::
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = buildmaster
+        ...
+        ... [buildmaster]
+        ... recipe = collective.buildbot:master
+        ... port = 8080
+        ... wport = 8082
+        ... project-name = The project
+        ... project-url = http://example.com
+        ... url = http://example.com/buildbot
+        ... slaves =
+        ...     slave1 password
+        ...     slave2 password
+        ... """)
+        
+        Running the buildout gives us::
+        
+        >>> print system(buildout)
+        Installing buildmaster...
+        New python executable in /sample-buildout/parts/buildmaster/bin/python
+        Installing setuptools.............done.
+        Generated script '/sample-buildout/parts/buildmaster/buildbot.tac'.
+        Generated config '/sample-buildout/parts/buildmaster/buildbot.cfg'.
+        Generated script '/sample-buildout/bin/buildmaster'.
+        
+        As shown above, the buildout generated the required configuration files.
+        
+        Twisted .tac file to launch buildbot::
+        
+        >>> cat(join('parts', 'buildmaster', 'buildbot.tac'))
+        from twisted.application import service
+        from buildbot.master import BuildMaster
+        import os
+        import sys
+        import collective.buildbot
+        <BLANKLINE>
+        basedir = '/sample-buildout/parts/buildmaster'
+        buildbot = os.path.dirname(collective.buildbot.__file__)
+        <BLANKLINE>
+        configfile = os.path.join(buildbot, 'master.py')
+        application = service.Application('buildmaster')
+        <BLANKLINE>
+        master = BuildMaster(basedir, configfile)
+        master.setServiceParent(application)
+        <BLANKLINE>
+        
+        A buildout config file::
+        
+        >>> cat(join('parts', 'buildmaster', 'buildbot.cfg'))
+        [slaves]
+        slave1 = password
+        slave2 = password
+        <BLANKLINE>
+        [buildbot]
+        projects-directory = /sample-buildout/parts/projects
+        project-name = The project
+        pollers-directory = /sample-buildout/parts/pollers
+        url = http://example.com/buildbot
+        wport = 8082
+        project-url = http://example.com
+        port = 8080
+        allow-force = false
+        <BLANKLINE>
+        
+        The slave recipe
+        ****************
+        
+        Supported options
+        =================
+        
+        The recipe supports the following options:
+        
+        host
+        Host of the buildmaster.
+        
+        port
+        Port on which the buildmaster listens.
+        
+        password
+        Sets the password for the buildbot.
+        
+        Example usage
+        =============
+        
+        We'll start by creating a buildout that uses the recipe::
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts =
+        ...	   buildslave
+        ...
+        ... [buildslave]
+        ... recipe = collective.buildbot:slave
+        ... host = localhost
+        ... port = 8888
+        ... password = password
+        ... """)
+        
+        Running the buildout gives us::
+        
+        >>> print system(buildout)
+        Installing buildslave.
+        ...
+        Generated script /sample-buildout/parts/buildslave/buildbot.tac.
+        Generated script '/sample-buildout/bin/buildslave'.
+        <BLANKLINE>
+        
+        
+        
+        The project recipe
+        ******************
+        
+        Supported options
+        =================
+        
+        The recipe supports the following options:
+        
+        Lists the projects the buildbot deal with (one project=one column) The
+        values must be a section name in the configuration file.  Then each of this
+        section must contain:
+        
+        slave-names
+        
+        A list of slaves name to use for the project.
+        
+        base-url
+        
+        Base url for the repository.
+        
+        branch
+        
+        Last part of the url. Default to 'trunk'. Not used if you provide a base url
+        ended with 'trunk'.
+        
+        email-notification-sender
+        
+        An email to send mail with.
+        
+        email-notification-recipients
+        
+        A set of lines with emails to send mail to.
+        
+        build-sequence
+        
+        The sequence of shell
+        commands to build the project.
+        Defaults to:
+        
+        - bin/python boostrap.py
+        - bin/buildout
+        
+        test-sequence
+        
+        The sequence of shell commands that are run to test the project.
+        Defaults to 'bin/test'
+        
+        The buildbot will use base-url/project/branch to get the full url to
+        be retrieved for the checkout.
+        
+        Example usage
+        =============
+        
+        We'll start by creating a buildout that uses the recipe::
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = my.package
+        ...
+        ... [my.package]
+        ... recipe = collective.buildbot:project
+        ... slave-names = slave1
+        ... base-url = http://example.com/svn/
+        ...
+        ... """)
+        
+        This will test the package located at `http://example.com/svn/my.package/trunk`
+        
+        Running the buildout gives us::
+        
+        >>> print system(buildout)
+        Installing my.package.
+        Generated config '/sample-buildout/parts/projects/my.package.cfg'.
+        
+        This will generate a config file for each project::
+        
+        >>> cat(join('parts', 'projects', 'my.package.cfg'))
+        [project]
+        ...
+        name = my.package
+        ...
+        slave-names = slave1
+        ...
+        branch = my.package/trunk
+        base-url = http://example.com/svn/
+        <BLANKLINE>
+        
+        Email notification::
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = my.package
+        ...
+        ... [my.package]
+        ... recipe = collective.buildbot:project
+        ... slave-names = slave1
+        ... email-notification-sender = foo@bar.com
+        ... email-notification-recipient =
+        ...     bar@foo.com
+        ...     buildbot@foo.com
+        ... base-url = http://example.com/svn/
+        ...
+        ... """)
+        
+        The projects recipe
+        *******************
+        
+        Supported options
+        =================
+        
+        Options are the same than the project except one.
+        
+        projects
+        
+        A list of projects name.
+        
+        
+        
+        The project recipe
+        ******************
+        
+        Supported options
+        =================
+        
+        The recipe supports the following options:
+        
+        Lists the projects the buildbot deal with (one project=one column) The
+        values must be a section name in the configuration file.  Then each of this
+        section must contain:
+        
+        vcs
+        
+        Default to svn
+        
+        base-url
+        
+        Root url for the repository.
+        
+        hist-max
+        
+        Number of history lines to look at (Default 100).
+        
+        user
+        
+        A svn user (Default None).
+        
+        password
+        
+        A valid svn password for the user (Default None).
+        
+        poll-interval
+        
+        Interval in second to check for changes.
+        
+        Example usage
+        =============
+        
+        We can define a poller to make our buildbot aware of commits::
+        
+        >>> write('buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = svnpoller
+        ...
+        ... [svnpoller]
+        ... recipe = collective.buildbot:poller
+        ... base-url = http://example.com/svn/buildout
+        ... user = h4x0r
+        ... password = passwd
+        ... """)
+        
+        >>> print system(buildout)
+        Installing svnpoller.
+        Generated config '/sample-buildout/parts/pollers/svnpoller.cfg'.
+        
+        Poller generation. You can see here all the available options::
+        
+        >>> cat(join('parts', 'pollers', 'svnpoller.cfg'))
+        [poller]
+        hist-max = 100
+        base-url = http://example.com/svn/buildout
+        vcs = svn
+        user = h4x0r
+        svn-binary = svn
+        password = passwd
+        poll-interval = 60
+        <BLANKLINE>
+        
+        
+        The pollers recipe
+        *******************
+        
+        Supported options
+        =================
+        
+        Options are the same than the project except one.
+        
+        base-urls
+        
+        A list of repository urls to look for.
+        
+        
+        
+        Contributors
+        ************
+        
+        Gael Pasgrimaud, Tarek Ziade, Kai Lautaportti, Jean-Francois Roche
+        
+        
+        Download
+        ********
+        
+Keywords: buildout buildbot
+Platform: UNKNOWN
+Classifier: Framework :: Buildout
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Software Development :: Build Tools
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: License :: OSI Approved :: Zope Public License
