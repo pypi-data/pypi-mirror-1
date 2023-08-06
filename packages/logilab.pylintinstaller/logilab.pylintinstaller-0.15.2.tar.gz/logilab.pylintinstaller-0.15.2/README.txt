@@ -1,0 +1,33 @@
+=========================
+logilab.installer package
+=========================
+
+.. contents::
+
+What is logilab.pylintinstaller ?
+=================================
+
+This package bundles all dependencies required to install pylint.
+
+pylint is a great QA tool, see:
+
+http://www.logilab.org/project/name/pylint
+
+This package is an "unofficial" bundle made to ease pylint 0.14 installation under various platform. 
+If you are using a debian-like ior a suze-like platform, use the deb packages provided by Logilab.
+
+How to use logilab.pylintinstaller ?
+====================================
+
+Make sure you don't have logilab-astng and logilab-common packages installed. Otherwise, remove them.
+
+Then install logilab.pylintinstaller with easy_install::
+
+    $ easy_install logilab.pylintinstaller
+
+Or with the distutils command line tool from within the folder::
+
+    $ python setup.py install
+
+The pylint command should then be available.
+
