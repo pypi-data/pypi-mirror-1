@@ -1,0 +1,1 @@
+See the README at Products/AnonymousCommenting/README.txt
