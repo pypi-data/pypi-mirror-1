@@ -1,0 +1,21 @@
+### -*- coding: utf-8 -*- #############################################
+#######################################################################
+"""Interfaces for the Zope 3 based ng.app.smartbanner.smartbanner package
+
+$Id: interfaces.py 51936 2008-10-23 08:14:17Z cray $
+"""
+__author__  = "Andrey Orlov, 2007"
+__license__ = "GPL"
+__version__ = "$Revision: 51936 $"
+
+
+from zope.interface import Interface
+
+from zope.schema import Text, TextLine, Field, Bool, Date, Int, URI
+
+class ISmartBannerAlgorithm(Interface) :
+    """ ISmartBannerAlgorithm
+    """
+    
+    def choice() :
+        """ Choice one item from container """
