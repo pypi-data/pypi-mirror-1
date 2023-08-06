@@ -1,0 +1,95 @@
+================================
+Writing an XML Translation Table
+================================
+
+Introduction
+============
+
+This file describes the format used in the main XML translation tables. These XML translation tables are powerful and capable of good translations, but they may need careful design to make them work accurately and efficiently.
+
+The design of the rule system used by these XML tables are heavily based on the translation system used in `BrailleTrans <http://alasdairking.me.uk/brailletrans>`_, and users are advised to read about how brailletrans works. Although these rules are based on the ideas used in brailletrans users are reminded that YABT is not an alternative implementation of brailletrans so certain features do not necessarily match.
+
+Below we will discuss the elements allowed in the translation table, but before we discuss the structure there is one element which needs mentioning which is used to overcome a limitation of XML 1.0. You are permitted to use the <char> element anywhere inside the table. the <char> element has one attribute named ord whose value should be the decimal ordinal of the character you wish to represent. As an example you might wish to insert the formfeed character in which case you should then insert the <char ord="12"> element. You may ask why is this needed when the &#xx; notation can be used? The answer is that some characters (formfeed being one of them) actually can't be represented in XML 1.0.
+
+The table format
+================
+
+The root element of a translation table is the <transtable> element. This element takes no attributes.
+
+----------------------
+The <metadata> element
+----------------------
+
+This element has no attributes. It should contain elements to specify custom character groups. Other elements can be added here but the loader will just ignore it.
+
+The <YABT_custom_matches> element
+---------------------------------
+
+This is an element to contain all your custom groups of characters which can be used in the table. The specification is unclear whether more than one can be defined, so it is recommended to only specify one <YABT_custom_matches> element.
+
+To specify a custom group of characters you add a child element to the <YABT_custom_matches> element. The name of the child element determines the name of the group and the contents of the child element is the characters contained in the group. Please remember the <char> element if you wish to specify certain characters like the formfeed character.
+
+----------------------
+The <YABTdata> element
+----------------------
+
+This is the main element which contains all the rules. There is two parts to translation, preprocessing (the charmaps) and the main translation.
+
+The <charmap> element
+---------------------
+
+This is the preprocessing stage of the translation. The idea with this is to map certain characters to others which mean the same, so to reduce the number of rules needed. An example of this is in British Braille with no capital signs then both lowercase and uppercase characters can be treated the same, so saving use having to specify upper and lowercase versions of all the rules.
+
+The <charmap> element has two child elements which contain text. The first child element should be the <orig> element, which contains the character from the input source to be mapped. The second child element is <repl> wich contains the character which should be substituted and sent to the main translation system.
+
+The <decision> element
+----------------------
+
+A <decision> element specifies input classes. An input class is a group of states and can be used in the rules to help filter out when a rule should apply. To fully understand this you may be best to read the section on the <rule> element. In the britishtobrl.xml table included the input classes are used to determine what grade Braille the rules apply to.
+
+The structure of the <decision> element is that it has two attributes and no child elements. The attributes are, inputclass which should be an integer to identify it in rules and states which should be a comma separated list of integers representing the states which belong to the inputclass.
+
+The <rule> element
+------------------
+
+This is the heart of the translation system and the <rule> elements specify how the translation should be done. Before discussing how you should write the <rule> elements the concept of how the rules work will be explained first.
+
+For a rule to be able to be applied four criteria must be met. These criteria are:
+
+* translator must be in a state within the rules inputclass (see the section on the <decision> element).
+* The focus must match the text which is currently being translated.
+* The text in the string being translated which comes immediately before the piece being translated must match the pattern of the before context.
+* The text in the string being translated which comes immediately after the text being translated (should be the same as the focus) should match the after context pattern.
+
+A rule can perform the two following actions:
+
+* append text to the output.
+* alter the translator's state.
+
+To create a rule you must create the <rule> element with the following child elements:
+
+* A <iclass> element. This should contain an integer to specify the inputclass where the rule can be applied. As only one inputclass can be specified using the <iclass> element you will need to define all possible groups of states previously using the <decision> element. Please see the section on the <decision> element for further detail on defining inputclasses.
+* A <focus> element. This should be the text to match and translate. When specifying this please remember that preprocessing as specified by the <charmap> elements will have been performed. An example of the importance of this is, if you use the <charmap> elements to change all characters to upper case, then your focus text must be in capitals otherwise the rule will fail to be matched.
+* <bfcontext> element. This should contain text to represent the text appearing immediately before the focus in the text to be translated. Again this will work on the text after preprocessing, so remember to account for any changes which will be caused by your <charmap> elements. The form of this context text will be discussed later on in this document.
+* <afcontext> element. This element contains a text pattern to specify what text may appear immediately after the focus text in the text to translate. The context text contained in this element should be of the same form as that required for the <bfcontext> element and is discussed later.
+* <trans> element. This contains the text to be appended to the output text.
+* <fstate> element. This contains an integer representing the state the translator should be switched to when the rule is applied. If the state should not be changed then use the value -1.
+
+****************
+Context patterns
+****************
+
+Rules need their context setting in the <bfcontext> and <afcontext> elements. YABT has a few different systems of matching contexts. These different systems for matching context vary in speed and flexibility, so it is advised to try and find the type of context matching which does what you need at the fastest speed. As an example, a regular expression is able to match a specific string, but a regular expression is slower than a simple text match, so for matching specific strings then the simple text match is recommended.
+
+The various systems for matching which can be used are listed below:
+
+* An always match. This matcher system performs no checks and just reports it matches and should be used where a context is not required. The text you should enter into the context elements of rules should be the two characters ^a. Should you enter text after the ^a then this extra text will be ignored.
+* A simple text match. This will check whether a specific string appears adjacent to the focus in the direction specified. The text you should enter into the context elements to use this is the two characters ^t followed by the text to match. As an example if you wanted to check if the text "head" immediately follows the focus you would define the <afcontext> element as <afcontext>^thead</afcontext>.
+* A custom character type match. You may remember back in the <metadata> element you defined some custom match groups of characters. Here you make use of those groups. Using this matching system it will check whether the character immediately adjacent to the focus is within the specified group. The pattern is of the form, the two characters ^c followed by the name of the group. For example you may have defined a custom match group for white space characters named whitespace, so to check if the character immediately after the focus is a whitespace character you would define the <afcontext> element as <afcontext>^cwhitespace.
+* Regular expressions. This is probably the most powerful matching system available, but it isn't the fastest. To use you give the text in the context elements as the two characters ^r followed by a standard regular expression. Please note when forming the regular expressions, YABT will automatically add the characters to specify the regular expression should appear adjacent to the focus. For example if you want the focus to be followed by one or more letter, with those letters followed by a digit you would give the <afcontext> element as: <afcontext>^r[a-zA-Z]+[0-9]</afcontext>.
+
+=============
+Example table
+=============
+
+There is a lot discussed in this document, and an example may help explain how this works. YABT comes with a table for British Braille. This table can be found in the source distribution as YABT/tables/britishtobrl.xml.
