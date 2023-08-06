@@ -1,0 +1,175 @@
+<!--!
+**********************************************************************
+| Copyright 2009-2010 David Isaacson, Stou Sandalski, Information Capsid
+|
+| This file is part of the program Adjector.
+|
+| Adjector is free software: you can redistribute it and/or modify
+| it under the terms of the GNU General Public License as published by
+| the Free Software Foundation, either version 2 of the License, or
+| (at your option) version 3 of the License.
+|
+| Adjector is distributed in the hope that it will be useful,
+| but WITHOUT ANY WARRANTY; without even the implied warranty of
+| MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+| GNU General Public License for more details.
+|
+| You should have received a copy of the GNU General Public License
+| along with Adjector. If not, see <http://www.gnu.org/licenses/>.
+|
+**********************************************************************
+-->
+<html xmlns='http://www.w3.org/1999/xhtml'
+      xmlns:py='http://genshi.edgewall.org/'
+      xmlns:xi='http://www.w3.org/2001/XInclude'
+      py:strip=''>
+
+    <div py:def='content'>
+    
+        <!--! Rendering functions, modified for stats from individual include files; there has to be a better way to do this -->
+        <py:def function='render_creative_headers()'>
+            <th>Title</th>
+            <th>Type / Size</th>
+            <th>Total Weight</th>
+            <th>Today</th>
+            <th>Yesterday</th>
+            <th>Past Week</th>
+            <th>Past Month</th>
+            <th>All Time</th>
+        </py:def>
+    
+        <py:def function='render_creative(creative, level=0)'>
+            <td class='title' style='padding-left: ${(level+1) * 1.1}em'><a href='${creative.view()}'>${creative.title}</a></td>
+            <td>${'Text' if creative.is_text else '%s x %s' % (creative.width, creative.height)}</td>
+            <td>${creative.weight * creative.parent_weight}</td>
+            <td>${creative.get_views(c.start_today, None)} (${creative.get_clicks(c.start_today, None)})</td>
+            <td>${creative.get_views(c.start_yesterday, c.start_today)} (${creative.get_clicks(c.start_yesterday, c.start_today)})</td>
+            <td>${creative.get_views(c.week_ago, None)} (${creative.get_clicks(c.week_ago, None)})</td>
+            <td>${creative.get_views(c.month_ago, None)} (${creative.get_clicks(c.month_ago, None)})</td>
+            <td>${creative.get_views(None, None)} (${creative.get_clicks(None, None)})</td>
+        </py:def>
+    
+        <py:def function='render_set(aset, level=0, header=True)' py:with='level = level - 1 if not header else level'>
+            <tr py:if='header' class='set ${"disabled" if aset.weight * aset.parent_weight == 0 else ""}'>
+                <td colspan='2' style='padding-left: ${level+1}em'><a href='${aset.view()}'>${aset.title}</a></td>
+                <td colspan='6'>${aset.weight * aset.parent_weight}</td>
+            </tr>
+            
+            <tr py:for='i, creative in enumerate(aset.creatives)' 
+                class='creative ${"odd" if i % 2 else "even"} ${"disabled" if creative.disabled or creative.weight * creative.parent_weight == 0 else ""}'>
+                ${render_creative(creative, level + 1)}
+            </tr>
+            
+            <py:for each='i, subset in enumerate(aset.subsets)'>
+                ${render_set(subset, level + 1)}
+            </py:for>
+            
+            <tr py:if='not aset.subsets and not aset.creatives' class='empty'>
+                <td colspan='8' style='padding-left: ${level+2}em'>
+                    This set has no children.
+                </td>
+            </tr>
+        </py:def>
+        
+         <py:def function='render_zone_headers()'>
+            <th>Title</th>
+            <th>Creative Types</th>
+            <th>Creative Sizes</th>
+            <th>Today</th>
+            <th>Yesterday</th>
+            <th>Past Week</th>
+            <th>Past Month</th>
+            <th>All Time</th>
+        </py:def>
+    
+        <py:def function='render_zone(zone, level=0)'>
+            <td class='title' style='padding-left: ${(level+1) * 1.1}em'><a href='${zone.view()}'>${zone.title}</a></td>
+            <td>${['All', 'Text', 'Blocks'][zone.creative_types]}</td>
+            <td>${zone.min_width}-${zone.max_width} x ${zone.min_height}-${zone.max_height}</td>
+            <td>${zone.get_views(c.start_today)} (${zone.get_clicks(c.start_today)})</td>
+            <td>${zone.get_views(c.start_yesterday, c.start_today)} (${zone.get_clicks(c.start_yesterday, c.start_today)})</td>
+            <td>${zone.get_views(c.week_ago)} (${zone.get_clicks(c.week_ago)})</td>
+            <td>${zone.get_views(c.month_ago)} (${zone.get_clicks(c.month_ago)})</td>
+            <td>${zone.get_views()} (${zone.get_clicks()})</td>
+        </py:def>
+            
+        <py:def function = 'render_location(location, level=0)'>
+            <tr class='location'>
+                <td colspan ='8' style='padding-left: ${level+1}em'><a href='${location.view()}'>${location.title}</a></td>
+            </tr>
+            
+            <tr py:for='i, zone in enumerate(location.zones)' 
+                class='zone ${"odd" if i % 2 else "even"}'>
+                ${render_zone(zone, level + 1)}
+            </tr>
+            
+            <py:for each='i, sublocation in enumerate(location.sublocations)'>
+                ${render_location(sublocation, level + 1)}
+            </py:for>
+            
+            <tr py:if='not location.sublocations and not location.zones' class='empty'>
+                <td colspan='8' style='padding-left: ${level+2}em'>
+                    This location has no children.
+                </td>
+            </tr>
+        </py:def>
+        
+        <!--! Start display here -->
+        <h2>Totals: Views (Clicks)</h2>
+        <table class='display'>
+            <tr>
+                <th>Today</th>
+                <th>Yesterday</th>
+                <th>Past Week</th>
+                <th>Past Month</th>
+                <th>All Time</th>
+            </tr>
+            <tr>
+                <td>${c.totals_today[0]} (${c.totals_today[1]})</td>
+                <td>${c.totals_yesterday[0]} (${c.totals_yesterday[1]})</td>
+                <td>${c.totals_week[0]} (${c.totals_week[1]})</td>
+                <td>${c.totals_month[0]} (${c.totals_month[1]})</td>
+                <td>${c.totals_all[0]} (${c.totals_all[1]})</td>
+            </tr>
+        </table>
+            
+        <h2>Sets &amp; Creatives</h2>
+        <table class='display'>
+            <tr>
+                ${render_creative_headers()}
+            </tr>
+                        
+            <py:for each='aset in c.sets'>
+                ${render_set(aset)}
+            </py:for>
+
+            <tr py:for='i, creative in enumerate(c.creatives)' 
+                class='creative ${"odd" if i % 2 else "even"} ${"disabled" if creative.disabled or creative.weight * creative.parent_weight == 0 else ""}'>
+                ${render_creative(creative)}
+            </tr>
+
+        </table>
+        
+        <h2>Zones &amp; Locations</h2>
+        <table class='display'>
+            <tr>
+                ${render_zone_headers()}
+            </tr>
+                        
+            <py:for each='location in c.locations'>
+                ${render_location(location)}
+            </py:for>
+
+            <tr py:for='i, zone in enumerate(c.zones)' 
+                class='zone ${"odd" if i % 2 else "even"}'>
+                ${render_zone(zone)}
+            </tr>
+
+        </table>
+        
+        
+    </div>
+    
+    <xi:include href='../common/master.html' />
+
+</html>
