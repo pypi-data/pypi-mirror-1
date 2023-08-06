@@ -1,0 +1,246 @@
+#!/usr/bin/env python
+"""
+install.py
+
+General installation script for the segtools package. Interacts with
+the user to configure the environment to download and install all
+dependencies and the segtools package.
+
+This script is designed to be downloaded and run independently, and
+will guide the process of downloading and installing all other source
+code.
+
+(c) 2009: Orion Buske <stasis@u.washington.edu>
+
+"""
+MIN_SEGTOOLS_VERSION = "0.1.1"
+
+${COMMON_CODE_HEADER}
+
+import re
+
+MIN_R_VERSION = "2.8"
+
+R_URL = "http://cran.fhcrc.org/src/base/R-2/R-2.9.2.tar.gz"
+
+# List of R package pre-requisites
+R_PACKAGES = ["latticeExtra", "reshape"]
+# Repository to use for downloading R libraries through CRAN
+CRAN_REPO = "http://cran.fhcrc.org"
+
+# One command per line
+R_INSTALL_SCRIPT = """
+cd $tmpdir
+wget $url -O $file
+if [ ! -d $filebase ]; then tar -xzf $file; fi
+cd $filebase
+./configure --prefix=$dir --enable-R-shlib
+make
+make install
+cd ..
+rm -rf $filebase
+rm -f $file
+"""
+
+${COMMON_CODE_BODY}
+
+############################## MAIN #########################
+def main(args=sys.argv[1:]):
+    # Set up shell details
+    try:
+        shell_name = os.path.basename(os.environ["SHELL"])
+    except KeyError:
+        shell_name = None
+    shell = ShellManager(shell_name)
+
+    try:
+        arch_home = setup_arch_home()
+        prompt_set_env(shell, "ARCHHOME", fix_path(arch_home))
+
+        python_home, default_python_home = setup_python_home(arch_home)
+        # Add python_home to PYTHONPATH
+        prompt_add_to_env(shell, "PYTHONPATH", python_home)
+
+        script_home, default_script_home = setup_script_home(arch_home)
+        # Add script_home to PATH
+        prompt_add_to_env(shell, "PATH", script_home)
+
+        prompt_create_cfg(arch_home, python_home, default_python_home,
+                          script_home, default_script_home)
+
+        hdf5_dir = setup_hdf5_installation(shell, arch_home)
+
+        prompt_install_numpy()
+
+        prompt_install_R(arch_home)
+
+        prompt_install_rpy2()
+
+        # Next step may need just-installed eggs, so update site list
+        addsitedir(python_home)
+
+        prompt_install_R_libs(pkgs=R_PACKAGES, repo=CRAN_REPO)
+
+        prompt_install_segtools()
+
+        # DONE: Test package installations?
+        prompt_test_packages(python_home)
+
+        print >>sys.stderr, "\n=========== Installation complete ============="
+        print >>sys.stderr, ("* Source your ~/.*rc file to update your"
+                             " environment *")
+
+    finally:  # Clean up
+        shell.close()
+
+########################### GET VERSION ########################
+def get_R_version():
+    """Returns R version as a string or None if not found or installed."""
+    try:
+        cmd = Popen(["R", "--version"], stdout=PIPE, stderr=PIPE)
+        resp = cmd.stdout.readlines()[0].strip()
+        matched = re.search("R version ([.0-9a-zA-Z]*) .*", resp)
+        if matched:
+            # R Version found! Check compilation configuration
+            print >>sys.stderr, "found!"
+            cmd = Popen(["R", "CMD", "config", "--cppflags"],
+                        stdout=PIPE, stderr=PIPE)
+            resp = cmd.stdout.readlines()[0].strip()
+            if resp == "R was not built as a library":
+                print >>sys.stderr, ("You already have R installed as a"
+                                     " program, but in order to work with"
+                                     " segtools, it must be installed as"
+                                     " a library.\nR library"),
+                return None
+            else:
+                print >>sys.stderr, "Searching for R library..."
+                return matched.group(1)
+        else:
+            return None
+    except (OSError, IndexError):
+        return None
+
+def get_rpy2_version():
+    """Returns rpy2 version as a string or None if not found or installed
+
+    Temporarily removes '.' from sys.path during installation to prevent
+    finding rpy2 in current directory (but uninstalled)
+    """
+    dir = os.getcwd()
+    index = None
+    if dir in sys.path:
+        index = sys.path.index(dir)
+        del sys.path[index]
+
+    try:
+        try:
+            import rpy2
+            return rpy2.__version__
+        except (AttributeError, ImportError):
+            return None
+    finally:
+        if index is not None:
+            sys.path.insert(index, dir)
+
+def get_segtools_version():
+    """Returns segtools version as a string or None if not found or installed
+
+    Temporarily removes '.' from sys.path during installation to prevent
+    finding segtools in current directory (but uninstalled).
+
+    Since segtools __version__ is currently a revision number, get the full
+    number from pkg_resources
+    """
+    dir = os.getcwd()
+    index = None
+    if dir in sys.path:
+        index = sys.path.index(dir)
+        del sys.path[index]
+
+    try:
+        try:
+            ref = pkg_resources.Requirement.parse("segtools")
+            data = pkg_resources.working_set.find(ref)
+            return data.version
+        except (AttributeError, ImportError):
+            return None
+    finally:
+        if index is not None:
+            sys.path.insert(index, dir)
+
+##################### SPECIFIC PROGRAM INSTALLERS ################
+def prompt_install_rpy2():
+    return _installer("rpy2", install_rpy2, get_rpy2_version,
+                      install_prompt=EASY_INSTALL_PROMPT)
+
+def prompt_install_R(arch_home, min_version=MIN_R_VERSION):
+    return _installer("R", install_R, get_R_version, url=R_URL,
+                      min_version=min_version, arch_home=arch_home)
+
+def prompt_install_R_libs(pkgs=R_PACKAGES, repo=CRAN_REPO):
+    query = "\nMay I download and install necessary R libraries?"
+    permission = prompt_yes_no(query)
+    if permission:
+        return install_R_libs(pkgs=pkgs, repo=repo)
+    else:
+        return False
+
+def prompt_install_segtools(min_version=MIN_SEGTOOLS_VERSION):
+    return _installer("segtools", install_segtools, get_segtools_version,
+                      install_prompt=EASY_INSTALL_PROMPT,
+                      min_version=min_version)
+
+def install_R(arch_home, *args, **kwargs):
+    """Install R to arch_home.
+
+    Set R_PROFILE_USER to /dev/null for the installation,
+    else, ~/.Rprofile code might crash, causing installation to fail/
+
+    """
+    if "R_PROFILE_USER" in os.environ:
+        old = os.environ["R_PROFILE_USER"]
+        os.environ["R_PROFILE_USER"] = "/dev/null"
+    else:
+        old = None
+
+    try:
+        install_dir = install_script("R", arch_home, R_INSTALL_SCRIPT,
+                                     url=R_URL)
+        return install_dir
+    finally:
+        if old is not None:
+            os.environ["R_PROFILE_USER"] = old
+
+def install_rpy2(*args, **kwargs):
+    return easy_install("rpy2")
+
+def install_R_libs(pkgs=R_PACKAGES, repo=CRAN_REPO, *args, **kwargs):
+    """Install R libs using CRAN.
+
+    Temporary unsets DISPLAY to try to not open X-window for ssh-ers.
+
+    """
+    if "DISPLAY" in os.environ:
+        old = os.environ["DISPLAY"]
+        del os.environ["DISPLAY"]
+    else:
+        old = None
+    try:
+        try:
+            from rpy2.robjects import r, numpy2ri
+            # numpy2ri imported for side-effects
+            from numpy import array
+
+            r["install.packages"](array(pkgs), dep=True)
+        except ImportError:
+            raise InstallationError("rpy2 required to install R libs!")
+    finally:
+        if old is not None:
+            os.environ["DISPLAY"] = old
+
+def install_segtools(min_version=MIN_SEGTOOLS_VERSION, *args, **kwargs):
+    return easy_install("segtools", min_version=min_version)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
