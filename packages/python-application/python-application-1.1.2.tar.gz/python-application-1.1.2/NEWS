@@ -1,0 +1,216 @@
+New in version 1.1.2
+--------------------
+
+1. Configuration framework improvements
+
+The use of the _datatypes attribute of ConfigSection has been deprecated in
+favor of a descriptor based syntax. The newly added ConfigSetting descriptor
+is now used to declare the type and default value of a setting. The
+descriptor is only necessary if validators are used as types, otherwise the
+initial value can be directly assigned to the setting and a descriptor is
+automatically generated using its type and value. The deprecated _datatypes
+attribute can still be used until version 1.2.0 and descriptors will be
+automatically generated from its contents.
+
+The ConfigSection class now has two attributes, __configfile__ and
+__section__, which if set to non-None values are used to automatically load
+the settings from the specified filename and section. Settings in
+ConfigSection classes can still be loaded explicitly using the read_settings
+method of ConfigFile.
+
+The following example describes the new use of the ConfigSection class:
+
+class MyConfigSection(ConfigSection):
+    __configfile__ = 'config.ini'
+    __section__ = 'MySettings'
+    address = ConfigSetting(type=datatypes.IPAddress, value='0.0.0.0')
+    interval = 100
+
+The Boolean configuration datatype has become a validator and instantiating
+it will return a bool instance. With this change, all the configuration
+datatypes are now validators.
+
+The get_option method of ConfigFile has been deprecated in favor of the
+get_setting method whose name is consistent with the rest of the terminology
+used in the configuration package. The signatures of the two methods are
+similar, but not identical:
+
+def get_option(self, section, option, default='', type=str)
+def get_setting(self, section, setting, type=str, default='')
+
+
+2. Descriptors
+
+Added a new descriptor that can be used to implement write once attributes,
+named WriteOnceAttribute. It should be noted that the descriptor can only
+enforce this while the object's attributes are accessed directly. It is
+still possible to modify/delete such an attribute by messing around with
+the descriptor's internal data. Thus the descriptor should not be used to
+guarantee such a behavior, because given Python's introspective abilities,
+it can be circumvented. Instead, the descriptor is meant to be used as an
+indication that the attribute should be writable only once and the code
+using it should play along and honor the limitation.
+
+
+Given a recent bug fix for a memory leak in the ThreadLocal descriptor, now
+both the ThreadLocal and the WriteOnceAttribute descriptors can only be used
+inside classes that allow weak referencing to their instances. Currently, in
+order to clean up internal data from objects that are no longer available,
+both descriptors use weak references with a callback to the objects for which
+they are an attribute, in order to be notified of the objects being released
+when no longer referenced. Due to this change, the following classes cannot
+use these descriptors anymore: subclasses of str, tuple and long as well as
+classes that define __slots__ and do not include __weakref__ in it.
+
+
+3. New version module
+
+Added a new module to handle version numbers for applications, modules and
+packages. The module offers a Version class that is a subclass of str and
+can represent a major.minor.micro[extraversion] version string that offers
+version wise comparison, rather than string wise, when comparing against
+another version instance. When compared against a string instance it will
+compare as a string.
+
+The class understands a number of standard conventions for the extraversion
+part, like alphaN, betaN, preN and rcN notations and is able to compare them
+correctly (alpha < beta < pre < rc). If the extraversion is missing or is a
+number it ranks higher than rcN. If the extraversion is not a number and it
+doesn't fit into these conventions is compared as a string and ranks higher
+than any of them. If the extraversion is a number or follows the alpha, beta,
+pre, rc convention and is prefixed by a dash or a dot, the dash/dot doesn't
+take part in the comparison.
+
+The Version class has a parse classmethod, that is able to take a version
+number expressed as a string and turn it into a Version instance that can be
+compared. This is useful when one needs to compare version numbers, but the
+package provides them as simple strings, not as comparable Version instances.
+
+
+New in version 1.1.1
+--------------------
+
+1. Configuration datatype changes
+
+The _defaultPort and _name attributes from the NetworkAddress and the
+EndpointAddress classes are being deprecated starting with this version,
+being replaced by default_port and respectively name. The deprecated
+attributes are still available, but give a deprecation warning and will
+be completely removed in version 1.2.0
+
+Added the LogLevel datatype that represents a log level and which can be
+used to map a log level name as read from a configuration file into a log
+level that can be assigned to log.level.current to change the application
+log level.
+
+
+New in version 1.1.0
+--------------------
+
+1. Singleton improvements
+
+The Singleton metaclass got enhanced to properly handle classes that take
+arguments in the __init__ and/or __new__ methods. Previously, Singleton
+created one instance per class, thus conflicting with classes that took
+arguments in __init__ and/or __new__, because instantiating the class again
+with a different set of arguments would have returned the same instance that
+was created before with a different set of arguments. This behavior was not
+only confusing, but also wrong.
+
+The new implementation will create multiple singletons per class, each one
+corresponding to a unique combination of the arguments used to instantiate
+the class. As a result, one will get the same object only by calling the
+class with the same arguments.
+
+One restriction of this is that the __init__ and/or __new__ arguments of the
+class that uses Singleton as a metaclass can only have immutable values, so
+that their unique combination can be used to lookup the proper instance in a
+dictionary.
+
+To determine the arguments, the Singleton metaclass will always prefer the
+__init__ signature over the __new__ signature if both are defined. When
+subclassing always keep this in mind, especially for cases where __init__
+is defined only in the parent class, while __new__ is defined in the current
+class. In this case, __init__ will still be preferred even though is defined
+in a parent class.
+
+For classes that had no arguments in __init__ and or __new__, there is no
+change in the behavior.
+
+
+2. Logging improvements
+
+The logging system was enhanced to also show the message type prefix (error,
+fatal, warning, debug) when outputting on the console as it does in syslog.
+
+The startSyslog() function was deprecated and replaced with start_syslog()
+for consistency with the naming convention in the other modules.
+
+Another improvement of the logging system is the ability to set a log level
+that will be used to filter out all log messages that do not have at least
+that level. The default log level is INFO, meaning that any message except
+debug messages will be logged. The level can be changed at any time during
+runtime:
+
+from application import log
+log.level.current = log.level.ERROR # only log error and critical messages
+
+The available log levels are: ALL, DEBUG, INFO, WARNING, ERROR, CRITICAL
+and NONE. ALL and NONE are not effective log levels, but they can be used
+to output all or no log messages by assigning them to log.level.current.
+
+The logging system also received a major improvement by no longer depending
+on twisted for its log module. A new log backend using the python standard
+logging module was added that offers the same functionality in the absence
+of twisted. The change is transparent to the user who doesn't have to take
+any steps to update his code. The functionality offered by the two backends
+is identical, so the logging system works the same if twisted is present or
+not.
+
+While a strong dependency on twisted was removed by this, a weak dependency
+on it still remains, in the sense that if twisted is installed the twisted
+log backend will always be preferred over the logging backend. However,
+twisted is no longer mandatory for python-application to work.
+
+
+3. Notification system
+
+A new notification.py module was added to python-application, to implement a
+notification system that can be used to communicate between different
+components of an application.
+
+The notification system offers a notification center, that is used to post
+notifications and keep track of the registered notification observers.
+
+Observers can register to receive certain notifications posted by certain
+senders. In particular one observer can watch for all notifications or for
+all senders if desired.
+
+The notification system implements a producer/consumer pattern and can be
+used to better isolate different components of an application and make them
+less dependant of each other. This is done by creating an asynchronous
+communication channel between them via the notification center. One entity
+can post a notification that publishes some state or information, while not
+being interested who will receive this information. In the same manner, some
+observers may register to receive that information not necessarily being
+interested in who published it or being aware of each other.
+
+
+4. Miscellaneous improvements
+
+A new module was added in application.python.descriptor to hold various
+useful descriptor classes. It currently only has one descriptor named
+ThreadLocal that can be used to get object attributes that are of a
+given type and hold data that is thread specific. For example:
+
+from application.python.descriptor import ThreadLocal
+from collections import deque
+
+class MyClass(object):
+    queue = ThreadLocal(deque)
+
+Any instance of this class will have a queue attribute that is of type deque
+and its contents is different in each thread. Type can be any python type
+that is a mutable data container (it can be immutable too but it doesn't
+make much sense that way).
+
