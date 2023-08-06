@@ -1,0 +1,331 @@
+====
+WASP
+====
+
+This package is an abstraction of interactions with WASPs allowing
+application developers to send and recieve messages without having to
+worry about the mechanics of sending and recieving messages with a
+particular wasp.
+
+It also allows the WASP being used to be changed by configuration
+only, without any changes to application code.
+
+Installation
+============
+
+To install the package, unpack the source distribution and then do::
+
+  python setup.py install
+
+You can also install with easy_install::
+
+  easy_install wasp
+
+Alternatively, if you're using zc.buildout, you can just specify the
+package as an egg requirement::
+
+  [buildout]
+  parts = myeggs ...
+  ...
+
+  [myeggs]
+  recipe = zc.recipe.egg
+  eggs = wasp
+  ...
+
+Finally, if you're using with Zope 2, just unpack the source
+distribution into $INSTANCE_HOME/lib/python.
+Be careful if you use easy_install or a buildout recipe *with* a Zope
+2 base distribution, such as that used by Plone, as  versions of the
+packages requires by `wasp` may be installed that are incompatible
+with Zope 2.
+
+Configuration
+=============
+
+The configuration of sending and receiving messages centres around the
+configuration of utilities providing ISendMessage, INotifyMessage and
+IRecieveMessage. Reading the documentation for these in interfaces.py
+will cover a lot of the explanation required to use the `wasp`
+package.
+
+To use the package, the first thing you'll need to do is choose a WASP
+implementation and load any ZCML directives it provides. For the
+examples here, we'll use the demo implementations which basically echo
+all their actions to the console rather than actually doing anything::
+
+  >>> load_zcml('''
+  ... <include package="wasp.demo" file="meta.zcml" />
+  ... ''')
+
+In order to send messages, you need to wire in the ISendMessage
+utility of your chosen WASP. WASP implementations usually provide a
+custom ZCML directive for doing this which allows you to specify the
+parameters.
+
+The demo implementation is no exception::
+
+  >>> load_zcml('''
+  ... <configure 
+  ...     xmlns="http://namespaces.zope.org/zope"
+  ...     xmlns:wasp="http://namespaces.simplistix.co.uk/wasp">
+  ...     <wasp:sender />
+  ... </configure>
+  ... ''')
+
+Next, if you're planning on receiving messages or notifications about
+messages you've sent, you need to wire in the Receiver view. For
+demonstration purposes, we wire it to all objects, but you probably
+only want to wire it in such that it appears at one particular url.
+
+  >>> load_zcml('''
+  ... <configure 
+  ...     xmlns="http://namespaces.zope.org/zope"
+  ...     xmlns:browser="http://namespaces.zope.org/browser">
+  ...   <browser:page
+  ...       name="wasp"
+  ...       for="*"
+  ...       class="wasp.Receiver"
+  ...       permission="zope.Public"
+  ...    
+  ...     />
+  ... </configure>
+  ... ''')
+
+Again, if you're planning on receiving messages or notifications about
+messages you've sent, you need to wire in an IProcessReponse
+utility. This is WASP-specific but can be changed independently of
+where the Receiver view is or how it's wired in. This means that
+application developers only have to worry about wiring in the Receiver
+view where they want it and system administrators can choose and
+change the WASP implementation used whenever they want.
+
+For the examples, we'll use a `wasp.demo.ProcessResponse`
+implementation::
+
+  >>> load_zcml('''
+  ... <configure 
+  ...     xmlns="http://namespaces.zope.org/zope">
+  ...     <utility factory="wasp.demo.ProcessResponse"/>
+  ... </configure>
+  ... ''')
+
+Sending Messages
+================
+
+Once configured, sending messages is as simple as::
+
+  >>> from wasp import send
+  >>> send('271234','some message')
+  Send to: '271234'
+  Message: 'some message'
+       Id: None
+  True
+
+As this shows, the send method takes an `msisdn`, a `message` and
+optionally a `message_id`.
+
+If `send` returns True, it indicates that the message has been
+successfully delivered. If something goes wrong, an exception will be
+raised.
+
+However, the most common case is when send returns False::
+
+  >>> load_zcml('''
+  ... <configure 
+  ...     xmlns="http://namespaces.zope.org/zope"
+  ...     xmlns:wasp="http://namespaces.simplistix.co.uk/wasp">
+  ...     <wasp:sender response="False"/>
+  ... </configure>
+  ... ''')
+  >>> send('271234','some message','id4321')
+  Send to: '271234'
+  Message: 'some message'
+       Id: 'id4321'
+  False
+
+A return value of False means that the message has successfully been
+passed to the WASP, but the WASP didn't have a definite response at
+this stage. To find out what happened, the application progammer must
+pass a `message_id`. This will be passed to the WASP and when the WASP
+calls back, this `message_id` will be returned. This is the subject of
+the next section.
+
+Receiving Notifications About Sent Messages
+===========================================
+
+To receive notifications about sent messages, the application
+programmer must provide an INotifyMessage utility.
+
+Here's a really simple example of this::
+
+  >>> class HandleNotification:
+  ...     def __call__(self,message_id,status,details):
+  ...         print "message_id:",repr(message_id)
+  ...         print "    status:",repr(status)
+  ...         print "   details:",repr(details)
+        
+Normally, we'd register this utility with ZCML, but here we do so
+directly with the component architecture::
+
+  >>> from wasp.interfaces import INotifyMessage
+  >>> from zope.component import provideUtility
+  >>> provideUtility(HandleNotification(),provides=INotifyMessage)
+
+We can show this in action by using the demo WASP implementations
+method of calling back::
+
+  >>> browser.open('http://localhost/@@wasp?type=notification&message_id=123&status=delivered&details=ok')
+  message_id: u'123'
+      status: <wasp.status.Delivered instance at ...>
+     details: u'ok'
+
+Now, in some cases, particularly if data is stored in the zodb, it's
+convenient to have access to the context of the Receiver view. The
+`wasp` package supports this by letting you register an adapter
+instead of a utility.
+
+Here's a simple example of a suitable adapter::
+
+  >>> class HandleNotification:
+  ...     def __init__(self,context):
+  ...         self.context = context
+  ...     def __call__(self,message_id,status,details):
+  ...         print "   context:",self.context
+  ...         print "message_id:",repr(message_id)
+  ...         print "    status:",repr(status)
+  ...         print "   details:",repr(details)
+        
+This should generally be registered for all objects as the Receiver
+view will make sure that only its context is adapted::
+
+  >>> from wasp.interfaces import INotifyMessage
+  >>> from zope.component import provideAdapter
+  >>> provideAdapter(HandleNotification,adapts=(None,),provides=INotifyMessage)
+
+Now when a notification is received, the code called has access to the
+context::
+
+  >>> browser.open('http://localhost/@@wasp?type=notification&message_id=123&status=delivered&details=ok')
+     context: <security proxied zope.app.folder.folder.Folder instance at ...>
+  message_id: u'123'
+      status: <wasp.status.Delivered instance at ...>
+     details: u'ok'
+
+
+Receiving Messages
+==================
+
+To receive messages, the application programmer must provide an
+IReceiveMessage utility. 
+
+Here's a really simple example of this::
+
+  >>> class HandleMessage:
+  ...     def __call__(self,msisdn,message_text):
+  ...         print "      msisdn:",repr(msisdn)
+  ...         print "message_text:",repr(message_text)
+
+Normally, we'd register this utility with ZCML, but here we do so
+directly with the component architecture::
+
+  >>> from wasp.interfaces import IReceiveMessage
+  >>> from zope.component import provideUtility
+  >>> provideUtility(HandleMessage(),provides=IReceiveMessage)
+
+We can show this in action by using the demo WASP implementations
+method of calling back::
+
+  >>> browser.open('http://localhost/@@wasp?type=message&msisdn=123&message_text=my+message')
+        msisdn: u'123'
+  message_text: u'my message'
+
+Now, in some cases, particularly if data is stored in the zodb, it's
+convenient to have access to the context of the Receiver view. The
+`wasp` package supports this by letting you register an adapter
+instead of a utility.
+
+Here's a simple example of a suitable adapter::
+
+  >>> class HandleMessage:
+  ...     def __init__(self,context):
+  ...         self.context = context
+  ...     def __call__(self,msisdn,message_text):
+  ...         print "     context:",self.context
+  ...         print "      msisdn:",repr(msisdn)
+  ...         print "message_text:",repr(message_text)
+        
+This should generally be registered for all objects as the Receiver
+view will make sure that only its context is adapted::
+
+  >>> from wasp.interfaces import IReceiveMessage
+  >>> from zope.component import provideAdapter
+  >>> provideAdapter(HandleMessage,adapts=(None,),provides=IReceiveMessage)
+
+Now when a message is received, the code called has access to the
+context::
+
+  >>> browser.open('http://localhost/@@wasp?type=message&msisdn=123&message_text=my+message')
+       context: <security proxied zope.app.folder.folder.Folder instance at ...>
+        msisdn: u'123'
+  message_text: u'my message'
+
+
+Currently Available WASPs
+=========================
+
+Documentation for the configuration of the currently avalable WASPs is
+found in the 'readme.txt' of each of the `wasp` subpackages. Each
+subpackage represents a different WASP implementation.
+
+The currently available WASP implementations are listed below:
+
+*demo*
+  a WASP for testing that just echos requests and responses.
+
+*bulksms*
+  an implementation for the service provided by
+  http://bulksms.2way.co.za/
+
+Licensing
+=========
+
+Copyright (c) 2008 Simplistix Ltd
+
+This Software is released under the MIT License:
+http://www.opensource.org/licenses/mit-license.html
+See license.txt for more details.
+
+Credits
+=======
+
+**Roche Compaan and Rijk Stofberg at Upfront**
+  Ideas and funding
+
+**Chris Withers**
+  Development
+
+Changes
+=======
+
+1.0.1
+-----
+
+- first open source release
+
+1.0.0
+-----
+
+- implementation for BulkSMS WASP.
+
+- clarified the meaning of `msisdn` in IReceiveMessage
+
+- added a generic SendException for use by WASP implementations.
+
+- change IProcessResponse to cater for returning notifications,
+  messages *and* a response for the browser
+
+0.9.0
+-----
+
+- initial release featuring only the demo implementation.
