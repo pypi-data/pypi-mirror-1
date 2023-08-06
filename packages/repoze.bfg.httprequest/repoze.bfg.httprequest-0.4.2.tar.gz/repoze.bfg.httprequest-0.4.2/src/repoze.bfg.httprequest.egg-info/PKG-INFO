@@ -1,0 +1,179 @@
+Metadata-Version: 1.0
+Name: repoze.bfg.httprequest
+Version: 0.4.2
+Summary: Adaptable request interfaces.
+Home-page: http://pypi.python.org/pypi/repoze.bfg.httprequest
+Author: Malthe Borch and Stefan Eletzhofer
+Author-email: repoze-dev@lists.repoze.org
+License: ZPL 2.1
+Description: Overview
+        ========
+        
+        The motivation for this package is to encourage the use of request
+        type adaptation instead of depending on packages with request type
+        definitions.
+        
+        Instead of subclassing the request interface, we encourage an
+        adaptation pattern:
+        
+        >>> from repoze.bfg.interfaces import IRequest
+        >>> IGZipRequest = IRequest({'http_accept_encoding': 'gzip'})
+        
+        An event handler listens for the ``INewRequest`` event and
+        automatically marks the request with interfaces as needed to adapt the
+        request to the request types that it may apply for.
+        
+        To complete the example above, a request would come in with an HTTP
+        environment like the following:
+        
+        {'http_accept_encoding': 'compress, gzip'}
+        
+        Since we've previouly adapted the request to an accept-encoding of
+        'gzip', the adaptation machinery will mark the interface such that
+        this environment will match the ``IGZipRequest`` interface.
+        
+        This would be an alternative to subclassing, where we would manually
+        have to set up an event listener that interprets the request
+        environment and marks the request with the interface.
+        
+        >>> class IGZipRequest(IRequest):
+        ...     """Marker interface for requests for gzipped response."""
+        
+        Credits
+        -------
+        
+        Stefan Eletzhofer <stefan.eletzhofer@inquant.de> and Malthe Borch
+        <mborch@gmail.com>.
+        
+        
+        Adaptable HTTP request interfaces
+        =================================
+        
+        Suppose we want to adapt on requests that have an "http_accept_encoding"
+        that calls for a gzipped response, we'd set up an interface as
+        follows:
+        
+        >>> from repoze.bfg.interfaces import IRequest
+        >>> IGZipRequest = IRequest({'http_accept_encoding': 'gzip'})
+        
+        Let's now craft a request that will match this interface.
+        
+        >>> class TestRequest(object):
+        ...     interface.implements(IRequest)
+        ...
+        ...     def __init__(self, environ):
+        ...         self.environ = environ
+        
+        >>> request = TestRequest({'http_accept_encoding': 'compress, gzip'})
+        
+        At this point, the request has not been prepared for adaptation.
+        
+        >>> from repoze.bfg.events import NewRequest
+        >>> from zope.event import notify
+        >>> notify(NewRequest(request))
+        
+        We expect the request to implement the ``IGZipRequest`` interface.
+        
+        >>> IGZipRequest.providedBy(request)
+        True
+        
+        To get more flexibility, we can supply a match function:
+        
+        >>> IAlternativeGZipRequest = IRequest(
+        ...    {'http_accept_encoding': lambda value: 'gzip' in value})
+        
+        >>> notify(NewRequest(request))
+        >>> IAlternativeGZipRequest.providedBy(request)
+        True
+        
+        Suppose now we'd also like to support requests for documents in
+        German.
+        
+        >>> IGermanLanguageRequest = IRequest({'http_accept_language': 'de'})
+        
+        We'll create a new request, which, besides asking a gzipped response,
+        also asks for the content in German.
+        
+        >>> request = TestRequest(
+        ...     {'http_accept_encoding': 'compress, gzip', 'http_accept_language': 'de'})
+        
+        >>> notify(NewRequest(request))
+        
+        Verify that the request provides the adapted interfaces.
+        
+        >>> IGermanLanguageRequest.providedBy(request)
+        True
+        
+        >>> IGZipRequest.providedBy(request)
+        True
+        
+        Now, as you would expect, we can adapt a request interface that
+        combines these two environments.
+        
+        >>> IZippedGerman = IRequest(
+        ...    {'http_accept_encoding': 'gzip', 'http_accept_language': 'de'})
+        >>> notify(NewRequest(request))
+        
+        >>> IZippedGerman.providedBy(request)
+        True
+        
+        Note that this interface extends the two interfaces that were created
+        for each of the environment pairs of it.
+        
+        >>> IZippedGerman.isOrExtends(IGermanLanguageRequest)
+        True
+        
+        >>> IZippedGerman.isOrExtends(IGZipRequest)
+        True
+        
+        Let's try a request that doesn't match.
+        
+        >>> IZippedFrench = IRequest(
+        ...     {'http_accept_encoding': 'gzip', 'http_accept_language': 'fr'})
+        >>> notify(NewRequest(request))
+        
+        >>> IZippedFrench.providedBy(request)
+        False
+        
+        Adapted requests are global with respect to the environment:
+        
+        >>> IRequest({'http_accept_encoding': 'gzip'}) is IRequest({'http_accept_encoding': 'gzip'})
+        True
+        
+        Pickle-support
+        --------------
+        
+        The adapted interface are created dynamically and would therefore not
+        be locatable by the ``pickle`` module. To remedy this, an import hook
+        is added on package initialization.
+        
+        (The ``repoze.bfg`` packages pickles configuration actions in order to
+        improve startup time, and therefore it's important that the adapted
+        interfaces are pickable.)
+        
+        >>> from pickle import dumps, loads
+        >>> p = dumps(IGZipRequest)
+        
+        Now, we'll pretend that we the ``repoze.bfg.httprequest.interfaces`` has
+        not yet been imported. This will make pickle import it when we load
+        back the pickle.
+        
+        >>> import sys
+        >>> del sys.modules['repozehttprequestinterfaces']
+        
+        We'll reinitialize the interfaces module.
+        
+        >>> loads(p)
+        <IHTTPRequest http_accept_encoding=gzip>
+        
+Keywords: zope3 repoze bfg
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Framework :: Zope3
