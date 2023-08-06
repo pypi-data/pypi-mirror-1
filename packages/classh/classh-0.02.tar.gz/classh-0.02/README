@@ -1,0 +1,188 @@
+ README: classh
+
+
+ classh is the "Cluster Administrator's ssh" tool.  It is yet another wrapper
+ around ssh for running commands on a number of hosts concurrently similar
+ to xCAT, pssh, Cluster ssh, and a gaggle of other utilities.
+
+ The astute reader will already be asking: *WHY* release ANOTHER such tool?
+
+ A few years ago I need something like this and surveyed the tools available
+ at the time.  My requirements were:
+
+   * Must handle thousands, preferably tens of thousands of targets
+   * Must run a reasonable number (100s) of the jobs concurrently
+   * Must be able to capture the output, error messages, and exit values
+     for each job in a manner amenable to automated post-processing
+   * Must be reliable enough not to stall, hang, nor crash "no matter what"
+   * Must run on a standard Linux installation and be able to handle a
+     variety of standard UNIX targets with no special client/agent/daemon
+     software deployed (other than sshd).
+
+ At that time I also need it to be capable of handling interactive
+ authentication (prompting for a password once, and automatically 
+ responding to ssh and sudo password prompts as necessary).
+
+ I wrote something in Python using os.fork(), os.execve(), Pexpect,
+ and the signal handling module (to handle SIGCHLD events).  It was a
+ relatively ugly hack which we only used internally for the purpose at hand.
+ It's output handling was crude. (Every child process simply wrote
+ $(hostname).{out,err,ret} files into a specified target/job results
+ directory).
+
+ However, it did the job and none of the other tools I reviewed at the
+ time met all of my requirements.  (It's possible that some of them
+ have the features, but have them poorly enough documented or sufficiently
+ inaccessible to a new user that I missed them).
+
+ classh is a re-implementation of that concept.
+
+ Example:
+
+    classh 'hostname;date' host1, host2, host3, ...
+
+
+ ... will simply fire off up to 100 (default) subprocesses of ssh, 
+ each running the 'hostname' and date 'commands' on their respective
+ hosts.
+
+ In this example if there were more than 100 hosts listed then after
+ a 100 jobs were active classh would pause for a few tenths of a second,
+ poll its pool of jobs for any that have completed, print any of the
+ results, kill any jobs that stalled (5 minutes by default), and
+ replenish the job pool until all the jobs were completed.
+
+ By default the output from each job would look like:
+
+	 host2   0   (8.2)     
+	   Output: 
+
+	   host2.foo.xxx
+           Fri Nov 20 03:39:32 PST 2009
+
+	 host1   7   (2.6)     
+	   Error:
+	   date: not found
+
+	   Output:
+
+	   host1.foo.xxx
+
+ ... and so on.  (A number of alternative result displays are supported).
+
+ While classh defaults to incrementally printing results it also captures
+ the output, error messages, exit value, start and end times of each; to
+ facilitate sorting, writing into separate files, etc.
+
+ For a more powerful example consider this:
+
+    classh -q -E ~/bin/remediate  -S '~/bin/nextstage someargs ...' \
+       'test -f /...' ./targets.txt
+
+
+ ... which will quietly (-q) run the command "test -f /..." on every
+ host listed in ./targets.txt and feed the names of each host that
+ reports an error into a process running ~/bin/remediate while feeding
+ all of the successful host names into another process which is running
+ "~/bin/nextstage" with "someargs ..." as arguments.
+
+ In other words we can easily pipeline successful and exceptional results
+ from one classh job into other processes (including, obviously, other 
+ classh commands).  
+
+ The -S and -E options perform a bit of magic, - means classh's own
+ stdout (for normal shell pipeline handling), a directory will be taken
+ as a target for *.{out,err,ret} files (*.ret only in -E directories)
+ an executable (or any string containing a space and starting with an
+ executable filename) will be executed in a subshell (as described) and
+ a regular/writable file will be opened for appending.
+
+ Similarly any of the trailing arguments that looks like a filename
+ (contains a '/' character) will be treated as a list of host names
+ or host patterns.
+
+ There is further magic in the hostname handling.  Any argument
+ that doesn't look like a filename and that does contain [...]
+ expressions such as foo[0-10] or bar[3,2,12-23,40-44]baz ... will be
+ expanded into a list like: foo0 foo1 ... foo10 or bar3baz bar2baz
+ ... bar40baz.  By default the same sort of numeric range expansion
+ will be performed on each entry in file as it's processed.
+
+ 
+
+
+ Features:
+
+   * Runs configurable number of jobs in parallel
+   * Tested on tens of thousands of targets per job
+   * Record exit status, running time, output, and error messages separately
+   * Supports timeouts (and records them)
+   * Supports (optional) incremental results gathering/processing
+   * Feed hostnames from successful and/or exceptional jobs into
+     their own files or processes.
+   * Flexible host pattern expansion (foo[1-20,31,32,40-100]bar.xxx)
+   * Flexible options for saving output, errors, and exit values
+     (including pickling all results for import)
+   * Support interactive shell
+   * Importable as a Python module: use to build more powerful scripts
+   * Basic functionality in one file using only Python 2.4 std libs.
+
+
+ Rhetorical Questions:
+
+   * Why not multiprocessing module?
+   * Why not Twisted/conch?
+ 
+
+
+ Links to Related Packages:
+
+ * http://vxargs.sourceforge.net/
+ * http://pydsh.sourceforge.net/
+ * http://pussh.sourceforge.net/
+ * http://www.csm.ornl.gov/torc/C3/  ## Cluster Command&Control (Python)
+ * http://guichaz.free.fr/gsh/  Group shell
+ * http://www.lysator.liu.se/fsh/    ## Honorable mention
+ * http://jonas.bardinosen.dk/pywrat/
+ * http://www.cure.nom.fr/blog/archives/83-SRC-Simultaneous-Remote-Command.html
+ * http://freshmeat.net/projects/octopussh (leads to 404 errors)
+
+
+ * http://freshmeat.net/projects/pconsole
+ * http://tentakel.biskalar.de/
+ * http://web.taranis.org/shmux/     ## Also good links!
+ * http://taktuk.gforge.inria.fr/
+ * http://www.tuxrocks.com/Projects/p-run/
+ * http://omnitty.sourceforge.net/
+ * http://www.theether.org/pssh/
+ * http://www.lerp.com/~sic/mass/
+ * http://outflux.net/unix/software/gsh/
+ * http://watson-wilson.ca/blog/sshdo.html 
+ * http://xcat.sourceforge.net/
+ * http://cssh.sourceforge.net/
+ * http://clusterit.sourceforge.net/
+ * http://sourceforge.net/projects/distribulator/
+ * http://sourceforge.net/projects/clusterssh/develop
+   * http://code.google.com/p/csshx/
+ * http://sourceforge.net/projects/clusterm/
+ * http://sourceforge.net/projects/consh/
+ * http://sourceforge.net/projects/mpssh/
+ * http://sourceforge.net/projects/mrtools/
+ * http://sourceforge.net/projects/mussh/
+ * http://sourceforge.net/projects/pdsh/
+ * http://sourceforge.net/projects/remotecmd/
+ * http://sourceforge.net/projects/rover/files/
+
+ * http://www.stearns.org/fanout/README.html
+ * http://y3sy3s.lafibre.org/?q=node/6
+ * 
+
+ Honorable Mention:
+ * http://open.controltier.org/wiki/ControlTier
+ * https://fedorahosted.org/func/
+ * http://expect.nist.gov/example/multixterm.man.html
+ * http://stromberg.dnsalias.org/~dstromberg/looper/
+ * http://mi.eng.cam.ac.uk/~er258/code/parallel.html
+
+ * http://www.noah.org/wiki/Pexpect
+ 
