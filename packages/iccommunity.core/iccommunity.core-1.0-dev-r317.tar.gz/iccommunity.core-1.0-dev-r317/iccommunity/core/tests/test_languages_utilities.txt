@@ -1,0 +1,164 @@
+============================================
+Functional doctest, language_utilities
+AKA: el test del coreano que vive en la triple frontera...
+author: Juan Pablo Gimenez <jpg@rcom.com.ar>
+============================================
+
+First some useful defines and includes...
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> from Products.CMFCore.utils import getToolByName
+    >>> from Products.PloneTestCase.setup import portal_owner, \
+    ...                                          default_user, \
+    ...                                          default_password
+
+    >>> portal = self.portal
+    >>> browser = Browser()
+    >>> portal_url = portal.absolute_url()
+    >>> folder_url = self.folder.absolute_url()
+    >>> login_url = portal_url + '/login_form'
+    >>> logout_url = portal_url + '/logout'
+	>>> portal.error_log._ignored_exceptions = ()
+    >>> browser.handleErrors = False
+	>>> from zope.app.component.hooks import setSite, getSite
+	>>> setSite(portal)
+	>>> getSite()
+	<PloneSite at /plone>
+
+	>>> portal_properties = getToolByName(portal, 'portal_properties')
+	>>> setattr(portal_properties.site_properties, 'default_language', 'es')
+	>>> setattr(portal_properties.site_properties, 'platecom.languages', ('es', 'pt', 'gn'))
+
+Now, we must login...
+    >>> browser.open(login_url)
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+
+Entonces podemos seguir...
+
+1) Crear tres usuario con la propiedad "platecom.language" modificada:
+
+    usuario:    platecom.language:
+    test1        en;es;it - en como plone lang
+    test2        es;en - es como plone lang
+    test3        it - it como plone lang
+    test4		 - no define nada
+    test1        en;es;it - pt como plone lang
+
+	>>> member1 = portal.portal_registration.addMember('test1', 'test1')
+	>>> member1.setMemberProperties({'language': 'en'})
+	>>> member1.setMemberProperties({'platecom.language': ('en', 'es', 'it')})
+
+	>>> member2 = portal.portal_registration.addMember('test2', 'test2')
+	>>> member2.setMemberProperties({'language': 'es'})
+	>>> member2.setMemberProperties({'platecom.language': ('es', 'en')})
+
+	>>> member3 = portal.portal_registration.addMember('test3', 'test3')
+	>>> member3.setMemberProperties({'language': 'it'})
+	>>> member3.setMemberProperties({'platecom.language': ('it',)})
+
+	>>> member4 = portal.portal_registration.addMember('test4', 'test4')
+
+	>>> member5 = portal.portal_registration.addMember('test5', 'test5')
+	>>> member5.setMemberProperties({'language': 'pt'})
+	>>> member5.setMemberProperties({'platecom.language': ('en', 'es', 'it')})
+
+	>>> from zope.component import queryUtility
+	>>> from zope.i18n.interfaces import IUserPreferredLanguages
+	>>> platecom_property_lang_util = queryUtility(IUserPreferredLanguages,
+	...							name='authenticated_member_platecom_languages_property')
+	>>> plone_lang_util = queryUtility(IUserPreferredLanguages,
+	...							name='authenticated_member_plone_preferred_languages')
+	>>> platecom_lang_util = queryUtility(IUserPreferredLanguages,
+	...							name='platecom_preferred_languages')
+
+	>>> from zope.publisher.browser import TestRequest
+	>>> request = TestRequest(form={'set_language': 'pt', 'HTTP_ACCEPT_LANGUAGE': 'es, ko'})
+
+Probar con el user test1
+
+	>>> self.login('test1')
+	>>> platecom_property_lang_util.getPreferredLanguages()
+	['en', 'es', 'it']
+	>>> plone_lang_util.getPreferredLanguages()
+	['en']
+	>>> platecom_lang_util.getPreferredLanguages(portal=portal, request=request)
+	['pt', 'en', 'es', 'it', 'ko', 'gn']
+
+Probar con el user test2
+
+	>>> self.login('test2')
+	>>> platecom_property_lang_util.getPreferredLanguages()
+	['es', 'en']
+	>>> plone_lang_util.getPreferredLanguages()
+	['es']
+	>>> platecom_lang_util.getPreferredLanguages(portal=portal, request=request)
+	['pt', 'es', 'en', 'ko', 'gn']
+
+Probar con el user test3
+
+	>>> self.login('test3')
+	>>> platecom_property_lang_util.getPreferredLanguages()
+	['it']
+	>>> plone_lang_util.getPreferredLanguages()
+	['it']
+	>>> platecom_lang_util.getPreferredLanguages(portal=portal, request=request)
+	['pt', 'it', 'es', 'ko', 'gn']
+
+Probar con el user test4
+
+	>>> self.login('test4')
+	>>> platecom_property_lang_util.getPreferredLanguages()
+	[]
+	>>> plone_lang_util.getPreferredLanguages()
+	[]
+	>>> platecom_lang_util.getPreferredLanguages(portal=portal, request=request)
+	['pt', 'es', 'ko', 'gn']
+
+Probar con el user test5
+
+	>>> self.login('test5')
+	>>> platecom_property_lang_util.getPreferredLanguages()
+	['en', 'es', 'it']
+	>>> plone_lang_util.getPreferredLanguages()
+	['pt']
+	>>> platecom_lang_util.getPreferredLanguages(portal=portal, request=request)
+	['pt', 'en', 'es', 'it', 'ko', 'gn']
+
+Que pasa con el global utility sin portal?
+
+    >>> setSite(portal)
+    >>> platecom_lang_util.getPreferredLanguages(request=request)
+    ['pt', 'en', 'es', 'it', 'ko', 'gn']
+
+Y que pasa con el global utility sin request?
+
+    >>> platecom_lang_util.getPreferredLanguages()
+    ['pt', 'en', 'es', 'it', 'gn']
+
+Ahora deberia probar TTW
+
+Probar con el user test1
+
+    >>> browser.open(logout_url)
+    >>> browser.open(login_url)
+    >>> browser.getControl(name='__ac_name').value = 'test1'
+    >>> browser.getControl(name='__ac_password').value = 'test1'
+    >>> browser.getControl(name='submit').click()
+
+Probar con el user test2
+
+    >>> browser.open(logout_url)
+    >>> browser.open(login_url)
+    >>> browser.getControl(name='__ac_name').value = 'test2'
+    >>> browser.getControl(name='__ac_password').value = 'test2'
+    >>> browser.getControl(name='submit').click()
+
+Probar con el user test3
+
+    >>> browser.open(logout_url)
+    >>> browser.open(login_url)
+    >>> browser.getControl(name='__ac_name').value = 'test3'
+    >>> browser.getControl(name='__ac_password').value = 'test3'
+    >>> browser.getControl(name='submit').click()
