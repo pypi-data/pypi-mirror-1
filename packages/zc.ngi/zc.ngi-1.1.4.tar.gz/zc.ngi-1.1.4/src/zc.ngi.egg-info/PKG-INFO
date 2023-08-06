@@ -1,0 +1,1074 @@
+Metadata-Version: 1.0
+Name: zc.ngi
+Version: 1.1.4
+Summary: Network Gateway Interface
+Home-page: http://www.python.org/pypi/zc.ngi
+Author: Jim Fulton
+Author-email: jim@zope.com
+License: ZPL 2.1
+Description: *************************
+        Network Gateway Interface
+        *************************
+        
+        Network programs are typically difficult to test because they require
+        setting up network connections, clients, and servers.  In addition,
+        application code gets mixed up with networking code.
+        
+        The Network Gateway Interface (NGI) seeks to improve this situation by
+        separating application code from network code.  This allows
+        application and network code to be tested independently and provides
+        greater separation of concerns.
+        
+        .. contents::
+        
+        Changes
+        *******
+        
+        ==================
+        1.1.4 (2009-10-28)
+        ==================
+        
+        Bug fixed:
+        
+        - Spurious warnings sometimes occurred due to a race condition in
+        setting up servers.
+        - Added missing "writelines" method to zc.ngi.adapters.Lines.
+        
+        ==================
+        1.1.3 (2009-07-30)
+        ==================
+        
+        Bug fixed:
+        
+        - zc.ngi.async bind failures weren't handled properly, causing lots of
+        annoying log messages to get spewed, which tesnded to fill up log
+        files.
+        
+        ==================
+        1.1.2 (2009-07-02)
+        ==================
+        
+        Bugs fixed:
+        
+        - The zc.ngi.async thread wasn't named. All threads should be named.
+        
+        ==================
+        1.1.1 (2009-06-29)
+        ==================
+        
+        Bugs fixed:
+        
+        - zc.ngi.blocking didn't properly handle connection failures.
+        
+        ==================
+        1.1.0 (2009-05-26)
+        ==================
+        
+        Bugs fixed:
+        
+        - Blocking input and output files didn't properly synchronize closing.
+        
+        - The testing implementation made muiltiple simultaneous calls to
+        handler methods in violation of the promise made in interfaces.py.
+        
+        - Async TCP servers used too low a listen depth, causing performance
+        issues and spurious test failures.
+        
+        New features:
+        
+        - Added UDP support.
+        
+        - Implementation responsibilities were clarified through an
+        IImplementation interface.  The "connector" attribute of the testing
+        and async implementations was renamed to "connect". The old name
+        still works.
+        
+        - Implementations are now required to log handler errors and to close
+        connections in response to connection-handler errors. (Otherwise,
+        handlers, and especially handler adapters, would have to do this.)
+        
+        ==================
+        1.0.1 (2007-05-30)
+        ==================
+        
+        Bugs fixed:
+        
+        - Server startups sometimes failed with an error like::
+        
+        warning: unhandled read event
+        warning: unhandled write event
+        warning: unhandled read event
+        warning: unhandled write event
+        ------
+        2007-05-30T22:22:43 ERROR zc.ngi.async.server listener error
+        Traceback (most recent call last):
+        File "asyncore.py", line 69, in read
+        obj.handle_read_event()
+        File "asyncore.py", line 385, in handle_read_event
+        self.handle_accept()
+        File "/zc/ngi/async.py", line 325, in handle_accept
+        sock, addr = self.accept()
+        TypeError: unpack non-sequence
+        
+        Detailed Documentation
+        **********************
+        
+        =========================
+        Network Gateway Interface
+        =========================
+        
+        Network programs are typically difficult to test because they require
+        setting up network connections, clients, and servers.  In addition,
+        application code gets mixed up with networking code.
+        
+        The Network Gateway Interface (NGI) seeks to improve this situation by
+        separating application code from network code.  This allows
+        application and network code to be tested independently and provides
+        greater separation of concerns.
+        
+        There are several interfaces defined by the NGI:
+        
+        IImplementation
+        APIs for implementing and connecting to TCP servers and for
+        implemented and sending messages to UDP servers.
+        
+        IConnection
+        Network connection implementation.  This is the core interface that
+        applications interact with,
+        
+        IConnectionHandler
+        Application component that handles TCP network input.
+        
+        IClientConnectHandler
+        Application callback that handles successful or failed outgoing
+        TCP connections.
+        
+        IServer
+        Application callback to handle incoming connections.
+        
+        IUDPHandler
+        Application callback to handle incoming UDP messages.
+        
+        The interfaces are split between "implementation" and "application"
+        interfaces.  An implementation of the NGI provides Implementation,
+        IConnection, IListener, and IUDPListener. An application provides
+        IConnectionHandler and one or more of IClientConnectHandler,
+        IServer, or IUDPHandler.
+        
+        For more information, see interfaces.py.
+        
+        Testing Implementation
+        ======================
+        
+        These interface can have a number of implementations.  The simplest
+        implementation is the testing implementation, which is used to test
+        application code.
+        
+        >>> import zc.ngi.testing
+        
+        The testing module provides IConnection, IConnector, and IListener
+        implementations. We'll use this below to illustrate how application code
+        is written.
+        
+        Implementing Network Clients
+        ============================
+        
+        Network clients make connections to and then use these connections to
+        communicate with servers.  To do so, a client must be provided with an
+        IConnector implantation.  How this happens is outside the scope of
+        the NGI.  An IConnector implementation could, for example, be provided
+        via the Zope component architecture, or via pkg_resources entry
+        points.
+        
+        Let's create a simple client that calls an echo server and verifies
+        that the server properly echoes data sent do it.
+        
+        >>> class EchoClient:
+        ...
+        ...     def __init__(self, connect):
+        ...         self.connect = connect
+        ...
+        ...     def check(self, addr, strings):
+        ...         self.strings = strings
+        ...         self.connect(addr, self)
+        ...
+        ...     def connected(self, connection):
+        ...         for s in self.strings:
+        ...             connection.write(s + '\n')
+        ...         self.input = ''
+        ...         connection.setHandler(self)
+        ...
+        ...     def failed_connect(self, reason):
+        ...         print 'failed connect:', reason
+        ...
+        ...     def handle_input(self, connection, data):
+        ...         print 'got input:', repr(data)
+        ...         self.input += data
+        ...         while '\n' in self.input:
+        ...             data, self.input = self.input.split('\n', 1)
+        ...             if self.strings:
+        ...                expected = self.strings.pop(0)
+        ...                if data == expected:
+        ...                    print 'matched:', data
+        ...                else:
+        ...                    print 'unmatched:', data
+        ...                if not self.strings:
+        ...                    connection.close()
+        ...             else:
+        ...                print 'Unexpected input', data
+        ...
+        ...     def handle_close(self, connection, reason):
+        ...         print 'closed:', reason
+        ...         if self.strings:
+        ...             print 'closed prematurely'
+        ...
+        ...     def handle_exception(self, connection, exception):
+        ...         print 'exception:', exception.__class__.__name__, exception
+        
+        
+        The client implements the IClientConnectHandler and IConnectionHandler
+        interfaces.  More complex clients might implement these interfaces with
+        separate classes.
+        
+        We'll instantiate our client using the testing connect:
+        
+        >>> client = EchoClient(zc.ngi.testing.connect)
+        
+        Now we'll try to check a non-existent server:
+        
+        >>> client.check(('localhost', 42), ['hello', 'world', 'how are you?'])
+        failed connect: no such server
+        
+        Our client simply prints a message (and gives up) if a connection
+        fails. More complex applications might retry, waiting between attempts,
+        and so on.
+        
+        The testing connect always fails unless given a test connection
+        ahead of time.  We'll create a testing connection and register it so a
+        connection can succeed:
+        
+        >>> connection = zc.ngi.testing.Connection()
+        >>> zc.ngi.testing.connectable(('localhost', 42), connection)
+        
+        We can register multiple connections with the same address:
+        
+        >>> connection2 = zc.ngi.testing.Connection()
+        >>> zc.ngi.testing.connectable(('localhost', 42), connection2)
+        
+        The connections will be used in order.
+        
+        Now, our client should be able to connect to the first connection we
+        created:
+        
+        >>> client.check(('localhost', 42), ['hello', 'world', 'how are you?'])
+        -> 'hello\n'
+        -> 'world\n'
+        -> 'how are you?\n'
+        
+        The test connection echoes data written to it, preceded by "-> ".
+        
+        Active connections are true:
+        
+        >>> bool(connection2)
+        True
+        
+        Test connections provide methods generating test input and flow closing
+        connections.  We can use these to simulate network events.  Let's
+        generate some input for our client:
+        
+        >>> connection.test_input('hello')
+        got input: 'hello'
+        
+        >>> connection.test_input('\nbob\n')
+        got input: '\nbob\n'
+        matched: hello
+        unmatched: bob
+        
+        >>> connection.test_close('done')
+        closed: done
+        closed prematurely
+        
+        >>> client.check(('localhost', 42), ['hello'])
+        -> 'hello\n'
+        
+        >>> connection2.test_input('hello\n')
+        got input: 'hello\n'
+        matched: hello
+        -> CLOSE
+        
+        >>> bool(connection2)
+        False
+        
+        Passing iterables to connections
+        ================================
+        
+        The writelines method of IConnection accepts iterables of strings.
+        
+        >>> def greet():
+        ...     yield 'hello\n'
+        ...     yield 'world\n'
+        
+        >>> zc.ngi.testing.Connection().writelines(greet())
+        -> 'hello\n'
+        -> 'world\n'
+        
+        If there is an error in your iterator, or if the iterator returns
+        a non-string value, an exception will be reported using
+        handle_exception:
+        
+        >>> def bad():
+        ...     yield 2
+        >>> connection = zc.ngi.testing.Connection()
+        >>> connection.setHandler(zc.ngi.testing.PrintingHandler(connection))
+        >>> connection.writelines(bad())
+        -> EXCEPTION TypeError Got a non-string result from iterable
+        
+        
+        Implementing network servers
+        ============================
+        
+        Implementing network servers is very similar to implementing clients,
+        except that a listener, rather than a connect is used.  Let's
+        implement a simple echo server:
+        
+        
+        >>> class EchoServer:
+        ...
+        ...     def __init__(self, connection):
+        ...         print 'server connected'
+        ...         self.input = ''
+        ...         connection.setHandler(self)
+        ...
+        ...     def handle_input(self, connection, data):
+        ...         print 'server got input:', repr(data)
+        ...         self.input += data
+        ...         if '\n' in self.input:
+        ...             data, self.input = self.input.split('\n', 1)
+        ...             connection.write(data + '\n')
+        ...             if data == 'Q':
+        ...                 connection.close()
+        ...
+        ...     def handle_close(self, connection, reason):
+        ...         print 'server closed:', reason
+        
+        Out EchoServer *class* provides IServer and implement IInputHandler.
+        
+        To use a server, we need a listener.  We'll use the use the testing
+        listener:
+        
+        >>> listener = zc.ngi.testing.listener(EchoServer)
+        
+        To simulate a client connection, we create a testing connection and
+        call the listener's connect method:
+        
+        >>> connection = zc.ngi.testing.Connection()
+        >>> listener.connect(connection)
+        server connected
+        
+        >>> connection.test_input('hello\n')
+        server got input: 'hello\n'
+        -> 'hello\n'
+        
+        >>> connection.test_close('done')
+        server closed: done
+        
+        >>> connection = zc.ngi.testing.Connection()
+        >>> listener.connect(connection)
+        server connected
+        
+        >>> connection.test_input('hello\n')
+        server got input: 'hello\n'
+        -> 'hello\n'
+        
+        >>> connection.test_input('Q\n')
+        server got input: 'Q\n'
+        -> 'Q\n'
+        -> CLOSE
+        
+        Note that it is an error to write to a closed connection:
+        
+        >>> connection.write('Hello')
+        Traceback (most recent call last):
+        ...
+        TypeError: Connection closed
+        
+        
+        Server Control
+        --------------
+        
+        The object returned from a listener is an IServerControl.  It provides
+        access to the active connections:
+        
+        >>> list(listener.connections())
+        []
+        
+        >>> connection = zc.ngi.testing.Connection()
+        >>> listener.connect(connection)
+        server connected
+        
+        >>> list(listener.connections()) == [connection]
+        True
+        
+        >>> connection2 = zc.ngi.testing.Connection()
+        >>> listener.connect(connection2)
+        server connected
+        
+        >>> len(list(listener.connections()))
+        2
+        >>> connection in list(listener.connections())
+        True
+        >>> connection2 in list(listener.connections())
+        True
+        
+        Server connections have a control attribute that is the connections
+        server control:
+        
+        >>> connection.control is listener
+        True
+        
+        Server control objects provide a close method that allows a server to
+        be shut down.  If the close method is called without arguments, then
+        then all server connections are closed immediately and no more
+        connections are accepted:
+        
+        >>> listener.close()
+        server closed: stopped
+        server closed: stopped
+        
+        >>> connection = zc.ngi.testing.Connection()
+        >>> listener.connect(connection)
+        Traceback (most recent call last):
+        ...
+        TypeError: Listener closed
+        
+        If a handler function is passed, then connections aren't closed
+        immediately:
+        
+        >>> listener = zc.ngi.testing.listener(EchoServer)
+        >>> connection = zc.ngi.testing.Connection()
+        >>> listener.connect(connection)
+        server connected
+        >>> connection2 = zc.ngi.testing.Connection()
+        >>> listener.connect(connection2)
+        server connected
+        
+        >>> def handler(control):
+        ...     if control is listener:
+        ...        print 'All connections closed'
+        
+        >>> listener.close(handler)
+        
+        But no more connections are accepted:
+        
+        >>> connection3 = zc.ngi.testing.Connection()
+        >>> listener.connect(connection3)
+        Traceback (most recent call last):
+        ...
+        TypeError: Listener closed
+        
+        And the handler will be called when all of the listener's connections
+        are closed:
+        
+        >>> connection.close()
+        -> CLOSE
+        >>> connection2.close()
+        -> CLOSE
+        All connections closed
+        
+        Long output
+        ===========
+        
+        Test requests output data written to them.  If output exceeds 50
+        characters in length, it is wrapped by simply breaking the repr into
+        50-characters parts:
+        
+        >>> connection = zc.ngi.testing.Connection()
+        >>> connection.write('hello ' * 50)
+        -> 'hello hello hello hello hello hello hello hello h
+        .> ello hello hello hello hello hello hello hello hel
+        .> lo hello hello hello hello hello hello hello hello
+        .>  hello hello hello hello hello hello hello hello h
+        .> ello hello hello hello hello hello hello hello hel
+        .> lo hello hello hello hello hello hello hello hello
+        .>  '
+        
+        Text output
+        ===========
+        
+        If the output from an application consists of short lines of text, a
+        TextConnection can be used.  A TextConnection simply outputs it's data
+        directly.
+        
+        >>> connection = zc.ngi.testing.TextConnection()
+        >>> connection.write('hello\nworld\n')
+        hello
+        world
+        
+        END_OF_DATA
+        ===========
+        
+        Closing a connection closes it immediately, without sending any
+        pending data.  An alternate way to close a connection is to write
+        zc.ngi.END_OF_DATA. The connection will be automatically closed when
+        zc.ngi.END_OF_DATA is encountered in the output stream.
+        
+        >>> connection.write(zc.ngi.END_OF_DATA)
+        -> CLOSE
+        
+        >>> connection.write('Hello')
+        Traceback (most recent call last):
+        ...
+        TypeError: Connection closed
+        
+        Connecting servers and clients
+        ==============================
+        
+        It is sometimes useful to connect a client handler and a server
+        handler.  Listeners created with the zc.ngi.testing.listener class have a
+        connect method that can be used to create connections to a server.
+        
+        Let's connect out echo server and client. First, we'll create out
+        server using the listener constructor:
+        
+        >>> listener = zc.ngi.testing.listener(EchoServer)
+        
+        Then we'll use the connect method on the listener:
+        
+        >>> client = EchoClient(listener.connect)
+        >>> client.check(('localhost', 42), ['hello', 'world', 'how are you?'])
+        server connected
+        server got input: 'hello\n'
+        server got input: 'world\n'
+        server got input: 'how are you?\n'
+        got input: 'hello\nworld\nhow are you?\n'
+        matched: hello
+        matched: world
+        matched: how are you?
+        server closed: closed
+        
+        .. Peer connectors
+        
+        Below is an older API for connecting servers and clients in a
+        testing environment.  The mechanisms defined above are prefered.
+        
+        The zc.ngi.testing.peer function can be used to create a
+        connection to a peer handler. To illustrate, we'll set up an echo
+        client that connects to our echo server:
+        
+        >>> client = EchoClient(zc.ngi.testing.peer(('localhost', 42), EchoServer))
+        >>> client.check(('localhost', 42), ['hello', 'world', 'how are you?'])
+        server connected
+        server got input: 'hello\n'
+        server got input: 'world\n'
+        server got input: 'how are you?\n'
+        got input: 'hello\nworld\nhow are you?\n'
+        matched: hello
+        matched: world
+        matched: how are you?
+        server closed: closed
+        
+        UDP Support
+        ===========
+        
+        To send a UDP message, just use an implementations udp method:
+        
+        >>> zc.ngi.testing.udp(('', 42), "hello")
+        
+        If there isn't a server listening, the call will effectively be
+        ignored. This is UDP. :)
+        
+        >>> def my_udp_handler(addr, data):
+        ...     print 'from %r got %r' % (addr, data)
+        
+        >>> listener = zc.ngi.testing.udp_listener(('', 42), my_udp_handler)
+        
+        >>> zc.ngi.testing.udp(('', 42), "hello")
+        from '<test>' got 'hello'
+        
+        >>> listener.close()
+        >>> zc.ngi.testing.udp(('', 42), "hello")
+        
+        A default handler is used if you don't pass a handler:
+        
+        >>> listener = zc.ngi.testing.udp_listener(('', 43))
+        >>> zc.ngi.testing.udp(('', 43), "hello")
+        udp from '<test>' to ('', 43):
+        'hello'
+        
+        >>> listener.close()
+        >>> zc.ngi.testing.udp(('', 43), "hello")
+        
+        =======================
+        Blocking network access
+        =======================
+        
+        The NGI normally uses an event-based networking model in which
+        application code reactes to incoming data.  That model works well for
+        some applications, especially server applications, but can be a bit of
+        a bother for simpler applications, especially client applications.
+        
+        The zc.ngi.blocking module provides a simple blocking network model.
+        The open function can be used to create a pair of file-like objects
+        that can be used for writing output and reading input.  To illustrate
+        this, we'll use the wordcount server.  We'll use the peer function to
+        create a testing connector that connects to the server directory
+        without using a network:
+        
+        >>> import zc.ngi.wordcount
+        >>> import zc.ngi.testing
+        >>> connector = zc.ngi.testing.peer(('localhost', 42),
+        ...                                 zc.ngi.wordcount.Server)
+        
+        The open function is called with an address and a connect callable:
+        
+        >>> import zc.ngi.blocking
+        >>> output, input = zc.ngi.blocking.open(('localhost', 42), connector)
+        
+        The output file lets us send output to the server:
+        
+        >>> output.write("Hello\n")
+        >>> output.write("world\n")
+        >>> output.write("\0")
+        
+        The wordcount server accepts a sequence of text from the
+        client. Delimited by null characters.  For each input text, it
+        generates a line of summary statistics:
+        
+        >>> input.readline()
+        '2 2 12\n'
+        
+        We can use the writelines method to send data using an iterator:
+        
+        >>> def hello(name):
+        ...     yield "hello\n"
+        ...     yield name
+        ...     yield "\0"
+        
+        >>> output.writelines(hello("everyone"))
+        >>> output.writelines(hello("bob"))
+        
+        To close the connection to the server, we'll send a close command,
+        which is a documenty consisting of the letter "C":
+        
+        >>> output.write("C\0")
+        
+        This causes the server to close the connection after it has sent it's
+        data.
+        
+        We can use the read function to read either a fixed number of bytes
+        from the server:
+        
+        >>> input.read(5)
+        '1 2 1'
+        
+        Or to read the remaining data:
+        
+        >>> input.read()
+        '4\n1 2 9\n'
+        
+        If read is called without a size, it won't return until the server has
+        closed the connection.
+        
+        In this example, we've been careful to only read as much data as the
+        server produces.  For example, we called read without passing a length
+        only after sending a quit command to the server.  When using the
+        blocking library, care is needed to avoid a deadlock, in which both
+        sides of a connection are waiting for input.
+        
+        The blocking open and input methods accept an optional timeout
+        argument.  The timeout argument accepts a floating-point time-out
+        value, in seconds.  If a connection or input operation times out, a
+        Timeout exception is raised:
+        
+        >>> output, input = zc.ngi.blocking.open(('localhost', 42), connector)
+        >>> import time
+        >>> then = time.time()
+        >>> input.read(5, timeout=0.5)
+        Traceback (most recent call last):
+        ...
+        Timeout
+        
+        >>> 0.5 <= (time.time() - then) < 1
+        True
+        
+        The readline and readlines functions accept a timeout as well:
+        
+        >>> then = time.time()
+        >>> input.readline(timeout=0.5)
+        Traceback (most recent call last):
+        ...
+        Timeout
+        
+        >>> 0.5 <= (time.time() - then) < 1
+        True
+        
+        >>> then = time.time()
+        >>> input.readlines(timeout=0.5)
+        Traceback (most recent call last):
+        ...
+        Timeout
+        
+        >>> 0.5 <= (time.time() - then) < 1
+        True
+        
+        Timeouts can also be specified when connecting. To illustrate this,
+        we'll pass a do-nothing connector:
+        
+        >>> then = time.time()
+        >>> zc.ngi.blocking.open(None, (lambda *args: None), timeout=0.5)
+        Traceback (most recent call last):
+        ...
+        ConnectionTimeout
+        
+        >>> 0.5 <= (time.time() - then) < 1
+        True
+        
+        Low-level connection management
+        ===============================
+        
+        When we used open above, we passed an address and a connect callable, and the
+        open function created a connection and created file-like objects for
+        output and input.  The connect function can be used to create a
+        connection without a file-like object:
+        
+        >>> connection = zc.ngi.blocking.connect(('localhost', 42), connector)
+        
+        The if the open function is called without a connect callable, the the first
+        object must be a connection object and output and input objects for
+        that connection will be returned:
+        
+        >>> output, input = zc.ngi.blocking.open(connection)
+        >>> output.write("Hello\n")
+        >>> output.write("world\n")
+        >>> output.write("\0")
+        >>> input.readline()
+        '2 2 12\n'
+        
+        Like the open function, the connect function accepts a timeout:
+        
+        >>> then = time.time()
+        >>> zc.ngi.blocking.connect(None, (lambda *args: None), timeout=0.5)
+        Traceback (most recent call last):
+        ...
+        ConnectionTimeout
+        
+        >>> 0.5 <= (time.time() - then) < 1
+        True
+        
+        ============
+        NGI Adapters
+        ============
+        
+        The NGI is a fairly low-level event-based framework.  Adapters can be
+        used to build higher-level semantics.  In this document, we'll describe
+        some sample adapters that provide more examples of using the NGI and
+        useful building blocks for other applications. The source for these
+        adapters can be found in the zc.ngi.adapters module.
+        
+        Lines
+        =====
+        
+        The first adapter we'll look at collects input into lines. To
+        illustrate this, we'll use a handler from zc.ngi.testing that simply
+        prints its input:
+        
+        >>> import zc.ngi.testing
+        >>> connection = zc.ngi.testing.Connection()
+        >>> handler = zc.ngi.testing.PrintingHandler(connection)
+        
+        This handler is used by default as the peer
+        of testing connections:
+        
+        >>> connection.test_input('x' * 80)
+        -> 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+        .> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+        
+        >>> connection.test_close('test')
+        -> CLOSE test
+        
+        Now, we'll use the lines adapter to break input into lines, separated
+        by newlines.  We apply the adapter to a connection:
+        
+        >>> import zc.ngi.adapters
+        >>> connection = zc.ngi.testing.Connection()
+        >>> adapter = zc.ngi.adapters.Lines(connection)
+        >>> handler = zc.ngi.testing.PrintingHandler(adapter)
+        
+        Now, when we provide input, it won't appear until lines are complete:
+        
+        >>> connection.test_input('Hello world!')
+        >>> connection.test_input('\n')
+        -> 'Hello world!'
+        
+        >>> connection.test_input('Hello\nWorld!\nHow are you')
+        -> 'Hello'
+        -> 'World!'
+        
+        Only input handling is affected.  Other methods of the adapter behave
+        as would the underlying connection:
+        
+        >>> adapter.write('foo')
+        -> 'foo'
+        
+        >>> adapter.writelines(['foo', 'bar'])
+        -> 'foo'
+        -> 'bar'
+        
+        >>> connection.test_close('test')
+        -> CLOSE test
+        
+        The original connection is available in the connection attribute:
+        
+        >>> adapter.connection is connection
+        True
+        
+        Sized Messages
+        ==============
+        
+        The second adapter we'll look at will handle binary data organized
+        into sized messages.  Each message has two parts, a length, and a
+        payload.  Of course, the length gives the length of the payload.
+        
+        To see this, we'll use the adapter to adapt a testing connection:
+        
+        >>> connection = zc.ngi.testing.Connection()
+        >>> adapter = zc.ngi.adapters.Sized(connection)
+        >>> handler = zc.ngi.testing.PrintingHandler(adapter)
+        
+        Now, we'll generate some input. We do so by providing (big-endian) sizes by
+        calling struct pack:
+        
+        >>> import struct
+        >>> message1 = 'Hello\nWorld!\nHow are you?'
+        >>> message2 = 'This is message 2'
+        >>> connection.test_input(struct.pack(">I", len(message1)))
+        >>> connection.test_input(message1[:10])
+        >>> connection.test_input(message1[10:]+ struct.pack(">I", len(message2)))
+        -> 'Hello\nWorld!\nHow are you?'
+        
+        >>> connection.test_input(message2)
+        -> 'This is message 2'
+        
+        Here we saw that our handler got the two messages individually.
+        
+        If we write a message, we can see that the message is preceded by the
+        message size:
+        
+        >>> adapter.write(message1)
+        -> '\x00\x00\x00\x19'
+        -> 'Hello\nWorld!\nHow are you?'
+        
+        Null messages
+        -------------
+        
+        It can be useful to send Null messages to make sure that a client is
+        still connected.  The sized adapter supports such messages.  Calling
+        write with None, sends a null message, which is a message with a
+        length of 1 << 32 - 1 and no message data:
+        
+        >>> adapter.write(None)
+        -> '\xff\xff\xff\xff'
+        
+        On input, Null messages are ignored by the sized adapter and are not
+        sent to the application:
+        
+        >>> connection.test_input('\xff\xff\xff\xff')
+        
+        Closing
+        -------
+        
+        Closing works too.
+        
+        >>> connection.test_close('test')
+        -> CLOSE test
+        
+        =================================
+        asyncore-based NGI implementation
+        =================================
+        
+        The async module provides an NGI implementation based on the Python
+        standard asyncore framework.  It provides 2 objects to be invoked
+        directly by applications:
+        
+        connector
+        an implementation of the NGI IConnector interface
+        
+        listener
+        an implementation of the NGI IListener interface
+        
+        The implementation creates a dedicated thread to run an asyncore main
+        loop on import.
+        
+        There's nothing else to say about the implementation from a usage
+        point of view.  The remainder of this document provides a
+        demonstration (test) of using the impemantation to create a simple
+        word-count server and client.
+        
+        Demonstration: wordcount
+        ========================
+        
+        The wordcount module has a simple word-count server and client
+        implementation.  We'll run these using the async implementation.
+        
+        Let's start the wordcount server:
+        
+        >>> import zc.ngi.wordcount
+        >>> import zc.ngi.async
+        >>> port = zc.ngi.wordcount.start_server_process(zc.ngi.async.listener)
+        
+        We passed the listener to be used.
+        
+        Now, we'll start a number of threads that connect to the server and
+        check word counts of some sample documents.  If all goes well, we
+        shouldn't get any output.
+        
+        >>> import threading
+        >>> addr = 'localhost', port
+        >>> threads = [threading.Thread(target=zc.ngi.wordcount.client_thread,
+        ...                             args=(zc.ngi.async.connect, addr))
+        ...            for i in range(200)]
+        
+        >>> _ = [thread.start() for thread in threads]
+        >>> _ = [thread.join() for thread in threads]
+        
+        Iterable input
+        ==============
+        
+        We can pass data to the server using an iterator.  To illustrate this,
+        we'll use the blocking interface:
+        
+        >>> import zc.ngi.blocking
+        >>> output, input = zc.ngi.blocking.open(addr, zc.ngi.async.connect,
+        ...                                      timeout=1.0)
+        >>> def hello(name):
+        ...     yield "hello\n"
+        ...     yield name
+        ...     yield "\0"
+        
+        >>> output.writelines(hello('world'), timeout=1.0)
+        >>> input.readline(timeout=1.0)
+        '1 2 11\n'
+        
+        .. Error handling:
+        
+        If we pass a non-iterable to writelines, we'll get an immediate
+        error.  To demonstrate this we'll violate our output file and
+        access it's _connection attribute so that we can bypass the check
+        in the blocking writelines method:
+        
+        >>> output._connection.writelines(2) # doctest: +ELLIPSIS
+        Traceback (most recent call last):
+        ...
+        TypeError: ...
+        
+        >>> output._connection.writelines('foo')
+        Traceback (most recent call last):
+        ...
+        AssertionError: writelines does not accept strings
+        
+        If we pass an iterable that returns a non-string, we'll get a type
+        error when we try to read because handle_exception is called in
+        the input handler.
+        
+        >>> output.writelines([2], timeout=0.1)
+        Traceback (most recent call last):
+        ...
+        Timeout
+        
+        >>> input.readline()
+        Traceback (most recent call last):
+        ...
+        TypeError: ('iterable output returned a non-string', 2)
+        
+        If there is an error, then the connection is closed:
+        
+        >>> input.read()
+        ''
+        
+        >>> output.write('hello')
+        Traceback (most recent call last):
+        ...
+        IOError: I/O operation on closed file
+        
+        Handler errors cause connections to be closed.  To see this, we'll
+        send the server an error message, which foreces an error:
+        
+        >>> output, input = zc.ngi.blocking.open(addr, zc.ngi.async.connect,
+        ...                                      timeout=1.0)
+        >>> output.write('E\0')
+        >>> input.read()
+        ''
+        
+        Let's create some lame clients:
+        
+        >>> import zope.testing.loggingsupport, logging
+        >>> loghandler = zope.testing.loggingsupport.InstalledHandler(
+        ...                  None, level=logging.ERROR)
+        
+        >>> event = threading.Event()
+        >>> class LameClientConnectionHandler:
+        ...     def connected(self, connection):
+        ...         connection.setHandler(self)
+        ...         raise ValueError('Broken connector')
+        ...     def handle_close(self, conection, reason):
+        ...         self.closed = reason
+        ...         event.set()
+        
+        >>> handler = LameClientConnectionHandler()
+        >>> zc.ngi.async.connect(addr, handler)
+        >>> event.wait(1)
+        
+        >>> print loghandler
+        zc.ngi.async.client ERROR
+        connection handler failed
+        
+        >>> handler.closed
+        'connection handler failed'
+        
+        
+        >>> loghandler.clear()
+        >>> event.clear()
+        
+        >>> class LameClientConnectionHandler:
+        ...     def connected(self, connection):
+        ...         connection.setHandler(self)
+        ...         connection.write('foo\0')
+        ...
+        ...     def handle_input(self, data):
+        ...         raise ValueError()
+        ...
+        ...     def handle_close(self, conection, reason):
+        ...         self.closed = reason
+        ...         event.set()
+        
+        >>> handler = LameClientConnectionHandler()
+        >>> zc.ngi.async.connect(addr, handler)
+        >>> event.wait(1)
+        
+        >>> print loghandler
+        zc.ngi.async.client ERROR
+        handle_input failed
+        
+        >>> handler.closed
+        'handle_input failed'
+        
+        >>> loghandler.uninstall()
+        
+        
+        .. stop the server
+        
+        >>> zc.ngi.wordcount.stop_server_process(zc.ngi.async.connect, addr)
+        ... # doctest: +ELLIPSIS
+        handle_input failed
+        Traceback (most recent call last):
+        ...
+        ValueError: E
+        
+        The server log was printed. Note that we see the Error that we
+        requested above.
+        
+        Download
+        **********************
+        
+Keywords: network
+Platform: UNKNOWN
