@@ -1,0 +1,93 @@
+Receiving Events
+================
+
+The Event handler is processes new feed items. The classifier is presumed to have been initialized already on the existing content.
+
+So we should probably create a mock class to demonstrate multi level handling of the 
+document.
+
+The obj may have content (text) if so, that will be the input for the following steps.
+Otherwise, we should try to use the link (s ??) to get usable text from whatever source. The goal is 
+to have readable text in the body if possible.
+
+From there, we go on to preparing an input vector, and classifying the document. 
+This might also draw content process attachments (enclosures) like pdfs if possible.
+
+We should then raise a classified event and hand over the object for further processing.
+
+
+We'll rip off Mauritz' code to generate some feeds and items
+
+
+Lets begin by creating our feeder.
+
+  >>> from Products.feedfeeder.content.folder import FeedfeederFolder
+  >>> id = folder.invokeFactory('FeedfeederFolder', 'feeder')
+  >>> feeder = folder.feeder
+  
+Setup some feeds.
+
+  >>> import os
+  >>> import collective.feedfiller
+
+  >>> samplesdir = os.path.dirname(collective.feedfiller.__file__)
+  >>> samplesdir = os.path.join(samplesdir, 'tests', 'samples')
+  >>> os.chdir(samplesdir)
+  >>> samplefiles = [os.path.join(samplesdir, 'BBCNews.xml'),]
+  >>> feeder.setFeeds(['file://'+x for x in samplefiles])
+  >>> itempath='file://'+ os.path.join(samplesdir, 'BBCItem1.html')
+
+  >>> import urllib2
+  >>> from BeautifulSoup import BeautifulSoup
+  >>> from collective.feedfiller.flayregistry import FlayRegistry
+  >>> from collective.feedfiller.adapters import FeedItemExpanderAdapter
+  >>> from collective.feedfiller.flay import FlayBBCNews
+  >>> class Handler(object):
+  ...     event_obj = None
+  ...     event_evt = None
+  ...     def handle(self, obj, event):
+  ...         self.event_obj = obj
+  ...         self.event_evt = event
+  ...         obj.link=itempath              # TESTING
+  ...         link = obj.link
+  ...         FlayBBCNews.set_root('file:///')
+  ...         FlayRegistry.add(FlayBBCNews)       # td with class storybody
+  ...         (subpath, flayer) = FlayRegistry.lookup(link)
+  ...         results = flayer(link)()
+  ...         block = results['body']
+  ...         if block:
+  ...             expanded = FeedItemExpanderAdapter(obj)  
+  ...             expanded.set_expanded_body(block)  
+  ...             expanded.update(results)
+  ...             pass
+  ...
+  
+  >>> handler = Handler()
+  >>> from zope import component
+  >>> from Products.feedfeeder.interfaces.item import IFeedItemConsumedEvent
+  >>> from Products.feedfeeder.interfaces.item import IFeedItem
+  >>> component.provideHandler(handler.handle,
+  ...                          (IFeedItem, IFeedItemConsumedEvent))
+
+Now that the event handler has been setup, parse in some entries and
+make sure the handler is getting to handle them.
+
+  >>> self.setRoles('Manager')
+  >>> view = feeder.restrictedTraverse('@@update_feed_items')
+  >>> view.update()
+  >>> self.setRoles('')
+
+  >>> handler.event_evt
+  <Products.feedfeeder.events.FeedItemConsumedEvent ...>
+  >>> handler.event_obj
+  <FeedFeederItem ...>
+  
+  >>> expanded = FeedItemExpanderAdapter(handler.event_obj) 
+  >>> assert 'Camelot' in expanded.get_expanded_body()
+  
+  >>> expanded.get_expanded_author()
+  u''
+  
+  >>> expanded.get_expanded_copyright()
+  u'BBC &copy; MMVIII'
+  
