@@ -1,0 +1,151 @@
+#!/usr/bin/python
+#
+# See __main__ for details or run help (-h)
+
+import os
+import shutil
+import sys
+import tempfile
+import commands
+
+# verbose set in options to main
+# verbose = False
+
+def _print(msg, error=False):
+    """"If verbose flag is set or error is True print msg
+    """
+    if verbose or error:
+        print msg
+
+def _run_cmd(cmd, raiseOnError=True):
+    status, output = commands.getstatusoutput(cmd)
+    if status:
+        msg = 'Error running command [%s]: %s' % (cmd, output)
+        if raiseOnError:
+            raise(Exception(msg))
+        else:
+            _print(msg, error=True)
+    else:
+        _print(output)
+
+def doSourceCheckout():
+    _print('Automated checkout in directory: %s' % svnPath)
+    svncmd = ''
+    if not os.path.exists(svnPath):
+        os.makedirs(svnPath)
+        svncmd = "%s checkout %s ./" % (svnbin, svnurl)
+        _print('Checking out source from: %s' % svnurl)
+    else:
+        svncmd = '%s update' % svnbin
+        _print('Updating source')
+    os.chdir(svnPath)
+    if os.system(svncmd):
+        raise "Couldn't checkout source with command: %s" % svncmd
+    _print('Checking out completed.')
+
+def configureShellEnvironment():
+    _print('Configuring current environment.')
+    _print('Setting environment variable KFORGE_SETTINGS to: %s' % configFilePath)
+    os.environ['KFORGE_SETTINGS'] = configFilePath
+    pythonPath = os.path.join(kforgeSystemPath, 'lib/python') 
+    sys.path.insert(0, pythonPath)
+    if os.environ.has_key('PYTHONPATH'):
+        pythonPath += ':' + os.environ['PYTHONPATH']
+    _print('Setting environment variable PYTHONPATH to: %s' % pythonPath)
+    os.environ['PYTHONPATH'] = pythonPath
+    djangoSettings = 'kforge.django.settings.main'
+    _print('Setting environment variable DJANGO_SETTINGS_MODULE to: %s' % djangoSettings)
+    os.environ['DJANGO_SETTINGS_MODULE'] = djangoSettings
+    _print('Configuring environment completed.')
+
+def runTests():
+    testcmd = os.path.join(kforgeBin, 'kforge-test kforge.coretest')
+    _print('Testing deployment of core using: %s' % testcmd)
+    _print('****** Core tests starting **********')
+    os.system(testcmd)
+    _print('****** Core testing completed ******')
+    
+    testcmd = os.path.join(kforgeBin, 'kforge-test')
+    _print('Testing deployment of KForge using: %s' % testcmd)
+    _print('****** KForge tests starting **********')
+    os.system(testcmd)
+    _print('****** KForge testing completed ******')
+
+
+def main():
+        adminCmd = os.path.join(kforgeBin, 'kforge-admin') + ' --config %s --system %s ' % (configFilePath, kforgeSystemPath)
+        configureShellEnvironment() # have to set this to have PYTHONPATH
+        if os.path.exists(kforgeSystemPath):
+            shutil.rmtree(kforgeSystemPath)
+        doSourceCheckout()
+        _print('Installing KForge system to: %s' % kforgeSystemPath)
+        instcmd = "python setup.py install --home=%s" % kforgeSystemPath
+        _run_cmd(instcmd)
+        _print('Completed installation of KForge system')
+        createEnvCmd = adminCmd + 'data create'
+        _run_cmd(createEnvCmd)
+        
+        _run_cmd(adminCmd + 'db rebuild')
+        runTests()
+
+import optparse
+if __name__ == '__main__':
+    usage = '''usage: %prog [options]
+
+Automatic checkout, installation, deployment and test of KForge
+
+A configuration file to use in deployment *must* be provided using the --config
+option.
+'''
+    parser = optparse.OptionParser(usage)
+    parser.add_option('-q', '--quiet',
+        action='store_false', dest='verbose', default=True,
+        help='Be quiet in printing status messages'
+    )
+    parser.add_option('--base',
+        action='store', dest='base_path', default='',
+        help='Base path to use for actions (checkout, installation etc will be done into subdirectories of this directory unless explicitly overridden by other options). If not supplied a temporary path will be used.'
+    )
+    parser.add_option('--svn-path',
+        action='store', dest='svn_path', default='',
+        help='Path to svn checkout. If this already exists a svn update will be performed instead of a checkout.'
+    )
+    parser.add_option('--kforge-system',
+        action='store', dest='kforge_system', default='',
+        help='Destination path for installation KForge system'
+    )
+    parser.add_option('--config',
+        action='store', dest='config_file_path', default='',
+        help='Config file path to use in integration test'
+    )
+    
+    (options, args) = parser.parse_args()
+    if not options.config_file_path:
+        parser.error('ERROR: config file path (--config) is not defined')
+    configFilePath = options.config_file_path
+
+    basePath = tempfile.mkdtemp(prefix='kforge-integration-test-')
+    if options.base_path:
+        basePath = options.base_path
+    
+    # url for KForge svn trunk 
+    svnurl = 'http://project.knowledgeforge.net/kforge/svn/trunk'
+    svnbin = 'svn'
+
+    # set defaults for other directory paths
+    svnPath = os.path.join(basePath, 'svn')
+    kforgeSystemPath = os.path.join(basePath, 'system')
+    kforgeBin = os.path.join(kforgeSystemPath, 'bin')
+    
+    verbose = options.verbose
+    if options.svn_path:
+        svnPath = options.svn_path
+    if options.kforge_system:
+        kforgePath = options.kforge_system
+    try:
+        main()
+    finally:
+        if not options.base_path: # we are using a temp directory
+            shutil.rmtree(basePath)
+    _print('Automated build-and-test completed.')
+
