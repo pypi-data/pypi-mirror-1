@@ -1,0 +1,98 @@
+Introduction
+============
+
+This package helps to create custom portal logo in Plone, using new configlet,
+custom css and images. It allows user to construct logo from multiple items
+such as text or images.
+
+Installing
+----------
+
+This package requires Plone 3.0 or later.
+
+Installing without buildout
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Install this package in either your system path packages or in the lib/python
+directory of your Zope instance. You can do this using either easy_install or
+via the setup.py script.
+
+After installing the package it needs to be registered in your Zope instance.
+This can be done by putting a collective.multilogo-configure.zcml file in the
+etc/package-includes directory with this content::
+
+  <include package="collective.multilogo" />
+
+or, alternatively, you can add that line to the configure.zcml in a package or
+Product that is already registered.
+
+Installing with buildout
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you are using `buildout`_ to manage your instance installing
+collective.multilogo is even simpler. You can install collective.multilogo by
+adding it to the eggs line for your instance::
+
+  [instance]
+  eggs = collective.multilogo
+  zcml = collective.multilogo
+
+The last line tells buildout to generate a zcml snippet that tells Zope
+to configure collective.multilogo.
+
+If another package depends on the collective.multilogo egg or includes its zcml
+directly you do not need to specify anything in the buildout configuration:
+buildout will detect this automatically.
+
+After updating the configuration you need to run the ''bin/buildout'', which
+will take care of updating your system.
+
+.. _buildout: http://pypi.python.org/pypi/zc.buildout
+
+Usage
+=====
+
+For example we want to create custom logo for portal DMS4U from server family:
+"DMS4U | CMS4U | ERP4U | CHAT4U" pointing to particular sites http://dms4u.cz,
+http://cms4u.cz, http://erp4u.cz, http://chat4u.cz etc.
+
+Go to "Site Setup" and open "Multi Logo Settings" configlet listed under
+"Add-on Product Configuration" control panel section.
+
+There you can specify a several options like display order (inline or block),
+logo items separator and define individual parts/items of the logo.
+
+In our case set "display inline" to True, as separator we enter "|" and define
+the following logo items:
+
+  title=DMS4U
+
+  image=
+
+  link=http://dms4u.cz
+
+  css_class='activeLogo' # to make logo item visually activated
+
+  new_window=False # we want the logo item to act like standard portal logo
+
+  title=CMS4U
+
+  image=
+
+  link=http://cms4u.cz
+
+  css_class='inactiveLogo' # to make logo item visually deactivated
+
+  new_window=True
+  
+  ...
+  etc
+
+Copyright and credits
+----------------------
+
+collective.multilogo is licensed under the GPL. See LICENSE.txt for details.
+
+It was written by Lukas Zdych.
+
+.. _DMS4U: http://dms4u.cz/
