@@ -1,0 +1,194 @@
+#!/usr/bin/env python
+
+import cmd
+import os
+import sys
+
+class PdwAdmin(cmd.Cmd):
+    """
+    TODO: self.verbose option and associated self._print
+    """
+
+    prompt = 'PD Work DB > '
+
+    def __init__(self):
+        cmd.Cmd.__init__(self) # cmd.Cmd is not a new style class
+        self.config_file_path = None
+        self.verbose = True
+
+    def run_interactive(self, line=None):
+        """Run an interactive session.
+        """
+        print 'Welcome to pdw-admin interactive mode\n'
+        self.do_about()
+        print 'Type:  "?" or "help" for help on commands.\n'
+        while 1:
+            try:
+                self.cmdloop()
+                break
+            except KeyboardInterrupt:
+                raise
+
+    def do_help(self, line=None):
+        cmd.Cmd.do_help(self, line)
+
+    def do_about(self, line=None):
+        import pdw
+        version = pdw.__version__
+        about = \
+'''Public Domain Works DB version %s. Copyright the Open Knowledge Foundation.
+This package is open-knowledge and open-source. See COPYING for details.
+''' % version
+        print about
+
+    def do_quit(self, line=None):
+        sys.exit()
+
+    def do_EOF(self, *args):
+        print ''
+        sys.exit()
+    
+    # =================
+    # Commands
+
+    def do_parse_html(self, line=''):
+        import pdw.saparse 
+        import pprint
+        def filter(filename):
+            return (line in filename)
+        def printhandler(recording):
+            pprint.pprint(recording)
+        pdw.saparse.parse(printhandler, filter)
+
+    def help_parse_html(self, line=None):
+        usage = \
+'''parse_html [filter-string]
+
+Parse scraped html files (located in cache) and print the extracted metadata.
+
+<filter-string> is a string which must be in the file name if it to be parsed
+(if no value provided parse all files).
+'''
+        print usage
+    
+    def do_html_to_db(self, line=''):
+        msg = 'Command temporarily disabled awaiting code overhaul'
+        raise Exception(msg)
+        import pdw.saparse
+        writer = pdw.saparse.PerformanceWriter()
+        def filter(filename):
+            return line in filename
+        pdw.saparse.parse(writer.get_recording, filter)
+        numrecs = pdw.dm.Performance.query.count()
+        print 'After procesing DB now contains %s recordings' % numrecs
+
+    def help_html_to_db(self, line=None):
+        usage = \
+'''html_to_db [filter-string]
+
+Parse scraped html files (located in cache), extract metadata, process/clean
+and then insert in the db. 
+
+<filter-string> is as for parse_html. 
+'''
+        print usage
+
+    def _connect_db(self):
+        import pdw
+        pdw.setup_config(self.config_file_path)
+        import pdw.model as model
+        self.model = model
+
+    def do_create_sql(self, line=''):
+        self._connect_db()
+        self.model.metadata.create_all(bind=self.model.Session.bind)
+
+    def do_drop_sql(self, line=''):
+        self._connect_db()
+        model.metadata.drop_all(bind=model.Session.bind)
+
+    def do_mb2dm(self, line=''):
+        self._connect_db()
+        import pdw.mb2dm
+        loader = pdw.mb2dm.MusicBrainzLoader()
+        if line:
+            start_date, end_date = line.split()
+            loader.start_date = start_date
+            loader.end_date = end_date
+        self._p('Starting download of information from MusicBrainz')
+        loader.execute()
+        self._p('Processing complete.')
+        # count will not work ...
+        numrecs = len(self.model.Performance.select())
+        self._p('After procesing DB now contains %s recordings' % numrecs)
+
+    def help_mb2dm(self, line=None):
+        usage = \
+'''mb2dm [start_date=19000101 end_date=19550101] 
+
+Load data from musicbrainz into our local domain model (db).
+
+start_date, end_date: load releases between start_date and end_date
+'''
+        print usage
+
+    def do_calculate_status(self, line=''):
+        import pdw.copyright
+        self._connect_db()
+        if line:
+            id = int(line)
+            # continuing weirdness if I don't to a random select select_by
+            # won't work
+            self.model.Work.select()
+            performances = self.model.Performance.select_by(id=id)
+        else:
+            performances = self.model.Performance.select()
+        for performance in performances:
+            self._p('Processing: %s' % performance.title())
+            status = pdw.copyright.copyright_status(performance)
+            self._p('-- Status: %s' % status)
+            performance.copyright_status = status
+            self.model.objectstore.flush()
+
+    def help_calculate_status(self, line=None):
+        usage = \
+'''calculate_status [id]
+
+Go through db and calculate copyright/public domain status of each performance and work.
+
+id: if id provided only perform calculation for that id.
+'''
+        print usage
+
+    def _p(self, msg, force=False):
+        if force or self.verbose:
+            print msg.encode('utf8')
+
+
+if __name__ == '__main__':
+    import optparse
+    usage = \
+'''%prog [options] [command]
+
+Public Domain Works CLI interface.
+
+To obtain information about the commands available run the "help" command.'''
+
+    parser = optparse.OptionParser(usage)
+    parser.add_option(
+        '--config',
+        action='store',
+        dest='config_file_path',
+        default='development.ini',
+        help='Path to configuration file.'
+    )
+    options, args = parser.parse_args()
+    cfg = os.path.abspath(options.config_file_path)
+    adminCmd = PdwAdmin()
+    adminCmd.config_file_path = cfg
+    if not args:
+        adminCmd.run_interactive()
+    else:
+        args = ' '.join(args)
+        args = args.replace('-','_')
+        adminCmd.onecmd(args)
