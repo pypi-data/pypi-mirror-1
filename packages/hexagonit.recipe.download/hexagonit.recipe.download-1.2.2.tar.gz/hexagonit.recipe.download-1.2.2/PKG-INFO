@@ -1,0 +1,511 @@
+Metadata-Version: 1.0
+Name: hexagonit.recipe.download
+Version: 1.2.2
+Summary: zc.buildout recipe for downloading and extracting packages
+Home-page: http://pypi.python.org/pypi/hexagonit.recipe.download
+Author: Kai Lautaportti
+Author-email: kai.lautaportti@hexagonit.fi
+License: ZPL
+Description: *******************************
+        Download recipe for zc.buildout
+        *******************************
+        
+        .. contents::
+        
+        The recipe downloads packages from the net and extracts them on the
+        filesystem. It is based on the gocept.download_ recipe with a few
+        additional features.
+        
+        * Github page: http://github.com/hexagonit/hexagonit.recipe.download
+        * Clone URL: git://github.com/hexagonit/hexagonit.recipe.download.git
+        * Issue tracker: http://github.com/hexagonit/hexagonit.recipe.download/issues
+        
+        .. _gocept.download: http://cheeseshop.python.org/pypi/gocept.download
+        
+        Change History
+        **************
+        
+        1.2.2 (2009-08-17)
+        ==================
+        
+        - Merged the current trunk (revision 79982) from the Plone Collective
+        Subversion repository. The collective repository is now abandoned and the
+        Github repository is the canonical one. [dokai]
+        
+        - Open files in binary mode when calculating MD5 checksums. This fixes a
+        bug with checksums on the Windows platform. Bug report and patch thanks to
+        Alexander Ivanov. [dokai]
+        
+        1.2.1 (2008-04-13)
+        ==================
+        
+        - Rename the buildout ``download-directory`` option to ``download-cache``
+        (which is the name used by buildout) [thefunny]
+        
+        - Added BBB support for the ``download-directory`` option. It will
+        emit a deprecation warning and set the ``download-cache`` option
+        accordingly. [dokai]
+        
+        1.2.0 (2008-01-19)
+        ==================
+        
+        - Added the `download-only` option to allow downloading arbitrary
+        files. [dokai]
+        
+        1.1.0 (2007-10-14)
+        ==================
+        
+        - Refactored the install method so recipe subclasses can override the base
+        directory. For more info see ``calculate_base`` method on ``Recipe`` class.
+        [hexsprite]
+        
+        - Recipe is now a new-style Python class so recipe subclasses can use super()
+        method to get some default behavior. [hexsprite]
+        
+        1.0.1 (2007-08-14)
+        ==================
+        
+        - For consistency with other similar recipes, the recipe now sets a
+        ``location`` option which may be read by other sections to learn
+        where the package was extracted. This is an alias for the
+        ``destination`` option.
+        
+        1.0.0
+        =====
+        
+        - First public release.
+        
+        Detailed Documentation
+        **********************
+        
+        Supported options
+        =================
+        
+        The ``hexagonit.recipe.download`` recipe can be used to download and
+        extract packages from the net. It supports the following options:
+        
+        url
+        URL to the package that will be downloaded and extracted. The
+        supported package formats are .tar.gz, .tar.bz2, and .zip. The
+        value must be a full URL,
+        e.g. http://python.org/ftp/python/2.4.4/Python-2.4.4.tgz.
+        
+        strip-top-level-dir
+        Switch to remove the top level directory from the
+        extracted archive. This will work only if the archive has exactly
+        one top level directory. Accepted values are 'true' or
+        'false'. Defaults to 'false'.
+        
+        ignore-existing
+        Switch to ignore existing files and/or directories. By
+        default, the extraction process fails if there is existing files
+        or directories matching the ones from the archive. Enabling this
+        option will skip these files/directories from the archive. When
+        this recipe is uninstalled the ignored files/directories *will
+        not* be removed. Accepted values are 'true' or 'false'. Defaults
+        to 'false'.
+        
+        md5sum
+        MD5 checksum for the package file. If available the MD5
+        checksum of the downloaded package will be compared to this value
+        and if the values do not match the execution of the recipe will
+        fail.
+        
+        destination
+        The location where the extracted contents of the package
+        will be placed. If omitted, a directory will be created under the
+        ``buildout['parts-directory']`` with the name of the section using
+        the recipe.
+        
+        download-only
+        When set to 'true', the recipe downloads the file without trying
+        to extract it. This is useful for downloading non-tarball
+        files. The ``strip-top-level-dir`` option will be ignored if this
+        option is enabled. Defaults to ``false``.
+        
+        Additionally, the recipe honors the ``download-cache`` option set
+        in the ``[buildout]`` section and stores the downloaded files under
+        it. If the value is not set a directory called ``downloads`` will be
+        created in the root of the buildout and the ``download-cache``
+        option set accordingly.
+        
+        The recipe will first check if there is a local copy of the package
+        before downloading it from the net. Files can be shared among
+        different buildouts by setting the ``download-cache`` to the same
+        location.
+        
+        Simple example
+        ==============
+        
+        >>> import os.path
+        >>> testdata = join(os.path.dirname(__file__), 'testdata')
+        >>> server = start_server(testdata)
+        
+        In the simplest form we can download a simple package and have it
+        extracted in the parts directory.
+        
+        >>> write(sample_buildout, 'buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = package1
+        ...
+        ... [package1]
+        ... recipe = hexagonit.recipe.download
+        ... url = %s/package1-1.2.3-final.tar.gz
+        ... """ % server)
+        
+        Ok, let's run the buildout:
+        
+        >>> print system(buildout)
+        Installing package1.
+        package1: Creating download directory: /sample-buildout/downloads
+        package1: Extracting package to /sample-buildout/parts/package1
+        
+        First of all, the recipe downloaded the package for us and placed it
+        in the downloads directory, which is located within the buildout
+        directory by default. Use the ``download-cache`` option to override
+        it.
+        
+        >>> ls(sample_buildout, 'downloads')
+        - package1-1.2.3-final.tar.gz
+        
+        Let's take a look at the buildout parts directory now.
+        
+        >>> ls(sample_buildout, 'parts')
+        d package1
+        
+        The containing directory is named after our part name. Within this
+        directory are the contents of the extracted package.
+        
+        >>> ls(sample_buildout, 'parts', 'package1')
+        d package1-1.2.3-final
+        
+        The package contained a single top level directory. Let's peek what's inside.
+        
+        >>> ls(sample_buildout, 'parts', 'package1', 'package1-1.2.3-final')
+        - CHANGES.txt
+        - README.txt
+        d src
+        
+        
+        Sharing packages between buildouts
+        ==================================
+        
+        Using the ``download-cache`` option in the buildout allows you to
+        store the downloaded packages in central location on your
+        filesystem. Using the the same location for the ``download-cache`` in
+        multiple buildouts will effectively share the packages between them
+        and reduce the network traffic and storage requirements.
+        
+        Let's create a directory to be used as the download cache.
+        
+        >>> cache = tmpdir('cache')
+        
+        And create a new buildout that sets the ``buildout-cache`` option
+        accordingly.
+        
+        >>> write(sample_buildout, 'buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = sharedpackage
+        ... download-cache = %(cache)s
+        ...
+        ... [sharedpackage]
+        ... recipe = hexagonit.recipe.download
+        ... url = %(server)s/package1-1.2.3-final.tar.gz
+        ... """ % dict(cache=cache, server=server))
+        
+        Ok, let's run the buildout:
+        
+        >>> print system(buildout)
+        Uninstalling package1.
+        Installing sharedpackage.
+        sharedpackage: Extracting package to /sample-buildout/parts/sharedpackage
+        
+        We can see that the package was placed under the shared container
+        instead of the default location under the buildout directory.
+        
+        >>> ls(cache)
+        d dist
+        - package1-1.2.3-final.tar.gz
+        
+        
+        MD5 checksums
+        =============
+        
+        The downloaded package can be verified against an MD5 checksum. This will
+        make it easier to spot problems if the file has been changed.
+        
+        >>> write(sample_buildout, 'buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = package1
+        ...
+        ... [package1]
+        ... recipe = hexagonit.recipe.download
+        ... url = %s/package1-1.2.3-final.tar.gz
+        ... md5sum = 821ecd681758d3fc03dcf76d3de00412
+        ... """ % server)
+        
+        Ok, let's rerun the buildout.
+        
+        >>> print system(buildout)
+        Uninstalling sharedpackage.
+        Installing package1.
+        package1: Using a cached copy from /sample-buildout/downloads/package1-1.2.3-final.tar.gz
+        package1: MD5 checksum OK
+        package1: Extracting package to /sample-buildout/parts/package1
+        
+        You will notice that the MD5 checksum was correct. Also rerunning the
+        buildout used the previously downloaded file from the ``downloads``
+        directory instead downloading it again from the net.
+        
+        
+        Controlling the extraction process
+        ==================================
+        
+        We can also extract the archive to any arbitrary location and have the
+        top level directory be stripped, which is often a useful feature.
+        
+        >>> tmpcontainer = tmpdir('otherplace')
+        >>> write(sample_buildout, 'buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = package1
+        ...
+        ... [package1]
+        ... recipe = hexagonit.recipe.download
+        ... url = %(server)s/package1-1.2.3-final.tar.gz
+        ... md5sum = 821ecd681758d3fc03dcf76d3de00412
+        ... destination = %(dest)s
+        ... strip-top-level-dir = true
+        ... """ % dict(server=server, dest=tmpcontainer))
+        
+        Rerunning the buildout now gives us
+        
+        >>> print system(buildout)
+        Uninstalling package1.
+        Installing package1.
+        package1: Using a cached copy from /sample-buildout/downloads/package1-1.2.3-final.tar.gz
+        package1: MD5 checksum OK
+        package1: Extracting package to /otherplace
+        
+        Taking a look at the extracted contents we can also see that the
+        top-level directory has been stripped.
+        
+        >>> ls(tmpcontainer)
+        - CHANGES.txt
+        - README.txt
+        d src
+        
+        
+        Partial extraction over existing content
+        ========================================
+        
+        By default, the recipe will fail if the destination where the package
+        will be extracted already contains files or directories also included
+        in the package.
+        
+        >>> container = tmpdir('existing')
+        >>> existingdir = mkdir(container, 'src')
+        
+        >>> write(sample_buildout, 'buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = package1
+        ...
+        ... [package1]
+        ... recipe = hexagonit.recipe.download
+        ... url = %(server)s/package1-1.2.3-final.tar.gz
+        ... md5sum = 821ecd681758d3fc03dcf76d3de00412
+        ... destination = %(dest)s
+        ... strip-top-level-dir = true
+        ... """ % dict(server=server, dest=container))
+        
+        Running the buildout now will fail because of the existing ``src``
+        directory in the destination.
+        
+        >>> print system(buildout)
+        Uninstalling package1.
+        Installing package1.
+        package1: Using a cached copy from /sample-buildout/downloads/package1-1.2.3-final.tar.gz
+        package1: MD5 checksum OK
+        package1: Extracting package to /existing
+        package1: Target /existing/src already exists. Either remove it or set ``ignore-existing = true`` in your buildout.cfg to ignore existing files and directories.
+        While:
+        Installing package1.
+        Error: File or directory already exists.
+        
+        Setting the ``ignore-existing`` option will allow the recipe to
+        proceed.
+        
+        >>> rmdir(container)
+        >>> container = tmpdir('existing')
+        >>> existingdir = mkdir(container, 'src')
+        
+        >>> write(sample_buildout, 'buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = package1
+        ...
+        ... [package1]
+        ... recipe = hexagonit.recipe.download
+        ... url = %(server)s/package1-1.2.3-final.tar.gz
+        ... md5sum = 821ecd681758d3fc03dcf76d3de00412
+        ... destination = %(dest)s
+        ... strip-top-level-dir = true
+        ... ignore-existing = true
+        ... """ % dict(server=server, dest=container))
+        
+        >>> print system(buildout)
+        Installing package1.
+        package1: Using a cached copy from /sample-buildout/downloads/package1-1.2.3-final.tar.gz
+        package1: MD5 checksum OK
+        package1: Extracting package to /existing
+        package1: Ignoring existing target: /existing/src
+        
+        >>> ls(container)
+        - CHANGES.txt
+        - README.txt
+        d src
+        
+        Also note that when the recipe is uninstalled the ignored targets will
+        not be removed as they are not part of the output of this recipe. We
+        can verify this by running the buildout again with a different
+        destination.
+        
+        >>> write(sample_buildout, 'buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = package1
+        ...
+        ... [package1]
+        ... recipe = hexagonit.recipe.download
+        ... url = %(server)s/package1-1.2.3-final.tar.gz
+        ... md5sum = 821ecd681758d3fc03dcf76d3de00412
+        ... strip-top-level-dir = true
+        ... ignore-existing = true
+        ... """ % dict(server=server))
+        
+        >>> print system(buildout)
+        Uninstalling package1.
+        Installing package1.
+        package1: Using a cached copy from /sample-buildout/downloads/package1-1.2.3-final.tar.gz
+        package1: MD5 checksum OK
+        package1: Extracting package to /sample-buildout/parts/package1
+        
+        Now when we look into the directory containing the previous buildout
+        we can see that the ``src`` directory is still there but the rest of
+        the files are gone.
+        
+        >>> ls(container)
+        d src
+        
+        
+        Offline mode
+        ============
+        
+        If the buildout is run in offline mode the recipe will still work if
+        the package is cached in the downloads directory. Otherwise the user
+        will be informed that downloading the file is not possible in offline
+        mode.
+        
+        >>> write(sample_buildout, 'buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = package1
+        ... offline = true
+        ...
+        ... [package1]
+        ... recipe = hexagonit.recipe.download
+        ... url = %(server)s/package1-1.2.3-final.tar.gz
+        ... md5sum = 821ecd681758d3fc03dcf76d3de00412
+        ... strip-top-level-dir = true
+        ... """ % dict(server=server))
+        
+        Let's verify that we do have a cached copy in our downloads directory.
+        
+        >>> ls(sample_buildout, 'downloads')
+        - package1-1.2.3-final.tar.gz
+        
+        >>> print system(buildout)
+        Uninstalling package1.
+        Installing package1.
+        package1: Using a cached copy from /sample-buildout/downloads/package1-1.2.3-final.tar.gz
+        package1: MD5 checksum OK
+        package1: Extracting package to /sample-buildout/parts/package1
+        
+        When we remove the file from the filesystem the recipe will not work.
+        
+        >>> remove(sample_buildout, 'downloads', 'package1-1.2.3-final.tar.gz')
+        >>> write(sample_buildout, 'buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = package1
+        ... offline = true
+        ...
+        ... [package1]
+        ... recipe = hexagonit.recipe.download
+        ... url = %(server)s/package1-1.2.3-final.tar.gz
+        ... md5sum = 821ecd681758d3fc03dcf76d3de00412
+        ... """ % dict(server=server))
+        
+        >>> print system(buildout)
+        Uninstalling package1.
+        Installing package1.
+        package1: Unable to download file in offline mode. Either run the buildout in online mode or place a copy of the file in /sample-buildout/downloads/package1-1.2.3-final.tar.gz
+        While:
+        Installing package1.
+        Error: Download error
+        
+        
+        Downloading arbitrary files
+        ===========================
+        
+        We can download any file when setting the ``download-only`` option to
+        ``true``. This will simply place the file in the ``destination``
+        directory.
+        
+        >>> downloads = tmpdir('downloads')
+        >>> write(sample_buildout, 'buildout.cfg',
+        ... """
+        ... [buildout]
+        ... parts = package
+        ...
+        ... [package]
+        ... recipe = hexagonit.recipe.download
+        ... url = %(server)s/package1-1.2.3-final.tar.gz
+        ... md5sum = 821ecd681758d3fc03dcf76d3de00412
+        ... destination = %(dest)s
+        ... download-only = true
+        ... """ % dict(server=server, dest=downloads))
+        
+        >>> print system(buildout)
+        Installing package.
+        package: MD5 checksum OK
+        
+        Looking into the destination directory we can see that the file was
+        downloaded but not extracted. Using the ``download-only`` option will
+        work for any file regardless of the type.
+        
+        >>> ls(downloads)
+        -  package1-1.2.3-final.tar.gz
+        
+        Contributors
+        ***********************
+        
+        * Kai Lautaportti (dokai), Author - kai.lautaportti@hexagonit.fi
+        * Jordan Baker (hexsprite) - jbb@scryent.com
+        * Sylvain Viollon (thefunny)
+        * Alexander Ivanov
+        
+        Download
+        ***********************
+        
+Keywords: development buildout recipe
+Platform: UNKNOWN
+Classifier: Framework :: Buildout
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Topic :: Software Development :: Build Tools
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
