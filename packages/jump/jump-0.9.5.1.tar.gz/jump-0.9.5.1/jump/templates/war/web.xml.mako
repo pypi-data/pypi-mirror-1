@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE web-app PUBLIC
+ "-//Sun Microsystems, Inc.//DTD Web Application 2.3//EN"
+ "http://java.sun.com/dtd/web-app_2_3.dtd">
+
+<web-app xmlns="http://java.sun.com/xml/ns/javaee" version="2.5">
+    <servlet>
+        <servlet-name>modjy</servlet-name>
+        <servlet-class>com.xhaus.modjy.ModjyJServlet</servlet-class>
+        <init-param>
+            <param-name>app_import_name</param-name>
+            <param-value>${wsgi_handler}</param-value>
+        </init-param>
+        <init-param>
+            <param-name>multithread</param-name>
+            <param-value>${0 if no_multithread else 1}</param-value>
+        </init-param>
+        <init-param>
+            <param-name>cache_callables</param-name>
+            <param-value>${1 if cache_callables else 0}</param-value>
+        </init-param>
+        <init-param>
+            <param-name>log_level</param-name>
+            <param-value>${log_level}</param-value>
+        </init-param>
+        <load-on-startup>1</load-on-startup>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>modjy</servlet-name>
+        <url-pattern>/*</url-pattern>
+    </servlet-mapping>
+</web-app>
