@@ -1,0 +1,27 @@
+Introduction
+============
+
+This is a wrapper for the Anobii APIs.
+see: http://api.anobii.com/api/api_home.php
+
+My approach is so similar to the one used by flickrApi that I get his code from
+http://flickrapi.sf.net/
+and I adapted it to Anobii API.
+thanks to Sybren Stuvel for his work.
+
+This product uses the aNobii API but is not endorsed or certified by aNobii.
+
+How to use it
+=============
+
+It's quite easy. first of all istance the AnobiiApi passing key and secret:
+
+  >>> a = anobii.api.AnobiiAPI(key, secret)
+  
+then call the api you need. for example to call the anobii.shelf.getSimpleShelf('user', 'limit') 
+you can call:
+
+  >>> a.shelf_getSimpleShelf(user_id='massimoazzolini', limit='3')
+  
+note that "anobii" disappears (a is anobii..) and "shelf." is replaced by "shelf_". 
+that's it.
