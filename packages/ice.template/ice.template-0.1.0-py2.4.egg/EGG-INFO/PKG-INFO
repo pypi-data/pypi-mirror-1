@@ -1,0 +1,189 @@
+Metadata-Version: 1.0
+Name: ice.template
+Version: 0.1.0
+Summary: Persistent cheetah templates
+Home-page: http://launchpad.net/ice.template
+Author: Ilshad Habibullin
+Author-email: astoon.net at gmail.com
+License: GPL v.3
+Description: ============================
+        Persistent Cheetah templates
+        ============================
+        
+        Features:
+        
+        - Cheetah template engine,
+        - sources in filesystem,
+        - stored in ZODB,
+        - editable TTW, simple "$var" Cheetah syntax for non-technical user,
+        - able to testing in management web-form,
+        - able to reset from source.
+        
+        Use cases:
+        
+        - mail templates,
+        - editable HTML snippets and pages,
+        - other.
+        
+        
+        * Needed imports for these tests *
+        
+        >>> import os, tempfile
+        >>> temp_dir = tempfile.mkdtemp()
+        
+        >>> import zope.component
+        >>> import ice.template
+        
+        >>> from zope.configuration import xmlconfig
+        >>> context = xmlconfig.file('meta.zcml', ice.template)
+        
+        
+        Create templates
+        ----------------
+        
+        1) Create source file using Cheetah syntax "$" for the variables::
+        
+        >>> file = os.path.join(temp_dir, 'welcome.tmpl')
+        
+        >>> open(file, 'w').write('''
+        ...     Dear $user_name!
+        ...	  Welcome to $site_name!
+        ... ''')
+        
+        2) Register template::
+        
+        >>> context = xmlconfig.string('''
+        ...     <configure
+        ...	      xmlns="http://namespaces.zope.org/zope"
+        ...	      xmlns:ice="http://namespaces.zope.org/ice"
+        ...	      i18n_domain="test">
+        ...
+        ...	      <ice:template
+        ...	          name="welcome"
+        ...		  title="Welcome"
+        ...		  storage="my-templates"
+        ...		  source="%s"
+        ...		  variables="user_name
+        ...		             site_name"
+        ...		  />
+        ...
+        ...	  </configure>
+        ...     ''' % file, context=context)
+        
+        
+        Create storage
+        --------------
+        
+        Need create (one or more) local utility to store templates.
+        Note, the utility name used for lookup the storage::
+        
+        >>> templates = ice.template.Templates()
+        
+        >>> zope.component.provideUtility(
+        ...     templates, ice.template.ITemplates, 'my-templates')
+        
+        
+        Usage
+        -----
+        
+        Use template::
+        
+        >>> data = {'user_name':u'Bob', 'site_name':'www.gnu.org'}
+        
+        >>> templates.compileTemplate('welcome', data)
+        '\n    Dear Bob!\n    Welcome to www.gnu.org!\n'
+        
+        
+        Manage templates
+        ----------------
+        
+        Looking all templates, registered for this storage::
+        
+        >>> list(templates.getAllTemplates())
+        [(u'welcome', <ice.template.zcml.Template object at ...>)]
+        
+        Get variables names::
+        
+        >>> templates.getVariables('welcome')
+        [u'user_name', u'site_name']
+        
+        Get template::
+        
+        >>> templates.getTemplate('welcome')
+        '\n    Dear $user_name!\n    Welcome to $site_name!\n'
+        
+        Edit template::
+        
+        >>> templates.setTemplate('welcome', "$site_name for you, $user_name")
+        
+        >>> templates.compileTemplate('welcome', data)
+        'www.gnu.org for you, Bob'
+        
+        Reset from source::
+        
+        >>> templates.resetTemplate('welcome')
+        '\n    Dear $user_name!\n    Welcome to $site_name!\n'
+        
+        >>> templates.compileTemplate('welcome', data)
+        '\n    Dear Bob!\n    Welcome to www.gnu.org!\n'
+        
+        
+        Using property
+        --------------
+        
+        Another way to use special property::
+        
+        >>> class Pagelet(object):
+        ...
+        ...     template = ice.template.PersistentTemplate('my-templates', 'welcome')
+        ...
+        ...     def update(self):
+        ...         self.data = {'user_name':'Man', 'site_name':'www.python.com.ua'}
+        ...
+        ...     def render(self):
+        ...         return self.template(self.data)
+        
+        >>> view = Pagelet()
+        >>> view.update()
+        >>> view.render()
+        '\n    Dear Man!\n    Welcome to www.python.com.ua!\n'
+        
+        
+        Management UI
+        -------------
+        
+        Management persistent Cheetah templates UI based on z3c.pagelet layers.
+        
+        There are 3 views for management templates:
+        
+        1) Listing of all storages.
+        2) Listing of all templates in a storage.
+        3) Edit form for given template, reload, testing, preview.
+        
+        Actually, you need to do only one: register listing of all storages
+        pagelet using class ice.template.browser.storages.Pagelet (see example
+        in configure.zcml in ice.template.browser module), because (2) and (3)
+        are already registered. For examples, take a look configure.zcml
+        in ice.template.tests module.
+        
+        
+        =======
+        CHANGES
+        =======
+        
+        
+        Version 0.1.0 (2009-05-04)
+        --------------------------
+        
+        - Initial release, this code is moved from common ice.app library.
+        
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: GNU General Public License (GPL)
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet :: WWW/HTTP :: Site Management
+Classifier: Framework :: Zope3
