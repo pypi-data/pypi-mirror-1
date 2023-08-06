@@ -1,0 +1,72 @@
+from vellum.press import Press
+
+class Script(object):
+    """
+    Uses Press to parse the build spec and then constructs
+    the internal data structures needed for Scribe.
+    """
+
+    def __init__(self, file, defaults={}):
+        """Uses the file and defaults to properly parse."""
+        press = Press(defaults)
+        spec = press.load(file)
+        self.options = spec.get("options", {})
+        self.targets = spec.get("targets", {})
+        self.depends = spec.get("depends", {})
+        self.options.update(defaults)
+
+    def resolve_depends(self, root):
+        """
+        Recursively resolves the dependencies for the root
+        target given and return a list with those followed
+        by the root.
+        """
+        building = []
+        if root in self.depends:
+            for dep in self.depends[root]:
+                if dep in self.depends and not dep in building:
+                    building.extend(self.resolve_depends(dep))
+                else:
+                    building.append(dep)
+        building.append(root)
+        return building
+
+    def show(self):
+        """
+        Displays the targets, options, and default target.
+        """
+        print "OPTIONS: %s" % repr(self.options)
+        print "\nTARGETS:"
+        # some targets are only in depends
+        keys = set(self.targets.keys() + self.depends.keys())
+        for target in keys:
+            building = self.resolve_depends(target)
+            print "%s:\t%s" % (target, repr(building))
+        print "\nDEFAULT: %s" % self.options.get("default", "None")
+
+    def reduce_targets(self, building):
+        """Given a list of targets this removes consecutive dupes."""
+        last = building[0]
+        reduced = [last]
+        for target in building[1:]:
+            if target != last:
+                reduced.append(target)
+                last = target
+        return reduced
+
+    def resolve_targets(self, to_build=[]):
+        """
+        Given a list of targets to_build this will make
+        a new list with all of the dependencies resolved.
+        """
+        if not to_build: 
+            if "default" not in self.options:
+                raise("You forgot to specify a default target and didn't give one on the command line.")
+            else:
+                return self.resolve_depends(self.options["default"])
+        else:
+            building = []
+            for target in to_build:
+                building.extend(self.resolve_depends(target))
+            return self.reduce_targets(building)
+
