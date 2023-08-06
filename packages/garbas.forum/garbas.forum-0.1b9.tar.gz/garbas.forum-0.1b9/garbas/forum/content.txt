@@ -1,0 +1,135 @@
+
+Forum (Content Type)
+====================
+
+Forum content types is container (folder), that can contains also other Forum
+content types that automaticaly become subfolder. As also shown bellow Forum
+content type can also contain Topic content type.
+
+In this example we'll show how can we create forum that has one main Forum
+container where other subforums are added. Subforum will also be categorized
+by custom categories defined in main Forum conainer.
+
+Main Forum container is as normal Forum content type. "allow_addtopic" option
+gives us control whether we want users to be able to add topics inside our
+Forum. 
+
+    >>> self.setRoles(['Manager'])
+    >>> self.portal.invokeFactory('Forum', 
+    ...     id = 'forum',
+    ...     title = 'Forum',
+    ...     categories = ['Category 1', 'Category 2', 'Category 3'],
+    ...     allow_addtopic = False)
+    'forum'
+
+Lets create two subforums. 'First Subforum' and 'Second Subforum'
+
+    >>> forum = getattr(self.portal, 'forum')
+    >>> forum.invokeFactory('Forum',
+    ...     id = 'first-subforum',
+    ...     title = 'First Subforum',
+    ...     category = 'Category 2')
+    'first-subforum'
+    >>> forum.invokeFactory('Forum',
+    ...     id = 'second-subforum',
+    ...     title = 'Second Subforum')
+    'second-subforum'
+
+'First Subforum' should be in 'Category 2' and 'Second Subforum' should not be
+in any category.
+
+    >>> first_subforum = getattr(forum, 'first-subforum')
+    >>> first_subforum.category
+    'Category 2'
+    >>> second_subforum = getattr(forum, 'second-subforum') 
+    >>> second_subforum.category
+    ''
+
+Lets check catalog custom metadata values. 
+
+    >>> forum.forum_topics()
+    0
+    >>> forum.forum_posts()
+    0
+    >>> forum.forum_category() == forum.category
+    True
+    >>> from DateTime import DateTime
+    >>> forum.modified() == forum.created()
+    True
+    >>> forum.forum_info() == ['', '']
+    True
+
+
+Topic (Content Type)
+====================
+
+Add Topic inside main Forum container. This should not be possible thru the
+web. Thru Plone UI we allow it.
+
+    >>> forum.invokeFactory('ForumTopic',
+    ...     id = 'topic-1',
+    ...     title = 'Topic 1',
+    ...     text = 'Text for Topic 1')
+	'topic-1'
+
+We check catalog metadata values/methods. "Topic 1" should be visible on forum
+listing.
+
+	>>> topic1 = getattr(forum, 'topic-1')
+    >>> forum.forum_topics()
+    1
+    >>> forum.forum_posts()
+    0
+    >>> forum.modified()==topic1.created()
+    True
+    >>> forum.forum_info()==[topic1.Creator(), topic1.absolute_url()]
+    True
+
+Now we add new Topic ("Topic 2") to subfolder. 
+
+    >>> first_subforum.invokeFactory('ForumTopic',
+    ...     id = 'topic-2',
+    ...     title = 'Topic 2',
+    ...     text = 'Text for Topic 2')
+	'topic-2'
+
+Both subforum and main forum container should have updated catalog values.
+
+	>>> topic2 = getattr(first_subforum, 'topic-2')
+    >>> forum.forum_topics(), first_subforum.forum_topics()
+    (2, 1)
+    >>> forum.forum_posts(), first_subforum.forum_posts()
+    (0, 0)
+    >>> forum.modified()==first_subforum.modified()==topic2.created()
+    True
+    >>> forum.forum_info() == \
+    ...     first_subforum.forum_info() == \
+    ...     [topic2.Creator(), topic2.absolute_url()] 
+    True
+
+
+Post (Content Type)
+===================
+
+Last thing garbas.forum provides is Post content type. Post is always a reply to topic.
+
+    >>> topic1.invokeFactory('ForumPost',
+    ...     id = 'post-1',
+    ...     title = 'RE: Topic 1',
+    ...     text = 'Text for Post 1')
+	'post-1'
+
+When added now our main forum container as well as "Topic 1" should reflect changes 
+in catalog values.
+
+	>>> post1 = getattr(topic1, 'post-1')
+    >>> forum.forum_posts(), topic1.forum_posts()
+    (1, 1)
+    >>> forum.modified() == topic1.modified() == post1.created()
+    True
+    >>> forum.forum_info() == \
+    ...     topic1.forum_info() == \
+    ...     [post1.Creator(), post1.absolute_url()] 
+    True
+   
+
