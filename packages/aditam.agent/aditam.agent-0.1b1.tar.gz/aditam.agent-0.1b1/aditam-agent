@@ -1,0 +1,86 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+#    Copyright (c) 2008 ADITAM project (contact@aditam.org)
+#    License: GNU GPLv3
+#
+#    This file is part of the ADITAM project.
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.  See the GNU General Public License
+#    for more details.
+#
+
+___author__ = '$LastChangedBy: jschneider $'
+__date__ = '$LastChangedDate: 2008-06-01 21:09:01 +0200 (Sun, 01 Jun 2008) $'
+__version__ = '$Rev: 223 $'
+
+import time
+import platform
+import Pyro.core
+import Pyro.util
+import Pyro.errors
+import socket
+import platform
+import logging
+
+from optparse import OptionParser
+
+from aditam.agent.jobmanager import JobManager
+from aditam.agent.monitoring import Monitoring
+from aditam.agent.config import agent_config
+from aditam.core.watcher import Watcher
+
+parser = OptionParser()
+
+parser.add_option("-p", "--port",
+	dest="port",
+	metavar="<port>",
+	help="Server port")
+parser.add_option("-H", "--host",
+	dest="host",
+	metavar="<host>",
+	help="Server host")
+
+(options, args) = parser.parse_args()
+
+def main():
+    # TODO : remove this hack and don't use the fork in the watcher
+    if platform.system().lower() != "windows":
+        Watcher()
+    os = platform.system()
+    host = options.host
+    port = options.port
+    if not host:
+        host = agent_config.get('server', 'host')
+        if agent_config.get('server', 'port'):
+            port = agent_config.getint('server', 'port')
+        else:
+            port = None
+    if not port:
+        port = 7766
+    if not host:
+        raise SystemExit("Please select use aditam-agent or use the "
+                "command line options (like --host)")
+    server = Pyro.core.getProxyForURI("PYROLOC://%s:%s/server" % \
+            (host, port))
+    if agent_config.has_option('agent', 'hostname') and \
+            agent_config.get('agent', 'hostname'):
+        hostname = agent_config.get('agent', 'hostname')
+    else:
+        hostname = socket.getfqdn()
+    try:
+        server.add_agent(unicode(hostname), os)
+    except Pyro.errors.ProtocolError, e:
+        logging.error(e)
+        raise SystemExit(e)
+    jobmanager = JobManager(host, port, hostname)
+    jobmanager.start()
+    monitoring = Monitoring(host, port, hostname)
+    monitoring.start()
+
+if __name__ == "__main__":
+    main()
+    
