@@ -1,0 +1,239 @@
+
+Testing the non-browser AtomPub publisher and its views
+=======================================================
+
+Setup a root and placemark container
+
+    >>> root = getRootFolder()
+    >>> from zope.app.folder import Folder
+    >>> import transaction
+    >>> root['places'] = Folder()
+    >>> places = root['places']
+    >>> from zope.interface import alsoProvides
+    >>> from zgeo.atom.interfaces import IAtomPubPOSTable
+    >>> alsoProvides(places, IAtomPubPOSTable)
+    >>> from zope.dublincore.interfaces import IWriteZopeDublinCore
+    >>> dc = IWriteZopeDublinCore(places)
+    >>> dc.title = u'Test Places'
+    >>> dc.description = u'Places for testing'
+
+Register an IFileFactory adapter for "application/atom+xml"
+
+    >>> from zgeo.atom.example import AtomFileFactory
+    >>> from zope.component import provideAdapter
+    >>> provideAdapter(AtomFileFactory, name='application/atom+xml;type=entry')
+
+And a AtomPub entry namer
+
+    >>> from zgeo.atom.example import AtomEntryNamer
+    >>> provideAdapter(AtomEntryNamer)
+
+Now, POST of an Atom entry document to the collection should add a new member
+resource.
+
+    >>> response = http(r"""
+    ... POST /places/atompub-collection HTTP/1.1
+    ... Content-Type: application/atom+xml
+    ... Authorization: Basic mgr:mgrpw
+    ... Slug: Placemark One
+    ... 
+    ... <?xml version="1.0" encoding="utf-8"?>
+    ... <entry
+    ...   xmlns="http://www.w3.org/2005/Atom"
+    ...   xmlns:georss="http://www.georss.org/georss"
+    ...   >
+    ...   <title>Theater at Hierapolis</title>
+    ...   <summary>Ancient theater.</summary>
+    ...   <georss:where>
+    ...     <gml:Point xmlns:gml="http://www.opengis.net/gml">
+    ...       <gml:pos>37.9266293044 29.1291142563</gml:pos>
+    ...     </gml:Point>
+    ...   </georss:where>
+    ...   <content/>
+    ... </entry>
+    ... """, handle_errors=False)
+    >>> response.getStatus()
+    201
+    >>> response.getHeader('Content-type')
+    'application/atom+xml;type=entry'
+    >>> response.getHeader('Location')
+    'http://localhost/places/placemark-one/atom-entry'
+    >>> print response.getBody()
+    <?xml version="1.0" encoding="utf-8"?>
+    <entry xmlns="http://www.w3.org/2005/Atom"
+           xmlns:georss="http://www.georss.org/georss"
+           xmlns:gml="http://www.opengis.net/gml">
+    <BLANKLINE>
+        <title>Theater at Hierapolis</title>
+        <link href="http://localhost/places/placemark-one/atom-entry"
+              type="application/atom+xml;type=entry" rel="edit"/>
+        <link href="http://localhost/places/placemark-one"
+              type="text/html" rel="alternate"/>
+        <id>urn:uuid:...</id>
+        <updated>2008-...</updated>
+        <summary>Ancient theater.</summary>
+    <BLANKLINE>
+        <georss:where>
+          <gml:Point>
+            <gml:pos>37.926629 29.129114</gml:pos>
+          </gml:Point>
+        </georss:where>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    </entry>
+    <BLANKLINE>
+    <BLANKLINE>
+
+Verify new content
+
+    >>> 'placemark-one' in places
+    True
+
+View the collection feed
+
+    >>> response = http(r"""
+    ... GET /places/atompub-collection HTTP/1.1
+    ... """, handle_errors=False)
+    >>> response.getStatus()
+    200
+    >>> response.getHeader('Content-Type')
+    'application/atom+xml'
+    >>> print response.getBody()
+    <?xml version="1.0" encoding="utf-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom"
+          xmlns:georss="http://www.georss.org/georss"
+          xmlns:gml="http://www.opengis.net/gml">
+    <BLANKLINE>
+    <BLANKLINE>
+      <title>Test Places</title>
+      <link href="http://localhost/places/atompub-collection"
+            type="application/atom+xml" rel="self"/>
+      <link href="http://localhost/places" type="text/html"
+            rel="alternate"/>
+      <link href="None" type="application/atom+xml"
+            rel="previous-archive"/>
+      <app:collection xmlns:app="http://www.w3.org/2007/app"
+                      href="http://localhost/places/atompub-collection"
+                      title="Test Places"/>
+      <updated>2008-...</updated>
+      <author>
+        <name>(u'zope.mgr',)</name>
+        <uri></uri>
+        <email></email>
+      </author>
+      <id>urn:uuid:...</id>
+    <BLANKLINE>
+      <entry>
+        <title>Theater at Hierapolis</title>
+        <link href="http://localhost/places/placemark-one/atom-entry"
+              type="application/atom+xml;type=entry" rel="edit"/>
+        <link href="http://localhost/places/placemark-one"
+              type="text/html" rel="alternate"/>
+        <id>urn:uuid:...</id>
+        <updated>2008-...</updated>
+        <summary>Ancient theater.</summary>
+    <BLANKLINE>
+        <georss:where>
+          <gml:Point>
+            <gml:pos>37.926629 29.129114</gml:pos>
+          </gml:Point>
+        </georss:where>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+      </entry>
+    <BLANKLINE>
+    </feed>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+
+And the entry
+
+    >>> response = http(r"""
+    ... GET /places/placemark-one/atom-entry HTTP/1.1
+    ... """, handle_errors=False)
+    >>> response.getStatus()
+    200
+    >>> response.getHeader('Content-Type')
+    'application/atom+xml;type=entry'
+    >>> print response.getBody()
+    <?xml version="1.0" encoding="utf-8"?>
+    <entry xmlns="http://www.w3.org/2005/Atom"
+           xmlns:georss="http://www.georss.org/georss"
+           xmlns:gml="http://www.opengis.net/gml">
+    <BLANKLINE>
+        <title>Theater at Hierapolis</title>
+        <link href="http://localhost/places/placemark-one/atom-entry"
+              type="application/atom+xml;type=entry" rel="edit"/>
+        <link href="http://localhost/places/placemark-one"
+              type="text/html" rel="alternate"/>
+        <id>urn:uuid:...</id>
+        <updated>2008-...</updated>
+        <summary>Ancient theater.</summary>
+    <BLANKLINE>
+        <georss:where>
+          <gml:Point>
+            <gml:pos>37.926629 29.129114</gml:pos>
+          </gml:Point>
+        </georss:where>
+    <BLANKLINE>
+    <BLANKLINE>
+    <BLANKLINE>
+    </entry>
+    <BLANKLINE>
+    <BLANKLINE>
+
+Register an IWriteFile adapter for our example content
+
+    >>> from zgeo.atom.example import AtomWriteFile
+    >>> from zope.component import provideAdapter
+    >>> provideAdapter(AtomWriteFile, name='application/atom+xml;type=entry')
+
+Edit via AtomPub. Providing no location, we expect the original location to
+persist.
+
+    >>> response = http(r"""
+    ... PUT /places/placemark-one/atom-entry HTTP/1.1
+    ... Content-Type: application/atom+xml;type=entry
+    ... Authorization: Basic mgr:mgrpw
+    ... 
+    ... <?xml version="1.0" encoding="utf-8"?>
+    ... <entry
+    ...   xmlns="http://www.w3.org/2005/Atom"
+    ...   xmlns:georss="http://www.georss.org/georss"
+    ...   >
+    ...   <title>Theater at Hierapolis</title>
+    ...   <summary>*Very* ancient theater</summary>
+    ... </entry>
+    ... """, handle_errors=False)
+    >>> response.getStatus()
+    200
+
+Verify
+
+    >>> dc = IWriteZopeDublinCore(places['placemark-one'])
+    >>> dc.description
+    u'*Very* ancient theater'
+    >>> from zgeo.geographer.interfaces import IGeoreferenced
+    >>> geo = IGeoreferenced(places['placemark-one'])
+    >>> geo.type
+    'Point'
+    >>> geo.coordinates
+    (29.129..., 37.926...)
+
+Delete the member
+
+    >>> response = http(r"""
+    ... DELETE /places/placemark-one/atom-entry HTTP/1.1
+    ... Authorization: Basic mgr:mgrpw
+    ... """, handle_errors=False)
+    >>> response.getStatus()
+    200
+
+Verify
+
+    >>> 'placemark-one' in places
+    False
+    
