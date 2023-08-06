@@ -1,0 +1,183 @@
+Test for gocept.cvs
+===================
+
+Setup
+-----
+
+We set up the CVS repository:
+
+>>> import cvsrep
+>>> cvstest = cvsrep.CVSTestRepository()
+>>> cvstest.create()
+>>> cvstest.create_testproject('myTestTag')
+
+Tags
+----
+
+We setup a new testproject with a given TAG:
+
+>>> cd(sample_buildout)
+>>> buildout_contents = '''
+... [buildout]
+... parts = cvspart
+...
+... [cvspart]
+... recipe = gocept.cvs
+... cvsroot = %s
+... destination = products
+... modules = gocept.test;myTestTag;gocept.test''' % cvstest.cvsrep_path
+>>> write('buildout.cfg', buildout_contents)
+
+And run buildout:
+
+>>> print system(buildout)
+Installing cvspart.
+U  gocept.test/.cvsignore
+U  gocept.test/file
+cvs checkout: Updating gocept.test
+
+The checkout should now have a sticky tag:
+
+>>> print system('cvs st parts/products/gocept.test/file')
+====...
+Sticky Tag:  myTestTag (branch: 1.1.1)
+...
+
+We run buildout again and the sticky tag should stay:
+
+>>> print system(buildout)
+Updating cvspart.
+>>> print system('cvs st parts/products/gocept.test/file')
+====...
+Sticky Tag:  myTestTag (branch: 1.1.1)
+...
+
+
+Now we change the configuration to use the HEAD,
+
+>>> buildout_contents = buildout_contents.replace('myTestTag', 'HEAD')
+>>> write('buildout.cfg', buildout_contents)
+
+and run the buildout again, which leads to reinstalling the part:
+
+>>> print system(buildout)
+Uninstalling cvspart.
+Running uninstall recipe.
+Installing cvspart.
+U gocept.test/.cvsignore
+U gocept.test/file
+...
+
+We should now have no sticky tag.
+
+>>> print system('cvs st parts/products/gocept.test/file')
+===...
+Sticky Tag: (none)
+...
+
+
+
+HEAD checkouts
+--------------
+
+We add another module, which we checkout from the HEAD. This checked out
+product shouldn't have any sticky tags:
+
+>>> buildout_contents = '''
+... [buildout]
+... parts = cvspart
+...
+... [cvspart]
+... recipe = gocept.cvs
+... cvsroot = %s
+... destination = products
+... modules = gocept.test;myTestTag;gocept.test
+...           gocept.test;HEAD;secondgocept.test''' % cvstest.cvsrep_path
+>>> write('buildout.cfg', buildout_contents)
+
+And run buildout:
+
+>>> print system(buildout)
+Uninstalling cvspart.
+Running uninstall recipe.
+Installing cvspart.
+U gocept.test/.cvsignore
+U gocept.test/file
+U secondgocept.test/.cvsignore
+U secondgocept.test/file
+cvs checkout: Updating gocept.test
+cvs checkout: Updating secondgocept.test
+
+The checkout itself was a HEAD checkout, but it should not have a sticky
+"HEAD" tag:
+
+>>> print system('cvs st parts/products/secondgocept.test/file')
+===...
+Sticky Tag: (none)
+...
+
+We run buildout again and there should be again no sticky tag:
+
+>>> print system(buildout)
+Updating cvspart.
+>>> print system('cvs st parts/products/secondgocept.test/file')
+====...
+Sticky Tag: (none)
+...
+
+
+Nested checkouts
+----------------
+
+If we have nested checkouts we need to test, that no checkouts "inherit"
+tags from checkouts 'above'. We checkout an additional module in
+gocept.test:
+
+>>> buildout_contents = '''
+... [buildout]
+... parts = cvspart
+...
+... [cvspart]
+... recipe = gocept.cvs
+... cvsroot = %s
+... destination = nested
+... modules = gocept.test;myTestTag;gocept.test
+...           gocept.test;HEAD;gocept.test/nested.test''' % cvstest.cvsrep_path
+>>> write('buildout.cfg', buildout_contents)
+
+Run buildout again. This checkout works with no problems:
+
+>>> print system(buildout)
+Uninstalling cvspart.
+Running uninstall recipe.
+Installing cvspart.
+U gocept.test/.cvsignore
+U gocept.test/file
+U nested.test/.cvsignore
+U nested.test/file
+cvs checkout: Updating gocept.test
+cvs checkout: Updating nested.test
+>>> print system('cvs st parts/nested/gocept.test/file')
+====...
+Sticky Tag: myTestTag (branch: 1.1.1)
+...
+>>> print system('cvs st parts/nested/gocept.test/nested.test/file')
+====...
+Sticky Tag: (none)
+...
+
+If we run a buildout with the install command again, everything should
+be fine as well:
+
+>>> print system(buildout + ' -n install cvspart')
+Updating cvspart.
+>>> print system('cvs st parts/nested/gocept.test/file')
+====...
+Sticky Tag: myTestTag (branch: 1.1.1)
+...
+>>> print system('cvs st parts/nested/gocept.test/nested.test/file')
+====...
+Sticky Tag: (none)
+...
+
+
