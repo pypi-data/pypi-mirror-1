@@ -1,0 +1,198 @@
+
+%token EB_LEFT
+%token EB_RIGHT
+%token EB_BOTH
+%token EB_NONE
+%token IDENTIFIER
+%token PROPERTY
+%token NOVALUE
+%token LEFT_QUOTE
+%token RIGHT_QUOTE
+%token LINE
+
+
+%%
+root
+            :
+            |property_expression tags 
+                {
+                    p = $1
+                    c = $2
+                    t = TAG_BLOCK_ROOT()
+                    t.startline = 1
+                    t.setChild(c)
+                    if p:
+                        t.addProperty( p['value'] )
+                    global output
+                    output = t.html()
+                    $$ = t
+                }
+            ;
+prefix
+            :EB_LEFT
+                {
+                    $$ = 1
+                }
+            |EB_RIGHT
+                {
+                    $$ = 2
+                }
+            |EB_BOTH
+                {
+                    $$ = 3
+                }
+            |EB_NONE
+                {
+                    $$ = 4
+                }
+            ;
+tags
+            :tag
+                {
+                    $$ = [$1]
+                }
+            |tags tag 
+                {
+                    arr = $1
+                    arr.append($2)
+                    $$ = arr
+                }
+            ;
+tag
+            :normal
+                {
+                    $$ = $1 
+                }
+            |oneline
+                {
+                    $$ = $1
+                }
+            |novalue
+                {
+                    $$ = $1
+                }
+            |line
+                {
+                    $$ = $1
+                }
+            ;
+novalue
+            :prefix IDENTIFIER NOVALUE property_expression
+                {
+                    id = $2
+                    p  = $4
+                    t  = tagFactory.get(id[0], $1)
+                    t.startline = id[1]
+                    if p:
+                        t.addProperty( p['value'] )
+                        t.endline = p['endline']
+                    else:
+                        t.endline = $3[1]
+                    $$ = t
+                }
+            ;
+normal
+            :prefix IDENTIFIER LEFT_QUOTE property_expression tags RIGHT_QUOTE 
+                {
+                    id = $2
+                    p  = $4
+                    t  = tagFactory.get(id[0], $1)
+                    t.startline = id[1]
+                    t.child     = $5
+                    t.endline   = $6[1]
+                    if p:
+                        t.addProperty( p['value'] )
+                    $$ = t
+                }
+            ;
+oneline
+            :prefix IDENTIFIER property_expression tag 
+                {
+                    id = $2
+                    p  = $3
+                    c  = $4
+                    t  = tagFactory.get(id[0], $1)
+                    t.startline = id[1]
+                    t.child     = [c]
+                    t.endline   = c.endline
+                    if p:
+                        t.addProperty( p['value'] )
+                    $$ = t
+                 }
+            ;
+property_expression
+            :   {
+                    $$ = None
+                }
+            |properties
+                {
+                    $$ = $1
+                }
+            ;
+properties
+            :property
+                {
+                    $$ = $1
+                }
+            |properties property
+                {
+                    ps = $1
+                    p  = $2
+                    psv = ps['value']
+                    pv  = p['value']
+                    ps['endline'] = p['endline']
+                    for key in pv:
+                        psv[key] = pv[key]
+                    $$ = ps
+                }
+            ;
+property
+            :PROPERTY IDENTIFIER value
+                {
+                    arr = {}
+                    arr['startline'] = $1[1]
+                    arr['endline']   = $2[1] + 1
+                    arr["value"]     = {}
+                    arr["value"][$2[0]] = $3
+                    $$ = arr
+                }
+            |PROPERTY IDENTIFIER LEFT_QUOTE values RIGHT_QUOTE
+                {
+                    arr = {}
+                    arr['startline'] = $1[1]
+                    arr['endline']   = $5[1]
+                    arr['value']     = {}
+                    arr['value'][$2[0]] = ' '.join( $4 )
+                    $$ = arr
+                }
+            ;
+values
+            : value
+                {
+                    $$ = [$1]
+                } 
+            | values value
+                {
+                    vs = $1
+                    vs.append($2)
+                    $$ = vs
+                }
+            ;
+value 
+            :LINE
+                {
+                    $$ = $1[0]
+                } 
+            ;
+line
+            :LINE 
+                {
+                    li = $1
+                    t = TAG_LINE()
+                    t.startline = li[1]
+                    t.endline   = li[1]
+                    t.child = [li[0]]
+                    $$ = t
+                }
+            ;
+%%
