@@ -1,0 +1,113 @@
+Manifest
+========
+
+This stuff we need::
+
+    >>> import os
+    >>> from StringIO import StringIO
+    >>> from zope.interface import implements
+    >>> from collective.plone.gsxml import manifest, content
+    >>> from Products.GenericSetup.interfaces import IExportContext
+
+
+First we need some initial setup to do::
+
+    >>> self.setRoles(('Manager'),)
+    >>> self.portal.invokeFactory("Folder", "export")
+    'export'
+    >>> ef = self.portal["export"]
+
+    >>> ef.invokeFactory('Document', id='doc1', title='Test Page 1',
+    ... text='<html> <body> a test page </body> </html>')
+    'doc1'
+
+    >>> ef.invokeFactory('Document', id='doc2', title='Test Page 2',
+    ... text='<html> <body> another test page </body> </html>')
+    'doc2'
+
+    >>> ef.invokeFactory('Folder', id='subfolder', title='Test Folder 1')
+    'subfolder'
+
+    >>> ef.subfolder.invokeFactory('Document', id='doc3', title='Test Page 3',
+    ... text='<html> <body> a test page in a subfolder </body> </html>')
+    'doc3'
+
+    >>> ef.subfolder.invokeFactory('Document', id='doc4', title='Test Page 4',
+    ... text='<html> <body> a test page in a subfolder </body> </html>')
+    'doc4'
+
+    >>> ef.subfolder.invokeFactory('Document', id='doc5', title='Test Page 5',
+    ... text='<html> <body> a test page in a subfolder </body> </html>')
+    'doc5'
+
+    >>> ef.objectIds()
+    ['doc1', 'doc2', 'subfolder']
+
+
+We want to test a complete export, so we write an export context that stores
+our data into a dictionary::
+
+
+    >>> class DummyExportContext( object ):
+    ...     implements( IExportContext )
+    ...
+    ...     def __init__( self ):
+    ...         self.brain={}
+    ...
+    ...     def writeDataFile( self, filename, text, content_type, subdir=None ):
+    ...
+    ...         if subdir is not None:
+    ...             filename = '/'.join( ( subdir, filename ) )
+    ...
+    ...         self.brain[filename] = text
+
+
+The next step is to create an exporter that uses our dummycontext::
+
+    >>> ex = content.XMLContentFSExporter( ef )
+    >>> exportable = ex.listExportableItems()
+    >>> exportable
+    [('doc1', <ATDocument at /plone/export/doc1>, <collective.plone.gsxml.content.XMLContentFSExporter object at ...>), ..., ('subfolder', <ATFolder at /plone/export/subfolder>, <collective.plone.gsxml.content.XMLContentFSExporter object at ...>)]
+
+
+Now we prepare a manifest::
+
+    >>> stream = StringIO()
+    >>> xml_writer = manifest.ManifestWriter( stream )
+
+
+fill the manifest::
+
+    >>> for object_id, object, ignored in exportable:
+    ...     xml_writer.add( object_id, object.getPortalTypeName() )
+
+
+So what do we have now?::
+
+    >>> print xml_writer.getvalue()
+    <manifest>
+    <record type="Document"> doc1 </record>
+    <record type="Document"> doc2 </record>
+    <record type="Folder"> subfolder </record>
+    </manifest>
+    <BLANKLINE>
+
+And the final step, all together::
+
+    >>> ec = DummyExportContext()
+    >>> ec.writeDataFile('.objects.xml',
+    ...                   text=xml_writer.getvalue(),
+    ...                   content_type='text/xml',
+    ...                   subdir=None,
+    ...                 )
+
+    >>> ex.export(ec, "structure", False)
+    >>> ec.brain.keys()
+
+
+
+
+
+::
+
+  vim: set ts=4 sw=4 expandtab filetype=rst:

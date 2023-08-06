@@ -1,0 +1,141 @@
+Export of ATContent Types with GSXML to a GMail Account
+=======================================================
+
+Ramon Bartl <ramonski@ramonski.de>
+Copyright (c) 2006-2007 InQuant GmbH
+
+Abstract
+--------
+The GSXML is a Product that generates XML out of Plones ATContent Types and
+implements GenericSetup's Interfaces to walk through folders and export the
+files to e.g. the Filesystem or whatever specific export context we have.
+
+Introduction
+------------
+Since Google increases their Mail storage capacity continuously, the necessity
+to delete mails at all has become obsolete. So why don't use this cheap space
+our purposes? Email has many nice advantages that makes it applicable for an
+export storage::
+
+    1. Email works
+    2. Plone Users have an Email registered
+    3. Email get queued over the internet, so no direct connection is needed
+    4. Receiving Email works almost everywhere
+    5. Users know their MUAs, so they can organize their backups
+
+This sounds nice and that's the reason why GSXML implements an GMail Export
+Context.
+
+NOTE:
+You need the libgmail, for information see::
+    http://libgmail.sourceforge.net/
+If you don't have an gmail account, you cannot run the test, so here is where
+you get one::
+    https://www.google.com/accounts/ManageAccount
+
+Here we go:
+~~~~~~~~~~~
+First of all, you need a Google mail account, surprise;) So before you can use
+this test, fill in your username and password::
+
+    >>> USER = "username@googlemail.com"
+    >>> PASS = "password"
+
+Now we can start with the export of some fake data into your account. We want
+to create a folder called 'export' with some dummy data in it.  Here the
+structure::
+
+    export
+    |-- doc1
+    |-- doc2
+    `-- subfolder
+        |-- doc3
+        |-- doc4
+        `-- doc5
+
+Ok, we start to build up our dummy construct::
+
+    >>> self.setRoles(('Manager'),)
+    >>> self.portal.invokeFactory("Folder", "export")
+    'export'
+    >>> ef = self.portal["export"]
+
+    >>> ef.invokeFactory('Document', id='doc1', title='Test Page 1',
+    ... text='<html> <body> a test page </body> </html>')
+    'doc1'
+
+    >>> ef.invokeFactory('Document', id='doc2', title='Test Page 2',
+    ... text='<html> <body> another test page </body> </html>')
+    'doc2'
+
+    >>> ef.invokeFactory('Folder', id='subfolder', title='Test Folder 1')
+    'subfolder'
+
+    >>> ef.subfolder.invokeFactory('Document', id='doc3', title='Test Page 3',
+    ... text='<html> <body> a test page in a subfolder </body> </html>')
+    'doc3'
+
+    >>> ef.subfolder.invokeFactory('Document', id='doc4', title='Test Page 4',
+    ... text='<html> <body> a test page in a subfolder </body> </html>')
+    'doc4'
+
+    >>> ef.subfolder.invokeFactory('Document', id='doc5', title='Test Page 5',
+    ... text='<html> <body> a test page in a subfolder </body> </html>')
+    'doc5'
+
+    >>> ef.objectIds()
+    ['doc1', 'doc2', 'subfolder']
+    >>> ef.subfolder.objectIds()
+    ['doc3', 'doc4', 'doc5']
+
+
+Now we need to do some setup to prepare the export::
+
+    >>> from zope.interface import implements
+    >>> from zope.interface.verify import verifyObject
+    >>> from Products.GenericSetup.interfaces import IExportContext
+
+    >>> from collective.plone.gsxml.content import XMLContentFSExporter
+    >>> from collective.plone.gsxml.context import GmailExportContext
+    >>> from collective.plone.gsxml.interfaces import *
+
+We wrote an adapter which adapts the functionality of the Marhaller, to get xml
+of ATContentTypes, and GenericSetup, to walk through folders and write the data
+somewhere. In our case we want to write to our Gmail Account::
+
+    >>> ex = XMLContentFSExporter( ef )
+
+    >>> IGSXMLFilesystemExporter.providedBy( ex )
+    True
+
+    >>> IFilesystemExporter.providedBy( ex )
+    True
+
+    >>> verifyObject( IFilesystemExporter, ex )
+    True
+
+Now we need to tell our exporter 'ex' where to export to. Therefore we create
+an export context which provides the Gmail functionality. Here we need the
+account access data which you hopefully filled in above. We provide an export
+id. We need this later to find the data for import::
+
+    >>> ec = GmailExportContext(USER, PASS, exportid="1234")
+
+Our export context provides GenericSetup's IExportContext interface::
+
+    >>> IExportContext.providedBy( ec )
+    True
+
+The final step. This can take a while and you need internet connection,
+surprise :) again::
+
+    >>> ex.export(ec, "structure", False)
+
+When everything worked fine, you should have now a bunch of emails in your account. The subject should be
+something like '[GSXML] 1234'. A good thing is to create a new label in your Gmail account 'GSXML' and
+make a filter for 'subject == [GSXML] ? tag with label 'GSXML' : Nothing'.
+
+
+::
+
+  vim: set ts=4 sw=4 expandtab filetype=rst:

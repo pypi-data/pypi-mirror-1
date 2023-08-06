@@ -1,0 +1,145 @@
+Export content with GSXML
+=========================
+
+
+The export context
+------------------
+
+The context implements GenericSetup's IExportContext::
+
+    >>> import os
+    >>> from zope.interface import implements
+    >>> from Products.GenericSetup.interfaces import IExportContext
+
+The writeDataFile() Function writes the Data into a dictionary. In this case
+the filename will be the key and the text, which is the content of the file,
+will be the value:
+
+'filename' -- the unqualified name of the file
+
+'text' -- the content of the file
+
+'content_type' -- the MIMEtype of the file
+
+'subdir' -- if passed, is a path to a subdirectory / folder in which to write
+    the file; if not passed, write the file to the root of the target
+
+Ok, now the code::
+
+    >>> class DummyExportContext(object):
+    ...     implements( IExportContext )
+    ...
+    ...     def __init__(self):
+    ...         self.brain={}
+    ...
+    ...     def writeDataFile(self, filename, text, content_type, subdir=None):
+    ...         if subdir is not None:
+    ...             fn = os.path.join( subdir, filename )
+    ...         else:
+    ...             fn = filename
+    ...
+    ...         self.brain[fn] = text
+
+
+Some Dummy Content
+------------------
+
+We need some data that we can export: let's put everything in a "export"
+folder::
+
+    >>> self.setRoles(('Manager'),)
+    >>> self.portal.invokeFactory("Folder", "export")
+    'export'
+    >>> ef = self.portal["export"]
+
+    >>> ef.invokeFactory('Document', id='doc1', title='Test Page 1',
+    ... text='<html> <body> a test page </body> </html>')
+    'doc1'
+
+    >>> ef.invokeFactory('Document', id='doc2', title='Test Page 2',
+    ... text='<html> <body> another test page </body> </html>')
+    'doc2'
+
+    >>> ef.invokeFactory('Folder', id='subfolder', title='Test Folder 1')
+    'subfolder'
+
+    >>> ef.subfolder.invokeFactory('Document', id='doc3', title='Test Page 3',
+    ... text='<html> <body> a test page in a subfolder </body> </html>')
+    'doc3'
+
+    >>> ef.subfolder.invokeFactory('Document', id='doc4', title='Test Page 4',
+    ... text='<html> <body> a test page in a subfolder </body> </html>')
+    'doc4'
+
+    >>> ef.subfolder.invokeFactory('Document', id='doc5', title='Test Page 5',
+    ... text='<html> <body> a test page in a subfolder </body> </html>')
+    'doc5'
+
+    >>> ef.objectIds()
+    ['doc1', 'doc2', 'subfolder']
+
+
+
+The Export Step
+---------------
+
+Now that we have a context that saves our data into a dictionary, we need an
+exporter that generates the XML out of our content and uses our context to save
+the data::
+
+    >>> from collective.plone.gsxml.content import XMLContentFSExporter
+    >>> ex = XMLContentFSExporter( ef )
+
+The XMLContentFSExporter implements the IFilesystemExporter interface::
+
+    >>> from collective.plone.gsxml.interfaces import IFilesystemExporter
+    >>> IFilesystemExporter.providedBy( ex )
+    True
+
+    >>> from zope.interface.verify import verifyObject
+    >>> verifyObject( IFilesystemExporter, ex )
+    True
+
+
+The final step::
+
+    >>> ec = DummyExportContext()
+    >>> ex.export(ec, "structure", False)
+
+Now we have all the data in the ``export context``::
+
+    >>> sorted(ec.brain.keys())
+    ['structure/export.description.data', 'structure/export.refs.pickle',
+    'structure/export.rights.data', 'structure/export.xml',
+    'structure/export/.objects.xml',
+    'structure/export/doc1.description.data',
+    'structure/export/doc1.refs.pickle',
+    'structure/export/doc1.rights.data', 'structure/export/doc1.text.data',
+    'structure/export/doc1.xml', 'structure/export/doc2.description.data',
+    'structure/export/doc2.refs.pickle',
+    'structure/export/doc2.rights.data', 'structure/export/doc2.text.data',
+    'structure/export/doc2.xml',
+    'structure/export/subfolder.description.data',
+    'structure/export/subfolder.refs.pickle',
+    'structure/export/subfolder.rights.data',
+    'structure/export/subfolder.xml',
+    'structure/export/subfolder/.objects.xml',
+    'structure/export/subfolder/doc3.description.data',
+    'structure/export/subfolder/doc3.refs.pickle',
+    'structure/export/subfolder/doc3.rights.data',
+    'structure/export/subfolder/doc3.text.data',
+    'structure/export/subfolder/doc3.xml',
+    'structure/export/subfolder/doc4.description.data',
+    'structure/export/subfolder/doc4.refs.pickle',
+    'structure/export/subfolder/doc4.rights.data',
+    'structure/export/subfolder/doc4.text.data',
+    'structure/export/subfolder/doc4.xml',
+    'structure/export/subfolder/doc5.description.data',
+    'structure/export/subfolder/doc5.refs.pickle',
+    'structure/export/subfolder/doc5.rights.data',
+    'structure/export/subfolder/doc5.text.data',
+    'structure/export/subfolder/doc5.xml']
+
+::
+
+  vim: set ts=4 sw=4 expandtab filetype=rst:
