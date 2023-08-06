@@ -1,0 +1,94 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+"""Outil de copie et mise à jour des référentiels AuF.
+
+Copyright ©2009  Agence universitaire de la Francophonie
+Licence : GPL version 3
+Auteur : Progfou <jean-christophe.andre@auf.org>
+
+Dépendances Debian : python >= 2.5
+"""
+
+RUN_USER = 'auf-refer'
+
+__all__ = ( 'RUN_USER' )
+
+USAGE = """Usages (nécessite parfois "root", par exemple via "sudo") :
+  auf-refer [-f] -a <ref> - copie un nouveau référentiel
+  auf-refer -r <ref>      - supprime un référentiel
+  auf-refer -p <ref>      - affiche le chemin d'accès à un référentiel
+  auf-refer -c <ref>      - affiche le contenu d'un référentiel
+  auf-refer [-f] -u       - met à jour les référentiels
+  auf-refer -l            - liste les référentiels copiés
+  auf-refer [-f] -L       - liste les référentiels disponibles
+  auf-refer [-f] -A       - copie tous les référentiels disponibles
+
+L'option -f permet de forcer le rechargement à travers un proxy/cache.
+"""
+
+from sys import argv, exit, stdout, stderr
+from getopt import getopt, GetoptError
+from pwd import getpwnam
+from os import getuid, setgid, setuid
+import aufrefer
+
+if __name__ == '__main__':
+    # interdiction formelle de tourner sous 'root'
+    if getuid() == 0:
+        try:
+            pw = getpwnam(RUN_USER)
+        except KeyError:
+            raise RuntimeError, "L'utilisateur '%s' n'existe pas." % RUN_USER
+        try:
+            setgid(pw.pw_gid)
+            setuid(pw.pw_uid)
+        except OSError:
+            raise RuntimeError, \
+                "Impossible de basculer vers l'utilisateur '%s'.\n" \
+                "Réessayez avec 'sudo' !" % RUN_USER
+
+    try:
+        opts, args = getopt(argv[1:], 'hfa:r:p:c:ulLA', ['help', 'force',
+            'add=', 'remove=', 'path=', 'content=', 'update', 'list',
+            'list-available', 'add-available'])
+    except GetoptError:
+        print USAGE
+        exit(1)
+
+    force = False
+    for opt, arg in opts:
+        if opt in ('-h', '--help'):
+            print USAGE
+            exit(0)
+        elif opt in ('-f', '--force'):
+            force = True
+        else:
+            try:
+                if opt in ('-a', '--add'):
+                    aufrefer.add(arg, force=force)
+                elif opt in ('-r', '--remove'):
+                    aufrefer.remove(arg)
+                elif opt in ('-p', '--path'):
+                    print aufrefer.path(arg)
+                elif opt in ('-c', '--content'):
+                    f = file(aufrefer.path(arg), 'rb')
+                    stdout.write(f.read())
+                    f.close()
+                elif opt in ('-u', '--update'):
+                    aufrefer.update(force=force)
+                elif opt in ('-l', '--list'):
+                    for referentiel in aufrefer.list():
+                        print referentiel
+                elif opt in ('-L', '--list-available'):
+                    list = aufrefer.list_available(force=force)
+                    for referentiel in sorted(list):
+                        print "%-16s : %s" % (referentiel, list[referentiel])
+                elif opt in ('-A', '--add-available'):
+                    aufrefer.add_available(force=force)
+            except RuntimeError, e:
+                print >>stderr, e
+
+    if not opts:
+        print USAGE
+    exit(0)
+
