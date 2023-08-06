@@ -1,0 +1,216 @@
+RoleField Tests
+===============
+
+RoleField is an Archetypes field that sets local roles in the intance object.
+
+Load configuration
+------------------
+
+    >>> from Products.Five.zcml import load_config
+    >>> import Products.Five
+    >>> load_config('configure.zcml', package=Products.Five)
+    >>> import Products.GenericSetup
+    >>> load_config('meta.zcml', Products.GenericSetup)
+    >>> import archetypes.rolefield
+    >>> load_config('configure.zcml', package=archetypes.rolefield)
+
+
+Define an example content type
+------------------------------
+
+The content type definition:
+
+    >>> from Products.Archetypes import public as atapi
+    >>> from archetypes.rolefield import RoleField
+    >>> class MyContent(atapi.BaseContent):
+    ...     portal_type = 'MyContent'
+    ...     schema = atapi.BaseSchema.copy() + atapi.Schema((
+    ...         RoleField(
+    ...             'responsible',
+    ...             role = 'Owner',
+    ...         ),
+    ...     ))
+    >>> atapi.registerType(MyContent, 'archetypes.rolefield')
+
+
+Create demo content
+-------------------
+
+The demo profile installs a new content type in the Plone site ('RoleFieldDemoContent'). We'll use this content type in our tests.
+
+First, create a new instance:
+
+    >>> self.loginAsPortalOwner()
+    >>> self.folder.invokeFactory(id='obj1', type_name='RoleFieldDemoContent')
+    'obj1'
+    >>> from Products.CMFPlone.utils import base_hasattr
+    >>> base_hasattr(self.folder, 'obj1')
+    True
+    >>> obj1 = getattr(self.folder, 'obj1')
+
+
+Basic usage
+-----------
+
+The accessor returns the current local roles:
+
+    >>> obj1.getTeam() == obj1.users_with_local_role('Owner')
+    True
+    >>> obj1.getTeam()
+    ['portal_owner']
+
+By default, 'allow_protected_roles' is set to False:
+
+    >>> field = obj1.getField('team')
+    >>> field.allow_protected_roles
+    False
+    >>> field.protected_roles
+    ('Manager', 'Owner')
+
+Since the handled role ('Owner') is one of the protected roles, the check should fail:
+
+    >>> field.checkProtectedRoles()
+    False
+
+Calling the mutator sets the appropriate local roles.
+
+    >>> obj1.setTeam(('test_user_1_',))
+
+The user is not allowed to change his own protected roles, so it will only add the new one:
+
+    >>> obj1.getTeam()
+    ['test_user_1_', 'portal_owner']
+    >>> obj1.users_with_local_role('Owner')
+    ['test_user_1_', 'portal_owner']
+
+
+Changing 'allow_protected_roles' to True, the check should pass:
+
+    >>> field.allow_protected_roles = True
+    >>> field.checkProtectedRoles()
+    True
+
+
+The user is now able to change his own protected roles:
+
+    >>> obj1.setTeam(('test_user_1_',))
+    >>> obj1.getTeam()
+    ['test_user_1_']
+    >>> obj1.users_with_local_role('Owner')
+    ['test_user_1_']
+
+Field can also be single valued:
+
+    >>> field.multiValued = False
+    >>> obj1.getTeam()
+    'test_user_1_'
+    >>> obj1.setTeam('test_user_1_')
+    >>> obj1.getTeam()
+    'test_user_1_'
+
+
+    >>> field.multiValued = True
+    
+
+Also allows to add new values:
+
+    >>> obj1.setTeam(('test_user_1_', 'portal_owner'))
+    >>> obj1.getTeam()
+    ['test_user_1_', 'portal_owner']
+
+    >>> obj1.setTeam(('portal_owner',))
+    >>> obj1.getTeam()
+    ['portal_owner']
+
+Advanged usage
+--------------
+
+RoleField also allows to specify a different target object, i.e., the object that where local roles will be assigned.
+
+Let's create a new object to use as a target:
+
+    >>> self.folder.invokeFactory(id='obj2', type_name='RoleFieldDemoContent')
+    'obj2'
+    >>> base_hasattr(self.folder, 'obj2')
+    True
+    >>> obj2 = getattr(self.folder, 'obj2')
+    >>> obj2.users_with_local_role('Owner')
+    ['portal_owner']
+
+Now add an expression to define the field target:
+
+    >>> field.target_expression = 'context.getTargetObject()'
+
+
+Object 'obj1' must have a method or attribute with id 'getTargetObject', or we'll get an AttributeError:
+
+    >>> try:
+    ...     obj1.setTeam(('test_user_1_',))
+    ... except AttributeError, e:
+    ...     e.args[0]
+    'getTargetObject'
+
+
+We'll define a new method to return the target object:
+
+    >>> def getTargetObject(self):
+    ...     if base_hasattr(self.aq_parent, 'obj2'):
+    ...         return getattr(self.aq_parent, 'obj2')
+    ...     return None
+
+    >>> from archetypes.rolefield.example.demo import RoleFieldDemoContent
+    >>> RoleFieldDemoContent.getTargetObject = getTargetObject
+    
+Now calling the mutator will affect the target object 'obj2':
+
+    >>> obj1.setTeam(('test_user_1_',))
+
+Role assignment at the context object should be unchanged:
+
+    >>> obj1.users_with_local_role('Owner')
+    ['portal_owner']
+
+The field value should now be the same as the target object role assignment:
+
+    >>> obj1.getTeam() == obj2.users_with_local_role('Owner') == ['test_user_1_']
+    True
+
+
+Vocabularies
+-------------
+
+RoleField also returns a vocabulary of users and/or groups, making it easier to set up out-of-the-box. The default vocabulary returns a list of users in the portal:
+
+    >>> field.principals
+    'users'
+    >>> [u['id'] for u in self.portal.acl_users.searchUsers()]
+    ['test_user_1_']
+
+    >>> field.Vocabulary(content_instance=obj1).items()
+    (('test_user_1_', 'test_user_1_'),)
+
+
+We can get users from specific groups. First lets add a new member to the Reviewers group:
+
+    >>> reviewers_group = self.portal.acl_users.getGroup('Reviewers')
+    >>> reviewers_group.addMember('test_user_1_')
+    >>> reviewers_group.getMemberIds()
+    ['test_user_1_']
+
+Now use property 'filter_groups' to set the groups that should be filtered and get the new vocabulary:
+
+    >>> field.filter_groups = ['Reviewers']
+    >>> field.Vocabulary(content_instance=obj1).items()
+    (('test_user_1_', 'test_user_1_'),)
+
+We can get a vocabulary composed by groups:
+
+    >>> field.principals = 'groups'
+    >>> field.Vocabulary(content_instance=obj1).items()
+    (('AuthenticatedUsers', 'Authenticated Users (Virtual Group)'), ('Administrators', 'Administrators'), ('Reviewers', 'Reviewers'))
+
+We can also get all (users and groups):
+
+    >>> field.principals = 'all'
+    >>> field.Vocabulary(content_instance=obj1).items()
+    (('AuthenticatedUsers', 'Authenticated Users (Virtual Group)'), ('Administrators', 'Administrators'), ('test_user_1_', 'test_user_1_'), ('Reviewers', 'Reviewers'))
