@@ -1,0 +1,3 @@
+__MOOTOOLS_VERSION__ = '1.2.4'
+__DEFAULT_MODULE__ = 'core'
+__DEFAULT_SUFFIX__ = 'yc'
