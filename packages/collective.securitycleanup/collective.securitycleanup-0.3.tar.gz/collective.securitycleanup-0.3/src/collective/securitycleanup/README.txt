@@ -1,0 +1,236 @@
+.. -*-doctest-*-
+
+==========================
+collective.securitycleanup
+==========================
+
+.. contents::
+
+WARNING: Backup your ZODB before using this package!
+
+The Zope 2 security framework is very powerful and one of it's greatest
+strengths.  A lot of it's power comes from it's flexibility.  Exposing
+that power to site adminsitrators often ends up giving them enough
+rope to hang themselves with.  This is exactly what the "Security" tab
+in the ZMI does.
+
+In many cases, a site admin or consultant is faced with the daunting
+task of restoring all the security settings throughout the Zope
+object heirarchy in order to bring sanity and predictability back to
+the site.  The collective.securitycleanup package provides
+GenericSetup handlers for restoring the role mappings and local roles
+back to their defaults.  This handler can be used in combination
+with existing handlers to set role mappings and to re-apply workflow
+security settings to help start the process of security cleanup.
+
+The clean up is performed on all ancestors including the Zope
+application root and by walking down the heirarchy to all descendants.
+This means all descendents of the context the handler is used on and
+all ancestors of the context including the root will be cleaned up.
+It will not clean up siblings or anything else that is not a direct
+ancestor to the context.
+
+The clean up removes all permission settings stored on the instance
+which effectively restores them to code defaults.  The clean up also
+removes all local roles except the "Owner" role for the user returned
+by OFS.interfasces.IOwned.getOwnerTuple() if already assigned.  If the
+object is CMF content with the creators field, the creator is
+synchronized with the owner.  Finally, if the context is a CMF portal,
+the workflow roles mappings will be updated for the whole portal.
+
+Use of this tool will likely only ever be a starting point.  So be
+sure to test thoroughly before deploying to your production server and
+backup your ZODB before using it.
+
+Start with Modified Security Settings
+=====================================
+
+Start with a Zope app some of whose role mappings have been changed
+from the code defaults.  The app also has local roles.
+
+    >>> app
+    <Application at >
+    >>> app.permission_settings('Modify portal content')[0]['acquire']
+    ''
+    >>> app.rolesOfPermission('Modify portal content')
+    [{'selected': '', 'name': 'Anonymous'},
+     {'selected': 'SELECTED', 'name': 'Authenticated'},
+     {'selected': 'SELECTED', 'name': 'Manager'},
+     {'selected': '', 'name': 'Owner'}]
+    >>> app.get_local_roles()
+    (('test_user_1_', ('Owner',)),)
+
+The app contains a folder some of whose role mappings don't acquire
+and have roles assigned and likewise has local roles.
+
+    >>> app.folder
+    <Folder at /folder>
+    >>> app.folder.permission_settings(
+    ...     'Add portal content')[0]['acquire']
+    ''
+    >>> app.folder.rolesOfPermission('Add portal content')
+    [{'selected': '', 'name': 'Anonymous'},
+     {'selected': 'SELECTED', 'name': 'Authenticated'},
+     {'selected': 'SELECTED', 'name': 'Manager'},
+     {'selected': '', 'name': 'Owner'}]
+    >>> app.folder.get_local_roles()
+    (('test_user_1_', ('Manager',)),)
+ 
+The folder also contains a CMF portal which is where the setup
+handlers will be applied.  The portal itself also has changed security
+settings.
+
+    >>> portal
+    <CMFSite at /folder/cmf>
+    >>> portal.permission_settings(
+    ...     'Review portal content')[0]['acquire']
+    ''
+    >>> portal.rolesOfPermission('Review portal content')
+    [{'selected': '', 'name': 'Anonymous'},
+     {'selected': '', 'name': 'Authenticated'},
+     {'selected': 'SELECTED', 'name': 'Manager'},
+     {'selected': '', 'name': 'Member'},
+     {'selected': 'SELECTED', 'name': 'Owner'},
+     {'selected': '', 'name': 'Reviewer'}]
+    >>> portal.get_local_roles()
+    (('portal_owner', ('Owner',)),
+     ('test_user_1_', ('Member',)))
+
+The portal also contains a folder with a document in it both of which
+also have modified security settings.
+
+    >>> portal.folder
+    <PortalFolder at /folder/cmf/folder>
+    >>> portal.folder.permission_settings(
+    ...     'Add portal folders')[0]['acquire']
+    ''
+    >>> portal.folder.rolesOfPermission('Add portal folders')
+    [{'selected': '', 'name': 'Anonymous'},
+     {'selected': '', 'name': 'Authenticated'},
+     {'selected': 'SELECTED', 'name': 'Manager'},
+     {'selected': '', 'name': 'Member'},
+     {'selected': '', 'name': 'Owner'},
+     {'selected': 'SELECTED', 'name': 'Reviewer'}]
+    >>> portal.folder.get_local_roles()
+    (('portal_owner', ('Owner',)),
+     ('test_user_1_', ('Reviewer',)))
+
+    >>> portal.folder.document
+    <Document at /folder/cmf/folder/document>
+    >>> portal.folder.document.permission_settings(
+    ...     'Copy or Move')[0]['acquire']
+    ''
+    >>> portal.folder.document.rolesOfPermission('Copy or Move')
+    [{'selected': '', 'name': 'Anonymous'},
+     {'selected': '', 'name': 'Authenticated'},
+     {'selected': 'SELECTED', 'name': 'Manager'},
+     {'selected': 'SELECTED', 'name': 'Member'},
+     {'selected': '', 'name': 'Owner'},
+     {'selected': '', 'name': 'Reviewer'}]
+    >>> portal.folder.document.get_local_roles()
+    (('portal_owner', ('Owner',)),
+     ('test_user_1_', ('Owner',)))
+    >>> portal.folder.document.listCreators()
+    ('test_user_1_',)
+
+Run the Handler
+===============
+
+The profile contains the collective.securitycleanup.txt file signaling
+that the setup handler should run for that profile.
+
+    >>> import os
+    >>> from collective import securitycleanup
+    >>> os.path.exists(os.path.join(
+    ...     os.path.dirname(securitycleanup.__file__),
+    ...     "profiles", "default", "collective.securitycleanup.txt"))
+    True
+
+Import the profile.
+
+    >>> portal.portal_setup.runAllImportStepsFromProfile(
+    ...     'profile-collective.securitycleanup:default')
+    {...collective.securitycleanup...
+
+Security Settings are Restored to Defaults
+==========================================
+
+Now all the security settings have been restored to the defaults while
+preserving the Owner local role as appropriate.
+
+    >>> app.permission_settings('Modify portal content')[0]['acquire']
+    ''
+    >>> app.rolesOfPermission('Modify portal content')
+    [{'selected': '', 'name': 'Anonymous'},
+     {'selected': '', 'name': 'Authenticated'},
+     {'selected': 'SELECTED', 'name': 'Manager'},
+     {'selected': '', 'name': 'Owner'}]
+    >>> app.get_local_roles()
+    ()
+
+    >>> app.folder
+    <Folder at /folder>
+    >>> app.folder.permission_settings(
+    ...     'Add portal content')[0]['acquire']
+    'CHECKED'
+    >>> app.folder.rolesOfPermission('Add portal content')
+    [{'selected': '', 'name': 'Anonymous'},
+     {'selected': '', 'name': 'Authenticated'},
+     {'selected': 'SELECTED', 'name': 'Manager'},
+     {'selected': '', 'name': 'Owner'}]
+    >>> app.folder.get_local_roles()
+    ()    
+
+    >>> portal
+    <CMFSite at /folder/cmf>
+    >>> portal.permission_settings(
+    ...     'Review portal content')[0]['acquire']
+    'CHECKED'
+    >>> portal.rolesOfPermission('Review portal content')
+    [{'selected': '', 'name': 'Anonymous'},
+     {'selected': '', 'name': 'Authenticated'},
+     {'selected': 'SELECTED', 'name': 'Manager'},
+     {'selected': '', 'name': 'Member'},
+     {'selected': '', 'name': 'Owner'},
+     {'selected': '', 'name': 'Reviewer'}]
+    >>> portal.get_local_roles()
+    (('portal_owner', ('Owner',)),)
+
+    >>> portal.folder
+    <PortalFolder at /folder/cmf/folder>
+    >>> portal.folder.permission_settings(
+    ...     'Add portal folders')[0]['acquire']
+    'CHECKED'
+    >>> portal.folder.rolesOfPermission('Add portal folders')
+    [{'selected': '', 'name': 'Anonymous'},
+     {'selected': '', 'name': 'Authenticated'},
+     {'selected': 'SELECTED', 'name': 'Manager'},
+     {'selected': '', 'name': 'Member'},
+     {'selected': '', 'name': 'Owner'},
+     {'selected': '', 'name': 'Reviewer'}]
+    >>> portal.folder.get_local_roles()
+    (('portal_owner', ('Owner',)),)
+
+    >>> portal.folder.document
+    <Document at /folder/cmf/folder/document>
+    >>> portal.folder.document.permission_settings(
+    ...     'Copy or Move')[0]['acquire']
+    'CHECKED'
+    >>> portal.folder.document.rolesOfPermission('Copy or Move')
+    [{'selected': '', 'name': 'Anonymous'},
+     {'selected': '', 'name': 'Authenticated'},
+     {'selected': 'SELECTED', 'name': 'Manager'},
+     {'selected': '', 'name': 'Member'},
+     {'selected': '', 'name': 'Owner'},
+     {'selected': '', 'name': 'Reviewer'}]
+    >>> portal.folder.document.get_local_roles()
+    (('portal_owner', ('Owner',)),)
+    >>> portal.folder.document.listCreators()
+    ('portal_owner',)
+    >>> portal.folder.document.rolesOfPermission('View')
+    [{'selected': '', 'name': 'Anonymous'},
+     {'selected': '', 'name': 'Authenticated'},
+     {'selected': 'SELECTED', 'name': 'Manager'},
+     {'selected': '', 'name': 'Member'},
+     {'selected': 'SELECTED', 'name': 'Owner'},
+     {'selected': '', 'name': 'Reviewer'}]
