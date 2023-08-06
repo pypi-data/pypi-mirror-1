@@ -1,0 +1,36 @@
+Introduction
+============
+
+The Python Global Interpreter Lock (GIL) poses some limitations on multi 
+processor performance by locking on all pure Python code. Although the
+threading support in twisted is excellent, the GIL was holding back performance
+by essentially keeping the process bound to a single CPU.
+
+In order to get around the GIL, Python brought in the multiprocessing package
+as of version 2.6. The multiprocessing package has been backported to both
+Python 2.4 and 2.5 and is available from the Python Package Index
+(http://pypi.python.org/pypi). The multiprocessing package provides a similar
+interface to the threading libraries provided by Python except that it uses
+processes instead of threads.
+
+This package, twisted.internet.processes, implements a wrapper around the 
+multiprocessing library and provides a method, deferToProcess, that works
+in the same manner as deferToThread.
+
+Implementation
+==============
+
+A process pool is created on the reactor in the same manner that the thread 
+pool is created in the normal reactor when deferToThread is first called. 
+
+Initially, the goal was to use the non-blocking code and callbacks from the
+multiprocessing library to provide a deferToProcess method. Unfortunately, 
+the multiprocessing.Pool.apply_async does not call the callback in the event 
+of a failure. In order to retain failure callbacks, the get method from the 
+asynchronous result set, multiprocessing.pool.AsyncResult, is used by wrapping
+it in a call to deferToThread. The thread is blocked while waiting on the 
+results from the call in a separate process.
+
+Using the multiprocessing.Pool.apply_async to defer to a process imposes some 
+additional requirements on the user code. All arguments and the function itself 
+must be pickleable by the Python cPickle module.
