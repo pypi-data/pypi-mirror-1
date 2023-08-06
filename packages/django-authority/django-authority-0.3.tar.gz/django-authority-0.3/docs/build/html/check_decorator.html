@@ -1,0 +1,217 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Check permissions using the decorator &mdash; django-authority v0.3 documentation</title>
+    <link rel="stylesheet" href="_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '',
+        VERSION:     '0.3',
+        COLLAPSE_MODINDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <link rel="shortcut icon" href="_static/favicon.png"/>
+    <link rel="top" title="django-authority v0.3 documentation" href="index.html" />
+    <link rel="next" title="Check permissions in templates" href="check_templates.html" />
+    <link rel="prev" title="Check permissions in python code" href="check_python.html" /> 
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="check_templates.html" title="Check permissions in templates"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="check_python.html" title="Check permissions in python code"
+             accesskey="P">previous</a> |</li>
+        <li><a href="index.html">django-authority v0.3 documentation</a> &raquo;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  <div class="section" id="check-permissions-using-the-decorator">
+<span id="check-decorator"></span><h1>Check permissions using the decorator<a class="headerlink" href="#check-permissions-using-the-decorator" title="Permalink to this headline">¶</a></h1>
+<div class="admonition note" id="index-0">
+<p class="first admonition-title">Note</p>
+<p class="last">A decorator is not the ultimate painkiller, if you need to deal with
+complex permission handling, take a look at <a class="reference external" href="check_python.html#check-python"><em>Check permissions in python code</em></a>.</p>
+</div>
+<div class="section" id="the-decorator-syntax">
+<h2>The decorator syntax<a class="headerlink" href="#the-decorator-syntax" title="Permalink to this headline">¶</a></h2>
+<p>Lets start with an example permission:</p>
+<div class="highlight-python"><pre>class FlatpagePermission(permissions.BasePermission):
+    label = 'flatpage_permission'
+    checks = ('can_do_foo',)
+
+    def can_do_foo(self):
+        # ...
+
+authority.register(Campaign, FlatpagePermission)</pre>
+</div>
+<p>A decorator for such a simple view would look like:</p>
+<div class="highlight-python"><pre>from authority.decorators import permission_required
+
+@permission_required('flatpage_permission.can_do_foo')
+def my_view(request):
+    # ...</pre>
+</div>
+<p>The decorator automatically takes the user object from the view&#8217;s arguments
+and calls <tt class="docutils literal"><span class="pre">can_do_foo</span></tt>. If this function returns <tt class="xref docutils literal"><span class="pre">True</span></tt>, the view gets
+called, otherwise the user will be redirected to the login page.</p>
+<div class="section" id="passing-arguments-to-the-permission">
+<h3>Passing arguments to the permission<a class="headerlink" href="#passing-arguments-to-the-permission" title="Permalink to this headline">¶</a></h3>
+<p>You can pass any arguments to the permission function. Assumed our permission
+function looks like this:</p>
+<div class="highlight-python"><pre>def can_do_foo(self, view_arg1, view_arg2=None):
+    # ...</pre>
+</div>
+<p>Our decorator can <em>grab</em> the arguments from the view and passes it to the
+permission function. Just take the arguments from the view and place them as
+a string on the decorator:</p>
+<div class="highlight-python"><pre>@permission_required('flatpage_permission.can_do_foo', 'arg1', 'arg2')
+def my_view(required, arg1, arg2):
+    # ...</pre>
+</div>
+<p>What happens under the hood?:</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="c"># Assumed the view gets called like this</span>
+<span class="n">my_view</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="s">&#39;bla&#39;</span><span class="p">,</span> <span class="s">&#39;blubb&#39;</span><span class="p">)</span>
+
+<span class="c"># At the end, the decorator would been called like this</span>
+<span class="n">can_do_foo</span><span class="p">(</span><span class="s">&#39;bla&#39;</span><span class="p">,</span> <span class="s">&#39;blubb&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="passing-queryset-lookups-to-the-permission">
+<h3>Passing queryset lookups to the permission<a class="headerlink" href="#passing-queryset-lookups-to-the-permission" title="Permalink to this headline">¶</a></h3>
+<p>You can pass queryset lookups instead of an argument. This might look a bit
+strange first, but it can save you a ton of code. Instead of passing a simple
+string to the permission function, declare a tuple of the syntax:</p>
+<div class="highlight-python"><pre>(&lt;model&gt;, '&lt;field_lookup&gt;', 'view_arg')
+# .. or ..
+('&lt;appname&gt;.&lt;modelname&gt;', '&lt;field_lookup&gt;', 'view_arg')</pre>
+</div>
+<p>Here is an example:</p>
+<div class="highlight-python"><pre># permission.py
+def can_do_foo(self, flatpage_instance=None):
+    # ...
+
+# views.py
+from django.contrib.flatpages.models import Flatpage
+@permission_required('flatpage_permission.can_do_foo', (Flatpage, 'url__iexact', 'url))
+def flatpage(required, url):
+    # ...</pre>
+</div>
+<p>What happens under the hood? It&#8217;s nearly the same as the <em>simple</em> decorator
+would do, except that the argument is fetched with a <tt class="docutils literal"><span class="pre">get_object_or_404</span></tt>
+statement. So this is the same:</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="p">(</span><span class="n">Flatpage</span><span class="p">,</span> <span class="s">&#39;url__iexact&#39;</span><span class="p">,</span> <span class="s">&#39;url&#39;</span><span class="p">)</span>
+<span class="n">get_object_or_404</span><span class="p">(</span><span class="n">Flatpage</span><span class="p">,</span> <span class="s">&#39;url__iexact&#39;</span><span class="o">=</span><span class="s">&#39;/about/&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">For all available field lookups, please refer to the Django documentation:
+<a class="reference external" href="http://docs.djangoproject.com/en/dev/ref/models/querysets/#id7">Field lookups</a></p>
+</div>
+</div>
+</div>
+<div class="section" id="contributed-decorators">
+<h2>Contributed decorators<a class="headerlink" href="#contributed-decorators" title="Permalink to this headline">¶</a></h2>
+<p>django-authority contributes two decorators, the syntax of both is the same as
+described above:</p>
+<ul class="simple">
+<li>permission_required</li>
+<li>permission_required_or_403</li>
+</ul>
+<p>In a nutshell, <tt class="docutils literal"><span class="pre">permission_required_or_403</span></tt> does the same as <tt class="docutils literal"><span class="pre">permission_required</span></tt>
+except it returns a Http403 Response instead of redirecting to the login page.</p>
+<p>Just like Django&#8217;s <tt class="docutils literal"><span class="pre">500.html</span></tt> and <tt class="docutils literal"><span class="pre">404.html</span></tt> you are able to override the
+template used in the permission denied page. Simply create a <tt class="docutils literal"><span class="pre">403.html</span></tt>
+template in your template directory. It will get the path of the denied page
+passed as the context variable <tt class="docutils literal"><span class="pre">request_path</span></tt>.</p>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="index.html">
+              <img class="logo" src="_static/logo.png" alt="Logo"/>
+            </a></p>
+            <h3><a href="index.html">Table Of Contents</a></h3>
+            <ul>
+<li><a class="reference external" href="">Check permissions using the decorator</a><ul>
+<li><a class="reference external" href="#the-decorator-syntax">The decorator syntax</a><ul>
+<li><a class="reference external" href="#passing-arguments-to-the-permission">Passing arguments to the permission</a></li>
+<li><a class="reference external" href="#passing-queryset-lookups-to-the-permission">Passing queryset lookups to the permission</a></li>
+</ul>
+</li>
+<li><a class="reference external" href="#contributed-decorators">Contributed decorators</a></li>
+</ul>
+</li>
+</ul>
+
+            <h4>Previous topic</h4>
+            <p class="topless"><a href="check_python.html"
+                                  title="previous chapter">Check permissions in python code</a></p>
+            <h4>Next topic</h4>
+            <p class="topless"><a href="check_templates.html"
+                                  title="next chapter">Check permissions in templates</a></p>
+          <div id="searchbox" style="display: none">
+            <h3>Quick search</h3>
+              <form class="search" action="search.html" method="get">
+                <input type="text" name="q" size="18" />
+                <input type="submit" value="Go" />
+                <input type="hidden" name="check_keywords" value="yes" />
+                <input type="hidden" name="area" value="default" />
+              </form>
+              <p class="searchtip" style="font-size: 90%">
+              Enter search terms or a module, class or function name.
+              </p>
+          </div>
+          <script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="check_templates.html" title="Check permissions in templates"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="check_python.html" title="Check permissions in python code"
+             >previous</a> |</li>
+        <li><a href="index.html">django-authority v0.3 documentation</a> &raquo;</li> 
+      </ul>
+    </div>
+    <div class="footer">
+      &copy; Copyright 2009, the django-authority team.
+      Created using <a href="http://sphinx.pocoo.org/">Sphinx</a> 0.6.2.
+    </div>
+  </body>
+</html>
