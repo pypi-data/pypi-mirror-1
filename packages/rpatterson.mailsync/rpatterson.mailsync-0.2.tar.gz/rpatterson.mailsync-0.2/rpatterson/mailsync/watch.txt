@@ -1,0 +1,101 @@
+========
+Watchers
+========
+
+Watchers are responsible for responding to changes to maildirs.
+Watchers use a checker to do anything necessary before passing the
+notification on, such as allowing a MUA or other process to move
+messages.  Finally, the watcher passes the notification on to mswatch.
+
+We start out with a maildir with one contained maildir.
+
+    >>> import os
+    >>> os.listdir(maildir)
+    ['tmp', 'new', '.foo', 'cur']
+    >>> os.listdir(foo)
+    ['tmp', 'new', 'cur']
+
+Setup a watcher on the maildir with a checker that simply prints the
+folders it was told to check.  This watcher will also use a template
+to prepend a prefix to the folder names.  Finally, this watcher also
+translates INBOX into Inbox.
+
+    >>> import subprocess
+    >>> script_watcher = subprocess.Popen(
+    ...     ['inputkill', '--', watcher_script,
+    ...      '--maildir=%s' % maildir, '--template=prefix.%s',
+    ...      '--inbox=Inbox',
+    ...      '--checker=rpatterson.mailsync.testing:PrintingChecker'],
+    ...     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+When the watcher first starts up, it returns a newline signaling that
+it has started up, but before it does so, it tells the mua to do what
+it will on startup.
+
+    >>> print script_watcher.stdout.readline(),
+    PrintingChecker:
+    >>> print script_watcher.stdout.readline(),
+    <BLANKLINE>
+
+Add a file to the contained maildir.  The checker will first check
+that folder and then emit the folder name.
+
+    >>> message = open(os.path.join(foo, 'new', '0'), mode='w')
+    >>> message.write('To: foo\n')
+    >>> message.close()
+
+    >>> print script_watcher.stdout.readline(),
+    PrintingChecker: prefix.foo
+    >>> print script_watcher.stdout.readline(),
+    prefix.foo
+
+The watcher also checks and emits changes to the maildir itself, the
+INBOX.
+
+    >>> message = open(os.path.join(maildir, 'new', '1'), mode='w')
+    >>> message.write('To: bar\n')
+    >>> message.close()
+
+    >>> print script_watcher.stdout.readline(),
+    PrintingChecker: prefix.Inbox
+    >>> print script_watcher.stdout.readline(),
+    prefix.Inbox
+
+Setup a new watcher with a checker that moves a message from the INBOX
+to the subfolder.
+
+    >>> from rpatterson.mailsync import watch, testing
+    >>> moveChecker = testing.MovingChecker(
+    ...     src=os.path.join(maildir, 'new', '0'),
+    ...     dst=os.path.join(foo, 'new', '1'))
+    >>> watcher = watch.Watcher(
+    ...     maildir=maildir, checker=moveChecker)
+    >>> watcher_iter = iter(watcher)
+    >>> print watcher_iter.next(),
+    MovingChecker:
+    <BLANKLINE>
+
+Add a file to the INBOX.
+
+    >>> message = open(os.path.join(maildir, 'new', '0'), mode='w')
+    >>> message.write('To: bar\n')
+    >>> message.close()
+
+First, the watcher will note the addition to the INBOX and will check
+the mail in that folder.  The checker will report this and move the
+file to the subfolder.
+
+    >>> print watcher_iter.next(),
+    MovingChecker: INBOX
+    MovingChecker: moving new/0 to .foo/new/1
+    INBOX
+
+Next, the watcher will note the removal from the INBOX folder and the
+addition to the subfolder and will check the mail in both locations.
+
+    >>> print watcher_iter.next(),
+    MovingChecker: INBOX
+    INBOX
+    >>> print watcher_iter.next(),
+    MovingChecker: foo
+    foo
