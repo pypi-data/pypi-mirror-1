@@ -1,0 +1,121 @@
+#if $redirects_map
+#for $redirect in $redirects_map
+<VirtualHost $bind>
+    ServerName $redirect.servername
+    #if $port == '80'
+    Redirect permanent / http://$host/
+    #else if $port == '443'
+    Redirect permanent / https://$host/
+    #end if
+</VirtualHost>
+
+#end for
+#end if
+<VirtualHost $bind>
+    ServerName $host
+
+    RewriteEngine On
+    RewriteLog $log_dir/rewrite_${host}.log
+    RewriteLogLevel 0
+
+    CustomLog $log_dir/access_${host}.log ${log_format}
+    ErrorLog $log_dir/error_${host}.log
+
+    <Proxy http://$backend.backend_host:$backend.backend_port>
+      Allow from all
+    </Proxy>
+
+    #if $etag
+    FileETag ${etag}
+    #end if
+
+    ${extras}
+
+    #if $filematch_map
+    <IfModule mod_expires.c>
+    #for $fm in $filematch_map
+      <FilesMatch "$fm.match">
+         #if $fm.expires
+         ExpiresActive on
+         ExpiresDefault ${fm.expires}
+         #end if
+         #if $fm.headers
+         #for $header in $fm.headers
+         Header set ${header.header} ${header.value}
+         #end for
+         #end if
+      </FilesMatch>
+
+    #end for
+    </IfModule>
+    #end if
+
+    #if $resources_map
+    #for $resource in $resources_map
+    Alias /${resource.url} ${resource.path}
+    <Directory ${resource.path}>
+       Order allow,deny
+       Allow from all
+    </Directory>
+
+    RewriteRule ^/${resource.url} - [L]
+
+    #end for
+    #end if
+
+    RewriteRule ^(.*)$ - [E=BACKEND_LOCATION:$backend.backend_host]
+    RewriteRule ^(.*)$ - [E=BACKEND_PORT:$backend.backend_port]
+    RewriteRule ^(.*)$ - [E=HOST:$backend.host]
+    RewriteRule ^(.*)$ - [E=PORT:$port]
+    #if $port == '80'
+    RewriteRule ^(.*)$ - [E=PROTO:http]
+    #else if $port == '443'
+    RewriteRule ^(.*)$ - [E=PROTO:https]
+    #end if
+    #if $zope2_vhm_maps
+    #for $path in $zope2_vhm_maps
+    RewriteRule ^(.*)$ - [E=ZOPEPATH:$path]
+    #if $backend._vhm_path
+    RewriteRule  ^/${backend._vhm_path}(.*)$ http://%{ENV:BACKEND_LOCATION}:%{ENV:BACKEND_PORT}/VirtualHostBase/%{ENV:PROTO}/%{ENV:HOST}:%{ENV:PORT}/%{ENV:ZOPEPATH}/VirtualHostRoot/_vh_$backend._vhm_path$1 [L,P]
+    RewriteRule  ^/(.*)$ http://%{ENV:BACKEND_LOCATION}:%{ENV:BACKEND_PORT}/VirtualHostBase/%{ENV:PROTO}/%{ENV:HOST}:%{ENV:PORT}/%{ENV:ZOPEPATH}/VirtualHostRoot/_vh_$backend._vhm_path/$1 [L,P]
+
+    #else
+    RewriteRule  ^/(.*)/$ http://%{ENV:BACKEND_LOCATION}:%{ENV:BACKEND_PORT}/VirtualHostBase/%{ENV:PROTO}/%{ENV:HOST}:%{ENV:PORT}/%{ENV:ZOPEPATH}/VirtualHostRoot/$1 [L,P]
+    RewriteRule  ^/(.*)$ http://%{ENV:BACKEND_LOCATION}:%{ENV:BACKEND_PORT}/VirtualHostBase/%{ENV:PROTO}/%{ENV:HOST}:%{ENV:PORT}/%{ENV:ZOPEPATH}/VirtualHostRoot/$1 [L,P]
+
+    #end if
+    #end for
+    #else
+    RewriteRule  ^/(.*)/$ http://%{ENV:BACKEND_LOCATION}:%{ENV:BACKEND_PORT}/$1 [L,P]
+    RewriteRule  ^/(.*)$ http://%{ENV:BACKEND_LOCATION}:%{ENV:BACKEND_PORT}/$1 [L,P]
+    #end if
+
+    #if $compression
+    # Enable Compression
+    <Location />
+       SetOutputFilter DEFLATE
+
+       # Netscape 4.x has some problems...
+       BrowserMatch ^Mozilla/4 gzip-only-text/html
+
+       # Netscape 4.06-4.08 have some more problems
+       BrowserMatch ^Mozilla/4\.0[678] no-gzip
+
+       # MSIE masquerades as Netscape, but it is fine
+       # BrowserMatch \bMSIE !no-gzip !gzip-only-text/html
+
+       # NOTE: Due to a bug in mod_setenvif up to Apache 2.0.48
+       # the above regex won't work. You can use the following
+       # workaround to get the desired effect:
+       BrowserMatch \bMSI[E] !no-gzip !gzip-only-text/html
+
+       # Don't compress images
+       SetEnvIfNoCase Request_URI \
+       \.(?:gif|jpe?g|png)$ no-gzip dont-vary
+
+       # Make sure proxies don't deliver the wrong content
+       Header append Vary User-Agent env=!dont-vary
+    </Location>
+    #end if
+
+</VirtualHost>
