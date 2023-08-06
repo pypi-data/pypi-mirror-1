@@ -1,0 +1,103 @@
+#!/usr/bin/python
+#
+# MACHINA
+# by pdp
+# GNUCITIZEN (http://www.gnucitizen.org)
+#
+
+#
+# STANDARD IMPORTS
+#
+import os
+import sys
+import logging
+import optparse
+
+#
+# MACHINA IMPORTS
+#
+import machina
+
+#
+# SET PROG
+#
+prog = os.path.basename(sys.argv[0])
+
+#
+# PARSE COMMAND LINE OPTIONS
+#
+parser = optparse.OptionParser(prog=prog, version=machina.machina.__version__)
+parser.add_option('-m', '--machina', action='store', type='string', dest='machina', metavar='FILE', help='specify machina')
+parser.add_option('-d', '--directory', action='store', type='string', dest='directory', metavar='DIR', help='specify working directory')
+parser.add_option('-D', '--define', action='append', type='string', dest='define', metavar='PAIR', help='define variable')
+
+(options, args) = parser.parse_args()
+
+#
+# PRINT ERROR AND EXIT
+#
+def print_error_and_exit(msg):
+	sys.stderr.write('%s: error: %s\n' % (prog, msg))
+	sys.exit(1)
+
+#
+# SET THE WORKING DIRECTORY
+#
+if options.directory:
+	try: os.chdir(options.directory)
+	except Exception, e:
+		print_error_and_exit('directory not found')
+
+#
+# DEFINE VARIABLES
+#
+variables = {}
+if options.define:
+	for pair in options.define:
+		tokens = str(pair).split('=', 1)
+
+		variables[tokens[0].strip()] = tokens[1]
+
+#
+# SET LOGGER
+#
+handler = logging.StreamHandler()
+handler.setLevel(logging.DEBUG)
+handler.setFormatter(machina.LogFormatter())
+
+logging.getLogger().addHandler(handler)
+logging.getLogger().setLevel(logging.DEBUG)
+
+#
+# LOAD AND EXECUTE MACHINA FILE
+#
+def load_and_execute_machina_file(file_path):
+	globals = variables
+	globals.update({'__builtins__':__builtins__, 'task':machina.task})
+
+	execfile(file_path, globals)
+
+	machina.task.launch_tasks()
+
+#
+# SET MACHINA
+#
+if options.machina:
+	try:
+		load_and_execute_machina_file(options.machina)
+		sys.exit(0)
+	except Exception, e:
+		print_error_and_exit(str(e))
+else:
+	for file_path in ['Machinafile', 'Machinafile.py']:
+		if os.path.isfile(file_path):
+			try:
+				load_and_execute_machina_file(file_path)
+				sys.exit(0)
+			except Exception, e:
+				print_error_and_exit(str(e))
+
+#
+# OR ELSE...
+#
+print_error_and_exit('no Machinafile or Machinafile.py found')
