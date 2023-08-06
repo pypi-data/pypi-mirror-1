@@ -1,0 +1,122 @@
+==================
+example.blobattype
+==================
+*Migrate custom AT-based content types to use blobs.*
+
+
+Introduction
+------------
+
+The purpose of this example package is to demonstrate how to migrate custom
+AT-based content types that use FileFields to use `plone.app.blob
+<http://pypi.python.org/pypi/plone.app.blob/>`_ based blobs.
+
+
+Migrating your own AT-based content types.
+------------------------------------------
+
+In order to migrate your own content types to use blobs you need to perform
+the following steps:
+
+Use a schema extender to replace the FileField(s) of your content type with
+BlobField(s). For detailed information on how to do so please look into the
+`archetypes.schemaextender
+<http://pypi.python.org/pypi/archetypes.schemaextender/>`_ documentation. In
+essence this breaks down to:
+
+- Creating an *extension* field::
+
+    class ExtensionBlobField(ExtensionField, BlobField):
+        """ derivative of blobfield for extending schemas """
+
+- Extending your content type to use the blob fields. So for instance if your
+  content type ExampleATType has two fields, namely *afile* and *secondfile*
+  you need to register an extender looking like::
+
+    class ExampleATTypeExtender(object):
+        adapts(IExampleATType)
+        implements(ISchemaExtender)
+
+        fields = [
+            ExtensionBlobField('afile',
+                widget=atapi.FileWidget(
+                    label=_(u"A file"),
+                    description=_(u"Some file"),
+                ),
+                required=True,
+                validators=('isNonEmptyFile'),
+            ),
+            ExtensionBlobField('secondfile',
+                widget=atapi.FileWidget(
+                    label=_(u"Some other file"),
+                    description=_(u"Some other file"),
+                ),
+                required=True,
+                validators=('isNonEmptyFile'),
+            ),
+        ]
+
+        def __init__(self, context):
+            self.context = context
+
+        def getFields(self):
+            return self.fields
+
+  If you want to be able to still use your content type without
+  *plone.app.blob* on instances that do not support blobs yet, you will find
+  it convenient to register the adapter with a conditional such as::
+
+    <adapter
+        zcml:condition="installed plone.app.blob"
+        factory=".exampleattype.ExampleATTypeExtender" />
+
+  This way, if plone.app.blob is not installed your original FileField(s) will
+  be used.
+
+- Migrate using the *plone.app.blob* helper method. The method will
+  automatically find all blob-aware fields as defined by the schema extender
+  above and perform migrations for those. It is as simple as::
+
+    from plone.app.blob.migrations import migrate
+    def migrateExampleATTypes(context):
+        return migrate(context, 'ExampleATType')
+
+- If you need, you can write your own migrator. Use `Products.contentmigration
+  <http://pypi.python.org/pypi/Products.contentmigration/>`_ to do so, and for
+  the example above the migrator would like this::
+
+    class ExampleATTypeMigrator(BaseInlineMigrator):
+        """ example migrator """
+
+        src_portal_type = 'ExampleATType'
+        src_meta_type = 'ExampleATType'
+        dst_portal_type = 'ExampleATType'
+        dst_meta_type = 'ExampleATType'
+
+        fields_map = {
+            'afile': None,
+            'secondfile': None,
+        }
+
+        def migrate_data(self):
+            f = self.obj.getField('afile').get(self.obj)
+            self.obj.getField('afile').getMutator(self.obj)(f)
+            f = self.obj.getField('secondfile').get(self.obj)
+            self.obj.getField('secondfile').getMutator(self.obj)(f)
+
+        def last_migrate_reindex(self):
+            self.obj.reindexObject()
+
+  You will also need to provide a *walker* iterating over your objects, in
+  this case::
+
+    def migrateExampleATTypes(context):
+        portal = getToolByName(context, 'portal_url').getPortalObject()
+        migrator = ExampleATTypeMigrator
+        walker = CustomQueryWalker(portal, migrator, full_transaction=True)
+        savepoint(optimistic=True)
+        walker.go()
+        return walker.getOutput()
+
+  You can now call *migrateExampleATTypes* from a view or a script to convert
+  your objects.
