@@ -1,0 +1,22 @@
+import unittest
+from zope.testing.doctestunit import DocTestSuite
+from zope.testing import doctest
+
+base_modulestring = 'plonehrm.personaldata.'
+modules = (
+    'notifications.utils',
+    )
+
+OPTIONFLAGS = (doctest.ELLIPSIS |
+               doctest.NORMALIZE_WHITESPACE)
+
+
+def test_suite():
+    suites = unittest.TestSuite()
+    for mod in modules:
+        mod = base_modulestring + mod
+        suite = DocTestSuite(module=mod,
+                             optionflags=OPTIONFLAGS)
+        suites.addTest(suite)
+
+    return suites
