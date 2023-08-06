@@ -1,0 +1,140 @@
+Introduction
+============
+
+This package contains various plugins for kss
+
+1. Redirect request
+2. Calendar
+3. Javascript value setter
+4. Autocomplete input box
+5. Javascript confirmation
+6. Alert text
+7. Dynamic positioning
+8. Open window
+9. Refresh page
+10. Remove attribute
+
+USAGE
+-----
+
+1. Redirect request
+*******************
+
+Redirect request is a simple plugin to redirect to a given url
+
+2. Calendar
+***********
+
+Render date picker is a global plugin that provides simple calendar
+
+One mandatory parameter - id of the input box to fill the selected date
+Example usage::
+
+    #created_calendar:click {
+        evt-click-preventdefault: True;
+        action-client: renderDatePicker;
+        renderDatePicker-fieldName: created;
+    }
+
+3. Value setter
+***************
+
+Value setter set a value of an input box using javascript ( changes actual current form values )
+
+target_element is id of an node that can receive the value (i.e. input)
+source_element is id of an node that is the value taken from
+value is any value that is send to the target_element
+conditional_element and conditional_attribute - the value is set only if conditional_attribute of conditional_element is true
+
+At least one of the sources has to be provided
+ 
+Example usage::
+
+    #kss-attr-activity-field:click {
+        evt-click-preventdefault: True;
+        action-client: valueSetter;
+        valueSetter-target_element: activity_name_field;
+        valueSetter-source_element: project_name_field;
+    }
+
+4. Autocomplete
+***************
+
+Autocomplete plugin displays limited list as you type into inpt box
+An input which is desired to use autocomplete has to have a attribute vocab with a list of possible values
+
+Autocomplete triggers an event "selected" when an item is chosen either using mouse or a keyboard
+
+from kss.plugin.cns.plugins.autocomplete import autocomplete_escape
+vocab = autocomplete_esacae(DisplayList(...))
+
+Example usage::
+
+    .kss-autocomplete:focus {
+        evt-focus-preventdefault: False;
+        action-client: autocomplete;
+        autocomplete-vocab_list: nodeAttr(vocab);
+    }
+
+    .kss-autocomplete:selected {
+        action-client: alert;
+        alert-message: 'An item was seleted';
+    }
+
+Note the usage of a class - the vocab is passed by kss attribute so the same kss definition can be used for more elements.
+
+5. Javascript confirmation
+**************************
+
+Confirm is a plugin to display a confirmation dialog with given message and on confirmation triggers an "confirmed" event
+
+Example usage::
+
+    button.removeItem:click {
+        evt-click-preventdefault: True;
+        evt-click-allowbubbling: True;
+        action-client: confirm;
+        confirm-text: "Do you really want to remove this item?";
+    }
+
+    button.removeItem:confirmed {
+        action-client: alert;
+        alert-message: "Deleting the item"
+    }
+
+6. Alert text
+*************
+
+Alert text is a simple plugin to display a javascript alert box, in opposite to core alert plugin it does not display any debug info
+
+7. Dynamic positioning
+**********************
+
+Dynamcic positioning is a plugin to center selected node to an absolute position in a window - simple implementation for ie6 problems with fixed position
+
+Parameters: left, top
+Can be either position in pixels or "center" that finds the center of a window
+
+8. Open window
+**************
+
+A simple plugin to open a new window with given url.
+
+Parameters: url
+
+Available as a kss command so it can be invoked within kss server action
+
+
+9. Refresh page
+***************
+
+A simple plugin to reload page. Available as a kss command so it can be invoked within kss server action
+
+10. Remove attribute
+********************
+
+A plugin to remove attributes. Core plugins only support adding attributes and removing by setting their values to empty.
+For instance it was not possible to remove attribute "disabled".
+
+Parameters: name - a name of the attribute to remove
+
