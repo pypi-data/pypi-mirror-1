@@ -1,0 +1,69 @@
+Introduction
+============
+
+This package provides a PloneTestCase-like class for running Selenium tests.
+
+It requires that you have Selenium RC (http://selenium-rc.openqa.org) running whilst the tests are running. The current version of the Python 'selenium' library (which is an automatically installed dependency of this package) seems to work best with Selenium RC 0.9.2. Once downloaded, run it with:
+
+ $ java -jar selenium-server.jar
+ 
+See test_example.py for an example of a test that sets up a Plone site and runs a simple test.
+
+See testcase.py for more information about the convenience methods contained in the SeleniumTestCase base class and the layer it uses to configure Selenium. You may want to use a custom layer derived from this one if you need to manage the Selenium Server information more carefully.
+
+Note that you can set the following environment variables to affect where the Selenium driver looks for the Selenium RC server:
+
+ - SELENIUM_HOST, the hostname (default to "localhost")
+ - SELENIUM_PORT, the hostname (default to "localhost")
+ - SELENIUM_BROWSER, the browser to launch (defaults to "\*chrome")
+ 
+Usage
+=====
+
+A simple test case may look like this::
+
+    from collective.ploneseltest import SeleniumTestCase
+
+    class DocumentTestCase(SeleniumTestCase):
+    
+        def afterSetUp(self):
+            """Setup for each test
+            """
+            self.setRoles(['Manager'])
+            self.login_user()
+        
+        def test_create_document(self):
+            self.selenium.click("//dl[@id='plone-contentmenu-factories']/dt/a/span[1]")
+            self.selenium.click("document")
+            self.wait()
+            self.selenium.type("title", "Some document")
+            self.selenium.click("name=form_submit")
+            self.wait()
+            self.failUnless(self.selenium.is_text_present("Some document"))
+
+The usual test setup and suite boilerplate has been omitted.
+
+See http://selenium-rc.openqa.org/python.html for more information about available client commands. You may also be interested in http://selenium-ide.openqa.org.
+ 
+Gotchas
+=======
+
+It is possible to set up state in an afterSetUp() method, e.g.::
+
+    def afterSetUp(self):
+        self.setRoles(['Manager'])
+        ...
+        
+However, you should explicitly commit all changes before starting to run Selenium commands::
+
+    import transaction ; transaction.commit()
+    
+To make this easier, there is a convenience self.open() method. This will open up the Plone site or a page within it. It will perform a commit before doing so, in case there are uncommitted changes.
+
+Note that self.open() is used by self.login_user(), thus to start each test as a logged-in Manager user, you would do::
+
+    def afterSetUp(self):
+        """Setup for each test
+        """
+        self.setRoles(['Manager'])
+        self.login_user()
