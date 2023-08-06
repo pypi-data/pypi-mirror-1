@@ -1,0 +1,95 @@
+Description of xm.hitcounter:
+
+  Version -- $Id: xm.hitcounter.txt 2169 2008-05-01 23:36:09Z anatoly $
+
+  URL -- $URL: svn://ukraine.acmediax.com/repos/Products/xm.hitcounter/trunk/xm/hitcounter/doc/xm.hitcounter.txt $
+
+  Annotation:
+
+    Simple and efficient hit counter tool. Fully based on mxmCounter
+    (http://www.mxm.dk/products/public/mxmCounter). I've included it temporarily
+    into buildout so there is possibility to see it's code in parts/productdistros/mxmCounter
+
+  Realization idea:
+
+    Main idea is to store counting data in tool object (in ZODB), but to avoid
+    conflicts on frequent writes, do rare by using intermediate memory dict to
+    to store counts.
+
+    Product consists of such parts:
+
+      - HitCounter tool class (derived from UniqueObject and PersistentDict)
+
+        HitCounter implements interface IHitCounter:
+
+        - def count(obj, use_view=False, request=None) - count object view,
+                                                         where use_view - flag to
+                                                         use view name as id
+
+        - def getCount(obj, use_view=False, request=None) - get count for
+                                                         object view,
+                                                         where use_view - flag to
+                                                         use view name as id
+
+        - saveInterval -- max interval in hits, we can store in memory (length of counts dict)
+
+        - saveIntervalTime -- max interval in seconds, we can leave counts in memory unsaved
+
+        As in mxmCounter, we have module variables:
+
+           - counts -- to store unsaved counts. Dict will be in form:
+
+            {'object_id': count}
+
+           - unsaved_counts -- to store overall saved in memory count, initialized to 0;
+
+           - first_unsaved -- time when first unsaved hit was, initialized to None;
+
+        This variable should be initialized in module's top
+
+        As in successor product, on count method we use cookies to store flag not
+        to count views twice.
+
+        count method algorithm:
+
+          - get uid from object and if use_view is set, then add view name to it
+
+          - check if cookie is set, if so, then return
+
+          - set appropriate cookie
+
+          - with thread lock:
+
+            - add count in counts dict (if first element, then set first_unsaved to now())
+
+            - inc unsaved_counts variable
+
+            - check unsaved_counts > saveInterval, if so then do flush method
+
+            - check now() - first_unsaved > saveIntervalTime, if so then do flush method
+
+         flush (internal) method algorithm:
+
+          - with thread lock:
+
+            - iterate on counts and add to tool's internal persistent dict values
+              from it, means get old value from tool, and add value from counts
+
+            - set unsaved_counts to 0
+
+            - set first_unsaved to None
+
+         getCount method algorithm:
+
+            - get count from tool's dict
+
+            - get count from counts memory dict
+
+            - return sum of values
+
+      - View Adapter with IHitCounter interface to ease access in templates
+
+        examples can be got from xm.mylimburgcfg/xm/mylimburgcfg/adapters/
+
+    PS: should be covered by tests of course
+        examples: xm.ranking, xm.contentcollections, etc
