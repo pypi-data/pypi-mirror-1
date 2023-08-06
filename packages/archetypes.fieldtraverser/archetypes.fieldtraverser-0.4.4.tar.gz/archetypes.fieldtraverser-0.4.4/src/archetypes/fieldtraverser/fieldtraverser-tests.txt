@@ -1,0 +1,255 @@
+archetypes.fieldtraverser tests
+===============================
+
+Start this test like so:
+./bin/instance test -s archetypes.fieldtraverser -t fieldtraverser-tests.txt
+or
+./bin/test -s archetypes.fieldtraverser -t fieldtraverser-tests.txt
+
+Set things up
+-------------
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+
+The following is useful when writing and debugging testbrowser tests. It lets
+us see error messages properly.
+
+    >>> browser.handleErrors = False
+    >>> self.portal.error_log._ignored_exceptions = ()
+
+We then turn off the various portlets, because they sometimes duplicate links
+and text (e.g. the navtree, the recent recent items listing) that we wish to
+test for in our own views. Having no portlets makes things easier.
+
+    >>> from zope.component import getMultiAdapter, getUtility
+    >>> from plone.portlets.interfaces import IPortletManager
+    >>> from plone.portlets.interfaces import IPortletAssignmentMapping
+
+    >>> left_column = getUtility(IPortletManager, name=u"plone.leftcolumn")
+    >>> left_assignable = getMultiAdapter((self.portal, left_column), IPortletAssignmentMapping)
+    >>> for name in left_assignable.keys():
+    ...     del left_assignable[name]
+
+    >>> right_column = getUtility(IPortletManager, name=u"plone.rightcolumn")
+    >>> right_assignable = getMultiAdapter((self.portal, right_column), IPortletAssignmentMapping)
+    >>> for name in right_assignable.keys():
+    ...     del right_assignable[name]
+
+
+Test the patch
+==============
+
+Import and apply patch
+    >>> from archetypes.fieldtraverser import patch
+
+Test if patch is applied to ImageField
+    >>> from Products.Archetypes.Field import ImageField
+    >>> ImageField.tag.__module__
+    'archetypes.fieldtraverser.patch'
+
+Test if patch is applied to ImageWidget
+    >>> from Products.Archetypes.Widget import ImageWidget
+    >>> ImageWidget._properties['macro']
+    'widget-image-fieldtraverser'
+
+Test if patch is applied to FileWidget
+    >>> from Products.Archetypes.Widget import FileWidget
+    >>> FileWidget._properties['macro']
+    'widget-file-fieldtraverser'
+
+Browser Tests
+=============
+
+Login
+    >>> from Products.PloneTestCase.setup import portal_owner, default_password
+    >>> browser.open(portal_url + '/login_form')
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+
+
+Test an Image Type
+------------------
+
+Create an Image
+    >>> browser.open(portal_url + '/createObject?type_name=Image')
+
+    >>> ctrl_img = browser.getControl(name='image_file')
+    >>> ctrl_img
+    <Control name='image_file' type='file'>
+    >>> ctrl_img.add_file(test_jpg, 'image/jpeg', 'plone.jpg')
+
+    >>> ctrl_desc = browser.getControl(name='description')
+    >>> ctrl_desc
+    <Control name='description' type='textarea'>
+    >>> ctrl_desc.value = 'I am a description'
+
+    >>> ctrl_sub = browser.getControl(name='form_submit')
+    >>> ctrl_sub
+    <SubmitControl name='form_submit' type='submit'>
+    >>> ctrl_sub.click()
+
+View the image
+    >>> browser.open(portal_url + '/plone.jpg/view')
+    >>> '++atfield++image-preview' in browser.contents
+    True
+
+    >>> browser.open(portal_url + '/plone.jpg/image_view_fullscreen')
+    >>> '++atfield++image' in browser.contents
+    True
+
+With this browser test, the edit-view shows only a link to the image
+instead the image-preview itself
+    >>> browser.open(portal_url + '/plone.jpg/edit')
+    >>> '++atfield++image' in browser.contents
+    True
+
+Test for traversing to fields
+    >>> browser.open(portal_url + '/plone.jpg/++atfield++title')
+    >>> browser.contents
+    'plone.jpg'
+
+    >>> browser.open(portal_url + '/plone.jpg/++atfield++description')
+
+Within the testbrowser environment we could not get 'I am a description'
+for this specific BaseUnit wrapped field. FieldTraverser returns the index_html
+for BaseUnit wrapped fields, but index_html writes directly to the response
+stream. Here we just got an empty response body.
+#    >>> browser.contents
+#    'I am a description'
+    >>> browser.headers['status']
+    '200 OK'
+    >>> browser.headers['content-type']
+    'text/plain'
+    >>> browser.headers['content-length']
+    '18'
+
+    >>> browser.open(portal_url + '/plone.jpg/++atfield++image-icon')
+    >>> browser.contents
+    '\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00...
+
+
+Test a File Type
+----------------
+
+Create a File
+    >>> browser.open(portal_url + '/createObject?type_name=File')
+
+    >>> ctrl = browser.getControl(name='file_file')
+    >>> ctrl.add_file(test_file, 'text/plain', 'testfile.txt')
+
+    >>> ctrl = browser.getControl(name='description')
+    >>> ctrl.value = 'Test file description'
+
+    >>> ctrl = browser.getControl(name='form_submit')
+    >>> ctrl.click()
+
+View the file
+    >>> browser.open(portal_url + '/testfile.txt/view')
+    >>> '++atfield++file' in browser.contents
+    True
+
+In file-edit mode, there is no link displayed by default.
+So there is no need to test for ++atfield++file.
+
+Test for traversing to fields
+    >>> browser.open(portal_url + '/testfile.txt/++atfield++title')
+    >>> browser.contents
+    'testfile.txt'
+
+    >>> browser.open(portal_url + '/testfile.txt/++atfield++description')
+    >>> browser.headers['status']
+    '200 OK'
+    >>> browser.headers['content-type']
+    'text/plain'
+    >>> browser.headers['content-length']
+    '21'
+
+    >>> browser.open(portal_url + '/testfile.txt/++atfield++file')
+    >>> browser.contents
+    'test\n'
+
+
+Test an Event
+-------------
+
+Create an Event
+    >>> browser.open(portal_url + '/createObject?type_name=Event')
+
+    >>> ctrl = browser.getControl(name='title')
+    >>> ctrl.value = 'testevent'
+
+    >>> ctrl = browser.getControl(name='description')
+    >>> ctrl.value = 'Test event description'
+
+    >>> ctrl = browser.getControl(name='startDate_year')
+    >>> ctrl.value = '2008',
+    >>> ctrl = browser.getControl(name='startDate_month')
+    >>> ctrl.value = '10',
+    >>> ctrl = browser.getControl(name='startDate_day')
+    >>> ctrl.value = '20',
+    >>> ctrl = browser.getControl(name='startDate_hour')
+    >>> ctrl.value = '10',
+    >>> ctrl = browser.getControl(name='startDate_minute')
+    >>> ctrl.value = '00',
+    >>> ctrl = browser.getControl(name='startDate_ampm')
+    >>> ctrl.value = 'AM',
+
+    >>> ctrl = browser.getControl(name='endDate_year')
+    >>> ctrl.value = '2008',
+    >>> ctrl = browser.getControl(name='endDate_month')
+    >>> ctrl.value = '10',
+    >>> ctrl = browser.getControl(name='endDate_day')
+    >>> ctrl.value = '21',
+    >>> ctrl = browser.getControl(name='endDate_hour')
+    >>> ctrl.value = '11',
+    >>> ctrl = browser.getControl(name='endDate_minute')
+    >>> ctrl.value = '30',
+    >>> ctrl = browser.getControl(name='endDate_ampm')
+    >>> ctrl.value = 'PM',
+
+    >>> ctrl = browser.getControl(name='contactName')
+    >>> ctrl.value = 'test contact'
+
+    >>> ctrl = browser.getControl(name='eventType_keywords:lines')
+    >>> ctrl.value = 'cat1\ncat2\ncat3'
+
+    >>> ctrl = browser.getControl(name='form_submit')
+    >>> ctrl.click()
+
+
+Test for traversing to fields
+    >>> browser.open(portal_url + '/testevent/++atfield++title')
+    >>> browser.contents
+    'testevent'
+
+    >>> browser.open(portal_url + '/testevent/++atfield++description')
+    >>> browser.headers['status']
+    '200 OK'
+    >>> browser.headers['content-type']
+    'text/plain'
+    >>> browser.headers['content-length']
+    '22'
+
+    >>> browser.open(portal_url + '/testevent/++atfield++startDate')
+    >>> browser.contents
+    '2008/10/20 10:00:00 GMT+2'
+
+    >>> browser.open(portal_url + '/testevent/++atfield++endDate')
+    >>> browser.contents
+    '2008/10/21 23:30:00 GMT+2'
+
+    >>> browser.open(portal_url + '/testevent/++atfield++contactName')
+    >>> browser.contents
+    'test contact'
+
+    >>> browser.open(portal_url + '/testevent/++atfield++eventType')
+    >>> browser.contents
+    "(u'cat1', u'cat2', u'cat3')"
+
+
+Give me a test console
+----------------------
+#    >>> interact( locals() )
