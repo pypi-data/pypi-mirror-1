@@ -1,0 +1,139 @@
+TODO: Browser tests for Emaillogin
+=============================
+
+  >>> from Products.Five.testbrowser import Browser
+  >>> from Products.PloneTestCase.setup import portal_owner, default_password
+  >>> browser = Browser()
+  >>> browser.handleErrors = False
+  >>> portal_url = self.portal.absolute_url()
+  
+Set up a test user with a email that can login.
+
+  >>> test_username = 'user1'
+  >>> test_user_fullname = 'User 1'
+  >>> test_user_pass = 'secret'
+  >>> test_user_email = 'user1@host.com'
+  
+  >>> test_username2 = 'user2'
+  >>> test_user_fullname2 = 'User 2'
+  >>> test_user_pass2 = 'secret2'
+  >>> test_user_email2 = 'user2@host.com'  
+  
+  >>> self.portal.portal_membership.addMember(test_username, test_user_pass, ['Member'], [], {'email': test_user_email, 'fullname': test_user_fullname})
+
+Now we will try to register as new user via the web but with an email that already exists. Plone doesn't allow this by default
+so we need to enable that:
+
+  >>> browser.open(portal_url)
+  >>> browser.getLink('Log in').click()
+  >>> browser.getControl(name='__ac_name').value = portal_owner
+  >>> browser.getControl(name='__ac_password').value = default_password
+  >>> browser.getControl(name='submit').click()
+  >>> "You are now logged in" in browser.contents
+  True
+
+Let's go directly to the security control panel:
+
+  >>> browser.open('http://nohost/plone/@@security-controlpanel')
+  >>> browser.getControl(name="form.enable_self_reg").value = "on"
+  >>> browser.getControl(name="form.enable_user_pwd_choice").value = "on"
+  >>> browser.getControl(name="form.actions.save").click()
+
+Log out and then join:
+
+  >>> browser.getLink('Log out').click()
+  >>> "You are now logged out" in browser.contents
+  True
+
+  >>> browser.open(portal_url + '/join_form')
+  >>> browser.getControl('Full Name').value = test_user_fullname2
+  >>> browser.getControl('User Name').value = test_username2
+  >>> browser.getControl('E-mail').value = test_user_email
+  >>> browser.getControl('Password').value = test_user_pass2
+  >>> browser.getControl('Confirm password').value = test_user_pass2
+  >>> browser.getControl('Register').click()
+  >>> 'The email you selected is already in use or is not valid. Please use another.' in browser.contents
+  True
+  
+We got the error that we wanted. Change to a unique email and try again.
+  
+  >>> browser.open(portal_url + '/join_form')
+  >>> browser.getControl('Full Name').value = test_user_fullname2
+  >>> browser.getControl('User Name').value = test_username2
+  >>> browser.getControl('E-mail').value = test_user_email2
+  >>> browser.getControl('Password').value = test_user_pass2
+  >>> browser.getControl('Confirm password').value = test_user_pass2
+  >>> browser.getControl('Register').click()
+  >>> 'You have been registered' in browser.contents
+  True
+  
+  
+Make sure that we can login as the first user.
+
+  >>> browser.open(portal_url)
+  >>> browser.getLink('Log in').click()
+  >>> form = browser.getForm(id='login_form')
+  >>> form.getControl('Login Name').value = test_username
+  >>> form.getControl('Password').value =  test_user_pass
+  >>> form.getControl('Log in').click()
+  
+  >>> "You are now logged in" in browser.contents and test_user_fullname in browser.contents
+  True
+
+First we will try to login with a wrong email and correct password.
+  
+  >>> browser.getLink('Log out').click()
+  >>> test_user_fullname in  browser.contents
+  False
+  
+  >>> browser.open(portal_url)
+  >>> browser.getLink('Log in').click()
+  >>> form = browser.getForm(id='login_form')
+  >>> form.getControl('Login Name').value = test_user_email + 'fail'
+  >>> form.getControl('Password').value =  test_user_pass
+  >>> form.getControl('Log in').click()
+  
+  >>> "You are now logged in" in browser.contents and test_user_fullname in browser.contents
+  False
+
+That failed as it should, now try with the correct email, but wrong password.
+
+  >>> browser.open(portal_url)
+  >>> browser.getLink('Log in').click()
+  >>> form = browser.getForm(id='login_form')
+  >>> form.getControl('Login Name').value = test_user_email
+  >>> form.getControl('Password').value =  test_user_pass + 'fail'
+  >>> form.getControl('Log in').click()
+  
+  >>> "You are now logged in" in browser.contents and test_user_fullname in browser.contents
+  False
+
+That failed as it should as well, now try with the correct email and correct password.
+
+  >>> browser.open(portal_url)
+  >>> browser.getLink('Log in').click()
+  >>> form = browser.getForm(id='login_form')
+  >>> form.getControl('Login Name').value = test_user_email
+  >>> form.getControl('Password').value =  test_user_pass
+  >>> form.getControl('Log in').click()
+  
+  >>> "You are now logged in" in browser.contents and test_user_fullname in browser.contents
+  True
+
+It worked to login nicely. Great. now we are logged in as "User 1"
+Now let's try to change the email to a email that is already registered for another user.
+
+  >>> browser.open(portal_url + '/personalize_form')
+  >>> browser.getControl(name = 'fullname').value = test_user_fullname
+  >>> browser.getControl(name = 'email').value = test_user_email2
+  >>> browser.getControl(name = 'form.button.Save').click()
+  >>> 'The email you selected is already in use or is not valid. Please use another.' in browser.contents
+  True
+  
+  >>> browser.open(portal_url + '/personalize_form')
+  >>> browser.getControl(name = 'fullname').value = test_user_fullname
+  >>> browser.getControl(name = 'email').value = 'new' + test_user_email
+  >>> browser.getControl(name = 'form.button.Save').click()
+  >>> 'Your personal settings have been saved.' in browser.contents
+  True
+  
