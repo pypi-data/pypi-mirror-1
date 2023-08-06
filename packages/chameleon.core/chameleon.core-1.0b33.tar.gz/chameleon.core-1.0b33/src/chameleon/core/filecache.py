@@ -1,0 +1,146 @@
+import os
+import sys
+import logging
+
+try:
+    from hashlib import sha1 as sha
+except ImportError:
+    from sha import sha
+
+try:
+    import imp
+except ImportError:
+    imp = None
+
+logger = logging.getLogger("Chameleon")
+
+class TemplateRegistry(object):
+    version = None
+    
+    def __init__(self):
+        self.registry = {}
+
+    def __getitem__(self, key):
+        return self.registry[key]
+
+    def __contains__(self, key):
+        return key in self.registry
+
+    def add(self, key, source):
+        _locals = {}
+        exec source in _locals
+        bind = _locals['bind']
+        func = bind()
+        func.source = source
+        self.registry[key] = func
+
+    def clear(self):
+        self.registry.clear()
+        self.registry['version'] = self.version
+
+    def purge(self):
+        self.clear()
+
+class TemplateCache(TemplateRegistry):
+    def __init__(self, filename, version):
+        self.filename = filename
+        self.version = version
+        self.registry = {}
+        try:
+            self.load()
+        except IOError:
+            self.clear()
+
+    def __getitem__(self, key):
+        render = self.registry[key]
+        if render is None:
+            self.load()
+            render = self.registry.get(key)
+            if render is None:
+                filename, timestamp = key[-2]
+                raise KeyError(filename)
+        return render
+
+    def __len__(self):
+        return len(self.registry) - 1
+
+    @property
+    def module_filename(self):
+        return self.filename + os.extsep + "py"
+
+    @property
+    def cmodule_filename(self):
+        return self.filename + os.extsep + "pyc"
+
+    def load(self):
+        filename = self.module_filename
+
+        try:
+            if imp is not None:
+                module_name = "chameleon_%s" % sha(filename).hexdigest()
+                f = open(filename, 'r')
+                try:
+                    if module_name in sys.modules:
+                        del sys.modules[module_name]
+                    module = imp.load_source(module_name, filename, f)
+                finally:
+                    f.close()
+                registry = module.registry
+            else:
+                _locals = {}
+                execfile(filename, _locals)
+                registry = _locals['registry']
+
+            version = registry['version']
+            if version != self.version:
+                raise ValueError("Version mismatch: %s != %s" % (
+                    version, self.version))
+        except (AttributeError, ValueError, TypeError), e:
+            logger.warn(
+                "Error loading cache for %s (%s)." % (self.filename, str(e)))
+            registry = {}
+            
+        self.registry.clear()
+        self.registry.update(registry)
+        
+    def add(self, key, source):
+        """Add template to module.
+
+        We simply append the function definition (closure inside a
+        ``bind`` method) and update the registry, e.g.
+
+          >>> registry[key] = bind()
+
+        """
+
+        self.unlink()
+
+        if os.path.exists(self.module_filename):
+            module = open(self.module_filename, 'a')
+        else:
+            module = open(self.module_filename, 'w')
+            self.initialize(module)
+        try:
+            module.write(source+'\n')
+            module.write("registry[%s] = bind()\n" % repr(key))
+        finally:
+            module.close()
+
+        self.registry[key] = None
+
+    def initialize(self, module):
+        module.write("registry = dict(version=%s)\n" % repr(self.version))
+
+    def purge(self):
+        self.clear()
+        self.unlink()
+        
+        # write empty file
+        module = open(self.module_filename, 'w')
+        self.initialize(module)
+        module.close()
+
+    def unlink(self):
+        # unlink an existing byte-code compiled file
+        if os.path.exists(self.cmodule_filename):
+            os.unlink(self.cmodule_filename)
