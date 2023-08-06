@@ -1,0 +1,57 @@
+/* -*- sql -*-
+
+   postgres specific registered procedures,
+   require the plpythonu language installed
+
+*/
+
+CREATE OR REPLACE FUNCTION sys_path_init(text, text) RETURNS int AS $$
+    #/* use '||'.join(exportpath) since plpython doesnt support sequence as argument */
+    import sys
+    GD['sys_path'] = [p for p in args[0].split('||') if not p in sys.path]
+    GD['cubes_path'] = args[1].split('||')
+    return 1
+$$ LANGUAGE plpythonu;;
+
+
+CREATE OR REPLACE FUNCTION version_data(bigint) RETURNS bytea AS $$
+    import sys
+    try:
+        plan = SD['plan']
+    except KeyError:
+        #/* first init sys.path */
+        sys.path = GD['sys_path'] + sys.path
+        #/* then set cubes path */
+        import cubes
+        cubes.__path__ = GD['cubes_path']
+        #/* then prepare and cache plan to get versioned file information from a
+        # version content eid */
+        plan = plpy.prepare(
+            'SELECT REV.cw_revision, REV.cw_from_repository, VF.cw_directory, VF.cw_name '
+            'FROM cw_VersionContent as VC, cw_VersionedFile as VF, cw_Revision as REV '
+            'WHERE VC.cw_eid=$1 AND VC.cw_content_for=VF.cw_eid AND VC.cw_from_revision=REV.cw_eid',
+            ['bigint'])
+        SD['plan'] = plan
+    row = plpy.execute(plan, [args[0]])[0]
+    repoeid = row['cw_from_repository']
+    from cubes.vcsfile import bridge
+    #/* use GD as repo handler cache to share them among plpython function */
+    try:
+        repohdlr = GD[repoeid]
+    except KeyError:
+        reporow = plpy.execute('SELECT R.cw_type, R.cw_path, R.cw_encoding '
+                               'FROM cw_Repository as R '
+                               'WHERE R.cw_eid=%s' % repoeid)[0]
+        repohdlr = bridge.build_repository_handler(repoeid, reporow['cw_type'],
+	                                           reporow['cw_path'],
+						   reporow['cw_encoding'])
+        GD[repoeid] = repohdlr
+        plpy.warning('built repository handler',
+	             reporow['cw_type'], reporow['cw_path'], repoeid)
+    data = repohdlr.file_content(row['cw_directory'], row['cw_name'], row['cw_revision'])
+    #/* XXX due to plpython bug we have to replace some characters... */
+    data = data.replace("\\", r"\134").replace("\000", r"\000").replace("'", r"\047") #'
+    return data
+$$ LANGUAGE plpythonu
+/* WITH(ISCACHABLE) XXX does postgres handle caching of large data nicely */
+;;
