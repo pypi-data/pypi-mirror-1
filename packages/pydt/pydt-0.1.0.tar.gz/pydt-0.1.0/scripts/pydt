@@ -1,0 +1,113 @@
+#!/usr/bin/env python
+"""
+Utility for reading numerical data, extract column and perform simple
+modification of the data. Type pydt --help for details.
+
+"""
+
+
+import sys
+import optparse
+import dtt.dataops as ops
+import dtt.rwcols as rc
+
+
+def cmlparse():
+    """Return a parsered command line, distinguishing between arguments
+    and options
+    """
+
+    usage = "usage: %prog [options] argument [pars]"
+    version = "%prog 0.1.0"
+    parser = optparse.OptionParser(usage, version=version)
+    parser.add_option("-f", "--file", dest="inputfile",
+        help="use INPUTFILE as input")
+    parser.add_option("-c", "--cols", dest="cols",
+        help="operate in column COLS only, COLS=c1[:c2]")
+    parser.add_option("-o", "--out", dest="outputfile",
+        help="stores output in OUTPUTFILE")
+
+    options, args = parser.parse_args()
+
+    modifiers = {'clip' : 2, 'norm':1, 'shift': 1, 'base': 1}
+    trimlist = args
+
+    parseredargs = []
+
+    while trimlist != []:
+        newarg = trimlist[0]
+        if newarg not in modifiers.keys():
+            text ="%s is not a valid option" % newarg
+            parser.error(text)
+        try:
+            npars = modifiers[newarg]
+            pars = [float(trimlist[i]) for i in range(1,npars+1)]
+        except IndexError:
+            text = "argument %s requires %d parameters" % (newarg,
+                npars)
+            parser.error(text) 
+        except ValueError:
+            text ="argument %s requires numerical parameters" % newarg
+            parser.error(text)
+
+        parseredargs.append((newarg, pars))
+
+        trimlist = trimlist[npars+1:]
+
+    if options.cols:
+        try:
+            rc.parsecolstring(options.cols)
+        except ValueError:
+            parser.error("-c invalid argument COLS (c1:c2:c3...)")
+
+    return options, parseredargs
+
+
+def main(opt, args):
+    """Executes the commands parsered by the command line
+    """
+
+#Data input
+
+    if opt.inputfile is None:
+        input = sys.stdin
+    else:
+        try:
+            input = open(inputfile, 'r')
+        except IOError:
+            sys.stderr.write("Error opening INPUTFILE: %s\n" 
+                % opt.inputfile)
+            sys.exit(1)
+
+    data = rc.readcols(input, opt.cols)
+
+#Data operation
+
+    for a in args:
+        if a[0] == 'clip':
+            data = ops.window(data, *a[1])
+
+        elif a[0] == 'base':
+            data = ops.subs(data, 1, a[1][0])
+
+        elif a[0] == 'shift':
+            data = ops.subs(data, 0, -a[1][0])
+
+        elif a[0] == 'norm':
+            data = ops.norm(data, 1, a[1][0])
+
+# Data output
+
+    if opt.outputfile is None:
+        output = sys.stdout
+    else:
+        output = open(opt.outputfile, 'w')
+
+    rc.writecols(output, data)
+
+
+if __name__ == '__main__':
+
+    opt, args = cmlparse()
+    main(opt, args)
+
