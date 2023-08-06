@@ -1,0 +1,53 @@
+from zope.interface import Interface, Attribute
+from zope.viewlet.interfaces import IViewletManager
+from plone.portlets.interfaces import IPortletDataProvider
+
+
+class IEmployeeView(Interface):
+    def extraItems():
+        """ Return all non hrm specific items
+        """
+
+
+class IWorkLocationView(Interface):
+    def alternative_views():
+        """List of dictionaries with url, title to alternative views.
+        """
+
+    def active_employees():
+        """Return list of active employees.
+        """
+
+    def inactive_employees():
+        """Return list of inactive employees.
+        """
+
+    def extraItems():
+        """Return items that are not in one of the other categories.
+        """
+
+    def managementFiles():
+        """Return list of management files.
+        """
+
+
+class ISubstitutionView(Interface):
+
+    params = Attribute("Keys and substitution values")
+    keys = Attribute("Keys available for substitution")
+
+
+class ISubstitutionPortlet(IPortletDataProvider):
+    pass
+
+
+class IEmployeeDetails(IViewletManager):
+    """A viewlet manager that renders all viewlets registered by extension
+    modules.
+    """
+
+
+class IEmployeesOverview(IViewletManager):
+    """A viewlet manager that renders all viewlets registered by extension
+    modules.
+    """
