@@ -1,0 +1,190 @@
+Automatically reload changed Python files - putting agility back to Plone development.
+
+collective.autorestart monitors Python .py files for changes and triggers a reload when you edit the files. 
+This way you don't need to restart Plone server between your code edit runs.
+collective.autorestart uses `plone.reload <http://pypi.python.org/pypi/plone.reload/0.10>`_ package to perform the actual code replacement.
+
+File system is monitored using inotify interface which is only available for Linux. 
+The future versions will support other operating systems as long as somebody contributes the file system monitoring 
+code or gives the author a new computer running operating system X.
+
+Features
+--------
+
+* Recursively detect changes in ZCML and Python files which are known to Zope
+
+* Automatically trigger reload when files are changed (saved)
+
+* Audio playback depending on whether the restart succeed or failed - you can go back to your files and you don't need to watch the terminal
+
+Dependencies
+------------
+
+* plone.reload
+
+* pyinotify for monitoring files (tested with version 0.8.6)
+
+* pygame for audio playback (optional)
+
+* `threadframe <http://pypi.python.org/pypi/threadframe>`_ (optional)
+
+pyinotify relies on Linux kernel feature called inotify and thus
+this application only works on Linux currently. However, it should be
+trivial to port it for other platforms. 
+
+
+Installation 
+-------------
+
+pyinotify depends on ctypes package and currently (04/2009) ctypes package is broken in PyPi. Manual installation needed::
+
+	wget http://kent.dl.sourceforge.net/sourceforge/ctypes/ctypes-1.0.2.tar.gz
+	tar -xzf ctypes-1.0.2.tar.gz 
+	cd ctypes-1.0.2/
+	python2.4 setup.py build
+	sudo python2.4 setup.py install
+	
+	
+Buildout setup
+==============
+
+Add the following egg to your buildout.cfg. 
+
+	eggs =
+		collective.autorestart
+		
+	...
+	
+	zcml = 
+		collective.autorstart
+		
+Rerun buildout. 
+
+Adding sound effect support
+===========================
+
+Optionally `pygame <http://www.pygame.org>`_ egg is needed for sound support. Pygame depends on SDL development library::
+
+	sudo apt-get install libsdl1.2-dev libsdl-mixer1.2-dev 
+	
+Add the following egg to your buildout.cfg::
+
+	eggs =
+		pygame
+		
+Rerun buildout. Answer yes when pygame barks about missing libraries.
+
+Usage
+-----
+
+Start Plone normally in the foreground using command::
+
+	bin/instance fg 
+	
+Zope must be in debug mode to collective.autorestart to function. collective.autorestart is not 
+loaded for production mode or unit testing.
+		
+collective.autorestart might not be effective immediately, since its sets the monitor on files on background.
+When it starts, you'll see a message in your terminal::
+
+	collective.autorestart Monitoring 3477 paths 12591 files for changes
+
+Edit any Python files. When you press save you should output in your terminal::
+
+	2009-04-15 04:11:37 INFO collective.autorestart Detected file system change:/home/moo/workspace/y-trunk/x/browser/views.py/
+	2009-04-15 04:11:37 INFO collective.autorestart Reloading Plone
+	2009-04-15 04:12:06 INFO collective.autorestart Reloaded done, report:Code reloaded:
+
+		...x/browser/views.py	
+				
+If you have pygame installed you will also hear a sound effect depending on whether code reload succeeded or failed.
+
+Logging
+=======
+
+If you are experiencing problems with collective.autorestart you can adjust log levels in logger.py.
+
+Set level to logging.DEBUG to get verbose output from the product to see whether your Python modules are correctly marked as reloadable.
+
+IDE compatiblity
+----------------
+
+At least Eclispe/PyDev does not like the idea of signal handlers and pyinotify running in the same application, causing deadlocks on SIGTERM. I have
+updated `idelauncher.py <http://plone.org/documentation/tutorial/developing-plone-with-eclipse/ide-compatible-launcher-script>`_
+to reflect this changes. This forces to Zope shutdown hard when stopped from IDE - Data.fs is not flushed.
+
+
+Thread debugger
+---------------
+
+Starting collective.autorestart 0.2 there is an internal thread dead lock debugger. Deadlock debugger is enabled
+always (even if the file change monitor is not running). You need to install threadframe egg::
+
+	eggs =
+		threadframe
+		
+		
+Thread debugger is mostly useful when Zope refuses to shutdown when collective.autorestart is running (see known issues).
+You might find it also handy to debug other Zope deadlock problems.
+In this case you can take a thread dump to your working folder *zope-threaddump.txt* file using the command::
+
+	killall -SIGUSR1 python2.4
+	
+If the application does not respond to SIGUSR1 it is totally foobared and killing Python interpreter with SIGKILL is 
+the only way to handle the situation.
+
+   
+Known issues
+-------------
+
+- Sometimes Zope process seem to fall into Zombie state (kind of dead, but blocks the HTTP port or Data.fs access). In this case, manually
+  kill Zope::
+  
+  	killall -SIGKILL python2.4
+  	
+  It appears to stuck in atexit.py / Py_Finalize() / Thread.join() - possible pyinotify bug. It happens both with Notifier and ThreadedNotifier::
+  
+		#0  0xb7f10430 in __kernel_vsyscall ()
+		#1  0xb7ecf405 in sem_wait@@GLIBC_2.1 () from /lib/tls/i686/cmov/libpthread.so.0
+		#2  0x080eadc0 in PyThread_acquire_lock (lock=0x95f5070, waitflag=1) at ../Python/thread_pthread.h:313
+		#3  0x080eee7c in lock_PyThread_acquire_lock (self=0xb7d31f20, args=0xb7cf502c) at ../Modules/threadmodule.c:63
+		#4  0x080c01d2 in PyEval_EvalFrame (f=0xfcf23f4) at ../Python/ceval.c:3568
+		#5  0x080c0d1e in PyEval_EvalCodeEx (co=0xb79f16a0, globals=0xb79d468c, locals=0x0, args=0xfbe0050, argcount=1, kws=0xfbe0054, kwcount=0, defs=0xb79f9258, 
+		    defcount=1, closure=0x0) at ../Python/ceval.c:2741
+		#6  0x080bffae in PyEval_EvalFrame (f=0xfbdfef4) at ../Python/ceval.c:3661
+		#7  0x080c0d1e in PyEval_EvalCodeEx (co=0xb79f6220, globals=0xb79d468c, locals=0x0, args=0xfb5dc30, argcount=1, kws=0xfb5dc34, kwcount=0, defs=0xb79f93b8, 
+		    defcount=1, closure=0x0) at ../Python/ceval.c:2741
+		#8  0x080bffae in PyEval_EvalFrame (f=0xfb5dadc) at ../Python/ceval.c:3661
+		#9  0x080c0d1e in PyEval_EvalCodeEx (co=0xb79f6720, globals=0xb79d468c, locals=0x0, args=0xb79d71f8, argcount=1, kws=0xe433218, kwcount=0, defs=0x0, defcount=0, 
+		    closure=0x0) at ../Python/ceval.c:2741
+		#10 0x0810c00e in function_call (func=0xb79faa74, arg=0xb79d71ec, kw=0xb7bc2bdc) at ../Objects/funcobject.c:548
+		#11 0x0805b417 in PyObject_Call (func=0x80, arg=0xb79d71ec, kw=0xb7bc2bdc) at ../Objects/abstract.c:1795
+		#12 0x080bd8b6 in PyEval_EvalFrame (f=0xfbd092c) at ../Python/ceval.c:3845
+		#13 0x080c0d1e in PyEval_EvalCodeEx (co=0xb79f6d60, globals=0xb79d40b4, locals=0x0, args=0xb7cf5038, argcount=0, kws=0x0, kwcount=0, defs=0x0, defcount=0, 
+		    closure=0x0) at ../Python/ceval.c:2741
+		#14 0x0810bf21 in function_call (func=0xb79fad84, arg=0xb7cf502c, kw=0x0) at ../Objects/funcobject.c:548
+		#15 0x0805b417 in PyObject_Call (func=0x80, arg=0xb7cf502c, kw=0x0) at ../Objects/abstract.c:1795
+		#16 0x080b941c in PyEval_CallObjectWithKeywords (func=0xb79fad84, arg=0xb7cf502c, kw=0x0) at ../Python/ceval.c:3435
+		#17 0x080e5cd9 in Py_Finalize () at ../Python/pythonrun.c:1568
+		#18 0x08057569 in Py_Main (argc=1, argv=0xbfc11ae4) at ../Modules/main.c:513
+		#19 0x08056d62 in main (argc=Cannot access memory at address 0x80
+		) at ../Modules/python.c:23
+		
+  `Debugging help <http://www.python.org/~jeremy/weblog/031003.html>`_ 
+  
+  
+- Newly created files are not automatically picked up
+
+- If you quickly edit and save several files some changes might go unnoticed
+
+- ZCML reload seems to invalidate some zope.component utility classes (vocabularies) - do hard restart if you get ComponentErrors after reload
+
+
+Author
+------
+
+Mikko Ohtamaa 
+
+`Twinapex Research, Oulu, Finland <http://www.twinapex.com>`_ - High quality Python hackers for hire
+
+
