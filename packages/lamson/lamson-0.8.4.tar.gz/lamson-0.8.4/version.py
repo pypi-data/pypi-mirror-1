@@ -1,0 +1,1 @@
+VERSION={'version': '0.8.4', 'rev': ['102', 'zedshaw@zed-shaws-macbook.local-20090517024936-585o8ygih1n99unm']}

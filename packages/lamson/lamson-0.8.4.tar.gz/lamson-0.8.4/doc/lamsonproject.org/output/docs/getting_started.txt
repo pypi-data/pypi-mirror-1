@@ -1,0 +1,311 @@
+From: Zed
+Title: Getting Started With Lamson
+
+Lamson is designed to work like modern web application frameworks like Django, TurboGears,
+ASP.NET, Ruby on Rails, and whatever PHP is using these days.  At every design decision 
+Lamson tries to emulate terminology and features found in these frameworks.  This Getting Started
+document will help you get through that terminology, get you started running your first
+lamson application, and walk you through the code you should read.
+
+In total it should take you about 30 minutes to an hour to complete.  If you just want
+to try Lamson, at least go through the 30 *second* introduction given first.
+
+
+h2. The 30 Second Introduction
+
+If you have Python and easy_install already, then try this out:
+
+<pre>
+$ easy_install lamson
+$ lamson gen -project mymailserver
+$ cd mymailserver
+$ lamson syncdb
+$ lamson start
+$ lamson log -queue run/queue -port 8899
+$ nosetests
+$ lamson help -for send
+$ lamson send -sender me@mydomain.com -to test@test.com \
+        -subject "My test." -body "Hi there." -port 8823
+$ less logs/lamson.log
+$ mutt -F muttrc
+$ lamson stop -ALL run
+</pre>
+
+You now have a working base Lamson setup ready for you to work on with the following installed:
+
+* Lamson and all dependencies (SQLAlchemy, Mako, nosetests)
+* Code for your project in mymailserver.  Look in app/handlers and config/settings.py
+* Two initial tests that verify your server is not an open relay and forwards mail in tests/handlers/open_relay_tests.py
+* A "logger" server running on port 8899 that dumps all of its mail into run/queue
+* A config script for mutt (muttrc) that you can use to inspect the run/queue *and* also send mail using Lamson's *send* command.
+
+
+h2. Important Terminology
+
+If you are an old SMTP guru and/or you've never written a web application with a modern web framework, then 
+some of the terminology used in Lamson may seem confusing.  Other terms may just confuse you or scare you 
+because they sound complicated.  I tried my best to make the concepts used in Lamson understandable and the
+code that implements them easy to read.  In fact, you could probably read the code to Lamson in an evening
+and understand how everything works.
+
+Experience though has taught me that nobody reads the code, even if it is small.  Therefore, here are 
+the most important concepts you should know to get a grasp of Lamson and how it works.
+
+* MVC(Model View Controller) -- Model View Controller is a design methodology used in web application frameworks
+where the data (model), presentation (view), and logic (controller) layers of the application are strictly 
+separated.
+* FSM(Finite State Machine) -- Finite State Machine is a special Lamson handler that stores it's state
+between executions.  Each time it runs it will perform an action based on what it is send *and* what
+it was doing last.  FSM in computer science class are overly complex, but in Lamson they are as easy
+to use as a _return_ statement.
+* Template -- Lamson generates the bodies of it's messages using Templates, which are text files
+that have parts that get replaced with variables you pass in.  Templates are converted to their
+final form with a process called *rendering*.
+* Relay -- The *relay* for a Lamson server is where Lamson delivers it's messages.  Usually the Relay
+is a smart tougher server that's not as smart, but very good at delivering mail.  Lamson can also be
+run as a Relay for testing purposes.
+* Receiver -- Lamson typically runs as the Receiver of email.  If you are familiar with a web application setup,
+then Lamson is the inverse.  Instead of Lamson runing "behind" an Apache or Nginx server, Lamson runs "in front"
+of an SMTP server like Postfix.  It listens on port 25, handles the mail it should, and forwards the rest
+to the Relay.  This makes Lamson much more of a Proxy or filter server.
+* Queue -- Lamson can also do all of its processing off a queue.  In this setup you would have your normal
+mail server dump all mail to a maildir queue, and then tell Lamson to process messages out of there.  This
+can be combined with the usual Receiver+Relay configuration for processing messages that might take a long
+time.
+* Maildir -- A standard created for the qmail project with stores mail in a directory such that you can access
+the mail atomically and store it on a shared disk without conflicts or locking.
+
+
+
+h2. Managing Your Server
+
+Your Lamson application is now running inside the Lamson Python server.  This is a very simple server based on Python's
+"smtpd":http://docs.python.org/library/smtpd.html and "asyncore":http://docs.python.org/library/asyncore.html libraries.
+
+bq. If you want to know more about how it operates, take a look at the _lamson/server.py_ file in the source distribution.
+
+You'll need to use a few Lamson commands to manage the server.  You already experienced them in the 
+30 second introduction, and you can review "them all":/docs/lamson_commands.html or see them
+by using the _lamson help_ command.
+
+Right now you have Lamson running on port 8823 and a "lamson logger" running on 8899.  Before we
+learn how to manage them and what they do, open up the _config/settings.py_ file and take a look
+at the following lines:
+
+<pre>
+relay = { "host": "localhost", "port": 8899, "debug": 1}
+receiver = { "host": "localhost", "port": 8823}
+</pre>
+
+Your file probably has some comments telling you what these do, but it's important to understand
+how they work.
+
+The _receiver_ setting is used by the _lamson start_ command to figure out where to listen
+for incoming SMTP connections.  In a real installation this would be port *25* on your external
+IP address.  It's where the internet talks to your server.
+
+The _relay_ setting is used by Lamson to figure out where to forward message replies (responses)
+for real delivery.  Normally this would be a "smart host" running a more established server
+like "Postfix":http://www.postfix.org/ or "Exim":http://www.exim.org/ to do the grunt work
+of delivering to the final recipients.
+
+bq. Lamson can deliver directly, but that is a waste of resources.  In the same way
+you wouldn't have Python or Ruby deliver video, static text, or images over HTTP, you 
+don't want Lamson bothering with the nasty business of delivering mail to people.
+
+You probably don't have another SMTP server running, and even if you did, it'd
+be a pain to configure it for development purposes.  You'd have to setup aliases, new
+mail boxes, restart it all the time, and other annoyances.
+
+For development, what we want is our own little private SMTP relay, and since Lamson can
+also deliver mail, that is what we get with the command:
+
+<pre>
+$ lamson log -queue run/queue -port 8899
+</pre>
+
+This tells Lamson to run as a "logging server", which doesn't actually deliver
+any mail.  If you don't give a -queue option, then it will log to _logs/lamson.log_
+and print out any emails it receives.  In this case we actually want the logger to
+dump mail it receives into the _run/queue_ Maildir.  That's what -queue does in this
+command.
+
+bq. Lamson uses Maildir by default since it is the most reliable and fastest mail queue
+format available.  It could also store mail messages to any queue supported by Python's
+"mailbox":http://docs.python.org/library/mailbox.html library.  If you were
+adventurous you could also use a RDBMS, but that's just silly.
+
+h3. Stopping Lamson
+
+The PID(Process ID) files are stored in the _run_ directory.  Here's a sample
+session where I stop all the running servers:
+
+<pre>
+$ ls -l run/*.pid
+-rw-r--r--  1 zedshaw  staff  5 May 16 16:41 run/log.pid
+-rw-r--r--  1 zedshaw  staff  5 May 16 16:41 run/smtp.pid
+
+$ lamson stop -ALL run
+Stopping processes with the following PID files: ['run/log.pid', 'run/smtp.pid']
+Attempting to stop lamson at pid 1693
+Attempting to stop lamson at pid 1689
+</pre>
+
+You can also pass other options to the stop command to just stop one server.  Use
+_lamson help -for stop_ to see all the options.
+
+h3. Starting Lamson Again
+
+Hopefully you've been paying attention and have figured out how to restart lamson and the
+logging server.  Just in case, here it is again:
+
+<pre>
+$ lamson start
+$ lamson log -queue run/queue -port 8899
+</pre>
+
+You should also look in the logs/lamson.log file to see that it actually started.  The
+other files in the logs directory contain messages dumped to various output methods (like
+Python's stdout and stderr).  Periodically, if the information you want is not in 
+logs/lamson.log then it is probably in the other files.
+
+bq.  You can change your logging configuration by eddin the logging line your config/settings.py file.
+
+
+h2. Other Useful Commands
+
+You should read the "available commands":/docs/lamson_commands.html documentation to get an
+overview, and you can also use _lamson help_ to see them at any time.
+
+h3. send
+
+The first useful command is _lamson send_, which lets you send mail to SMTP servers (not
+just Lamson) and watch the full SMTP protocol chatter.  Here's a sample:
+
+<pre>
+$ lamson send -port 25 -host zedshaw.com -debug 1 \
+    -sender tester@test.com -to zedshaw@zedshaw.com \
+    -subject "Hi there" -body "Test body."
+send: 'ehlo zed-shaws-macbook.local\r\n'
+reply: '502 Error: command "EHLO" not implemented\r\n'
+reply: retcode (502); Msg: Error: command "EHLO" not implemented
+send: 'helo zed-shaws-macbook.local\r\n'
+reply: '250 localhost.localdomain\r\n'
+reply: retcode (250); Msg: localhost.localdomain
+send: 'mail FROM:<tester@test.com>\r\n'
+reply: '250 Ok\r\n'
+reply: retcode (250); Msg: Ok
+send: 'rcpt TO:<zedshaw@zedshaw.com>\r\n'
+reply: '250 Ok\r\n'
+reply: retcode (250); Msg: Ok
+send: 'data\r\n'
+reply: '354 End data with <CR><LF>.<CR><LF>\r\n'
+reply: retcode (354); Msg: End data with <CR><LF>.<CR><LF>
+data: (354, 'End data with <CR><LF>.<CR><LF>')
+send: 'Content-Type: text/plain; charset="us-ascii"\r\nMIME-Version: 1.0\r\nContent-Transfer-Encoding: 7bit\r\nSubject: Hi there\r\nFrom: tester@test.com\r\nTo: zedshaw@zedshaw.com\r\n\r\n.\r\n'
+reply: '250 Ok\r\n'
+reply: retcode (250); Msg: Ok
+data: (250, 'Ok')
+send: 'quit\r\n'
+reply: '221 Bye\r\n'
+reply: retcode (221); Msg: Bye
+</pre>
+
+Using this helps you debug your Lamson server by showing you the exact protocol sent
+between you and the server.  It is also a useful SMTP server debug command by itself.
+
+bq.  When you use the supplied muttrc you'll be configured to use Lamson's sendmail
+(not *send) command as your delivery command.  This lets you use mutt as a complete development
+tool with minimal configuration.
+
+h3. queue
+
+The _lamson queue_ command lets you investigate and manipulate the run/queue (or any maildir).
+You can pop a message off, get a message by its key, remove a message by its key, count the messages,clear the queue, list keys in the queue.   It gives you a lower level view of the queue than
+mutt would, and lets you manipulate it behind the scenes.
+
+h3. restart
+
+Lamson does reload the code of your project when it receives a new request (probably too
+frequently), but if you change the _config/settings.py_ file then you need to restart.
+Easiest way to do that is with the restart command.
+
+h3. deq
+
+A more advanced configuration is to have Lamson or another mail server deliver pending
+messages to the run/queue, and then you run a "dequeue server" that processes the 
+messages in it.  A dequeue server is great for processing that would take too long or
+needs to be distributed.  Using it is outside the scope of this manual, but you can 
+check its help and look at the mailinglist sample to see how you might do this.
+
+h3. syncdb
+
+Lamson uses the SQLAlchemy library as its ORM layer, and also needs a working database
+to process any requests.  This is because the FSM(Finite State Machine) system needs to
+store status information in a table in the database.
+
+To get your database start use the _lamson syncdb_ command, and if you make changes to
+your model rerun it.
+
+
+h2. Testing It With Mutt
+
+Mutt is a very handy testing tool, and with our development Lamson setup we can use the included
+muttrc to fake Mutt out.  Here's the muttrc:
+
+<pre>
+set mbox_type=Maildir
+set folder="run/queue"
+set mask="!^\\.[^.]"
+set mbox="run/queue"
+set record="+.Sent"
+set postponed="+.Drafts"
+set spoolfile="run/queue"
+set sendmail="/usr/local/bin/lamson sendmail -port 8823 -host 127.0.0.1"
+</pre>
+
+This tells Mutt to use the _run/queue_ directory as a Maildir queue for its
+inbox.  It also configures it to use the _/usr/local/bin/lamson_ command
+to do the delivery.  Using the _lamson sendmail_ command (NOT *send) lets
+Mutt deliver to different ports and servers in a development situation.
+
+bq.  Another example of how difficult SMTP systems are to use is the fact that
+you have to reconfigure the postfix main.cf to make the sendmail command use a 
+different port or server.  There are no command line options to specify it.
+
+
+h2. Walking Through The Code
+
+
+Coming soon....
+
+h2. Writing A Unit Test
+
+
+Coming soon....
+
+
+h2. Making It Do Something
+
+
+Coming soon....
+
+h2. Other Examples
+
+Next you'll want to sink your teeth in a bigger example.  Go grab "the source distribution .tar.gz":/releases/ and 
+extract it so you can get at the examples:
+
+<pre>
+$ tar -xzvf lamson-VERSION.tar.gz
+$ cd lamson-VERSION
+$ cd examples/mailinglist
+</pre>
+
+You are now in the mailinglist example.  Using what you've learned so far you can start reviewing the code
+and finding out how a working example operates.
+
+h2. Getting Help
+
+As you work through this documentation, send your questions "to me":/contact.html and I'll try to help
+you.
+

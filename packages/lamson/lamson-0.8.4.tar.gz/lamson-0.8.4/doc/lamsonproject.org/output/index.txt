@@ -1,0 +1,131 @@
+From: Zed
+Title: Lamson The Python SMTP Server
+
+We've all been there, mucking around in the sendmail m4 macros trying one more time to get the
+damn mailing list to update for the new users.  Every time we say, "This sucks, I want to rewrite
+this stupid thing."  Yet, when we're done, we simply crawl back to our caves covered in our sendmail
+wounds.
+
+Lamson's goal is to put an end to the hell that is "e-mail application development".  Rather than
+stay stuck in the 1970's, Lamson adopts modern web application framework design and uses a proven
+scripting language (Python).
+
+<pre>
+def UNKNOWN (session, message, list, action, host):
+  if action == "unsubscribe":
+      logging.debug("Ignoring user who doesn't really exist.")
+  elif action == "subscribe":
+      confirm_address = "%s-confirm-%d@%s" % (list, random.randint(0,10000),
+              host)
+      body = view('confirmation.msg').render( list=list,
+              confirm_address=confirm_address, action="subscribe")
+      relay.reply(message, confirm_address,
+              "Confirm your subscription to %s" % list, body)
+
+      return JOINING
+  else:
+      body = view('unknown.msg', address=message['to'])
+      relay.reply(message, list + "-noreply@" + host, "Invalid command %s" %
+              action, body)
+</pre>
+
+Instead of hideous aliases files (that you never remember to update) 
+Lamson uses friendly regular expressions and routing.
+
+<pre>
+handlers = [
+    ("^([a-z.A-Z0-9]+)-(unsubscribe)@(HOST)$",
+       Conversation('app.handlers.admin', reload=DEBUG)),
+    ("^([a-z.A-Z0-9]+)-(subscribe)@(HOST)$",
+       Conversation('app.handlers.admin', reload=DEBUG)),
+    ("^([a-z.A-Z0-9]+)-(pause)@(HOST)$", 
+       Conversation('app.handlers.admin', reload=DEBUG)),
+    ("^([a-z.A-Z0-9]+)-(unpause)@(HOST)$", 
+       Conversation('app.handlers.admin', reload=DEBUG)),
+    ("^([a-z.A-Z0-9]+)-(confirm)-([0-9]+)@(HOST)$", 
+       Conversation('app.handlers.admin', reload=DEBUG)),
+    ("^([a-z.A-Z0-9]+)@(HOST)$", 
+       Conversation('app.handlers.debate', unique=True, reload=DEBUG)),
+    ("^([a-z.A-Z0-9]+)-(.+)@(HOST)$", 
+       Conversation('app.handlers.admin', reload=DEBUG)),
+    ("^(.+)@(HOST)$", ForwardHandler()),
+    ("^(.+)@(.+)$", LogHandler()),
+]
+</pre>
+
+Rather than bizarre flat file "databases" and hashtable stores, Lamson uses a real
+Object-Relation Mapping system (SQLAlchemy) to talk to an RDBMS.
+
+<pre>
+table = Table(table_name, metadata, 
+        Column('id', Integer, primary_key=True),
+        Column('recipient', String(50), nullable=False),
+        Column('sender', String(50), nullable=False),
+        Column('state', String(50), nullable=False, default="START"),
+        Column('fsm', String(50), nullable=False),
+        Column("last_modified", DateTime,
+            default=datetime.datetime.now,
+            onupdate=datetime.datetime.now,
+            nullable=False)
+)
+mapper(FSMState, table)
+</pre>
+
+Everything about Lamson is modern, rejecting any part of the gargantuan e-mail standards
+that doesn't make sense in today's world of giant attachments to MS Exchange(TM) servers
+through spam blockers trying their best to defend the world.
+
+
+h2. The 30 Second Introduction
+
+If you have Python and easy_install already, then try this out:
+
+<pre>
+$ easy_install lamson
+$ lamson gen -project mymailserver
+$ cd mymailserver
+$ lamson syncdb
+$ lamson start
+$ lamson log -queue run/queue -port 8899
+$ nosetests
+$ lamson help -for send
+$ lamson send -sender me@mydomain.com -to test@test.com \
+        -subject "My test." -body "Hi there." -port 8823
+$ less logs/lamson.log
+$ mutt -F muttrc
+$ lamson stop -ALL run
+</pre>
+
+You now have a working base Lamson setup ready for you to work on with the following installed:
+
+* Lamson and all dependencies (SQLAlchemy, Mako, nosetests)
+* Code for your project in mymailserver.  Look in app/handlers and config/settings.py
+* Two initial tests that verify your server is not an open relay and forwards mail in tests/handlers/open_relay_tests.py
+* A "logger" server running on port 8899 that dumps all of its mail into run/queue
+* A config script for mutt (muttrc) that you can use to inspect the run/queue *and* also send mail using Lamson's *send* command.
+
+
+h2. Next Steps
+
+If you want to write a Lamson application you'll have to read the code.  You can grab 
+"the code":/download.html and you can read through the "quick start":/docs/getting_started.html
+documentation.  After you've gone through that, best thing to do is read the code to
+the mailing list example included in the "source distribution":/releases/ and read the
+rest of the "documentation":/docs/ on this site.
+
+At any point, you can get help for all available Lamson commands with:
+
+<code>
+$ lamson help
+</code>
+
+You can get individual command help with:
+
+<code>
+$ lamson help -for send
+</code>
+
+Finally, if you really want to get started using Lamson to implement your dream email
+application, but are completely lost, then you can "contact me":/contact.html for help.
+
+
