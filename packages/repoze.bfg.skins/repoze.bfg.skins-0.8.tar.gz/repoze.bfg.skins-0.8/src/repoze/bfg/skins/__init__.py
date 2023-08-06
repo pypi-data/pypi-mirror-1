@@ -1,0 +1,4 @@
+from template import get_skin_template
+
+from template import render_skin_template
+from template import render_skin_template_to_response
