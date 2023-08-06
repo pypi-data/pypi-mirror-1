@@ -1,0 +1,220 @@
+# -*- coding: utf-8 -*-
+'''
+>>> s = SubRipFile("""1
+... 00:00:02,207 --> 00:00:03,221
+... ÉCHEC !
+...
+... 2
+... 00:00:30,371 --> 00:00:33,981
+... Le Retour de l'Enfant Prodigue
+...
+... 3
+... 00:00:35,619 --> 00:00:37,277
+... Ce qui veut dire...
+...
+... 4
+... 00:00:37,433 --> 00:00:39,761
+... un bénéfice, cette année, de...
+...
+... 5
+... 00:00:39,933 --> 00:00:43,121
+... - 1 800 milliards de milliards.
+... - Splendide !
+...
+... 6
+... 00:00:43,410 --> 00:00:45,136
+... Sans compter les revenus subsidiaires
+... """)
+>>> len(s)
+6
+'''
+__all__ = ['SubRipFile', 'SubRipItem', 'SubRipTime']
+import re
+from itertools import chain
+from os.path import exists, isfile
+from UserList import UserList
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
+
+
+class InvalidItem(Exception):
+    pass
+
+
+class TimeItemDescriptor(object):
+
+    def __init__(self, ratio, super_ratio=None):
+        self.ratio = int(ratio)
+        self.super_ratio = int(super_ratio) if super_ratio else None
+
+    def __get__(self, instance, klass):
+        if instance is None:
+            raise AttributeError
+        if self.super_ratio:
+            return (instance.ordinal % self.super_ratio) / self.ratio
+        return instance.ordinal / self.ratio
+
+    def __set__(self, instance, value):
+        base_ord = instance.ordinal
+        if self.super_ratio:
+            base_ord %= self.super_ratio
+        current_part = base_ord - instance.ordinal % self.ratio
+        instance.ordinal += value * self.ratio - current_part
+
+
+class SubRipTime(object):
+    STRING_FORMAT = '%02d:%02d:%02d,%03d'
+    RE_TIME = re.compile(r'''(?P<hours>\d{2}):
+                             (?P<minutes>\d{2}):
+                             (?P<seconds>\d{2}),
+                             (?P<micro_seconds>\d{3})''',
+                             re.VERBOSE)
+    SECONDS_RATIO = 1000
+    MINUTES_RATIO = SECONDS_RATIO * 60
+    HOURS_RATIO = MINUTES_RATIO * 60
+
+    hours = TimeItemDescriptor(HOURS_RATIO)
+    minutes = TimeItemDescriptor(MINUTES_RATIO, HOURS_RATIO)
+    seconds = TimeItemDescriptor(SECONDS_RATIO, MINUTES_RATIO)
+    micro_seconds = TimeItemDescriptor(1, SECONDS_RATIO)
+
+    def __init__(self, hours=0, minutes=0, seconds=0, micro_seconds=0):
+        """
+        SubRipTime(hours, minutes, seconds, micro_seconds)
+
+        All arguments are optional and have a default value of 0.
+        """
+        self.ordinal = hours * self.HOURS_RATIO \
+                     + minutes * self.MINUTES_RATIO \
+                     + seconds * self.SECONDS_RATIO \
+                     + micro_seconds
+
+    def __unicode__(self):
+        return unicode(self.STRING_FORMAT) % (self.hours,
+            self.minutes, self.seconds, self.micro_seconds)
+
+    def shift(self, *args, **kwargs):
+        """
+        shift(hours, minutes, seconds, micro_seconds)
+
+        All arguments are optional and have a default value of 0.
+        """
+        self.ordinal += self.__class__(*args, **kwargs).ordinal
+
+    @classmethod
+    def from_ordinal(cls, ordinal):
+        new_time = cls()
+        new_time.ordinal = int(ordinal)
+        return new_time
+
+    @classmethod
+    def from_string(cls, source):
+        match = re.match(cls.RE_TIME, source)
+        if not match:
+            raise InvalidItem
+        items = dict((k, int(v)) for k, v in match.groupdict().items())
+        return cls(**items)
+
+
+class SubRipItem(object):
+
+    RE_ITEM = r'''(?P<sub_id>\d+)
+(?P<start>\d{2}:\d{2}:\d{2},\d{3}) --> (?P<end>\d{2}:\d{2}:\d{2},\d{3})
+(?P<sub_title>.*)'''
+
+    def __init__(self, sub_id=0, start=None, end=None, sub_title=''):
+        self.id = int(sub_id)
+        self.start = start or SubRipTime()
+        self.end = end or SubRipTime()
+        self.sub_title = unicode(sub_title)
+
+    def __unicode__(self):
+        return u'%s\n%s --> %s\n%s\n\n' % (self.id,
+            self.start, self.end, self.sub_title)
+
+    def shift(self, *args, **kwargs):
+        """
+        shift(hours, minutes, seconds, micro_seconds)
+
+        Add given values to start and end attributes.
+        All arguments are optional and have a default value of 0.
+        """
+        self.start.shift(*args, **kwargs)
+        self.end.shift(*args, **kwargs)
+
+    @classmethod
+    def from_string(cls, source):
+        match = re.match(cls.RE_ITEM, source, re.MULTILINE)
+        if not match:
+            raise InvalidItem
+        datas = dict(match.groupdict())
+        datas['start'] = SubRipTime.from_string(datas['start'])
+        datas['end'] = SubRipTime.from_string(datas['end'])
+        return cls(**datas)
+
+
+class SubRipFile(object, UserList):
+    """
+    SubRip file descriptor.
+
+    Provide a pure Python mapping on all metadatas.
+    """
+
+    def __init__(self, path='', encoding='utf-8'):
+        """
+        SubRipFile([path, [encoding]])
+
+        Encoding is set to utf-8 as default.
+        """
+        UserList.__init__(self)
+        self.encoding = encoding
+        self.path = path
+
+        if path:
+            if exists(path) and isfile(path):
+                source_file = open(path, 'rU')
+            else:
+                source_file = StringIO(path)
+            string_buffer = StringIO()
+            for line in chain(source_file, '\n'):
+                if line.strip():
+                    string_buffer.write(line)
+                else:
+                    string_buffer.seek(0)
+                    source = unicode(string_buffer.read(), self.encoding)
+                    new_item = SubRipItem.from_string(source)
+                    self.data.append(new_item)
+                    string_buffer.truncate(0)
+            source_file.close()
+
+    def shift(self, *args, **kwargs):
+        """
+        shift(hours, minutes, seconds, micro_seconds)
+
+        Add given values to start and end attributes of each items of file
+        with given values.
+        All arguments are optional and have a default value of 0.
+        """
+        for item in self:
+            item.shift(*args, **kwargs)
+
+    def save(self, path=None, encoding=None):
+        """
+        save([save_path[, encoding]])
+
+        Use init path if no other provided.
+        Use init encoding if no other provided.
+        """
+        self.path = path or self.path
+        self.encoding = encoding or self.encoding
+
+        save_file = open(self.path, 'w+')
+        for item in self:
+            save_file.write(unicode(item).encode(self.encoding))
+        save_file.close()
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testmod()
