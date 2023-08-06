@@ -1,0 +1,404 @@
+Metadata-Version: 1.0
+Name: hurry.file
+Version: 1.2
+Summary: hurry.file is an advanced Zope 3 file widget which tries its best to behave
+like other widgets, even when the form is redisplayed due to a validation
+error. It also has built-in support for fast Apache-based file uploads
+and downloads through Tramline.
+
+Home-page: UNKNOWN
+Author: Martijn Faassen, Infrae
+Author-email: faassen@startifact.com
+License: ZPL 2.1
+Description: hurry.file fields
+        =================
+        
+        The file widget is built on top of the HurryFile object::
+        
+        >>> from hurry.file import HurryFile
+        >>> file = HurryFile('foo.txt', 'mydata')
+        >>> file.filename
+        'foo.txt'
+        >>> file.data
+        'mydata'
+        >>> file.size
+        6
+        >>> f = file.file
+        >>> f.read()
+        'mydata'
+        
+        We can also create HurryFile objects from file-like objects::
+        
+        >>> from StringIO import StringIO
+        >>> from zope import component
+        >>> from hurry.file.interfaces import IFileRetrieval
+        >>> fileretrieval = component.getUtility(IFileRetrieval)
+        >>> file = fileretrieval.createFile('bar.txt', StringIO('test data'))
+        >>> file.filename
+        'bar.txt'
+        >>> file.size
+        9
+        >>> file.data
+        'test data'
+        >>> f = file.file
+        >>> f.read()
+        'test data'
+        
+        This does exactly the same, but may be easier to use::
+        
+        >>> from hurry.file import createHurryFile
+        >>> file = createHurryFile('test2.txt', StringIO('another test file'))
+        >>> file.filename
+        'test2.txt'
+        >>> file.size
+        17
+        
+        The HurryFile object normally stores the file data using ZODB
+        persistence. Files can however also be stored by tramline.  If
+        tramline is installed in Apache, the Tramline takes care of generating
+        ids for files and storing the file on the filesystem directly. The ids
+        are then passed as file data to be stored in the ZODB.
+        
+        Let's first enable tramline.
+        
+        The tramline directory structure is a directory with two subdirectories,
+        one called 'repository' and the other called 'upload'::
+        
+        >>> import tempfile, os
+        >>> dirpath = tempfile.mkdtemp()
+        >>> repositorypath = os.path.join(dirpath, 'repository')
+        >>> uploadpath = os.path.join(dirpath, 'upload')
+        >>> os.mkdir(repositorypath)
+        >>> os.mkdir(uploadpath)
+        
+        We create a TramlineFileRetrieval object knowing about this directory,
+        and register it as a utility::
+        
+        >>> from hurry.file.file import TramlineFileRetrievalBase
+        >>> class TramlineFileRetrieval(TramlineFileRetrievalBase):
+        ...    def getTramlinePath(self):
+        ...        return dirpath
+        >>> retrieval = TramlineFileRetrieval()
+        >>> component.provideUtility(retrieval, IFileRetrieval)
+        
+        Now let's store a file the way tramline would during upload::
+        
+        >>> f = open(os.path.join(repositorypath, '1'), 'wb')
+        >>> f.write('test data')
+        >>> f.close()
+        
+        The file with underlying name '1' (the data stored in the ZODB will be
+        just '1') will now be created::
+        
+        >>> file = HurryFile('foo.txt', '1')
+        
+        The data is now '1', referring to the real file::
+        
+        >>> file.data
+        '1'
+        
+        Retrieving the file results in the real file::
+        
+        >>> f = file.file
+        >>> f.read()
+        'test data'
+        
+        We can also retrieve its size::
+        
+        >>> file.size
+        9L
+        
+        It should be possible to create Hurry File objects that are stored in
+        the directory structure directly::
+        
+        >>> file = retrieval.createFile('test.txt', StringIO('my test data'))
+        >>> file.filename
+        'test.txt'
+        
+        We get an id for the data now::
+        
+        >>> file.data != 'my test data'
+        True
+        
+        And we can retrieve the file itself::
+        
+        >>> f = file.file
+        >>> f.read()
+        'my test data'
+        >>> file.size
+        12L
+        
+        Now let's disable tramline in our utility::
+        
+        >>> class TramlineFileRetrieval(TramlineFileRetrievalBase):
+        ...     def getTramlinePath(self):
+        ...        return dirpath
+        ...     def isTramlineEnabled(self):
+        ...        return False
+        >>> component.provideUtility(TramlineFileRetrieval(), IFileRetrieval)
+        
+        We expect the same behavior as when tramline is not installed::
+        
+        >>> file = HurryFile('foo.txt', 'data')
+        >>> f = file.file
+        >>> f.read()
+        'data'
+        >>> file.size
+        4
+        
+        Clean up::
+        
+        >>> import shutil
+        >>> shutil.rmtree(dirpath)
+        
+        hurry.file widgets
+        ==================
+        
+        This is an infrastructure to create a file widget that behaves as much
+        as possible like a normal text widget in formlib. Normally a file
+        widget loses its file data when a form is re-presented for reasons of
+        failing form validation. A ``hurry.file`` widget retains the file, for
+        example by storing it in a session.
+        
+        In order to do this, we have a special way to store file data along with
+        its filename::
+        
+        >>> from hurry.file import HurryFile
+        >>> some_file = HurryFile('foo.txt', 'the contents')
+        >>> some_file.filename
+        'foo.txt'
+        >>> some_file.data
+        'the contents'
+        
+        We can provide a download widget. In this case, there's nothing
+        to download::
+        
+        >>> from hurry.file.browser import DownloadWidget
+        >>> from hurry.file.schema import File
+        >>> from zope.publisher.browser import TestRequest
+        >>> field = File(__name__='foo', title=u'Foo')
+        >>> field = field.bind(None)
+        >>> request = TestRequest()
+        >>> widget = DownloadWidget(field, request)
+        >>> widget()
+        u'<div>Download not available</div>'
+        
+        Even if there were data in the request, there'd be nothing to download::
+        
+        >>> from zope.publisher.browser import FileUpload
+        >>> request = TestRequest(form={'field.foo': FileUpload(some_file)})
+        >>> widget = DownloadWidget(field, request)
+        >>> widget()
+        u'<div>Download not available</div>'
+        
+        Now set a value::
+        
+        >>> widget.setRenderedValue(some_file)
+        >>> widget()
+        u'<a href="foo.txt">foo.txt</a>'
+        
+        Now on to an edit widget. First the case in an add form with no
+        data already available, and no data in request::
+        
+        >>> from hurry.file.browser import EncodingFileWidget
+        >>> field = File(__name__='foo', title=u'Foo', required=False)
+        >>> field = field.bind(None)
+        >>> request = TestRequest()
+        >>> widget = EncodingFileWidget(field, request)
+        
+        >>> def normalize(s):
+        ...   return '\n  '.join(filter(None, s.split(' ')))
+        
+        >>> print normalize(widget())
+        <input
+        class="fileType"
+        id="field.foo"
+        name="field.foo"
+        size="20"
+        type="file"
+        />
+        
+        Now let's try a situation where data is available in the request, but
+        it's an empty string for the file::
+        
+        >>> request = TestRequest(form={'field.foo': u''})
+        >>> widget = EncodingFileWidget(field, request)
+        
+        >>> def normalize(s):
+        ...   return '\n  '.join(filter(None, s.split(' ')))
+        
+        >>> print normalize(widget())
+        <input
+        class="fileType"
+        id="field.foo"
+        name="field.foo"
+        size="20"
+        type="file"
+        />
+        
+        Now let's render again when there's already available data. What should show
+        up is an extra, hidden field which contains the file_id::
+        
+        >>> widget.setRenderedValue(some_file)
+        >>> print normalize(widget())
+        <input
+        class="fileType"
+        id="field.foo"
+        name="field.foo"
+        size="20"
+        type="file"
+        />
+        (foo.txt)<input
+        class="hiddenType"
+        id="field.foo.file_id"
+        name="field.foo.file_id"
+        type="hidden"
+        value="Zm9vLnR4dAp0aGUgY29udGVudHM="
+        />
+        
+        Now let's render again, this time with file data available in the request
+        instead. The same should happen::
+        
+        >>> request = TestRequest(form={'field.foo': FileUpload(some_file)})
+        >>> widget = EncodingFileWidget(field, request)
+        >>> print normalize(widget())
+        <input
+        class="fileType"
+        id="field.foo"
+        name="field.foo"
+        size="20"
+        type="file"
+        />
+        (foo.txt)<input
+        class="hiddenType"
+        id="field.foo.file_id"
+        name="field.foo.file_id"
+        type="hidden"
+        value="Zm9vLnR4dAp0aGUgY29udGVudHM="
+        />
+        
+        Now let's render again, this time not with file data available in the
+        request, but an id. Again, we should see the same::
+        
+        >>> request = TestRequest(form={'field.foo.file_id':
+        ...                             'Zm9vLnR4dAp0aGUgY29udGVudHM='})
+        >>> widget = EncodingFileWidget(field, request)
+        >>> print normalize(widget())
+        <input
+        class="fileType"
+        id="field.foo"
+        name="field.foo"
+        size="20"
+        type="file"
+        />
+        (foo.txt)<input
+        class="hiddenType"
+        id="field.foo.file_id"
+        name="field.foo.file_id"
+        type="hidden"
+        value="Zm9vLnR4dAp0aGUgY29udGVudHM="
+        />
+        
+        If there is both file data and an id, something else happens. First, let's
+        prepare some new file::
+        
+        >>> another_file = HurryFile('bar.txt', 'bar contents')
+        
+        We happen to know, due to the implementation of EncodingFileWidget,
+        that the file_id is going to be "YmFyLnR4dApiYXIgY29udGVudHM=". Let's
+        make a request with the original id, but a new file upload::
+        
+        >>> request = TestRequest(form={'field.foo': FileUpload(another_file),
+        ...                             'field.foo.file_id':
+        ...                             'Zm9vLnR4dAp0aGUgY29udGVudHM='})
+        
+        We expect the new file to be the one that's uploaded::
+        
+        >>> widget = EncodingFileWidget(field, request)
+        >>> print normalize(widget())
+        <input
+        class="fileType"
+        id="field.foo"
+        name="field.foo"
+        size="20"
+        type="file"
+        />
+        (bar.txt)<input
+        class="hiddenType"
+        id="field.foo.file_id"
+        name="field.foo.file_id"
+        type="hidden"
+        value="YmFyLnR4dApiYXIgY29udGVudHM="
+        />
+        
+        hurry.file changes
+        ==================
+        
+        1.2 (2009-03-11)
+        ----------------
+        
+        * Add a 'size' attribute that knows the size of the file in bytes (no
+        matter whether it's stored using tramline or in the ZODB).
+        
+        1.1 (2008-08-07)
+        ----------------
+        
+        * Add in a buildout.cfg that installs the test runner.
+        
+        * List dependencies in setup.py.
+        
+        * Rely on zope.session instead of zope.app.session to stop deprecation
+        warnings.
+        
+        * Add long description in setup.py based on README.txt and file.txt
+        doctests, and CHANGES.txt.
+        
+        1.0 (2006-10-25)
+        ----------------
+        
+        * Support for Tramline (fast file uploads/downloads) through
+        IFileRetrieval. By default, nothing changes.
+        
+        If a subclass of TramlineFileRetrievalBase is registered as a
+        IFileRetrieval utility, hurry.file becomes Tramline aware. If files
+        are created manually, they can be created through the
+        createHurryFile function, or the 'createFile' method of the
+        IFileRetrieval service. This will take care of storing the file in
+        the right place.
+        
+        Tramline can be found here: http://codespeak.net/svn/rr/tramline/trunk
+        
+        0.9.3 (2006-10-23)
+        ------------------
+        
+        * Send tramline_ok header back when redisplaying widget, in case we're
+        working with tramline.
+        
+        0.9.2 (2006-09-28)
+        ------------------
+        
+        * Zope 3.3 has a change in the way it deals with file name encoding
+        which broke hurry.file. This includes a workaround.
+        
+        0.9.1 (2006-09-22)
+        ------------------
+        
+        * first cheeseshop release.
+        
+        0.9 (2006-06-15)
+        ----------------
+        
+        * separation from general hurry package into hurry.file
+        
+        * eggification
+        
+        0.8 (2006-05-01)
+        ----------------
+        
+        Initial public release.
+        
+Keywords: zope zope3
+Platform: UNKNOWN
+Classifier: Programming Language :: Python
+Classifier: Framework :: Zope3
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
