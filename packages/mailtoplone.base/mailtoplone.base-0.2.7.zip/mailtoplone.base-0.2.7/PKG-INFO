@@ -1,0 +1,259 @@
+Metadata-Version: 1.0
+Name: mailtoplone.base
+Version: 0.2.7
+Summary: basic package for mailtoplone
+Home-page: https://svn.plone.org/svn/collective/mailtoplone/mailtoplone.base
+Author: Hans-Peter Locher
+Author-email: hans-peter.locher@inquant.de
+License: GPL
+Description: mailtoplone.base
+        ================
+        
+        Overview
+        --------
+        
+        basic package for mailtoplone
+        
+        Authors
+        -------
+        
+        Stefan Eletzhofer --
+        "<stefan dot eletzhofer at inquant de>"
+        
+        Hans-Peter Locher --
+        "<hans-peter dot locher at inquant de>"
+        
+        Copyright (c) 2007-2008 InQuant GmbH -- "http://www.inquant.de"
+        
+        Dependencies
+        ------------
+        
+        Additional egg dependecies
+        **************************
+        
+        icalendar
+        python-dateutil
+        
+        Contents
+        --------
+        
+        Content Types
+        *************
+        
+        InBox:
+        
+        Provides an XMLRPCView to access it's drop method.
+        Dropping a mailstring ( a plaintext string containing the whole email including envelope),
+        a plone content type Email will be generated, the data field will contain the mailstring.
+        
+        Email:
+        
+        File like content type conatining the mailstring inside the data field.
+        View registered for IEmail: emailview ( as standard view )
+        shows:
+        
+        - headers Subject, From, To, Cc
+        
+        - body (prefers text/html parts over text/plain parts)
+        
+        - attachments (download link)
+        
+        Adapters
+        ********
+        
+        MailDropBox:
+        
+        Basic adapter, providing a drop method generating an Email out of the dropped mailstring
+        
+        BlogMailDropBox:
+        
+        Advanced adapter, creating a news item out of the dropped mailstring.
+        
+        EventMailDropBox:
+        
+        Advanced adapter, creating an event out of text/calendar attachments inside the dropped mailstring
+        
+        Utilities
+        *********
+        
+        BaseDropBoxFactory:
+        
+        Used to find objects providing IMailDropBoxMarker with id=key. Used by
+        the deliver action in mailtoplone.contentrules.
+        
+        ICalEventFactory:
+        
+        Taking an icalendar string, this utility creates an ATEvent out of each
+        VEVENT. The implementation supports keywordarguments, passing them to
+        invokeFactory.
+        This implementation correctly imports events exported from plone, as a
+        first approach.
+        It is used by the EventMailDropBox.
+        
+        MarkerInterfaces
+        ****************
+        
+        You can use these markerinterfaces (@@manage_interfaces) to mark a folder
+        for mailtoplone (remember to reindex the marked object). Afterwards the
+        folder can be found and delivered mails to.
+        
+        IMailDropBoxMarker(Interface):
+        """ marker interface for mail drop boxes """
+        
+        IBlogMailDropBoxMarker(IMailDropBoxMarker):
+        """ marker interface for blog mail drop boxes """
+        
+        IEventMailDropBoxMarker(IMailDropBoxMarker):
+        """ marker interface for event mail drop boxes """
+        
+        Scripts
+        *******
+        
+        dropemail:
+        
+        File system python script, to drop a mail to an inbox(url), specify the mail as file or use stdin
+        
+        vim: set ft=rst tw=75 nocin nosi ai sw=4 ts=4 expandtab:
+        
+        Change history
+        **************
+        
+        Changelog
+        =========
+        
+        0.2.7 (2009-07-22)
+        ------------------
+        
+        - use subject to generate id for type Email,
+        so we avoid being limited to 1000 emails per
+        dropbox (fixes #7) [hplocher]
+        
+        0.2.6 (2008-12-02)
+        ------------------
+        
+        - fix dependency in setup.py to now require
+        python-dateutil (was dateutil earlier)
+        - correct propertiestool.xml to not purge, and only add Email to
+        typesUseViewActionInListings [hplocher]
+        - for earlier changes see included CHANGELOG
+        
+        Detailed Documentation
+        **********************
+        
+        mailtoplone.base
+        ================
+        
+        Setup TestEnvironment
+        ---------------------
+        
+        Setting up a inbox containing email1, email2::
+        
+        >>> self.setRoles(('Manager',))
+        >>> self.portal.invokeFactory('InBox', 'inbox')
+        'inbox'
+        >>> self.portal.inbox.invokeFactory('Email', 'email1')
+        'email1'
+        >>> self.portal.inbox.invokeFactory('Email', 'email3')
+        'email3'
+        
+        Adapter
+        -------
+        
+        Let's test the drop function useable with the MailDropBox Adapter,
+        The dropped mails get their id's using the NameChooser::
+        
+        >>> from mailtoplone.base.interfaces import IMailDropBox
+        >>> IMailDropBox(self.portal.inbox).drop("some data")
+        >>> IMailDropBox(self.portal.inbox).drop("some data")
+        >>> IMailDropBox(self.portal.inbox).drop("some data")
+        >>> self.portal.inbox.objectIds()
+        ['email1', 'email3', 'email', 'email-1', 'email-2']
+        
+        Let's test some values of a created email::
+        
+        >>> self.portal.inbox.email.title
+        'email'
+        >>> self.portal.inbox.email.data
+        'some data'
+        >>> self.portal.inbox.email.meta_type
+        'Email'
+        
+        
+        Browserview xmlrpcview
+        ----------------------
+        
+        Let's test if the xmlrpcview has a drop method which creates an Email in
+        the inbox::
+        
+        >>> theview = self.portal.inbox.restrictedTraverse('xmlrpcview')
+        >>> theview.drop("dropped via view")
+        >>> self.portal.inbox.objectIds()
+        ['email1', 'email3', 'email', 'email-1', 'email-2', 'email-3']
+        >>> self.portal.inbox.listFolderContents()[5].data
+        'dropped via view'
+        
+        Email title
+        -----------
+        
+        We generate the tile for email objects out of the subject, otherwise we'll
+        take the id.
+        
+        First, let's create various minimalistic emails::
+        
+        >>> withsubject = 'subject: withsubject'
+        >>> withSubject = 'Subject: withSubject'
+        >>> withbetreff = 'betreff: withbetreff'
+        >>> withBetreff = 'Betreff: withBetreff'
+        
+        Let's drop this emails to our inbox::
+        
+        >>> theview.drop(withsubject)
+        >>> self.portal.inbox.listFolderContents()[6].Title()
+        'withsubject'
+        
+        >>> theview.drop(withSubject)
+        >>> self.portal.inbox.listFolderContents()[7].Title()
+        'withSubject'
+        
+        >>> theview.drop(withbetreff)
+        >>> self.portal.inbox.listFolderContents()[8].Title()
+        'withbetreff'
+        
+        >>> theview.drop(withBetreff)
+        >>> self.portal.inbox.listFolderContents()[9].Title()
+        'withBetreff'
+        
+        If we have multiple subject / betreff / ... in our mail, let's take the
+        first Subject::
+        
+        >>> theview.drop('Subject: SUB\nBetreff: BET')
+        >>> self.portal.inbox.listFolderContents()[10].Title()
+        'SUB'
+        
+        We decode the subject header for presentation, let's drop an encoded subject::
+        
+        >>> theview.drop('Subject: =?ISO-8859-15?Q?=FCld=F6m?=')
+        >>> self.portal.inbox.listFolderContents()[11].Title() == 'üldöm'
+        True
+        
+        ::
+        
+        vim: set ft=rst tw=75 nocin nosi ai sw=4 ts=4 expandtab:
+        
+        
+        Contributors
+        ************
+        
+        Hans-Peter Locher, InQuant GmbH
+        
+        Stefan Eletzhofer, InQuant GmbH
+        
+        Download
+        ********
+        
+Platform: UNKNOWN
+Classifier: Framework :: Plone
+Classifier: Framework :: Zope2
+Classifier: Framework :: Zope3
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
