@@ -1,0 +1,149 @@
+PyContext -- Context-Oriented Programming for Python
+
+Introduction
+============
+
+Context-Oriented Programming is a paradigm that tries to integrate
+the current environment into the program. Context comes in many
+different forms: environment variables, request-context in web apps,
+sensor readings of peripheral sensors (temperature, network availability,
+...).
+
+As an abstraction, context-oriented programming introduces two concepts:
+layers, and dynamic variables.
+
+Method Layers
+=============
+
+A method layer allows to augment existing methods, based on context.
+Layers must be activated when a certain context is entered; a
+code of block then runs "within" the layer. While the layer is active,
+layered methods change their meaning in the context of the layer
+activation; invocations of the same methods outside the layer keep
+the original meaning.
+
+Layer activations can be stacked; inner-most activations override
+the meaning of out activations.
+
+Layer Definitions
+-----------------
+
+A method layer is defined by inheriting from context.layers.Layer:
+
+  from context.layers import Layer, before, after, instead
+
+  class L(Layer):
+      pass
+
+Definition of Layered Classes and Methods
+-----------------------------------------
+
+A layered class is defined by inheriting both from the layer,
+and the original class:
+
+  class Original:
+    def method(self):
+        print "original method"
+
+    def method2(self):
+        print "original method2"
+
+  class _name_is_irrelevant(L, Original):
+     "Definition of partial behavior of Original class in the L layer."
+     ...
+
+Layered methods are defined as methods in the layered class,
+annotated with either layers.before, layers.after, or layers.instead,
+depending on how the layered method should be invoked with
+respect to the original method.
+
+     @before
+     def method(self, context):
+         print "Definition of method in L running before original method"
+
+     @instead
+     def method2(self, context):
+         print "Layer L code running instead of method2"
+
+Layered methods receive an additional parameter indicating the context in
+which they run as the second parameter after the self parameter. The primary
+method of this context object is .proceed, which allows to invoke the prior
+definition of the method (in particular for layered methods defined as 
+@instead methods).
+
+Layer Activation
+----------------
+
+To activate a layer, use the future with statement
+
+  from __future__ import with_statement
+  o = Original()
+  o.method()
+  with L:
+      print "Inside layer L"
+      o.method()
+      o.method2()
+  print "Outside layer L again"
+  o.method2()
+
+Disabling Activations
+---------------------
+
+If, within a layer method, further invocations should not see the layer
+active, running the code in a block like
+
+  with Disabled(L):
+    code
+
+is possible.
+
+Dynamic Variables
+=================
+
+Another concept of context-oriented programming are dynamic
+variables, which are similar to global variables, except that
+they receive their value not globally, but from the dynamic
+context.
+
+Declaring a Dynamic Variable
+----------------------------
+
+A dynamic variable is an instance of context.Variable:
+
+  var = context.Variable()
+
+Setting the Variable for a Context
+----------------------------------
+
+The .set() method returns a context manager to be used
+with the with statement:
+
+  with var.set(100):
+     code()
+
+Reading the Variable
+--------------------
+
+The .get() method can be used to determine the value of
+the variable in the current context:
+
+  def code():
+      print code.get()
+
+Examples
+========
+
+dynvar.py demonstrates the dynamic variables in a simple manner.
+useragent.py is a layer for the httplib.HTTPConnection class
+which automatically send a User-Agent header in a context where
+the layer is active - independent of whether the methods of
+the class are invoked directly (through httplib) or indirectly
+(through urllib - which would normally send a different User-Agent
+header).
+
+Further Readings
+================
+
+http://www.swa.hpi.uni-potsdam.de/cop/
+http://vst.ensm-douai.fr/Esug2007Media/uploads/1/PyContext.pdf
+http://www.iam.unibe.ch/~scg/Archive/Papers/Loew07aPyContext.pdf
