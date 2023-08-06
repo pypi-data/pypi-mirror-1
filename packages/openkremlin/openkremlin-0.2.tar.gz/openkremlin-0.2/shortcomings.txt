@@ -1,0 +1,82 @@
+Kremlin Encrypt shortcomings
+============================
+
+In the process of reverse engineering Kremlin Encrypt, a number of
+cryptographic oddities/shortcomings were found. Although none of these is
+critical enough to compromise the key or encrypted data, it is worrying
+because it demonstrates a disregard for common encryption techniques and best
+practices.
+
+For this reason, I urge you not to use Kremlin Encrypt if at all possible.
+
+Note that this is not an exhaustive audit of the Kremlin Encrypt software.
+
+Password cracking
+-----------------
+
+Background: The most obvious attack against password-based file encryption
+software is simply trying out a large number of different passwords, either
+generated on the fly, or based on dictionary words. The typical way to defend
+against this attack is deliberately making the relation between the encryption
+key and the password, more complex, usually by repeatedly hashing the password
+many times. This technique is called "key strengthening."
+
+Kremlin Encrypt does not use the traditional key strengthening approach. Prior
+to decrypting the archive, Kremlin Encrypt applies the encryption algorithm
+1000 times and checks whether the result matches the expected value.
+
+However, because the encryption key is not dependant on this step, it can be
+skipped. The first encrypted block contains a 32-bit number value which
+specifies the length of the first file name. Since Windows only permits file
+names up to 256 characters, a very large portion of keys can be ruled out with
+only a single decryption step. To test for false positives, one can proceed
+with the typical passphrase verification algorithm.
+
+TODO: Write proof of concept cracker exploiting this weakness.
+
+
+Other oddities
+--------------
+
+1. SHA-1 implementation interprets byte order of its input in reverse,
+including the final padding data -- meaning that the implementation is not
+technically FIPS-compliant.  This demonstrates that Kremlin's algorithm was
+*not* verified against published SHA-1 test vectors.
+
+2. CBC mode is not used on encrypted file headers/metadata; this means that
+similar filenames, and similar file sizes, are leaked, as they appear in
+predictable locations.
+
+3. Uses a linear congruential random number generator, whose output can be
+easily predicted. Fortunately Kremlin Encrypt does not use random numbers in
+any critical parts of the software -- as far as I can tell.
+
+4. Awkward block-padding with random, instead of CBC or other encryption modes
+suggests that they don't have a clue what they're doing. With a proper
+encryption mode, random-padding wouldn't be necessary.
+
+5. No MAC (Message Authentication Codes). File contents is protected by 32-bit
+Adler CRC, but file metadata entries are completely unverified.  This means
+that when using stream ciphers (such as RC4), the file header data as well as
+block headers are malleable. But even with block ciphers, given that file
+indexes do not use CBC, individual fields can be corrupted, and pass
+undetected by Kremlin.
+
+6. Due to current limitations, there is no support for 128-bit block ciphers.
+This excludes all AES candidates, such as Rijndael (a.k.a AES), Twofish and
+Serpent. Other cryptography products have long ago phased out 64-bit ciphers
+in favor of 128-bit ones.
+
+7. The SecureRand function exported from KremSDK.dll, reconstructed from
+disassembly. Not secure by a long shot::
+
+  char SecureRand()
+  {
+    int random;
+    do {
+      random = rand();
+    } while(random % 257 == 256)
+
+    return (char)random;
+  }
+
