@@ -1,0 +1,86 @@
+#!/usr/bin/env python
+
+import sys, optparse, stellaris, logging, os, shutil
+
+from benri.utils import daemonize
+from benri.log import initLogger
+from benri.config import Config
+from stellaris.service import Serve, SecureServe
+from stellaris.env import Environment
+from pkg_resources import Requirement, resource_filename
+
+def start(env_path):
+    # read in the config file
+
+    try:
+        env = Environment(env_path)
+
+        try:
+            server = SecureServe(env, server_threads=50)
+        except Exception, e:
+            env.log.info('Could not configure the secure server. %s' % str(e))
+            server = Serve(env, server_threads=50)
+
+    except Exception, e:
+        sys.exit(str(e))
+
+    try:
+        server.start()
+    except KeyboardInterrupt, e:
+        env.log.debug("Received a keyboard interrupt, stopping server.")
+        server.stop()
+    except SystemExit, e:
+        env.log.debug("Received system exit, stopping server.")
+        server.stop()
+
+if __name__ == "__main__":
+    p = optparse.OptionParser(version='stellaris'.title() + ' ' + stellaris.__VERSION__, usage="%prog [options] <environment path>")
+    p.add_option("-d", "--daemon", action="store_const", const=True, dest="daemon", default=False, help="Runs the service in the background.")
+    p.add_option("-c", "--create-environment", action="store", type="string", dest="setup",
+                 help="Create the files necessary to run a stellaris instance. The given name is used to create a directory with the files in the current working directory.")
+    p.add_option("-m", "--migrate-environment", action="store", type="string", dest="migrate",
+                 help="Update an existing environment with new static files. Note that any changes done to the static files will be overwritten. Changes to the configuration files are not migrated, but must be performed by hand.")
+    
+
+    (opts, args) = p.parse_args()
+
+    if opts.setup:        
+        name = opts.setup
+        path = os.path.join(os.getcwd(), name)
+        try:
+            env = Environment(path, create=True)
+        except Exception, e:
+            import traceback
+            traceback.print_exc()
+            sys.exit("Could not create the environment %s\n" % name)
+            
+        print "Created the files necessary to run Stellaris in %s." % path
+        print "Start a stand-alone Stellaris instance with `stellaris %s`" % path
+        sys.exit()
+
+    if opts.migrate:
+        env_path = os.path.join(os.getcwd(), opts.migrate)
+
+        try:
+            env = Environment(env_path, create=False)
+            env.migrate()
+        except Exception, e:
+            import traceback
+            traceback.print_exc()
+            sys.exit("Could not create the environment %s\n" % env_path)
+        sys.exit()
+        
+    if len(args) < 1:
+        p.print_version()
+        p.print_help()
+        sys.exit(-1)
+    
+    env_path = os.path.abspath(args[0])
+    
+    # this must be done before daemonize
+    curdir = os.getcwd()
+                
+    if opts.daemon:
+        daemonize()
+    
+    start(env_path)
