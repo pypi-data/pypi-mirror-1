@@ -1,0 +1,80 @@
+Introduction
+============
+
+Stepper is a very good Zope products. This egg is a first effort to bring some
+plone relative steps availables to developpers and site administrator.
+
+How many of you have suffer from having proxy error while trying to reindex
+a new index in a catalog ?
+
+Well now it's possible to:
+- Change all members's passwords to a unique password
+- Change all members's emails to a unique email
+- Apply a profile without busy a zope's current thread on a production server
+- Activate/Deactivate a PAS plugin: deactivate login from your website before activate a migration
+
+So if you have any idea for any reusable migration or feature for developpers, let me know.
+
+How to use
+==========
+
+Like Stepper, for example:
+::
+
+    $ ./bin/instance run parts/productdistros/Stepper/run.py -C collective.steps.config /plone profile_default
+
+
+Available steps
+===============
+
+Password
+--------
+
+This step let you set a common password for all members of Plone site. The base configuration for this step set the passwords to 'secret'
+::
+
+    $ ./bin/instance run parts/productdistros/Stepper/run.py -C collective.steps.config /myplone init_users_password
+
+EMail
+-----
+
+This step let you set a common email to all members of a Plone site. The base configuration for this step set the mail to 'mail@provider.com'
+::
+
+    $ ./bin/instance run parts/productdistros/Stepper/run.py -C collective.steps.config /myplone email
+
+ClearExpiredAccount
+-------------------
+
+In a Plone site when you fullfill the join_form a member is created in the member database with a random password.
+Then the password reset request is sent to the user. This step help you providing a way to cleanup your member database
+
+You can also adding some lines of code to monkey patch the password reset tool to not clean it's own password reset requests. Once the password
+requests are reseted you can't detect if a user account already been activated.
+::
+
+    from Products.PasswordResetTool.PasswordResetTool import PasswordResetTool
+    def clearExpired(self, days=10): pass
+    PasswordResetTool.clearExpired = clearExpired
+    logger.info('password reset tool is now patched, clearExpired do nothing')
+
+::
+
+    $ ./bin/instance run parts/productdistros/Stepper/run.py -C collective.steps.config /myplone del_unactivated_account
+
+Profile
+-------
+
+Apply a generic setup profile.
+::
+
+    $ ./bin/instance run parts/productdistros/Stepper/run.py -C collective.steps.config /myplone profile_default
+
+TODO
+====
+
+- GenerateUsers into member.py to create members. convienent for stress testing purpose
+- GenerateContent into content.py
+
+Note the code is available at http://svn-mirror.plone.org/svn/collective/collective.steps/trunk#egg=collective.steps-dev
+
