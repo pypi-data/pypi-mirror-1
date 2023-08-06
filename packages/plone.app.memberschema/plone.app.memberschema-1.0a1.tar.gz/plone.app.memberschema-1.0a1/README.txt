@@ -1,0 +1,98 @@
+Introduction
+============
+
+This package provides support for building managing member properties via
+zope.schema type schemata. It installs as a PAS property plugin, which, by
+default stores data in the ZODB.
+
+Once the plugin is installed, you can write a schema interface as normal, 
+e.g.::
+
+    >>> from zope.interface import Interface
+    >>> from zope import schema
+    >>> class Hobbies(Interface):
+    ...     """Details member's hobbies
+    ...     """
+    ...     
+    ...     favorite_hobby = schema.TextLine(title=u"Favorite hobby")
+    ...     num_hobbies = schema.Int(title=u"Number of hobbies", min=0)
+
+If this was in a module my.memberdata.schema, you could add the following
+to the `schemata` property found in acl_users/schema_properties in your
+Plone site::
+
+    my.memberdata.schema.Hobbies
+    
+Properties can then be accessed with the usual API, e.g.::
+
+    >>> member.getProperty('favorite_hobby')
+    
+Note that field names must be unique. If a field exists in more than one
+schemata, the first schemata listed takes precedence.
+
+Default fields
+--------------
+
+There are a number of default fields, split across several schemata. These
+are all found in plone.app.memberschema.default, and include:
+
+ Basics -- full name and email address
+ Location -- location and language
+ Details -- biography and home page
+ Settings -- other individual settings
+
+GenericSetup importer
+---------------------
+
+You can install a new schemata like this using GenericSetup. Add a file called
+memberschema.xml to your profile, with data like:
+
+    <memberschema>
+        <schema>my.memberdata.schema.Hobbies</schema>
+    </memberschema>
+    
+If you wish to purge the list before adding your own schemata, set an
+attribute `purge="true"` on the <memberschema /> element. By default, your
+new schema will go at the end of the list. You can change the order by adding
+either an `insert-before` or an `insert-after` attribute to the <schema />
+element. The value is either another fully qualified interface name, or "*",
+to indicate that the element should go first/last.
+
+Forms
+-----
+
+The package provides a member data edit form using the plone.autoform package.
+By default, it will list each schema in its own fieldset. You may annotate
+your schema interface with the various hints that plone.autform expects,
+either manually, by loading the schema from a plone.supermodel XML file, or
+using the grokkers in plone.directives.form. See those packages for more
+details.
+
+There are two views provided out of the box: '@@edit-profile' must take a
+user id as a query string parameter ('id'). It is protected by the permission
+zope2.ManageUsers. '@@my-profile' is used to edit the current user's profile.
+It is protected by cmf.SetOwnProperties.
+
+Note that this package does not wire the views up anywhere, so you'll need to
+link to them yourself, and possibly hide or override Plone's standard
+'personalize_form' template.
+
+Alternate storages
+------------------
+
+The PAS API is still the canonical way to get and set member properties. If
+you want to make sure that a given field comes from, say, LDAP, the easiest
+way is often to make sure that there's an appropriate PAS plugin activated
+as an IPropertiesPlugin that sits before the schema_properties plugin and
+provides the relevant property.
+
+Alternatively, if you want to implement your own storage, you can implement
+an `IBags` adapter. This should adapt the plugin (you can, for example, set
+a custom marker interface on the plugin class to achieve such an override)
+and must return an `IBag` - really, just an object onto which values can get
+set or from which retrieved.
+
+Acknowledgements
+----------------
+
+plone.app.memberschema draws inspiration from ore.member by Kapil Thangavelu.
