@@ -1,0 +1,766 @@
+import unittest
+import tempfile
+import logging
+import shutil
+import mock
+import copy
+import os
+
+from StringIO import StringIO
+
+import git
+import gitctl
+import gitctl.command
+import gitctl.utils
+
+def join(*parts):
+    return os.path.realpath(os.path.abspath(os.path.join(*parts)))
+
+class GitControlTestCase(unittest.TestCase):
+
+    def setUp(self):
+        self.path = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.path)
+
+    def config(self, data):
+        filename = os.path.join(self.path, 'gitexternals.cfg')
+        open(filename, 'w').write(data)
+        return filename
+
+class CommandTestCase(unittest.TestCase):
+    """Base class for gitcl command tests."""
+
+    def setUp(self):
+        # Create a temp container that will contain the test fixture. This will
+        # be cleaned up after each test.
+        self.container = tempfile.mkdtemp()
+
+        # Set up a logging handler we can use in the tests
+        self.output = output = []
+        stream = mock.Mock()
+        stream.write = lambda *args: output.append((args[0] % args[1:]).strip())
+        stream.flush = lambda:None
+        console = logging.StreamHandler(stream)
+        formatter = logging.Formatter('%(message)s')
+        console.setLevel(logging.INFO)
+        console.setFormatter(formatter)
+        logging.getLogger('gitctl').addHandler(console)
+        logging.getLogger('gitctl').setLevel(logging.INFO)
+        
+        # Set up a Git repository that will mock an upstream for us
+        self.upstream_path = os.path.join(self.container, 'project.git')
+        os.makedirs(self.upstream_path)
+        self.upstream = git.Git(self.upstream_path)
+        self.upstream.init()
+        
+        open(os.path.join(self.upstream_path, 'foobar.txt'), 'w').write('Lorem lipsum')
+        self.upstream.add('foobar.txt')
+        self.upstream.commit('-m Initial commit')
+        self.upstream.branch('development')
+        self.upstream.branch('staging')
+        self.upstream.branch('production')
+        self.upstream.checkout('development')
+        self.upstream.branch('-d', 'master')
+        
+        # Create a gitcl.cfg configuration
+        open(os.path.join(self.container, 'gitctl.cfg'), 'w').write("""
+[gitctl]
+upstream = origin
+upstream-url = %s
+branches =
+    development
+    staging
+    production
+development-branch = development
+staging-branch = staging
+production-branch = production
+commit-email = commit@non.existing.tld
+commit-email-prefix = [GIT]
+        """.strip() % self.container)
+
+        # Create an externals configuration
+        open(os.path.join(self.container, 'gitexternals.cfg'), 'w').write("""
+[project.local]
+url = %s
+container = %s
+type = git
+treeish = development
+        """.strip() % (self.upstream_path, self.container))
+
+    def tearDown(self):
+        shutil.rmtree(self.container)
+        
+    def clone_upstream(self, name, as_repo=False):
+        """Clones the upstream repository and returns a git.Git object bound
+        to the new clone.
+        """
+        path = os.path.join(self.container, name)
+        temp = git.Git(self.container)
+        temp.clone(self.upstream_path, path)
+        
+        clone = git.Repo(path)
+        clone.git.branch('-f', '--track', 'production', 'origin/production')
+        clone.git.branch('-f', '--track', 'staging', 'origin/staging')
+        
+        if as_repo:
+            return clone
+        else:
+            return clone.git
+
+class TestCommandBranch(CommandTestCase):
+    """Tests for the ``branch`` command."""
+
+    def setUp(self):
+        super(self.__class__, self).setUp()
+        
+        self.local = self.clone_upstream('project.local', as_repo=True)
+        
+        # Mock some command line arguments
+        self.args = mock.Mock()
+        self.args.config = os.path.join(self.container, 'gitctl.cfg')
+        self.args.externals = os.path.join(self.container, 'gitexternals.cfg')
+
+    
+    def test_branch__list(self):
+        self.args.list = True
+        self.args.checkout = False
+        
+        gitctl.command.gitctl_branch(self.args)
+        self.assertEquals(1, len(self.output))
+        self.assertEquals('project.local........................... development', self.output[0])
+    
+    def test_branch__checkout_with_dirty_working_directory(self):
+        self.args.list = False
+        self.args.checkout = ['development']
+        
+        # Make the working directory dirty.
+        self.local.git.checkout('development')
+        open(join(self.local.git.git_dir, 'something.py'), 'w').write('import sha\n')
+        self.local.git.add('something.py')
+        
+        self.failUnless(self.local.is_dirty)
+        gitctl.command.gitctl_branch(self.args)
+        self.assertEquals(1, len(self.output))
+        self.assertEquals('project.local........................... Dirty working directory. Please commit or stash and try again.', self.output[0])
+    
+    def test_branch__checkout_with_same_target_branch(self):
+        self.args.list = False
+        self.args.checkout = ['development']
+        
+        self.local.git.checkout('development')
+        self.assertEquals(self.local.active_branch, 'development')
+
+        gitctl.command.gitctl_branch(self.args)
+        self.assertEquals(1, len(self.output))
+        self.assertEquals('project.local........................... Already at ``development``', self.output[0])
+    
+    def test_branch__checkout_with_nonexisting_branch(self):
+        self.args.list = False
+        self.args.checkout = ['non-existing-branch']
+        
+        self.assertEquals(self.local.active_branch, 'development')
+        gitctl.command.gitctl_branch(self.args)
+        self.assertEquals(1, len(self.output))
+        self.assertEquals('project.local........................... No such branch: ``non-existing-branch``', self.output[0])
+    
+    def test_branch__checkout_success(self):
+        self.args.list = False
+        self.args.checkout = ['staging']
+        
+        self.local.git.checkout('development')
+        self.assertEquals(self.local.active_branch, 'development')
+
+        gitctl.command.gitctl_branch(self.args)
+        self.assertEquals('staging', self.local.active_branch)
+        self.assertEquals(1, len(self.output))
+        self.assertEquals('project.local........................... Checked out ``staging``', self.output[0])
+
+class TestCommandUpdate(CommandTestCase):
+    """Tests for the ``update`` command."""
+    
+    def test_update__clone(self):
+        # Mock some command line arguments
+        self.args = mock.Mock()
+        self.args.config = os.path.join(self.container, 'gitctl.cfg')
+        self.args.externals = os.path.join(self.container, 'gitexternals.cfg')
+        
+        local_path = join(self.container, 'project.local')
+        
+        self.failIf(os.path.exists(local_path))
+        gitctl.command.gitctl_update(self.args)
+        self.failUnless(os.path.exists(local_path))
+        
+        repo = git.Git(local_path)
+        # Make sure that we have the local tracking branches set up correctly.
+        info = ' '.join(repo.remote('show', 'origin').split())
+        self.failUnless(info.startswith('* remote origin'))
+        self.failUnless(info.endswith('Tracked remote branches development production staging'))
+        # Make sure we have the right branch checked out.
+        self.assertEquals('* development', [b.strip() for b in repo.branch().splitlines() if b.startswith('*')][0])
+
+    def test_update__pull(self):
+        # Mock some command line arguments
+        self.args = mock.Mock()
+        self.args.config = os.path.join(self.container, 'gitctl.cfg')
+        self.args.externals = os.path.join(self.container, 'gitexternals.cfg')
+        self.args.merge = True
+
+        local_path = join(self.container, 'project.local')
+        local = git.Git(local_path)
+
+        # Run update once to clone the project
+        gitctl.command.gitctl_update(self.args)
+        self.failUnless(os.path.exists(local_path))
+        # Assert that is has the initial commit only
+        log = local.log('--pretty=oneline').splitlines()
+        self.assertEquals(1, len(log))
+        self.failUnless(log[0].endswith('Initial commit'))
+        
+        # Create a parallel clone, commit some changes and push them upstream
+        another = self.clone_upstream('another')
+        open(os.path.join(another.git_dir, 'random_addition.txt'), 'w').write('Foobar')
+        another.add('random_addition.txt')
+        another.commit('-m', 'Second commit')
+        another.push()
+
+        # Run update again and assert we got back the changes
+        gitctl.command.gitctl_update(self.args)
+        self.assertEquals(['project.local........................... Cloned and checked out ``development``',
+                           'project.local........................... Pulled'],
+                          self.output)
+        log = local.log('--pretty=oneline').splitlines()
+        self.assertEquals(2, len(log))
+        self.failUnless(log[0].endswith('Second commit'))
+
+
+    def test_update__fetch_checkout(self):
+        # Mock some command line arguments
+        self.args = mock.Mock()
+        self.args.config = os.path.join(self.container, 'gitctl.cfg')
+        self.args.externals = os.path.join(self.container, 'gitexternals.cfg')
+        self.args.merge = True
+
+        # Get the SHA1 checksum for the current head and pin the externals to it.
+        sha1_first = self.upstream.rev_parse('HEAD').strip()
+        open(os.path.join(self.container, 'gitexternals.cfg'), 'w').write("""
+[project.local]
+url = %s
+container = %s
+type = git
+treeish = %s
+                """.strip() % (self.upstream_path, self.container, sha1_first))
+        
+        local_path = join(self.container, 'project.local')
+        local = git.Git(local_path)
+
+        # Run update once to clone the project
+        gitctl.command.gitctl_update(self.args)
+        self.failUnless(os.path.exists(local_path))
+        # Assert that is has the initial commit only
+        log = local.log('--pretty=oneline').splitlines()
+        self.assertEquals(1, len(log))
+        self.failUnless(log[0].endswith('Initial commit'))
+
+        # Create a parallel clone, commit some changes and push them upstream
+        another = self.clone_upstream('another')
+        open(os.path.join(another.git_dir, 'random_addition.txt'), 'w').write('Foobar')
+        another.add('random_addition.txt')
+        another.commit('-m', 'Second commit')
+        another.push()
+
+        # Get the SHA1 of the new HEAD and update the externals again.
+        sha1_second = self.upstream.rev_parse('HEAD').strip()
+        open(os.path.join(self.container, 'gitexternals.cfg'), 'w').write("""
+[project.local]
+url = %s
+container = %s
+type = git
+treeish = %s
+                """.strip() % (self.upstream_path, self.container, sha1_second))
+        
+        # Run update again and assert we got back the changes
+        gitctl.command.gitctl_update(self.args)
+        self.assertEquals(['project.local........................... Cloned and checked out ``%s``' % sha1_first,
+                           'project.local........................... Checked out revision ``%s``' % sha1_second],
+                          self.output)
+        log = local.log('--pretty=oneline').splitlines()
+        self.assertEquals(2, len(log))
+        self.failUnless(log[0].endswith('Second commit'))
+        self.assertEquals(sha1_second, local.rev_parse('HEAD').strip())
+
+    
+    def test_update__rebase(self):
+        # Mock some command line arguments
+        self.args = mock.Mock()
+        self.args.config = os.path.join(self.container, 'gitctl.cfg')
+        self.args.externals = os.path.join(self.container, 'gitexternals.cfg')
+        self.args.merge = False
+
+        local_path = join(self.container, 'project.local')
+        local = git.Git(local_path)
+
+        # Run update once to clone the project
+        gitctl.command.gitctl_update(self.args)
+        self.failUnless(os.path.exists(local_path))
+        # Assert that is has the initial commit only
+        log = local.log('--pretty=oneline').splitlines()
+        self.assertEquals(1, len(log))
+        self.failUnless(log[0].endswith('Initial commit'))
+        
+        # Create a parallel clone, commit some changes and push them upstream
+        another = self.clone_upstream('another')
+        open(os.path.join(another.git_dir, 'random_addition.txt'), 'w').write('Foobar')
+        another.add('random_addition.txt')
+        another.commit('-m', 'Second commit')
+        another.push()
+
+        # Run update again and assert we got back the changes
+        gitctl.command.gitctl_update(self.args)
+        self.assertEquals(['project.local........................... Cloned and checked out ``development``',
+                           'project.local........................... Rebased'],
+                          self.output)
+        log = local.log('--pretty=oneline').splitlines()
+        self.assertEquals(2, len(log))
+        self.failUnless(log[0].endswith('Second commit'))
+
+class TestCommandFetch(CommandTestCase):
+    """Tests for the ``fetch`` command."""
+
+    def setUp(self):
+        super(self.__class__, self).setUp()
+        
+        self.local = self.clone_upstream('project.local')
+        
+        # Mock some command line arguments
+        self.args = mock.Mock()
+        self.args.config = os.path.join(self.container, 'gitctl.cfg')
+        self.args.externals = os.path.join(self.container, 'gitexternals.cfg')
+
+    def test_fetch(self):
+        # Create another local clone, add a file and push to make the remote
+        # ahead of self.local.
+        another = self.clone_upstream('another')
+        open(os.path.join(another.git_dir, 'random_addition.txt'), 'w').write('Foobar')
+        another.add('random_addition.txt')
+        another.commit('-m', 'Fubu')
+        another.push()
+
+        # Assert that our local tracking branch is at the same revision with the
+        # remote
+        self.assertEquals(self.local.rev_parse('development'),
+                          self.local.rev_parse('origin/development'))
+        # Fetch changes from upstream
+        gitctl.command.gitctl_fetch(self.args)
+        self.assertEquals('project.local........................... Fetched', self.output[0])
+        self.failIfEqual(self.local.rev_parse('development'),
+                         self.local.rev_parse('origin/development'))
+
+
+class TestCommandPending(CommandTestCase):
+    """Tests for the ``pending`` command."""
+
+    def setUp(self):
+        super(self.__class__, self).setUp()
+        
+        self.local = self.clone_upstream('project.local')
+        
+        # Mock some command line arguments
+        self.args = mock.Mock()
+        self.args.config = os.path.join(self.container, 'gitctl.cfg')
+        self.args.externals = os.path.join(self.container, 'gitexternals.cfg')
+        self.args.production = False
+        self.args.staging = False
+        self.args.dev = False
+        self.args.show_config = False
+        self.args.diff = False
+
+    def test_pending__third_party_package(self):
+        # Create a new repository to act as our second, third-party upstream.
+        # This will simply contain the default 'master' branch without our
+        # dev/staging/production setup.
+        thirdparty_path = os.path.join(self.container, 'thirdparty.git')
+        os.makedirs(thirdparty_path)
+        thirdparty = git.Git(thirdparty_path)
+        thirdparty.init()
+        
+        open(os.path.join(thirdparty_path, 'TOP_SECRET.txt'), 'w').write('Lorem lipsum')
+        thirdparty.add('TOP_SECRET.txt')
+        thirdparty.commit('-m Initial commit')
+
+        # Add the configuration to our gitexternals.cfg configuration
+        open(os.path.join(self.container, 'gitexternals.cfg'), 'w').write("\n\n" + """
+[thirdparty.local]
+url = %s
+container = %s
+type = git
+treeish = master
+        """.strip() % (thirdparty_path, self.container))
+
+        # Create a local clone
+        thirdparty.clone(thirdparty_path, join(self.container, 'thirdparty.local'))
+        
+        # Assert the third party repositories are skipped
+        gitctl.command.gitctl_pending(self.args)
+        self.assertEquals('thirdparty.local........................ Skipping.', self.output[0])
+
+    def test_pending__remote_out_of_sync(self):
+        self.args.dev = True
+        
+        # Create a new commit in the development branch, but don't push it upstream.
+        self.local.checkout('development')
+        open(join(self.local.git_dir, 'something.py'), 'w').write('import sha\n')
+        self.local.add('something.py')
+        self.local.commit('-m', 'Important')
+        
+        # Assert that we notice that the remote is out-of-sync.
+        gitctl.command.gitctl_pending(self.args)
+        self.assertEquals('project.local........................... Branch ``development`` out of sync with upstream. Run "gitcl update" or pull manually.',
+                          self.output[0])
+
+    def test_pending__dirty_working_directory(self):
+        self.args.dev = True
+        
+        # Create a new commit in the development branch and then modify the file
+        # without committing.
+        self.local.checkout('development')
+        open(join(self.local.git_dir, 'something.py'), 'w').write('import sha\n')
+        self.local.add('something.py')
+        self.local.commit('-m', 'Important')
+        open(join(self.local.git_dir, 'something.py'), 'a').write('s = sha.new()')
+
+        # Assert that we notice that the working directory is dirty
+        gitctl.command.gitctl_pending(self.args)
+        self.assertEquals('project.local........................... Uncommitted local changes.',
+                          self.output[0])
+
+    def test_pending__production_ok(self):
+        # By default all the branches are in-sync with each other
+        self.args.production = True
+        gitctl.command.gitctl_pending(self.args)
+        self.assertEquals('project.local........................... OK', self.output[0])
+
+    def test_pending__production_advanced_over_pinned_versions(self):
+        self.args.production = True
+        
+        # Create a new gitexternals.cfg configuration that uses a pinned version
+        pinned = self.local.rev_parse('production').strip()
+        open(join(self.container, 'gitexternals.cfg'), 'w').write("""
+[project.local]
+url = %s
+container = %s
+type = git
+treeish = %s
+        """ % (self.upstream_path, self.container, pinned))
+        
+        # Commit a new change into the production branch
+        self.local.checkout('production')
+        open(join(self.local.git_dir, 'something.py'), 'w').write('import sha\n')
+        self.local.add('something.py')
+        self.local.commit('-m', 'Important')
+        self.local.push()
+        
+        gitctl.command.gitctl_pending(self.args)
+        self.failUnless(self.output[0].startswith('project.local........................... Branch ``production`` is 1 commit(s) ahead of the pinned down version at revision'))
+
+    def test_pending__staging_ok(self):
+        # By default all the branches are in-sync with each other
+        self.args.staging = True
+        gitctl.command.gitctl_pending(self.args)
+        self.assertEquals('project.local........................... OK', self.output[0])
+
+    def test_pending__staging_advanced_over_production(self):
+        self.args.staging = True
+        
+        # Create a new commits in the staging branch
+        self.local.checkout('staging')
+        open(join(self.local.git_dir, 'something.py'), 'w').write('import sha\n')
+        self.local.add('something.py')
+        self.local.commit('-m', 'Important')
+        open(join(self.local.git_dir, 'other.py'), 'w').write('import md5\n')
+        self.local.add('other.py')
+        self.local.commit('-m', 'Monumental')
+        self.local.push()
+        
+        # Assert that we notice the difference
+        gitctl.command.gitctl_pending(self.args)
+        self.assertEquals('project.local........................... Branch ``staging`` is 2 commit(s) ahead of ``production``',
+                          self.output[0])
+
+    def test_pending__development_ok(self):
+        # By default all the branches are in-sync with each other
+        self.args.dev = True
+        gitctl.command.gitctl_pending(self.args)
+        self.assertEquals('project.local........................... OK', self.output[0])
+
+    def test_pending__development_advanced_over_staging(self):
+        self.args.dev = True
+        
+        # Create a new commit in the development branch
+        self.local.checkout('development')
+        open(join(self.local.git_dir, 'something.py'), 'w').write('import sha\n')
+        self.local.add('something.py')
+        self.local.commit('-m', 'Important')
+        self.local.push()
+        
+        # Assert that we notice the difference
+        gitctl.command.gitctl_pending(self.args)
+        self.assertEquals('project.local........................... Branch ``development`` is 1 commit(s) ahead of ``staging``',
+                          self.output[0])
+
+    
+    def test_pending__show_config(self):
+        self.args.production = True
+        self.args.show_config = True
+
+        # Create a new gitexternals.cfg configuration that uses a pinned version
+        pinned = self.local.rev_parse('production').strip()
+        open(join(self.container, 'gitexternals.cfg'), 'w').write("""
+[project.local]
+url = %s
+container = %s
+type = git
+treeish = %s
+        """ % (self.upstream_path, self.container, pinned))
+
+        # Commit a new change into the production branch
+        self.local.checkout('production')
+        open(join(self.local.git_dir, 'something.py'), 'w').write('import sha\n')
+        self.local.add('something.py')
+        self.local.commit('-m', 'Important')
+        self.local.push()
+        # Get the SHA1 of the HEAD of production
+        head = self.local.rev_parse('production').strip()
+
+        
+        gitctl.command.gitctl_pending(self.args)
+        self.assertEquals(1, len(self.output))
+        self.failUnless(self.output[0].strip().endswith(head))
+    
+    def test_pending__diff(self):
+        self.args.dev = True
+        self.args.diff = True
+        
+        # Create a new commit in the development branch
+        self.local.checkout('development')
+        open(join(self.local.git_dir, 'something.py'), 'w').write('import sha\n')
+        self.local.add('something.py')
+        self.local.commit('-m', 'Important')
+        self.local.push()
+        
+        # Assert that we notice the difference
+        gitctl.command.gitctl_pending(self.args)
+        self.assertEquals(2, len(self.output))
+        self.assertEquals('project.local........................... Branch ``development`` is 1 commit(s) ahead of ``staging``',
+                          self.output[0])
+        self.failUnless('diff --git a/something.py b/something.py' in self.output[1])
+
+class TestCommandStatus(CommandTestCase):
+    """Tests for the ``status`` command."""
+
+    def setUp(self):
+        super(self.__class__, self).setUp()
+        
+        self.local = self.clone_upstream('project.local')
+        
+        # Mock some command line arguments
+        self.args = mock.Mock()
+        self.args.config = os.path.join(self.container, 'gitctl.cfg')
+        self.args.externals = os.path.join(self.container, 'gitexternals.cfg')
+        self.args.no_fetch = False
+
+    def test_status__ok(self):
+        gitctl.command.gitctl_status(self.args)
+        self.assertEquals(1, len(self.output))
+        self.assertEquals('project.local........................... OK', self.output[0])
+    
+    def test_status__dirty_working_directory(self):
+        open(os.path.join(self.local.git_dir, 'make_wd_dirty.txt'), 'w').write('Lorem')
+        self.local.add('make_wd_dirty.txt')
+        
+        gitctl.command.gitctl_status(self.args)
+        self.assertEquals(1, len(self.output))
+        self.assertEquals('project.local........................... Uncommitted local changes', self.output[0])
+
+    def test_status__out_of_sync__local_advanced(self):
+        open(os.path.join(self.local.git_dir, 'new_file.txt'), 'w').write('Lorem')
+        self.local.add('new_file.txt')
+        self.local.commit('-m', 'Foobar')
+        
+        gitctl.command.gitctl_status(self.args)
+        self.assertEquals(1, len(self.output))
+        self.assertEquals('project.local........................... Branch ``development`` out of sync with upstream', self.output[0])
+
+    def test_status__out_of_sync__remote_advanced(self):
+        # Create another local clone, add a file and push to make the remote
+        # ahead of self.local.
+        another = self.clone_upstream('another')
+        open(os.path.join(another.git_dir, 'random_addition.txt'), 'w').write('Foobar')
+        another.add('random_addition.txt')
+        another.commit('-m', 'Fubu')
+        another.push()
+        
+        gitctl.command.gitctl_status(self.args)
+        self.assertEquals(1, len(self.output))
+        self.assertEquals('project.local........................... Branch ``development`` out of sync with upstream', self.output[0])
+        
+
+class TestUtils(unittest.TestCase):
+    """Tests for the utility functions."""
+
+    def setUp(self):
+        self.path = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.path)
+    
+    def test_pretty(self):
+        self.assertEquals('foobar....', gitctl.utils.pretty('foobar', 10))
+        self.assertEquals('barfoo              ', gitctl.utils.pretty('barfoo', 20, ' '))
+
+    def test_project_path__absolute(self):
+        proj1 = {'container' : 'foo', 'name' : 'bar' }
+        proj2 = {'container' : '/foo/bar', 'name' : 'froobnoz' }
+        self.assertEquals(os.path.join(os.getcwd(), 'foo/bar'), gitctl.utils.project_path(proj1, relative=False))
+        self.assertEquals('/foo/bar/froobnoz', gitctl.utils.project_path(proj2, relative=False))
+
+    def test_project_path__relative(self):
+        proj1 = {'container' : 'foo', 'name' : 'bar' }
+        proj2 = {'container' : os.path.join(os.getcwd(), 'foo', 'bar'),
+                 'name' : 'froobnoz' }
+
+        self.assertEquals('foo/bar', gitctl.utils.project_path(proj1, relative=True))
+        self.assertEquals('foo/bar/froobnoz', gitctl.utils.project_path(proj2, relative=True))
+
+    def test_is_sha1_too_short(self):
+        self.failIf(gitctl.utils.is_sha1('123456790abcdef'))
+
+    def test_is_sha1_too_long(self):
+        self.failIf(gitctl.utils.is_sha1('123456790abcdef123456790abcdef123456790abcdef123456790abcdef'))
+
+    def test_is_sha1_valid(self):
+        self.failUnless(gitctl.utils.is_sha1('1234567890abcdef1234567890abcdef12345678'))
+
+    def test_is_sha1_invalid(self):
+        self.failIf(gitctl.utils.is_sha1('12345678ghijkl1234567890abcdef12345678'))
+
+    def test_parse_config__invalid_file(self):
+        self.assertRaises(ValueError, lambda: gitctl.utils.parse_config(['/non/existing/path']))
+    
+    def test_parse_config__missing_section(self):
+        config = os.path.join(self.path, 'foo.cfg')
+        open(config, 'w').write("[invalid]")
+        self.assertRaises(ValueError, lambda: gitctl.utils.parse_config([config]))
+    
+    def test_parse_config(self):
+        config = os.path.join(self.path, 'gitctl.cfg')
+        open(config, 'w').write("""
+[gitctl]
+upstream = upstream
+upstream-url = git@github.com:dokai
+branches =
+    development
+    staging
+    production
+    experimental
+development-branch = development
+staging-branch = staging
+production-branch = production
+commit-email = commit@non.existing.tld
+commit-email-prefix = [GIT]
+        """.strip())
+        conf = gitctl.utils.parse_config([config])
+        self.assertEquals('upstream', conf['upstream'])
+        self.assertEquals('git@github.com:dokai', conf['upstream-url'])
+        self.assertEquals([('upstream/development', 'development'),
+                           ('upstream/staging', 'staging'),
+                           ('upstream/production', 'production'),
+                           ('upstream/experimental', 'experimental')],
+                           conf['branches'])
+        self.assertEquals('development', conf['development-branch'])
+        self.assertEquals('staging', conf['staging-branch'])
+        self.assertEquals('production', conf['production-branch'])
+        self.assertEquals('commit@non.existing.tld', conf['commit-email'])
+        self.assertEquals('[GIT]', conf['commit-email-prefix'])
+
+
+    def test_parse_externals(self):
+        ext = os.path.join(self.path, 'gitexternals.cfg')
+        open(ext, 'w').write("""
+[my.project]
+url = git@github.com:dokai/my-project
+container = src
+type = git
+treeish = development
+
+[your.project]
+url = git@github.com:dokai/your-project
+container = src
+type = git
+treeish = master
+        """.strip())
+        projects = gitctl.utils.parse_externals(ext)
+        self.assertEquals([{'container': 'src',
+                            'name': 'my.project',
+                            'treeish': 'development',
+                            'type': 'git',
+                            'url': 'git@github.com:dokai/my-project'},
+                           {'container': 'src',
+                            'name': 'your.project',
+                            'treeish': 'master',
+                            'type': 'git',
+                            'url': 'git@github.com:dokai/your-project'}],
+                           projects)
+
+    def test_generate_externals(self):
+        projects = [{'container': 'src',
+                     'name': 'my.project',
+                     'treeish': 'development',
+                     'type': 'git',
+                     'url': 'git@github.com:dokai/my-project'},
+                    {'container': 'src',
+                     'name': 'your.project',
+                     'treeish': 'master',
+                     'type': 'git',
+                     'url': 'git@github.com:dokai/your-project'}]
+        self.assertEquals("""
+[your.project]
+url = git@github.com:dokai/your-project
+container = src
+type = git
+treeish = master
+
+[my.project]
+url = git@github.com:dokai/my-project
+container = src
+type = git
+treeish = development
+         """.strip(), gitctl.utils.generate_externals(projects).strip())
+    
+    def test_externals_roundtrip(self):
+        projects = [{'container': 'src',
+                     'name': 'my.project',
+                     'treeish': 'development',
+                     'type': 'git',
+                     'url': 'git@github.com:dokai/my-project'},
+                     {'container': 'src',
+                     'name': 'your.project',
+                     'treeish': 'master',
+                     'type': 'git',
+                     'url': 'git@github.com:dokai/your-project'}]
+
+        ext = os.path.join(self.path, 'gitexternals.cfg')
+        open(ext, 'w').write(gitctl.utils.generate_externals(copy.deepcopy(projects)))
+
+        self.assertEquals(projects, gitctl.utils.parse_externals(ext))
+
+def test_suite():
+    return unittest.TestSuite([
+            unittest.makeSuite(TestCommandStatus),
+            unittest.makeSuite(TestCommandPending),
+            unittest.makeSuite(TestCommandFetch),
+            unittest.makeSuite(TestCommandUpdate),
+            unittest.makeSuite(TestCommandBranch),
+            unittest.makeSuite(TestUtils),
+            ])
