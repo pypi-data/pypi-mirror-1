@@ -1,0 +1,90 @@
+;-*-Doctest-*-
+
+===========================
+ClueMapperThemer Code Usage
+===========================
+
+
+Themes
+======
+
+Themes can be selected on a per project basis and equate to
+deliverance themes.
+
+  >>> from clue.themer.theme import ThemeManager
+
+By default the only theme we'll get is the default theme since the
+themes directory doesn't actually exist.
+
+  >>> tmanager = ThemeManager('', {'base': {}})
+  >>> tmanager.themes
+  [<Theme ... name=Default ClueMapper Theme>, <LinkedTheme ... name=Default Configured Theme>]
+
+But creating a themes directory should fix this.
+
+  >>> import os
+  >>> from clue.tools import testing
+  >>> workingtempdir = testing.gen_tempdir()
+  >>> for x in range(1, 3):
+  ...     os.makedirs(os.path.join(workingtempdir, 'etc', 'cluemapper', 'themes',
+  ...                              'theme-%i' % x))
+  >>> tmanager = ThemeManager(workingtempdir, {'base': {}})
+  >>> tmanager.themes
+  [<Theme id=$DEFAULT_CM_THEME; name=Default ClueMapper Theme>, <LinkedTheme id=$DEFAULT_CONFIG_THEME; name=Default Configured Theme>, <Theme id=theme-1; name=theme-1>, <Theme id=theme-2; name=theme-2>]
+
+Creating a directory with a leading period should mean it gets
+ignored.  Also using _lookup_themes directly here since the themes
+property is cached.
+
+  >>> os.makedirs(os.path.join(workingtempdir, 'etc', 'cluemapper',
+  ...                          'themes', '.foo'))
+  >>> tmanager._setup_themes()
+  >>> '.foo' in tmanager._cached_themes_dict
+  False
+
+
+Theme lookups should work fine.
+
+  >>> tmanager.get_theme('theme-1')
+  <Theme id=theme-1; name=theme-1>
+  >>> tmanager.default_theme
+  <LinkedTheme id=$DEFAULT_CONFIG_THEME; name=Default Configured Theme>
+
+
+Filter
+======
+
+The ThemeFilter is the main guts of theming.  It uses the ThemeManager
+to figure out how to do the application of the theme against the
+application.
+
+  >>> from clue.themer.theme import ThemeFilter
+  >>> tfilter = ThemeFilter(lambda x, y: None, {})
+
+There is a small vhost manipulation used to handle basic proxy
+situations.
+
+  >>> from clue.themer.theme import WORKINGDIR, CONFIG
+  >>> env = {'HTTP_X_FORWARDED_HOST': 'someplace',
+  ...        WORKINGDIR: '', CONFIG: {'base': {}},
+  ...        'QUERY_STRING': ''}
+  >>> tfilter._fix_vhost(env)
+  >>> env['HTTP_HOST']
+  'someplace'
+
+The main logic in the filter is figuring out which theme to use.  At
+first we'll get the default theme.
+
+  >>> tfilter._act_on_theme(env)
+  '$DEFAULT_CONFIG_THEME'
+
+But if we change cluemapper.themeid we'll get another value back.
+
+  >>> env['cluemapper.themeid'] = 'theme-1'
+  >>> tfilter._tmanager_factory = lambda x, y: tmanager
+  >>> tfilter._act_on_theme(env)
+  'theme-1'
+
+Calling the filtered app should yield us data.
+
+  >>> tfilter(env, lambda x, y, z=None: None)
