@@ -1,0 +1,230 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-us" xml:lang="en-us" >
+<head>
+<title>Django Live</title>
+<meta name="robots" content="NONE,NOARCHIVE" />
+
+   <style type="text/css">
+
+body{
+    background-color: #9ddcab;
+    font-family: Verdana, Arial;
+    padding: 10px;
+    font-size: 14px;
+}
+
+.sender{
+    color: #2c6250;
+}
+
+.message{
+    color: #4444;
+}
+
+#output{
+    background-color: #ddf5e2;
+    overflow-y: scroll;
+    height: 300px;
+    padding: 10px;
+    color: #4444;
+}
+
+#input{
+    background-color: #62886a;
+    border: 0px;
+    width: 100%;
+    color: #eeffd0;
+    padding: 3px;
+}
+
+#username{
+    color: #1b1a1a;
+    background: transparent;
+    border: 0px;
+    border-bottom: 1px #eeffd0 dashed;
+}
+
+#change_name{
+   margin-left: auto;
+   margin-bottom: 10px;
+   width: 340px;
+}
+
+    </style>
+
+    <script src="http://{{ ORBITED_HOST }}:{{ ORBITED_PORT }}/static/Orbited.js"></script>
+    <script>
+      document.domain = document.domain;
+      Orbited.settings.port = "{{ ORBITED_PORT }}";
+      Orbited.settings.hostname = "{{ORBITED_HOST }}";
+      TCPSocket = Orbited.TCPSocket;
+    </script>
+    <script src="http://{{ ORBITED_HOST }}:{{ ORBITED_PORT }}/static/protocols/stomp/stomp.js"></script>
+    <script src="http://{{ ORBITED_HOST }}:{{ ORBITED_PORT }}/static/JSON.js"></script>
+
+    <script>
+Shell = function(output){
+    var self = this
+    self.output = output
+    
+    self.print = function(s, u) {
+        var s = self.format(s)
+        if (!u) u = "";
+        self.output.innerHTML += "<span class='sender'>"+u+"</span>"+
+                                 "<span class='message'>&rarr; " + s + "</span><br>"
+        self.output.scrollTop = self.output.scrollHeight     
+    }
+    
+    
+    self.format = function(expr)
+    {
+        var s = prettyprint(expr)
+        s = htmlescape(s)
+        return s
+    }
+
+    var htmlescape = function(s) {
+        var s = s.replace("&", "&amp;", "g")
+        s = s.replace("<", "&lt;", "g")
+        s = s.replace(">", "&gt;", "g")
+        s = s.replace(" ", "&nbsp;", "g")
+        s = s.replace("\n", "<br>", "g")
+        return s
+    }
+
+    var prettyprint = function(s) {
+        var q = "("
+        if(typeof(s) == "string")
+            return s
+        for (var i=0; i<s.length; i++) {
+            if (typeof(s[i]) != "object")
+                q += s[i]
+            else
+                q += prettyprint(s[i])
+            if (i < s.length -1)
+                q += " "
+        }
+        q += ")"
+        return q
+    }
+}
+
+</script>
+
+    <script>
+
+// OLD CODE for RabbitMQ
+// I could just use the chat_channel for the send destination and for the subscribe routing key and it would work all the same. This gives the possibility of hierarchical order of the information. Should use django session instead of math random...
+//var chat_send_destination = chat_channel+"."+String(Math.random());
+//var subscribe_headers = {exchange:'amq.topic', routing_key:chat_channel+".#"};
+
+
+var current_username = 'guest';
+var just_entered = true;
+var previous_username = '';
+
+var manager_channel = "{{ manager_channel }}";
+var chat_channel = "{{ channel }}";
+var stomp_broker = "{{ STOMP_BROKER }}";
+var stomp_port = {{ STOMP_PORT }};
+
+if (stomp_broker=='rabbitmq'){
+  var subscribe_destination = '';
+  var send_headers = {exchange:'amq.topic'};
+  var subscribe_headers = {exchange:'amq.topic', routing_key:chat_channel};
+}
+else {
+  var send_headers = {exchange:''};
+  var subscribe_destination = chat_channel;
+  var send_headers = {exchange:''};
+  var subscribe_headers = {exchange:''};
+}
+
+
+var user_message = function (msg){
+    if (!msg) msg = document.getElementById('input').value;
+//    json_msg = JSON.stringify({'user': document.getElementById('username').value,
+    json_msg = JSON.stringify({'user': current_username,
+                               'message': msg});
+    document.getElementById('input').value = "";
+    stomp.send(json_msg, chat_channel, send_headers);
+}
+
+var channel_message = function (msg){
+    json_msg = JSON.stringify({'message': msg});
+    stomp.send(json_msg, chat_channel, send_headers);
+}
+      
+var manager_message = function(user, channel, msg){
+    json_msg = JSON.stringify({'user': user, 'channel': channel});
+    stomp.send(json_msg, manager_channel, send_headers);
+}
+
+var change_nickname = function(new_nickname){
+  current_username = new_nickname;
+  document.getElementById('input').focus();
+  channel_message(previous_username +' is now known as '+ current_username);
+}
+    </script>
+
+    <script>
+        onload = function() {
+            var output = document.getElementById('output');
+            var shell = new Shell(output);
+
+            // set up stomp client.
+            stomp = new STOMPClient();
+            stomp.onopen = function() {
+            };
+            stomp.onclose = function(code) {
+                shell.print("Transport closed (code: " + code + ")");
+            };
+            stomp.onerror = function(error) {
+                alert("onerror: " + error);
+            };
+            stomp.onerrorframe = function(frame) {
+                alert("onerrorframe: " + frame.body);
+            };
+            stomp.onconnectedframe = function() {
+                shell.print("Connected as user " + current_username);
+                stomp.subscribe(subscribe_destination, subscribe_headers);
+                manager_message(current_username, chat_channel);
+                channel_message(current_username +" has joined this channel.");
+            };
+            stomp.onmessageframe = function(frame) {
+                var m = JSON.parse(frame.body);
+                shell.print(m.message, m.user);
+            };
+
+            current_username = document.getElementById('username').value;
+            stomp.connect(document.domain, stomp_port, 'guest', 'guest');
+            document.getElementById('input').value = "type your message here and press ENTER to send"
+            document.getElementById('username').focus();
+
+        };
+        onunload = function() {
+           channel_message(current_username +"has left this."); 
+           stomp.reset();
+        }
+    </script>
+
+
+</head>
+
+<body>
+<div id="container">
+    <div id="change_name">
+        your name: <input id="username" value="{{ username  }}"
+                         onKeyPress="if (!previous_username) { previous_username = this.value; this.value='';}
+                                     if(event.keyCode==13) change_nickname(this.value);"/>
+    </div>
+
+    <div id="output"></div> 
+
+    <p>
+        <input id="input" value="" size="40" 
+         onKeyPress="if (just_entered){ this.value=''; just_entered = false}; if(event.keyCode==13) user_message();"/>
+    </p>
+</div>
+</body>
+</html>
