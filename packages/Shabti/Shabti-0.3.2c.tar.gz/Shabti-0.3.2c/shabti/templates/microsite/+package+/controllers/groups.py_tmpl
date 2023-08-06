@@ -1,0 +1,139 @@
+# -*- coding: utf-8 -*-
+import logging
+
+from pylons import url, session, tmpl_context as c
+from pylons.controllers.util import abort, redirect_to
+from pylons.i18n import set_lang, get_lang, _, ungettext, N_
+
+from {{package}}.lib.base import BaseController, render, bag_it_and_tag_it
+
+log = logging.getLogger(__name__)
+
+from datetime import datetime
+from {{package}} import model as model
+from {{package}}.lib.helpers import dcmeta, get_object_or_404
+from paste import httpexceptions
+
+from {{package}}.lib.decorators import authorize
+from {{package}}.lib.auth.permissions import SignedIn
+
+from tw.api import WidgetBunch
+from tw.mods.pylonshf import validate
+from {{package}}.forms.identity import *
+
+group_form = GroupForm('group_form', location = "headbottom")
+new_group_form = NewGroupForm('new_group_form', location = "headbottom")
+
+class GroupsController(BaseController):
+    
+    def __before__(self):
+        c.dcmeta = dcmeta(title="Group")
+    
+    @authorize(SignedIn())
+    def index(self, **kwargs):
+        sq = model.Session.query(model.Group)
+        c.title = c.dcmeta.title = _("Group Administration")
+        c.dc_description = _("Content admin")
+        c.groups = sq.order_by(model.Group.name.asc())
+        return render('dashboard/groups.mak')
+    
+    @authorize(SignedIn())
+    def show(self, id):
+        group = get_object_or_404(model.Group, id=id)
+        c.dcmeta.title = c.title = c.dcmeta.title + " :: " + group.name
+        c.name = group.name
+        c.content = group.description + '<br/>Groups:' + \
+                    ', '.join([u.username for u in group.users])
+        return render('show.mak')
+    
+    @authorize(SignedIn())
+    def new(self):
+        """GET /new: Form to create a new item."""
+        c.title = "Add group"
+        c.w = WidgetBunch()
+        c.w.form = new_group_form
+        c.legend = "Group ..."
+        c.value = None
+        c.action = url('create_group')
+        return render('dashboard/group_add.mak')
+    
+    @validate(form=new_group_form, error_handler="new")
+    @authorize(SignedIn())
+    def create(self):
+        group = model.Group()
+        try:
+            for k,v in self.form_result.iteritems():
+                setattr(group, k, v)
+            setattr(group, 'created', datetime.utcnow())
+            model.Session.save_or_update(group)
+            model.Session.commit()
+            bag_it_and_tag_it(group, 'group', u'add')
+            model.Session.commit()
+            session['flash'] = "Successful creation"
+        except Exception and Exception != httpexceptions.HTTPFound, msg:
+            session['flash'] = "Failed creation."
+        session.save()
+        c.flash = session['flash']
+        return redirect_to(url('groups'))
+    
+    @authorize(SignedIn())
+    def edit(self, id):
+        """GET /id;edit: Form to edit an existing item."""
+        group = get_object_or_404(model.Group, id=id)
+        c.title = _("Editing group ") + "&#171;%s&#187;" % group.name 
+        c.dc_description = _("Edit group ") + " %s" % group.name
+        c.w = WidgetBunch()
+        c.w.form = group_form
+        c.legend = "Group ..."
+        c.value = group
+        c.action = url('save_group', id=id)
+        return render('dashboard/group.mak')
+    
+    @validate(form=group_form, error_handler="edit")
+    @authorize(SignedIn())
+    def update(self, id):
+        """PUT /id: Update an existing item."""
+        c.group = get_object_or_404(model.Group, id=id)
+        try:
+            self.form_result.pop('_method')
+            for k, v in self.form_result.iteritems():
+                if getattr(c.group, k) != v:
+                    setattr(c.group, k, v)
+            bag_it_and_tag_it(c.group, 'group', u'edit')
+            model.Session.commit()
+            # Optional -- clear the cache because it'll now be stale
+            # cache.get_cache('{{package}}.group_%s' % c.group.id).clear()
+            session['flash'] = "Successful update"
+        except Exception, msg:
+            log.debug('Update: exception detected: %s' % msg)
+            session['flash'] = "Failed update"
+        c.flash = session['flash']
+        session.save()
+        return redirect_to(url('edit_group', id=id))
+    
+    @authorize(SignedIn())
+    def delete(self, id):
+        """DELETE /id: Delete an existing item."""
+        group = get_object_or_404(model.Group, id=id)
+        try:
+            bag_it_and_tag_it(group, 'group', u'delete')
+            model.Session.delete(group)
+            model.Session.commit()
+            session['flash'] = "Successful deletion"
+        except Exception, msg:
+            session['flash'] = "Failed deletion"
+        c.flash = session['flash']
+        session.save()
+        return redirect_to(url('groups'))
+    
+    def popup(self, id):
+        c.group = get_object_or_404(Group, id=id)
+        c.title = c.group.name.decode('utf-8')
+        c.content = c.group.description.decode('utf-8') + ' created: ' + \
+                c.group.created.strftime("%Y-%m-%d %H:%M:%S") + \
+                '<br />Users: ' + \
+                ', '.join([u.username for u in c.group.users])
+        return render('thickbox.mak')
+    
+
+

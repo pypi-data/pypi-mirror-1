@@ -1,0 +1,71 @@
+# -*- coding: utf-8 -*-
+from pylons import tmpl_context as c
+from pylons.templating import render_mako
+from {{package}}.lib.base import BaseController, config
+from {{package}}.model.rdfmodel import *
+
+class RdflabController(BaseController):
+
+    def __before__(self):
+        pass
+
+    def index(self):
+        try:
+            rdfSubject.db = app_globals.graph
+        except:
+            rdfSubject.db = config['rdfalchemy.ra_engine']
+        c.graph = rdfSubject.db
+        return render_mako('default.mak')
+
+    def constituency(self, id=1010):
+
+        # Imports
+        from rdfalchemy.sparql.sesame2 import SesameGraph
+        from rdflib import Namespace, URIRef, RDF
+
+        # Namespace declarations
+        doap = Namespace('http://www.w3.org/1999/02/22-rdf-syntax-ns#doap')
+        rdf = Namespace('http://www.w3.org/1999/02/22-rdf-syntax-ns#')
+        foaf = Namespace('http://daml.umbc.edu/ontologies/cobra/0.4/foaf-basic#')
+        ukpp = Namespace('http://bel-epa.com/ont/2007/6/ukpp.owl#')
+
+        # Bind db URL and create the graph
+        ukppdb = 'http://bel-epa.com:8080/openrdf-sesame/repositories/ukppsw01'
+        db = SesameGraph(ukppdb)
+
+        # Convenience bindings
+        frmd = URIRef(ukpp['fromDate'])
+        tod = URIRef(ukpp['toDate'])
+        wp = URIRef(ukpp['wikipediaEntry'])
+        fn = URIRef('http://daml.umbc.edu/ontologies/cobra/0.4/foaf-basic#name')
+
+        # Specify the relationship we want to explore: ?mp reps ?y
+        # The predicate ...
+        reps = URIRef('http://reliant.teknowledge.com/DAML/SUMO.owl#represents')
+
+        # Specify the constituency in which we are interested (?mp reps const)
+        # The object ...
+        constit = URIRef(ukpp['ukpp-const-%s' % id])
+
+        # Find all triples where p,o matches the predicate and the object
+        # (the semantics dictate that only an MP can rep a constit)
+        # A (new, reduced) graph is returned 
+        mps = db.value(None, reps, constit)
+
+        # Iteratively, using the MPs retrieved, go back to the db
+        # and retrieve all s, p, o where s is an MP, let p and o match
+        # whatever's there
+        for p, o in db.predicate_objects(mps):
+            # Encode for convenience
+            uo = o.encode('utf8')
+            up = p.encode('utf8')
+            # Keep what we want
+            if p == tod:
+                c.tod = uo
+            elif p == frmd:
+                c.frmd = uo
+            elif p == fn:
+                c.name = uo
+            elif p == wp:
+                c.wp = uo
+        return render_mako('constituency.mak')

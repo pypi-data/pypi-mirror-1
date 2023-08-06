@@ -1,0 +1,114 @@
+# -*- coding: utf-8 -*-
+"""Helper functions
+
+Consists of functions to typically be used within templates, but also
+available to Controllers. This module is available to both as 'h'.
+"""
+from datetime import datetime
+# # We will need this later
+# try:
+#     import json
+# except ImportError:
+#     # Python < 2.6
+#     import simplejson as json
+
+from webhelpers import *
+from webhelpers.rails.wrapped import *
+from routes import redirect_to
+from pylons import url
+
+# @@FIXME: Bring up to date with 0.9.7 
+from webhelpers.rails.asset_tag import *
+from webhelpers.markdown import markdown
+from webhelpers import text
+from webhelpers.text import truncate
+
+from webhelpers.html.tags import *
+from webhelpers.html import literal
+from webhelpers.pylonslib import Flash as _Flash
+import sqlalchemy.types as types
+flash = _Flash()
+
+{{if template_engine == 'genshi'}}
+from genshi.core import Markup
+{{endif}}
+
+{{if template_engine == 'genshi'}}
+def wrap_helpers(localdict):
+    """Wrap the helpers for use in Genshi templates"""
+    def helper_wrapper(func):
+        def wrapped_helper(*args, **kwargs):
+            return Markup(func(*args, **kwargs))
+        try:
+            wrapped_helper.__name__ = func.__name__
+        except TypeError:
+            # Python < 2.4
+            pass
+        wrapped_helper.__doc__ = func.__doc__
+        return wrapped_helper
+    for name, func in localdict.iteritems():
+        if (not callable(func) or
+            not func.__module__.startswith('webhelpers.rails')):
+            continue
+        localdict[name] = helper_wrapper(func)
+
+wrap_helpers(locals())
+{{endif}}
+
+from {{package}}.lib.auth import permissions
+from {{package}}.lib.auth import get_user
+
+def get_object_or_404(model, **kw):
+    from pylons.controllers.util import abort
+    """
+    Returns object, or raises a 404 Not Found is object is not in db.
+    Uses elixir-specific `get_by()` convenience function (see elixir source: 
+    http://elixir.ematia.de/trac/browser/elixir/trunk/elixir/entity.py#L1082)
+    Example: user = get_object_or_404(model.User, id = 1)
+    """
+    obj = model.get_by(**kw)
+    if obj is None:
+        abort(404)
+    return obj
+
+# Auth helpers
+
+def signed_in():
+    return permissions.SignedIn().check()
+
+def in_group(group_name):
+    return permissions.InGroup(group_name).check()
+
+def has_permission(perm):
+    return permissions.HasPermission(perm).check()
+
+# Boilerplate Dublin Core and other meta-data
+# @@FIXME: Read values from config
+class DCMeta(object):
+    def __init__(self, **kw):
+        for k, v in kw.iteritems():
+            setattr(self, k, v)
+        self.copyrightyear = self.date.year
+
+# Would be neater if values were set in a .ini file
+def dcmeta(description=u"", 
+            title=u"", 
+            distribution=u"global",
+            creator = u"Graham Higgins <gjh@bel-epa.com>",
+            copyright = u"© No-one in particular",
+            date = datetime.now(),
+            identifier = u"",
+            abstract = u"",
+            issued = datetime.now(),
+            icbm = "51.2876,-2.8214"):
+    return DCMeta(description=description, 
+            title=title, 
+            distribution=distribution,
+            creator = creator,
+            copyright = copyright,
+            date = date,
+            identifier = identifier,
+            abstract = abstract,
+            issued = issued,
+            icbm = icbm)
+
