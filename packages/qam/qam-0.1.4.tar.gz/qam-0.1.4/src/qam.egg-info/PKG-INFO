@@ -1,0 +1,252 @@
+Metadata-Version: 1.0
+Name: qam
+Version: 0.1.4
+Summary: QAM is a simple RPC Framework which uses the AMQP Protocoll as Transport Protocoll.
+Home-page: http://packages.python.org/qam
+Author: QAM Team
+Author-email: qamteam@gmail.com
+License: UNKNOWN
+Description: =======================================
+        QAM - A python RPC Framework using AMQP
+        =======================================
+        
+        Introduction
+        ------------
+        
+        ``qam`` is a framework for remote-procedure-calls based the `carrot`_ messaging framework. The code is based on `Python XML-RPC`_.
+        
+        The AMQP messaging system manages the remote-procedure-calls for a client and a server. The client sends a amqp message to the server, where the method is specified which should be called on server.
+        After executing the function the result is packed into a amqp message and sent back to the client.
+        
+        The aim of ``qam`` is to offer a simple RPC framework, which is reliable and secure.
+        
+        You have to install a AMQP message broker. The most popular are:
+        
+        - `RabbitMQ`_
+        - `ZeroMQ`_
+        - `Apache ActiveMQ`_
+        
+        Personally we have used RabbitMQ, it is easy to install and to configure.
+        
+        Before you start using the ``qam`` framework you should know a little bit about AMQP.
+        Therefor we advice you to read `Rabbits and warrens`_ a very good article which introduces the basic ideas of AMQP.
+        Further you can look at the `carrot`_ documentation. There you can get also good overview of AMQP.
+        
+        
+        
+        
+        
+        
+        
+        .. _`carrot`: http://ask.github.com/carrot/introduction.html
+        .. _`Python XML-RPC`: http://docs.python.org/library/xmlrpclib.html
+        .. _`Rabbits and warrens`: http://blogs.digitar.com/jjww/2009/01/rabbits-and-warrens/
+        .. _`RabbitMQ`: http://www.rabbitmq.com/
+        .. _`ZeroMQ`: http://www.zeromq.org/
+        .. _`AMQP`: http://amqp.org
+        .. _`Apache ActiveMQ`: http://activemq.apache.org/
+        
+        
+        Installation
+        ------------
+        
+        ``qam`` can be installed via the Python Package Index of from source.
+        
+        Using ``easy_install`` to install ``qam``::
+        
+        $ easy_install qam
+        
+        
+        If you have downloaded a source tarball you can install it
+        by doing the following::
+        
+        $ python setup.py build
+        # python setup.py install # as root
+        
+        
+        Tutorial
+        --------
+        
+        **Starting the QAMServer**
+        
+        First it is necessary, to tell the QAMServer which functions are available. Therefor you have to register the functions on the QAMServer.
+        After registering the functions, the QAMServer waits for method-calls from the QAMProxy.
+        
+        Here is how you register a function on QAMServer and switch into the serving mode:
+        
+        >>> from qam.qam_server import QAMServer
+        >>> qam_server = QAMServer(hostname="localhost",
+        ...                    port=5672,
+        ...                    username='guest',
+        ...                    password='guest',
+        ...                    vhost='/',
+        ...                    server_id='qamserver')
+        ...
+        >>> def adder_function(x, y):
+        ...    return x + y
+        ...
+        >>> qam_server.register_function(adder_function, 'add')
+        ...
+        ... # it is also possible to register the adder_function as follows:
+        ... # qam_server.register_function(adder_function)
+        ... # the method-name for registering in this case is adder_function.__name__
+        ...
+        >>> qam_server.serve()
+        
+        It is also possible to register whole classes on QAMServer. Therefor you only have to register the class instance on the QAMServer.
+        It's not necessary to register all functions of the class, it's enough when you register the class instance.
+        
+        Here is how you register a class instance on QAMServer and switch into the serving mode:
+        
+        >>> from qam.qam_server import QAMServer
+        >>> qam_server = QAMServer(hostname="localhost",
+        ...                    port=5672,
+        ...                    username='guest',
+        ...                    password='guest',
+        ...                    vhost='/',
+        ...                    server_id='qamserver')
+        ...
+        >>> class TestClass():
+        ...    def __init__(self):
+        ...        pass
+        ...    def adder_function(self,a,b):
+        ...        return a+b
+        ...
+        >>> testclass = TestClass()
+        >>> qam_server.register_class(testclass,'testclass')
+        >>> qam_server.serve()
+        
+        
+        **Managing RPC with QAMProxy**
+        
+        The QAMProxy sends the RPC-requests to the QAMServer and receives the result.
+        There are two different ways to receive the result:
+        
+        - *synchronous call*: the QAMProxy blocks until a result arrives
+        - *asynchronous call*: it is possible to register a callback-function which will be called when the result arrives. In the meantime the QAMProxy can execute other functions.
+        
+        *Synchronous RPC*
+        
+        This example shows you how to call a simple method registered on the QAMServer. You have to wait for the result, because no callback-function is registered. So it is a synchronous RPC.
+        
+        >>> from qam.qam_proxy import QAMProxy, QAMMethodNotFoundException, QAMException
+        ... # create a new QAMProxy-instance
+        >>> qam_proxy = QAMProxy(hostname="localhost",
+        ...                    port=5672,
+        ...                    username='guest',
+        ...                    password='guest',
+        ...                    vhost='/',
+        ...                    server_id='qamserver',
+        ...                    client_id='qamproxy')
+        ...
+        >>> result = qam_proxy.add(2,3) # call method on QAMServer and wait for a result
+        ... # close all open carrot-AMQP connections
+        >>> qam_proxy.close()
+        
+        In case you have registered a class instance on the QAMServer and you want to call a method from this instance you can simple call this instance on QAMProxy.
+        You can call the instance with the name you specified with ``qam.qam_server.QAMServer.register_class(instance,name)``.
+        In this example it is a synchronous RPC again. You have to wait for the result.
+        
+        >>> from qam.qam_proxy import QAMProxy, QAMMethodNotFoundException, QAMException
+        >>> qam_proxy = QAMProxy(hostname="localhost",
+        ...                    port=5672,
+        ...                    username='guest',
+        ...                    password='guest',
+        ...                    vhost='/',
+        ...                    server_id='qamserver',
+        ...                    client_id='qamproxy')
+        ...
+        >>> result = qam_proxy.testclass.adder_function(2,4)
+        >>> qam_proxy.close()
+        
+        *Asynchronous RPC*
+        
+        If you don't want to wait for the result it is possible to register a callback-function.
+        You can do this by calling ``QAMProxy.callback(callback_function, error_function).method_to_call_on_server(params)``.
+        The callback-function takes two parameters as arguments. The first is the callback-function.
+        The second is optional and is only called if an error occourd on QAMServer.
+        After receiving the result from QAMServer the callback-function or the error-function is executed, with the result as parameter.
+        You can monitor the state of the callback with ``qam.qam_proxy.get_callback_state(uid)``. Possible States are:
+        
+        - 0: waiting on result
+        - 1: processing (recult arrived)
+        - 2: callback finished
+        
+        In the following example you can see how to use callback-functions. In this example a simple method-call on the Server should be executed.
+        No class instance is registered on the QAMServer, only the adder_function is registered.
+        
+        >>> from qam.qam_proxy import QAMProxy, QAMMethodNotFoundException, QAMException
+        >>> qam_proxy = QAMProxy(hostname="localhost",
+        ...                    port=5672,
+        ...                    username='guest',
+        ...                    password='guest',
+        ...                    vhost='/',
+        ...                    server_id='qamserver',
+        ...                    client_id='qamproxy')
+        ...
+        ... # defining functions for callback
+        >>> def success(arg):
+        ...    print arg
+        >>> def error(arg):
+        ...    # if an error occours on QAMServer
+        ...    print arg
+        >>> uid = qam_proxy.callback(success, error).adder_function(2,4)
+        >>> while True:
+        ...    state = qam_proxy.get_callback_state(uid)
+        ...    if state == 2 :
+        ...        # execution of callback finished
+        ...        break
+        ...
+        >>> qam_proxy.close()
+        
+        The function success and error are registered as callback-functions. If everything worked the success-function will be called.
+        If an error occoured on the QAMServer the error-function will be called.
+        If no error-function is defined and an error occourd a log-message is written into the log-file.
+        
+        It is also possible to execute asynchronous class-instance-method calls on the QAMServer. In the following example you can see how you can manage that.
+        You can call the instance with the name you specified with ``qam.qam_server.QAMServer.register_class(instance,name)``.
+        
+        >>> from qam.qam_proxy import QAMProxy, QAMMethodNotFoundException, QAMException
+        >>> qam_proxy = QAMProxy(hostname="localhost",
+        ...                    port=5672,
+        ...                    username='guest',
+        ...                    password='guest',
+        ...                    vhost='/',
+        ...                    server_id='qamserver',
+        ...                    client_id='qamproxy')
+        ...
+        ... # defining functions for callback
+        >>> def success(arg):
+        ...    print arg
+        >>> def error(arg):
+        ...    # if an error occours on QAMServer
+        ...    print arg
+        >>> uid = qam_proxy.callback(success, error).testclass.adder_function(2,4)
+        >>> while True:
+        ...    state = qam_proxy.get_callback_state(uid)
+        ...    if state == 2 :
+        ...        # execution of callback finished
+        ...        break
+        ...
+        >>> qam_proxy.close()
+        
+        
+        Architecture
+        ------------
+        
+        .. image:: _static/images/qam_arch.png
+        .. image:: _static/images/qam_proxy_sync.png
+        .. image:: _static/images/qam_proxy_async.png
+        
+        
+        
+Keywords: rpc amqp
+Platform: any
+Classifier: Development Status :: 3 - Alpha
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Communications
+Classifier: Topic :: System :: Distributed Computing
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
