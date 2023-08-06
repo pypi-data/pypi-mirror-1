@@ -1,0 +1,17 @@
+import rel
+rel.override()
+rel.initialize(["epoll"])
+from dez.http.application import HTTPApplication
+port = 8888
+
+def simple_app(environ, start_response):
+    """Simplest possible application object"""
+    status = '200 OK'
+    response_headers = [('Content-type','text/plain')]
+    start_response(status, response_headers)
+    return ['Hello world!\n']
+    
+def main():
+    httpd = HTTPApplication("127.0.0.1", port)
+    httpd.add_wsgi_rule("/", simple_app)
+    httpd.start()
