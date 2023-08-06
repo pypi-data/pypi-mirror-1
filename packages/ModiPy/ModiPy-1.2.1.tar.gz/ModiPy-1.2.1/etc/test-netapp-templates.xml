@@ -1,0 +1,104 @@
+<!-- A demo configuration file for configuring a changeset -->
+
+<config xmlns:xi="http://www.w3.org/2001/XInclude">
+
+<!--
+  A global change namespace, used to define commonly used items.
+  You can use this to define variables that can be substituted in
+  common places below. This provides a mechanism for templating changes.
+
+  All values are strings. If you need to convert to a python number,
+  do this in the python code, via int(), float() etc.
+  
+-->
+<!-- include change templates I want to use -->
+<xi:include href="../templates/netapp-create-volume.change-template.xml"/>
+<xi:include href="../templates/netapp-set-volume-option.change-template.xml"/>
+<xi:include href="../templates/netapp-create-qtree.change-template.xml"/>
+<xi:include href="../templates/netapp-set-qtree-security.change-template.xml"/>
+<xi:include href="../templates/netapp-destroy-volume.change-template.xml"/>
+
+<!-- define my provisioner -->
+<provisioner
+  name='netapp_provisioner'
+  module='provisioner_command'
+  type='MultiConnectingProvisioner'
+  command_timeout='60'>
+
+  <command>ssh -i /home/daedalus/.ssh/modipy -o BatchMode=yes -o ServerAliveInterval=0 root@%(device.ipaddress)s "%(command.send)s"</command>
+
+<!--
+  <command>/bin/bash -c "echo %(command.send)s >> /home/daedalus/testing_output"</command>
+-->
+
+</provisioner>
+
+<provisioner
+  name='netapp_provisioner_zapi'
+  module='netapp'
+  type='ZAPIProvisioner' />
+
+<!-- define some devices I want to provision to -->
+<device name='wibble'>
+  <ipaddress>10.232.8.71</ipaddress>
+</device>
+
+<device name='test-filer'>
+  <fqdn>snorty-netapp</fqdn>
+</device>
+
+<!-- Define iterators used by changes -->
+<iterator name="primary_volumes">
+  <dict>
+    <entry name="volname">prim_root</entry>
+    <entry name="volaggr">aggr0</entry>
+    <entry name="volsize">25m</entry>
+  </dict>
+
+  <dict>
+    <entry name="volname">prim_vol01</entry>
+    <entry name="volaggr">aggr0</entry>
+    <entry name="volsize">25m</entry>
+  </dict>
+</iterator>
+
+<iterator name="primary_qtrees">
+  <dict>
+    <entry name="volname">prim_root</entry>
+    <entry name="qtree_name">qtree1</entry>
+    <entry name="qtree_security">unix</entry>
+  </dict>
+  <dict>
+    <entry name="volname">prim_vol01</entry>
+    <entry name="qtree_name">qtree2</entry>
+    <entry name="qtree_security">unix</entry>
+  </dict>
+
+</iterator>
+
+<!-- Set up the change list I want to apply -->
+<change name="create_primary_volumes" template='create_netapp_volume' iterator='primary_volumes'>
+  <target>test-filer</target>
+</change>
+
+<change name="create_primary_qtrees" template='create_netapp_qtree' iterator='primary_qtrees'>
+  <target>test-filer</target>
+  <depends on='create_primary_volumes'/>
+</change>
+
+<change name="set_primary_qtrees_security" template='netapp_set_qtree_security' iterator='primary_qtrees'>
+  <target>test-filer</target>
+  <depends on='create_primary_qtrees'/>
+</change>
+
+<change name="destroy_test_volumes" template='netapp_destroy_volume' iterator='primary_volumes'>
+  <target>test-filer</target>
+  <depends on='set_primary_qtrees_security'/>
+
+  <preimpl>
+    <pause/>
+  </preimpl>
+
+</change>
+
+</config>
