@@ -1,0 +1,56 @@
+Overview
+********
+
+Basic Usage
+-----------
+
+Simple dispatching by HTTP 1.1 ``Host:``:
+
+.. testsetup::
+
+  from wfront import echo_app
+  myapp = ajaxyapp = otherapp = secureapp = someapp = echo_app
+
+.. testcode::
+
+  import wfront
+
+  mapping = [('www.example.com', myapp, None),
+             ('example.com', myapp, None),
+             ('ajaxything.example.com:9001', ajaxyapp, None),
+             ('otherapp.example.com', otherapp, None)]
+
+  router = wfront.route(mapping)
+
+Flexible routing with logical port abstractions:
+
+.. testcode::
+
+  mapping = [('www.example.com:http', myapp, None),
+             ('www.example.com:https', secureapp, None) ]
+
+  schemes = {'http': (80, 8000), 'https': (443, 8443)}
+  router = wfront.by_scheme(mapping, schemes)
+
+Patch ``environ`` on the fly to adapt to proxy and WSGI server quirks:
+
+.. testcode::
+
+  mapping = [('www.example.com::/someapp', someapp, {'SCRIPT_NAME': '/'}),
+             ('www.example.com:https:', secureapp, {'HTTPS': 'on'})]
+
+  router = wfront.route(mapping)
+
+Plus HTTP 1.0 Host: compatibility helpers, adapters for
+Internet-facing web proxies, declarative ``environ`` rewriting rules,
+and more...
+
+Notes
+-----
+
+Tested with:
+
+- Apache 2.0 mod_proxy, mod_rewrite
+- Apache 2.2 mod_proxy, mod_rewrite, mod_proxy_ajp
+- Pound
+- Stunnel

@@ -1,0 +1,432 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Examples &mdash; WFront v0.4 documentation</title>
+    <link rel="stylesheet" href="_static/default.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '',
+        VERSION:     '0.4',
+        COLLAPSE_MODINDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="top" title="WFront v0.4 documentation" href="index.html" />
+    <link rel="prev" title="Built-In Cleanup Filter" href="filter.html" /> 
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="modindex.html" title="Global Module Index"
+             accesskey="M">modules</a> |</li>
+        <li class="right" >
+          <a href="filter.html" title="Built-In Cleanup Filter"
+             accesskey="P">previous</a> |</li>
+        <li><a href="index.html">WFront v0.4 documentation</a> &raquo;</li> 
+      </ul>
+    </div>  
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  <div class="section" id="examples">
+<h1>Examples<a class="headerlink" href="#examples" title="Permalink to this headline">¶</a></h1>
+<p>Here are some collected recipes and tips for integrating WSGI apps
+with various front-end web servers and proxies.</p>
+<div class="section" id="module-examples.apache.mod_proxy">
+<h2>Apache mod_proxy<a class="headerlink" href="#module-examples.apache.mod_proxy" title="Permalink to this headline">¶</a></h2>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Apache mod_proxy examples in the source distribution can be <a class="reference internal" href="#running-examples"><em>run</em></a> with <tt class="docutils literal"><span class="pre">python</span> <span class="pre">-m</span> <span class="pre">examples.apache.mod_proxy</span></tt></p>
+</div>
+<div class="section" id="retrieving-the-host-header">
+<h3>Retrieving the Host: Header<a class="headerlink" href="#retrieving-the-host-header" title="Permalink to this headline">¶</a></h3>
+<p>By default, mod_proxy places the client&#8217;s original <tt class="docutils literal"><span class="pre">Host:</span></tt> header in
+<tt class="docutils literal"><span class="pre">X-Forwarded-For-Host:</span></tt>, and places its own address in the <tt class="docutils literal"><span class="pre">Host:</span></tt> header.
+WFront usually resolves this automatically when performing virtual host
+matching.  Your Apache version may be able to disable this behavior with:</p>
+<div class="highlight-apache"><div class="highlight"><pre><span class="nb">ProxyPreserveHost</span> <span class="k">On</span>
+</pre></div>
+</div>
+<p>If that directive is not available to you, copying the contents of
+<tt class="docutils literal"><span class="pre">X-Forwarded-For-Host</span></tt> or <tt class="docutils literal"><span class="pre">X-Forwarded-For-Server</span></tt> are also options.  The
+latter is HTTP 1.0-proof.</p>
+<p>It&#8217;s often handy to update the <tt class="docutils literal"><span class="pre">environ['HTTP_HOST']</span></tt> to match the client&#8217;s
+Host: header.  There are a couple ways to do this.  One is to use the
+<tt class="docutils literal"><span class="pre">sprintf</span></tt> directive to copy whichever <tt class="docutils literal"><span class="pre">X-...</span></tt> strategy you&#8217;ve picked to
+<tt class="docutils literal"><span class="pre">HTTP_HOST</span></tt>.</p>
+<p>Another option is the <tt class="docutils literal"><span class="pre">reset_host</span></tt> directive, which updates HTTP_HOST with
+precisely the same Host that WFront&#8217;s Host: resolution logic determined.</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="kn">from</span> <span class="nn">wfront</span> <span class="kn">import</span> <span class="n">route</span><span class="p">,</span> <span class="n">echo_app</span>
+
+<span class="n">router</span> <span class="o">=</span> <span class="n">route</span><span class="p">([(</span><span class="s">&#39;host1.domain::&#39;</span><span class="p">,</span> <span class="n">echo_app</span><span class="p">,</span> <span class="p">{</span><span class="s">&#39;wfront.reset_host&#39;</span><span class="p">:</span> <span class="bp">True</span><span class="p">})])</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="mixed-http-and-https-proxying">
+<h3>Mixed HTTP and HTTPS Proxying<a class="headerlink" href="#mixed-http-and-https-proxying" title="Permalink to this headline">¶</a></h3>
+<p>Proxying both HTTP and HTTPS connections to a single WSGI back end presents a
+challenge- mod_proxy does not forward any metadata that would allow the WSGI
+server to determine which method the client used to connect.</p>
+<p>The ideal WSGI side is simple:</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="c"># Set up routes for two hosts.</span>
+<span class="n">mapping</span> <span class="o">=</span> <span class="p">[(</span><span class="s">&#39;host1.domain:80&#39;</span><span class="p">,</span> <span class="n">echo_app</span><span class="p">,</span> <span class="bp">None</span><span class="p">),</span>
+           <span class="p">(</span><span class="s">&#39;host1.domain:443&#39;</span><span class="p">,</span> <span class="n">echo_app</span><span class="p">,</span> <span class="bp">None</span><span class="p">)]</span>
+<span class="n">router2</span> <span class="o">=</span> <span class="n">route</span><span class="p">(</span><span class="n">mapping</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>As mod_proxy is not a transparent proxy, it is possible to pass hints through
+to the backend.  In this example, we&#8217;re embedding metadata in the proxy
+destination URL itself:</p>
+<div class="highlight-python"><pre>
+# - Listening for HTTP and HTTPS on a single IP.
+# - Proxying only /app/* to the WSGI backend, other paths are handled by
+#   Apache
+&lt;VirtualHost 10.0.5.11:80&gt;
+   ServerName host1.domain
+   ProxyPreserveHost On
+   RewriteEngine On
+   RewriteRule ^/app/(.*)  http://localhost:5000/-http/$1 [P] [L]
+&lt;/VirtualHost&gt;
+&lt;VirtualHost 10.0.5.11:443&gt;
+   ServerName host1.domain
+   SSLEngine On
+   SSLCertificateFile pem/host1.domain.pem
+   ProxyPreserveHost On
+   RewriteEngine On
+   RewriteRule ^/app/(.*)  http://localhost:5000/-https/$1 [P] [L]
+&lt;/VirtualHost&gt;
+</pre>
+</div>
+<p>On the Python side, there is another WFront router set up to detect that
+metadata, consume it and update the environ with the HTTP/HTTPS distinction.
+We&#8217;ll also take the opportunity to set a missing Host: header for HTTP 1.0
+clients.</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="n">proxy_mapping</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">(</span><span class="s">&#39;::/-https&#39;</span><span class="p">,</span> <span class="n">router2</span><span class="p">,</span> <span class="p">{</span>
+        <span class="s">&#39;wsgi.url_scheme&#39;</span><span class="p">:</span> <span class="s">&#39;https&#39;</span><span class="p">,</span>
+        <span class="s">&#39;HTTPS&#39;</span><span class="p">:</span> <span class="s">&#39;ON&#39;</span><span class="p">,</span>
+        <span class="s">&#39;HTTP_X_FORWARDED_PORT&#39;</span><span class="p">:</span> <span class="s">&#39;443&#39;</span><span class="p">,</span>
+        <span class="s">&#39;wfront.setdefault.HTTP_HOST&#39;</span><span class="p">:</span> <span class="s">&#39;%(X_FORWARDED_FOR_SERVER)s&#39;</span><span class="p">,</span>
+        <span class="s">&#39;wfront.strip_path&#39;</span><span class="p">:</span> <span class="s">&#39;/-https&#39;</span><span class="p">}),</span>
+    <span class="p">(</span><span class="s">&#39;::/-http&#39;</span><span class="p">,</span> <span class="n">router2</span><span class="p">,</span> <span class="p">{</span>
+        <span class="s">&#39;wfront.strip_path&#39;</span><span class="p">:</span> <span class="s">&#39;/-http&#39;</span><span class="p">,</span>
+        <span class="s">&#39;wfront.setdefault.HTTP_HOST&#39;</span><span class="p">:</span> <span class="s">&#39;%(X_FORWARDED_FOR_SERVER)s&#39;</span><span class="p">})</span>
+    <span class="p">]</span>
+
+<span class="n">front</span> <span class="o">=</span> <span class="n">route</span><span class="p">(</span><span class="n">proxy_mapping</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">router2</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>After filtering, this router presents the cleaned up environ to the ideal
+router defined above for dispatching.</p>
+<p>The <tt class="docutils literal"><span class="pre">default=</span></tt> will fallback to the regular <tt class="docutils literal"><span class="pre">router2</span></tt> if no <tt class="docutils literal"><span class="pre">/-http</span></tt>
+URLs are found, allowing the single <tt class="docutils literal"><span class="pre">front</span></tt> callable to be used proxied
+serving (as in production) and direct serving (as in development).</p>
+</div>
+</div>
+<div class="section" id="module-examples.pound">
+<h2>Pound<a class="headerlink" href="#module-examples.pound" title="Permalink to this headline">¶</a></h2>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Pound examples in the source distribution can be <a class="reference internal" href="#running-examples"><em>run</em></a> with <tt class="docutils literal"><span class="pre">python</span> <span class="pre">-m</span> <span class="pre">examples.pound</span></tt></p>
+</div>
+<div class="section" id="http-1-1-clients">
+<h3>HTTP 1.1 Clients<a class="headerlink" href="#http-1-1-clients" title="Permalink to this headline">¶</a></h3>
+<p>Serving virtual domains through a Pound proxy works well.  Pound
+passes through the client&#8217;s HTTP 1.1 Host: header unchanged.</p>
+</div>
+<div class="section" id="http-1-0-clients">
+<h3>HTTP 1.0 Clients<a class="headerlink" href="#http-1-0-clients" title="Permalink to this headline">¶</a></h3>
+<p>Older clients connecting to Pound will not send a Host: header.  If
+you are depending on host information for routing, some sort of
+default or fallback is required.  Here are two approaches for older
+clients:</p>
+<div class="section" id="static-host-fallback">
+<h4>Static Host Fallback<a class="headerlink" href="#static-host-fallback" title="Permalink to this headline">¶</a></h4>
+<p>A simple Pound configuration, routing all virtual hosts on a single IP
+address to a back-end cluster:</p>
+<div class="highlight-python"><pre>
+# Pound listens on port 80 for HTTP requests
+ListenHTTP
+  Address 10.0.5.11
+  Port 80
+End
+
+Service
+  # WSGI server
+  Backend
+    Address 127.0.0.1
+    Port 5000
+  End
+End
+</pre>
+</div>
+<p>On the Python side, a default Host: header can be injected, directing
+all HTTP 1.0 requests to a single virtual host.</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="kn">from</span> <span class="nn">wfront</span> <span class="kn">import</span> <span class="n">EnvironRewriter</span><span class="p">,</span> <span class="n">echo_app</span>
+
+<span class="n">static_default_host</span> <span class="o">=</span> <span class="n">EnvironRewriter</span><span class="p">(</span>
+    <span class="p">{</span><span class="s">&#39;wfront.setdefault.HTTP_HOST&#39;</span><span class="p">:</span> <span class="s">&#39;host1.domain&#39;</span><span class="p">})</span>
+
+<span class="n">front_door</span> <span class="o">=</span> <span class="n">static_default_host</span><span class="o">.</span><span class="n">as_middleware_for</span><span class="p">(</span><span class="n">echo_app</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="dynamic-host-fallback">
+<h4>Dynamic Host Fallback<a class="headerlink" href="#dynamic-host-fallback" title="Permalink to this headline">¶</a></h4>
+<p>In this Pound configuration, Pound listens on two IP addresses for
+HTTPS connections, routing both to a single back-end cluster.  Pound
+will forward the raw IP it answered on as X-Forwarded-For, and that
+can be used to look up a matching virtual host name.  In this example,
+we push the IP/host name pairing completely into Pound configuration,
+divorcing the WSGI app from those details.</p>
+<div class="highlight-python"><pre>
+# Pound listens on port 443 for HTTPS requests on two interfaces.
+ListenHTTPS
+  Address 10.0.5.11
+  Port 443
+  Cert "../pem/host1.domain.pem"
+  AddHeader "X-Fallback-Host: host1.domain"
+End
+
+ListenHTTPS
+  Address 10.0.5.12
+  Port 443
+  Cert "../pem/host2.domain.pem"
+  AddHeader "X-Fallback-Host: host2.domain"
+End
+
+Service
+  # WSGI server
+  Backend
+    Address 127.0.0.1
+    Port 5000
+  End
+End
+</pre>
+</div>
+<p>On the Python side, the injected header provides a default Host: for
+HTTP 1.0 clients.</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="n">dynamic_default_host</span> <span class="o">=</span> <span class="n">EnvironRewriter</span><span class="p">(</span>
+    <span class="p">{</span><span class="s">&#39;wfront.setdefault.HTTP_HOST&#39;</span><span class="p">:</span> <span class="s">&#39;%(HTTP_X_FALLBACK_HOST)s&#39;</span><span class="p">})</span>
+
+<span class="n">front_door2</span> <span class="o">=</span> <span class="n">dynamic_default_host</span><span class="o">.</span><span class="n">as_middleware_for</span><span class="p">(</span><span class="n">echo_app</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="updating-wsgi-scheme-under-https">
+<h3>Updating <tt class="docutils literal"><span class="pre">wsgi.scheme</span></tt> under HTTPS<a class="headerlink" href="#updating-wsgi-scheme-under-https" title="Permalink to this headline">¶</a></h3>
+<p>Pound proxies listening for HTTPS forward those connections to the
+back-end over straight HTTP.  That&#8217;s convenient, however Pound does
+not include any hints to the back-end that it answered the client&#8217;s
+request over HTTPS rather than HTTP.  That metadata is often needed on
+the WSGI side for authorization validation, URL generation, etc.
+Here&#8217;s one way to pass a hint through:</p>
+<div class="highlight-python"><pre>
+# Pound listens for HTTP and HTTPS requests on 1 interface.
+ListenHTTP
+  Address 10.0.5.11
+  Port 80
+  AddHeader "X-Scheme: http"
+End
+
+ListenHTTPS
+  Address 10.0.5.11
+  Port 443
+  Cert "../pem/host1.domain.pem"
+  AddHeader "X-Scheme: https"
+End
+
+Service
+  # WSGI server
+  Backend
+    Address 127.0.0.1
+    Port 5000
+  End
+End
+</pre>
+</div>
+<p>On the Python side, the standard <tt class="docutils literal"><span class="pre">wsgi.url_scheme</span></tt> <tt class="docutils literal"><span class="pre">environ</span></tt>
+variable is updated to match the client&#8217;s protocol.</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="n">scheme_corrector</span> <span class="o">=</span> <span class="n">EnvironRewriter</span><span class="p">(</span>
+    <span class="p">{</span><span class="s">&#39;wfront.sprintf.wsgi.url_scheme&#39;</span><span class="p">:</span> <span class="s">&#39;%(HTTP_X_SCHEME)s&#39;</span><span class="p">})</span>
+
+<span class="n">front_door3</span> <span class="o">=</span> <span class="n">scheme_corrector</span><span class="o">.</span><span class="n">as_middleware_for</span><span class="p">(</span><span class="n">echo_app</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="stunnel">
+<span id="running-examples"></span><h2>Stunnel<a class="headerlink" href="#stunnel" title="Permalink to this headline">¶</a></h2>
+<p><tt class="docutils literal"><span class="pre">stunnel</span></tt> can route HTTPS connections to a back-end WSGI server
+quite successfully.  The <tt class="docutils literal"><span class="pre">stunnel</span></tt> connection is transparent and does
+not change the HTTP headers in any fashion, so the Host: header (if
+present) is reliable.</p>
+<p>However this transparency makes HTTPS detection difficult.  Your WSGI
+server will most likely set <tt class="docutils literal"><span class="pre">environ['REMOTE_ADDR']</span></tt> to the IP
+address of the host running <tt class="docutils literal"><span class="pre">stunnel</span></tt>.  A possible approach would be
+a filter or WSGI middleware that inspects that address at runtime, and
+sets <tt class="docutils literal"><span class="pre">wsgi.url_scheme</span></tt> appropriately.  This type of conditional
+re-writing is currently outside the scope of WFront&#8217;s built-in
+capabilities and would require custom code.</p>
+</div>
+<div class="section" id="other-proxies-and-front-end-servers">
+<h2>Other Proxies and Front-End Servers<a class="headerlink" href="#other-proxies-and-front-end-servers" title="Permalink to this headline">¶</a></h2>
+<p>Have experience with another tool?  Write-ups and examples gladly accepted.</p>
+</div>
+<div class="section" id="module-examples">
+<h2>Running Examples<a class="headerlink" href="#module-examples" title="Permalink to this headline">¶</a></h2>
+<p>The WFront source distribution contains runnable versions of these
+examples in the <tt class="docutils literal"><span class="pre">examples/</span></tt> directory.  All examples route to
+the <tt class="xref docutils literal"><span class="pre">wfront.echo_app()</span></tt>, a simple WSGI app that reports the
+contents of the <tt class="docutils literal"><span class="pre">environ</span></tt>.</p>
+<div class="section" id="running-example-wfront-code">
+<h3>Running Example WFront Code<a class="headerlink" href="#running-example-wfront-code" title="Permalink to this headline">¶</a></h3>
+<p>Example code can be run with this general syntax:</p>
+<div class="highlight-python"><pre>$ cd &lt;directory where you've unpacked WFront&gt;
+$ python -m examples.&lt;module&gt; [wsgi_function_name]</pre>
+</div>
+<p>This will start a simple <tt class="docutils literal"><span class="pre">wsgiref</span></tt> HTTP server on port 5000, serving
+up the example WSGI app <tt class="docutils literal"><span class="pre">wsgi_function_name</span></tt>.  If the app is
+omitted, the <tt class="docutils literal"><span class="pre">echo_app</span></tt> is served instead.  For example:</p>
+<div class="highlight-python"><pre>$ python -m examples.pound front_door</pre>
+</div>
+</div>
+<div class="section" id="example-server-configurations">
+<h3>Example Server Configurations<a class="headerlink" href="#example-server-configurations" title="Permalink to this headline">¶</a></h3>
+<p>The example directory also contains proxy server configuration files
+that go with the examples.  You&#8217;re on your own for getting these
+running.  Typically this is pretty simple and you&#8217;ll provide the
+WFront configuration to the server binary as a command line option.
+See the documentation for your server package.  You may need to
+<tt class="docutils literal"><span class="pre">sudo</span></tt> to run a configuration that binds to port 80 or 443.</p>
+<p>The configurations listen on IP addresses 10.0.5.11 and 10.0.5.12.  You can adjust these to match your workstation, or just add them as alias to your loopback (localhost) adapter.</p>
+<p>On modern Linux that looks like:</p>
+<div class="highlight-python"><pre>sudo ip addr add 10.0.5.11 dev lo
+sudo ip addr add 10.0.5.12 dev lo
+
+sudo sh -c "cat &gt;&gt; /etc/hosts" &lt;&lt;EOF
+10.0.5.11	host1.domain
+10.0.5.12	host1.domain
+EOF
+</pre>
+</div>
+<p>and on Mac OSX:</p>
+<div class="highlight-python"><pre>sudo /sbin/ifconfig lo0 alias 10.0.5.11 netmask 255.255.255.0
+sudo /sbin/ifconfig lo0 alias 10.0.5.12 netmask 255.255.255.0
+
+sudo sh -c "cat &gt;&gt; /etc/hosts" &lt;&lt;EOF
+10.0.5.11	host1.domain
+10.0.5.12	host1.domain
+EOF
+</pre>
+</div>
+</div>
+<div class="section" id="experimenting-with-http-requests">
+<h3>Experimenting With HTTP Requests<a class="headerlink" href="#experimenting-with-http-requests" title="Permalink to this headline">¶</a></h3>
+<p>You can use your web browser to make requests and see how things are
+working.  You can connect to your web server
+(e.g. <tt class="docutils literal"><span class="pre">http://host1.domain/</span></tt>) or directly to the WSGI server
+(e.g. <tt class="docutils literal"><span class="pre">http://localhost:5000/</span></tt>).</p>
+<p>Many of the examples deal with handling older HTTP 1.0 clients in a
+virtual hosting setup.  Most web browsers no longer speak 1.0, so the
+a little command line tool is included to run these requests and
+observe the results:</p>
+<div class="highlight-python"><pre>$ examples/request
+Usage: request [-1.1|-1.0] url</pre>
+</div>
+<p>The default is a 1.1 request.  Your Python must have working SSL
+support if you want to use <tt class="docutils literal"><span class="pre">https://</span></tt> urls.</p>
+</div>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar">
+        <div class="sphinxsidebarwrapper">
+            <h3><a href="index.html">Table Of Contents</a></h3>
+            <ul>
+<li><a class="reference external" href="">Examples</a><ul>
+<li><a class="reference external" href="#module-examples.apache.mod_proxy">Apache mod_proxy</a><ul>
+<li><a class="reference external" href="#retrieving-the-host-header">Retrieving the Host: Header</a></li>
+<li><a class="reference external" href="#mixed-http-and-https-proxying">Mixed HTTP and HTTPS Proxying</a></li>
+</ul>
+</li>
+<li><a class="reference external" href="#module-examples.pound">Pound</a><ul>
+<li><a class="reference external" href="#http-1-1-clients">HTTP 1.1 Clients</a></li>
+<li><a class="reference external" href="#http-1-0-clients">HTTP 1.0 Clients</a><ul>
+<li><a class="reference external" href="#static-host-fallback">Static Host Fallback</a></li>
+<li><a class="reference external" href="#dynamic-host-fallback">Dynamic Host Fallback</a></li>
+</ul>
+</li>
+<li><a class="reference external" href="#updating-wsgi-scheme-under-https">Updating <tt class="docutils literal"><span class="pre">wsgi.scheme</span></tt> under HTTPS</a></li>
+</ul>
+</li>
+<li><a class="reference external" href="#stunnel">Stunnel</a></li>
+<li><a class="reference external" href="#other-proxies-and-front-end-servers">Other Proxies and Front-End Servers</a></li>
+<li><a class="reference external" href="#module-examples">Running Examples</a><ul>
+<li><a class="reference external" href="#running-example-wfront-code">Running Example WFront Code</a></li>
+<li><a class="reference external" href="#example-server-configurations">Example Server Configurations</a></li>
+<li><a class="reference external" href="#experimenting-with-http-requests">Experimenting With HTTP Requests</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            <h4>Previous topic</h4>
+            <p class="topless"><a href="filter.html" title="previous chapter">Built-In Cleanup Filter</a></p>
+            <h3>This Page</h3>
+            <ul class="this-page-menu">
+              <li><a href="_sources/examples.txt" rel="nofollow">Show Source</a></li>
+            </ul>
+          <h3>Quick search</h3>
+            <form class="search" action="search.html" method="get">
+              <input type="text" name="q" size="18" /> <input type="submit" value="Go" />
+              <input type="hidden" name="check_keywords" value="yes" />
+              <input type="hidden" name="area" value="default" />
+            </form>
+            <p style="font-size: 90%">Enter search terms or a module, class or function name.</p>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="modindex.html" title="Global Module Index"
+             accesskey="M">modules</a> |</li>
+        <li class="right" >
+          <a href="filter.html" title="Built-In Cleanup Filter"
+             accesskey="P">previous</a> |</li>
+        <li><a href="index.html">WFront v0.4 documentation</a> &raquo;</li> 
+      </ul>
+    </div>
+    <div class="footer">
+      &copy; Copyright 2008, Jason Kirtland.
+      Created using <a href="http://sphinx.pocoo.org/">Sphinx</a> 0.6.
+    </div>
+  </body>
+</html>

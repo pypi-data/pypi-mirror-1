@@ -1,0 +1,38 @@
+######
+WFront
+######
+
+WFront is a top-level request dispatcher, directing requests based on
+the requested "Virtual Host", listening port, URL path, or any
+combination.
+
+WFront can be used to:
+
+* host multiple WSGI-powered domains in a single process
+
+* emulate a mod_proxy, SCGI/FastCGI/AJP, mod_wsgi, or mod_python WSGI
+  setup under a simple development mode WSGI server
+
+* simplify development and testing of complex, multi-server cluster
+  environments
+
+* or just perform simple path-based request dispatching
+
+Mapping HTTP/1.0 requests to HTTP/1.1 Host:-style requests is supported
+and is very flexible.  WFront includes an environ manipulation toolkit
+that allows for additions to and transformations of server-provided
+environ data to be performed on each request.
+
+
+Documentation Contents
+======================
+
+.. toctree::
+   :maxdepth: 2
+
+   overview
+   mappings
+   routing
+   filter
+   examples
+

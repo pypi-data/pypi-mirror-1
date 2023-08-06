@@ -1,0 +1,205 @@
+
+Routing
+*******
+
+
+wfront.router
+=============
+
+wfront.route(mapping, **kw)
+
+   Create a routing middleware matching hostname, port and path.
+
+   Parameters:
+      * *mapping* -- A sequence of mapping tuples, see *Mappings*
+
+      * *default* -- Optional. Invoked if there are no hits in the
+        map. May either be a WSGI callable or a 2-tuple of (app,
+        filter).
+
+      * *host_resolver* -- a callable that receives an environ and
+        returns a string of ``'hostname:port:path'``.  Defaults to
+        ``default_resolver()``.
+
+      * *abort404* -- a WSGI app that will be run if there are no map
+        hits and no *default* is provided.  Default *abort404* is a
+        very simple 404 WSGI application.
+
+      * *cleanup_syntax* -- may be ``verbose`` or ``shortcut``.  If
+        ``shortcut``, enables shortcut filter specifications.  See
+        *Built-In Cleanup Filter*.
+
+      * ***kw* -- passed through to ``WFront.__init__()``.
+
+   Returns a ``WFront`` WSGI callable:
+
+      router = wfront.route([('www.my.host:80', app, None)])
+
+
+Routing by URL Scheme
+=====================
+
+wfront.by_scheme(mapping, schemes={'http': (80, ), 'https': (443, )}, **kw)
+
+   Create a routing middleware matching hostname, URL scheme and path.
+
+   Parameters:
+      * *mapping* -- A sequence of mapping tuples, see *Mappings*
+
+      * *schemes* -- A mapping of scheme names to sequences of port
+        numbers.  By default, http on port 80 and https on 443.
+
+      * *proxied_host_is_accurate* -- optional.  If False, a Host:
+        header will not be considered if a X-Forwarded-For header is
+        also present.  Only required for some non-transparent front-
+        end proxy configurations.
+
+      * *default* -- Optional. Invoked if there are no hits in the
+        map. May either be a WSGI callable or a 2-tuple of (app,
+        filter).
+
+      * *abort404* -- a WSGI app that will be run if there are no map
+        hits and no *default* is provided.  Default *abort404* is a
+        very simple 404 WSGI application.
+
+      * *cleanup_syntax* -- may be ``verbose`` or ``shortcut``.  If
+        ``shortcut``, enables shortcut filter specifications.
+
+      * ***kw* -- passed through to ``WFront.__init__()``.
+
+   If you have a server that speaks HTTP on 80, 8000 and 8001, you
+   might specify:
+
+      router = wfront.by_scheme([('www.my.host:http', app, None)],
+                                schemes={'http': (80, 8000, 8001)})
+
+   This would match on a request for ``www.my.host`` made to port 80,
+   8000 or 8001.
+
+
+Custom Routers
+==============
+
+The base implementation can be extended for custom functionality.
+
+class wfront.WFront(mapping, default=None, host_resolver=None, abort404=None, cleanup_syntax='verbose')
+
+   __init__(mapping, default=None, host_resolver=None, abort404=None, cleanup_syntax='verbose')
+
+      Create a routing middleware that directs to one or more WSGI
+      apps.
+
+      Parameters:
+         * *mapping* -- a mapping specification.
+
+         * *default* -- Optional. Invoked if there are no hits in the
+           map. May either be a WSGI callable or a 2-tuple of (app,
+           filter).
+
+         * *host_resolver* -- a callable that receives an environ and
+           returns a string of ``':hostname:port:path'``.  Defaults to
+           ``default_resolver()``.
+
+         * *abort404* -- a WSGI app that will be run if there are no
+           map hits and no *default* is provided.  Default is a very
+           simple 404 handler.
+
+         * *cleanup_syntax* -- may be ``verbose`` or ``shortcut``.  If
+           ``shortcut``, enables shortcut filter specifications.
+
+      A simple router that answers any request for ``localhost``:
+
+         front = WFront([('localhost', myapp, None)])
+
+      A more complex router:
+
+         mapping = [ ('www.example.com', myapp),
+                     ('www.example.com:443', sec_app, 'mymodule.filter'),
+                     ('wap.example.mobi', myapp, {'mode': 'wap'}), ]
+
+         router = WFront(mapping)
+
+      By default, the requested host is taken from HTTP_HOST and
+      guaranteed to contain a port number.  You can customize this
+      behavior by supplying 'host_resolver' as a function that takes
+      the environ and returns a string of 'hostname:port:path'
+
+   add(spec, app, filter=None)
+
+      Add a new mapping.
+
+      Spec may be a regex in which case it is used as-is, otherwise
+      spec is regex-escaped and converted into a host:port:path
+      matcher.
+
+      If a regex is supplied and it contains a 'pathinfo' named group,
+      that group will be used in PATH_INFO / SCRIPT_NAME manipulation.
+
+   dump_mappings()
+
+      Debugging, dump decompiled regex patterns.
+
+
+Virtual Host Resolution
+=======================
+
+wfront.default_resolver(environ)
+
+   Extracts 'host:portnumber:path' from an environ.
+
+wfront.modproxy_resolver(environ)
+
+   Extracts 'host:portnumber:path' from an environ. This resolver will
+   attempt to use X-Forwarded-Host if present and will ignore any
+   Host: header offered by the server.
+
+In many cases, this function will 'just work' and retrieve the correct
+'hostname' and 'path' from the environ with no fuss.  If it is not
+working for your web server and/or WSGI container, the implementation
+is listed below.
+
+
+           path = environ.get('REQUEST_URI', None)
+           if path is None:
+               path = environ.get('SCRIPT_NAME', '') + environ.get('PATH_INFO')
+
+           # mod_proxy-style forward?
+           if 'HTTP_X_FORWARDED_FOR' in environ:
+               # Some pass it in an x-header
+               if 'HTTP_X_FORWARDED_HOST' in environ:
+                   host = environ['HTTP_X_FORWARDED_HOST']
+               # some others pass along the original Host:
+               elif self.proxied_host_is_accurate and 'HTTP_HOST' in environ:
+                   host = environ['HTTP_HOST']
+               # Or, default to remote server name if the client didn't
+               # supply Host:
+               elif 'HTTP_X_FORWARDED_SERVER' in environ:
+                   host = environ['HTTP_X_FORWARDED_SERVER']
+               # Otherwise ignore Host: and default to our server name.
+               else:
+                   host = environ['SERVER_NAME']
+               # In a proxy situation, the original request port is only
+               # known if there is a Host: or forwarded Host: header AND
+               # the request is either on a non-standard port or is http
+               # on port 80.  There's no way to distinguish a
+               # simply-proxied HTTP and HTTPS connection!  Given that,
+               # default to 80.  Ignore wsgi.url_scheme until such a time
+               # as the WSGI spec makes it clear if this is variable
+               # describes the *user's* URL scheme or the application
+               # container's URL scheme.  It's safer to assume the
+               # latter.
+               if ':' not in host:
+                   host += ':' + environ.get('HTTP_X_FORWARDED_PORT', '80')
+               return host + ':' + path
+           # Not mod_proxy-style proxied- assume direct connection.
+           else:
+               host = environ.get('HTTP_HOST', None)
+               if host is None:
+                   host = environ['SERVER_NAME'] + ':' + environ['SERVER_PORT']
+               elif ':' not in host:
+                   ssl = environ.get('HTTPS', environ['wsgi.url_scheme']).lower()
+                   if ssl in _ssl_flags:
+                       host += ':443'
+                   else:
+                       host += ':80'
+               return host + ':' + path

@@ -1,0 +1,363 @@
+
+Examples
+********
+
+Here are some collected recipes and tips for integrating WSGI apps
+with various front-end web servers and proxies.
+
+
+Apache mod_proxy
+================
+
+Note: Apache mod_proxy examples in the source distribution can be *run*
+  with ``python -m examples.apache.mod_proxy``
+
+
+Retrieving the Host: Header
+---------------------------
+
+By default, mod_proxy places the client's original ``Host:`` header in
+``X-Forwarded-For-Host:``, and places its own address in the ``Host:``
+header. WFront usually resolves this automatically when performing
+virtual host matching.  Your Apache version may be able to disable
+this behavior with:
+
+   ProxyPreserveHost On
+
+If that directive is not available to you, copying the contents of
+``X-Forwarded-For-Host`` or ``X-Forwarded-For-Server`` are also
+options.  The latter is HTTP 1.0-proof.
+
+It's often handy to update the ``environ['HTTP_HOST']`` to match the
+client's Host: header.  There are a couple ways to do this.  One is to
+use the ``sprintf`` directive to copy whichever ``X-...`` strategy
+you've picked to ``HTTP_HOST``.
+
+Another option is the ``reset_host`` directive, which updates
+HTTP_HOST with precisely the same Host that WFront's Host: resolution
+logic determined.
+
+
+   from wfront import route, echo_app
+
+   router = route([('host1.domain::', echo_app, {'wfront.reset_host': True})])
+
+
+Mixed HTTP and HTTPS Proxying
+-----------------------------
+
+Proxying both HTTP and HTTPS connections to a single WSGI back end
+presents a challenge- mod_proxy does not forward any metadata that
+would allow the WSGI server to determine which method the client used
+to connect.
+
+The ideal WSGI side is simple:
+
+
+   # Set up routes for two hosts.
+   mapping = [('host1.domain:80', echo_app, None),
+              ('host1.domain:443', echo_app, None)]
+   router2 = route(mapping)
+
+As mod_proxy is not a transparent proxy, it is possible to pass hints
+through to the backend.  In this example, we're embedding metadata in
+the proxy destination URL itself:
+
+
+   # - Listening for HTTP and HTTPS on a single IP.
+   # - Proxying only /app/* to the WSGI backend, other paths are handled by
+   #   Apache
+   <VirtualHost 10.0.5.11:80>
+      ServerName host1.domain
+      ProxyPreserveHost On
+      RewriteEngine On
+      RewriteRule ^/app/(.*)  http://localhost:5000/-http/$1 [P] [L]
+   </VirtualHost>
+   <VirtualHost 10.0.5.11:443>
+      ServerName host1.domain
+      SSLEngine On
+      SSLCertificateFile pem/host1.domain.pem
+      ProxyPreserveHost On
+      RewriteEngine On
+      RewriteRule ^/app/(.*)  http://localhost:5000/-https/$1 [P] [L]
+   </VirtualHost>
+
+On the Python side, there is another WFront router set up to detect
+that metadata, consume it and update the environ with the HTTP/HTTPS
+distinction. We'll also take the opportunity to set a missing Host:
+header for HTTP 1.0 clients.
+
+
+   proxy_mapping = [
+       ('::/-https', router2, {
+           'wsgi.url_scheme': 'https',
+           'HTTPS': 'ON',
+           'HTTP_X_FORWARDED_PORT': '443',
+           'wfront.setdefault.HTTP_HOST': '%(X_FORWARDED_FOR_SERVER)s',
+           'wfront.strip_path': '/-https'}),
+       ('::/-http', router2, {
+           'wfront.strip_path': '/-http',
+           'wfront.setdefault.HTTP_HOST': '%(X_FORWARDED_FOR_SERVER)s'})
+       ]
+
+   front = route(proxy_mapping, default=router2)
+
+After filtering, this router presents the cleaned up environ to the
+ideal router defined above for dispatching.
+
+The ``default=`` will fallback to the regular ``router2`` if no
+``/-http`` URLs are found, allowing the single ``front`` callable to
+be used proxied serving (as in production) and direct serving (as in
+development).
+
+
+Pound
+=====
+
+Note: Pound examples in the source distribution can be *run* with ``python
+  -m examples.pound``
+
+
+HTTP 1.1 Clients
+----------------
+
+Serving virtual domains through a Pound proxy works well.  Pound
+passes through the client's HTTP 1.1 Host: header unchanged.
+
+
+HTTP 1.0 Clients
+----------------
+
+Older clients connecting to Pound will not send a Host: header.  If
+you are depending on host information for routing, some sort of
+default or fallback is required.  Here are two approaches for older
+clients:
+
+
+Static Host Fallback
+~~~~~~~~~~~~~~~~~~~~
+
+A simple Pound configuration, routing all virtual hosts on a single IP
+address to a back-end cluster:
+
+
+   # Pound listens on port 80 for HTTP requests
+   ListenHTTP
+     Address 10.0.5.11
+     Port 80
+   End
+
+   Service
+     # WSGI server
+     Backend
+       Address 127.0.0.1
+       Port 5000
+     End
+   End
+
+On the Python side, a default Host: header can be injected, directing
+all HTTP 1.0 requests to a single virtual host.
+
+
+
+   from wfront import EnvironRewriter, echo_app
+
+   static_default_host = EnvironRewriter(
+       {'wfront.setdefault.HTTP_HOST': 'host1.domain'})
+
+   front_door = static_default_host.as_middleware_for(echo_app)
+
+
+
+Dynamic Host Fallback
+~~~~~~~~~~~~~~~~~~~~~
+
+In this Pound configuration, Pound listens on two IP addresses for
+HTTPS connections, routing both to a single back-end cluster.  Pound
+will forward the raw IP it answered on as X-Forwarded-For, and that
+can be used to look up a matching virtual host name.  In this example,
+we push the IP/host name pairing completely into Pound configuration,
+divorcing the WSGI app from those details.
+
+
+   # Pound listens on port 443 for HTTPS requests on two interfaces.
+   ListenHTTPS
+     Address 10.0.5.11
+     Port 443
+     Cert "../pem/host1.domain.pem"
+     AddHeader "X-Fallback-Host: host1.domain"
+   End
+
+   ListenHTTPS
+     Address 10.0.5.12
+     Port 443
+     Cert "../pem/host2.domain.pem"
+     AddHeader "X-Fallback-Host: host2.domain"
+   End
+
+   Service
+     # WSGI server
+     Backend
+       Address 127.0.0.1
+       Port 5000
+     End
+   End
+
+On the Python side, the injected header provides a default Host: for
+HTTP 1.0 clients.
+
+
+
+   dynamic_default_host = EnvironRewriter(
+       {'wfront.setdefault.HTTP_HOST': '%(HTTP_X_FALLBACK_HOST)s'})
+
+   front_door2 = dynamic_default_host.as_middleware_for(echo_app)
+
+
+
+Updating ``wsgi.scheme`` under HTTPS
+------------------------------------
+
+Pound proxies listening for HTTPS forward those connections to the
+back-end over straight HTTP.  That's convenient, however Pound does
+not include any hints to the back-end that it answered the client's
+request over HTTPS rather than HTTP.  That metadata is often needed on
+the WSGI side for authorization validation, URL generation, etc.
+Here's one way to pass a hint through:
+
+
+   # Pound listens for HTTP and HTTPS requests on 1 interface.
+   ListenHTTP
+     Address 10.0.5.11
+     Port 80
+     AddHeader "X-Scheme: http"
+   End
+
+   ListenHTTPS
+     Address 10.0.5.11
+     Port 443
+     Cert "../pem/host1.domain.pem"
+     AddHeader "X-Scheme: https"
+   End
+
+   Service
+     # WSGI server
+     Backend
+       Address 127.0.0.1
+       Port 5000
+     End
+   End
+
+On the Python side, the standard ``wsgi.url_scheme`` ``environ``
+variable is updated to match the client's protocol.
+
+
+
+   scheme_corrector = EnvironRewriter(
+       {'wfront.sprintf.wsgi.url_scheme': '%(HTTP_X_SCHEME)s'})
+
+   front_door3 = scheme_corrector.as_middleware_for(echo_app)
+
+
+
+Stunnel
+=======
+
+``stunnel`` can route HTTPS connections to a back-end WSGI server
+quite successfully.  The ``stunnel`` connection is transparent and
+does not change the HTTP headers in any fashion, so the Host: header
+(if present) is reliable.
+
+However this transparency makes HTTPS detection difficult.  Your WSGI
+server will most likely set ``environ['REMOTE_ADDR']`` to the IP
+address of the host running ``stunnel``.  A possible approach would be
+a filter or WSGI middleware that inspects that address at runtime, and
+sets ``wsgi.url_scheme`` appropriately.  This type of conditional re-
+writing is currently outside the scope of WFront's built-in
+capabilities and would require custom code.
+
+
+Other Proxies and Front-End Servers
+===================================
+
+Have experience with another tool?  Write-ups and examples gladly
+accepted.
+
+
+Running Examples
+================
+
+The WFront source distribution contains runnable versions of these
+examples in the ``examples/`` directory.  All examples route to the
+``wfront.echo_app()``, a simple WSGI app that reports the contents of
+the ``environ``.
+
+
+Running Example WFront Code
+---------------------------
+
+Example code can be run with this general syntax:
+
+   $ cd <directory where you've unpacked WFront>
+   $ python -m examples.<module> [wsgi_function_name]
+
+This will start a simple ``wsgiref`` HTTP server on port 5000, serving
+up the example WSGI app ``wsgi_function_name``.  If the app is
+omitted, the ``echo_app`` is served instead.  For example:
+
+   $ python -m examples.pound front_door
+
+
+Example Server Configurations
+-----------------------------
+
+The example directory also contains proxy server configuration files
+that go with the examples.  You're on your own for getting these
+running.  Typically this is pretty simple and you'll provide the
+WFront configuration to the server binary as a command line option.
+See the documentation for your server package.  You may need to
+``sudo`` to run a configuration that binds to port 80 or 443.
+
+The configurations listen on IP addresses 10.0.5.11 and 10.0.5.12.
+You can adjust these to match your workstation, or just add them as
+alias to your loopback (localhost) adapter.
+
+On modern Linux that looks like:
+
+   sudo ip addr add 10.0.5.11 dev lo
+   sudo ip addr add 10.0.5.12 dev lo
+
+   sudo sh -c "cat >> /etc/hosts" <<EOF
+   10.0.5.11	host1.domain
+   10.0.5.12	host1.domain
+   EOF
+
+and on Mac OSX:
+
+   sudo /sbin/ifconfig lo0 alias 10.0.5.11 netmask 255.255.255.0
+   sudo /sbin/ifconfig lo0 alias 10.0.5.12 netmask 255.255.255.0
+
+   sudo sh -c "cat >> /etc/hosts" <<EOF
+   10.0.5.11	host1.domain
+   10.0.5.12	host1.domain
+   EOF
+
+
+Experimenting With HTTP Requests
+--------------------------------
+
+You can use your web browser to make requests and see how things are
+working.  You can connect to your web server (e.g.
+``http://host1.domain/``) or directly to the WSGI server (e.g.
+``http://localhost:5000/``).
+
+Many of the examples deal with handling older HTTP 1.0 clients in a
+virtual hosting setup.  Most web browsers no longer speak 1.0, so the
+a little command line tool is included to run these requests and
+observe the results:
+
+   $ examples/request
+   Usage: request [-1.1|-1.0] url
+
+The default is a 1.1 request.  Your Python must have working SSL
+support if you want to use ``https://`` urls.
