@@ -1,0 +1,99 @@
+================
+The daily syncer
+================
+
+The daily syncer is responsible to keep the URL databases of the LMS and the
+clients synchronized. It does this by getting a full snapshot of the clients'
+databases and provides them with the current status information for all URLs
+they are interested in [#functionaltest]_.
+
+
+We need an XML-RPC dummy to simulate the communication:
+
+>>> from gocept.lms.tests import install_xmlrpcdummy
+>>> xmlrpc = install_xmlrpcdummy()
+
+
+Synchronizing clients
+=====================
+
+When run with an empty database, nothing happens:
+
+>>> from gocept.lms.sync import sync
+>>> sync()
+>>> xmlrpc.show_log()
+
+Let's create a client:
+
+>>> clients = zope.component.getUtility(gocept.lms.interfaces.IClientProvider)
+>>> clients.add(gocept.lms.client.Client('fred'))
+>>> fred = clients.get('fred')
+
+And register two URL for him
+
+>>> import zope.component
+>>> import gocept.lms.interfaces
+>>> urls = zope.component.getUtility(gocept.lms.interfaces.IURLProvider)
+>>> url1 = urls.add('http://example.com/1')
+>>> url2 = urls.add('http://example.com/2')
+>>> fred.register_urls([url1, url2])
+
+Fred has not registered any URLs and hasn't been synced yet, so running sync
+will retrieve his URLs, register new ones, remove old ones and tell him about
+the states:
+
+>>> sync()
+>>> xmlrpc.show_log()
+Connect: None
+Get all links
+Connect: None
+Update many states: fred - 2
+
+Fred now still has two URLs registered. However, URL 2 is gone and URL 3
+appeared:
+
+>>> sorted(u.url for u in fred.urls)
+['http://example.com/1', 'http://example.com/3']
+
+Fred successfully synced, and we don't synchronize more often than once a day,
+so the next sync won't include Fred:
+
+>>> sync()
+>>> xmlrpc.show_log()
+
+However, we can ask for a forced sync, by setting a flag on Fred's
+synchronization options:
+
+
+>>> from gocept.lms.interfaces import ISynchronization
+>>> fred_sync = ISynchronization(fred)
+>>> fred_sync.force = True
+
+>>> sync()
+>>> xmlrpc.show_log()
+Connect: None
+Get all links
+Connect: None
+Update many states: fred - 2
+
+Note that the `force` flag is reset once a sync was run:
+
+>>> fred_sync.force
+False
+
+And now, another run won't sync again:
+
+>>> sync()
+>>> xmlrpc.show_log()
+
+
+.. [#functionaltest] Setup functional test
+
+    >>> import gocept.lms.app
+    >>> root = getRootFolder()
+    >>> import zope.app.component.hooks
+    >>> old_site = zope.app.component.hooks.getSite()
+    >>> zope.app.component.hooks.setSite(root)
+
+    >>> root['app'] = gocept.lms.app.LMS()
+    >>> zope.app.component.hooks.setSite(root['app'])
