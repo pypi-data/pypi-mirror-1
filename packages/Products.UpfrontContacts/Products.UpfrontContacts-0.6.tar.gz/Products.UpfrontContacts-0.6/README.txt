@@ -1,0 +1,32 @@
+Manage organisations, people and the relationships between them inside
+Plone and allow them to log in easily to your Plone site.
+
+This product provides the content types Person and Organisation. Person
+and Organisation instances can be created anywhere in a Plone site. Both
+content types are folderish to allow the storage of related content
+inside them. AT References are used to represent the relationships
+between organisations and people.
+
+Person instances can log into a Plone site. This is made possible by
+subclassing remember FolderishMember.
+
+A nice contact manager UI derived from BaseCamp's people management is
+available when adding a Contact Manager to your Plone site.
+
+More features:
+
+    Import and export contacts in CSV format.
+
+    Import and export contacts in vCard format.
+
+    Contacts has remember support and can log in to a Plone site.
+
+    Edit Person and Organisation schemas with ATSchemaEditor.
+
+License:
+
+    GPL
+
+Installation:
+
+    Add Products.UpfrontContacts to the eggs section in your buildout.
