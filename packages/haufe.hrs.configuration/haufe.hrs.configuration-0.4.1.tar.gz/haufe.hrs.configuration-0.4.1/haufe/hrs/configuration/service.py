@@ -1,0 +1,175 @@
+#################################################################
+# haufe.hrs.configuration - a pseudo-hierarchical configuration
+# management infrastructure
+# (C) 2008, Haufe Mediengruppe, Freiburg
+#################################################################
+
+
+"""
+The central configuration service
+"""
+
+import os
+import time
+import cfgparse
+import zope.event
+import threading
+from sets import Set
+from decorator import synchronized
+from zope.component.interfaces import IFactory
+from zope.interface import implements, implementedBy
+
+import util
+from logger import getLogger
+from interfaces import IConfigurationService, IConfigurationChangedEvent
+
+try:
+    from pyinotify import  ThreadedNotifier, WatchManager, EventsCodes
+    from pyinotify import ProcessEvent
+    have_pyinotify = True
+except ImportError:
+    have_pyinotify = False
+
+
+LOG = getLogger()
+
+class ConfigurationService(object):
+
+    implements(IConfigurationService)
+
+    lock = threading.Lock()
+
+    def __init__(self, reload_after=None, watch=False):
+        self._clear()
+        self.reload_after = reload_after # seconds
+        self.last_reload = time.time()
+        self.watch = watch # Watch configuration file changes
+
+        # start notification service
+        self.notify_wm = None
+        self.notifier = None
+        if self.watch and have_pyinotify:
+            self.notify_mask = EventsCodes.IN_MODIFY | EventsCodes.IN_DELETE | EventsCodes.IN_ATTRIB |  EventsCodes.IN_CREATE
+            self.notify_wm = WatchManager()
+            event_handler = NotificationEvent()
+            event_handler.setService(self) # needed for callback
+            self.notifier = ThreadedNotifier(self.notify_wm, event_handler)
+            self.notifier.start()
+
+    @synchronized(lock)
+    def _clear(self):
+        self.parser = cfgparse.ConfigParser()
+        self.model_files = Set()
+        self.configuration_files = Set()
+
+    def registerModel(self, filename):
+        """ Register a configuration model with the service """
+        filename = os.path.abspath(filename)
+        if not os.path.exists(filename):
+            raise IOError('Mode file %s does not exist' % filename)
+        LOG.debug('register model: %s' % filename)
+        self.model_files.add(filename)
+
+    def loadConfiguration(self, filename):
+        """ Load a configuration file matching one of the registered
+            models into the service 
+        """
+        filename = os.path.abspath(filename)
+        if not os.path.exists(filename):
+            raise IOError('Configuration file %s does not exist' % filename)
+        LOG.debug('loading configuration: %s' % filename)
+        self.configuration_files.add(filename)
+        self.reload()
+
+        if self.watch and have_pyinotify:
+            # watch path for events handled by mask.
+            LOG.debug('watching %s' % filename)
+            self.notify_wm.add_watch(filename, self.notify_mask)
+
+    @synchronized(lock)
+    def reload(self):
+        try:
+            self._reload()
+        except Exception, e:
+            LOG.error('Reloading the configuration failed', exc_info=True)
+
+        self.last_reload = time.time()
+        zope.event.notify(ConfigurationChangedEvent(self.getConfiguration()))
+
+
+    def _reload(self):
+        """ Reload models and configuration """
+
+        LOG.debug('Reloading configuration')
+        # create a new parser first (w/o overriding the original one)
+        parser = cfgparse.ConfigParser()
+
+        # re-add model files
+        for filename in self.model_files:
+            util.generateParser(filename, parser=parser)
+
+        # add configuration files
+        for filename in self.configuration_files:
+            parser.add_file(cfgfile=filename, content=None)
+
+        opts = parser.parse()
+        self.opts = opts
+        self.parser = parser
+
+    def get(self, name, prefix=None):
+        """ Return the value of a configuration option for a given key.
+            'name' is either a full dotted name or added to a dotted
+             prefix.
+        """
+
+        if self.reload_after is not None:
+            if time.time() - self.last_reload > self.reload_after:
+                self.reload()
+        OL = util.OptionLookup(self.opts, prefix=prefix)
+        return OL.get(name)
+
+    def getConfiguration(self):
+        """ Return all configuration entries as dict """
+        return self.opts.__dict__.copy() 
+
+    def __del__(self):
+        if self.notifier:
+            self.notifier.stop()
+
+
+class ConfigurationServiceFactory(object):
+    """ Factory for the configuration service """
+    implements(IFactory)
+
+    def __call__(self, watch=False):
+        return ConfigurationService(watch=watch)
+
+    def getInterfaces(self):
+        return implementedBy(ConfigurationService)
+
+ConfigurationServiceFactory = ConfigurationServiceFactory()
+
+#######################################
+# pyinotify handler for events
+#######################################
+
+if have_pyinotify:
+    class NotificationEvent(ProcessEvent):
+
+        service = None
+
+        def setService(self, service):
+            self.service = service
+
+        def process_default(self, event):
+            LOG.debug('Configuration file changed: %s' % event.path)
+            self.service.reload()
+
+
+class ConfigurationChangedEvent(object):
+    """ Event indicating that the main configuration has been reloaded """
+
+    implements(IConfigurationChangedEvent)
+
+    def __init__(self, configuration):
+        self.configuration = configuration
