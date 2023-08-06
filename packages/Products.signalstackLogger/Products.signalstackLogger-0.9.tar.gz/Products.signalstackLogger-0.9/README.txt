@@ -1,0 +1,33 @@
+Introduction
+============
+        
+This package is based on Products.signalstack.
+     
+The one difference from the original product is a change to where
+the thread dump is output.  This version of signalstack uses
+the python logging facilities to output the thread dump, rather
+than printing to stdout.  Certain production setups don't have
+access to stdout, i.e. when `zopectl start` is used.
+        
+This change allows access to the thread dump when stdout is not 
+accessible, since in addition to writing to stdout, the thread dump 
+is also written to the zope event log.  '
+        
+Products.signalstackLogger is triggered in the same was as the 
+original, i.e. by sending *USR1* to a Zope2 instance.
+        
+The original Products.signalstack is intended to be used with
+supervisord, which retains stdout.
+        
+From the original README:
+-------------------------
+This package is a simple debugging tool for Zope 2 instances that are
+stuck. Unlike the `z3c.deadlockdebugger`_ and `DeadlockDebugger`_ this
+package also works if all threads in an instance are stuck.
+        
+If you send the *USR1* signal to a Zope2 instance with Products.signalstack
+installed it will dump a stracktrace of all threads on the console.
+        
+.. _Products.signalstack: http://pypi.python.org/pypi/Products.signalstack
+.. _z3c.deadlockdebugger: http://pypi.python.org/z3c.deadlockdebugger
+.. _DeadlockDebugger: http://www.zope.org/Members/nuxeo/Products/DeadlockDebugger
