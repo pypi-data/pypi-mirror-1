@@ -1,0 +1,1 @@
+from described_routes.resource_template import ResourceTemplate, ResourceTemplates
