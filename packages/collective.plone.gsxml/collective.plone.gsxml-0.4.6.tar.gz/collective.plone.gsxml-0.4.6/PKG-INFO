@@ -1,0 +1,212 @@
+Metadata-Version: 1.0
+Name: collective.plone.gsxml
+Version: 0.4.6
+Summary: A package for importing and exporting content from Plone
+Home-page: https://svn.plone.org/svn/collective/gsxml/branches/0.4.6
+Author: Stefan Eletzhofer, Ramon Bartl
+Author-email: stefan.eletzhofer@inquant.de
+License: GPL
+Description: collective.plone.gsxml
+        ======================
+        
+        An XML import/export add-on for Plone_.
+        
+        .. _Plone: http://www.plone.org
+        
+        Installation
+        ============
+        
+        **collective.plone.gsxml** is a egg, so installation is easy
+        if you use buildout.  You just need to add **collective.plone.gsxml**
+        to your plone part's *eggs* AND *zcml* option.
+        
+        A example buildout is available here:
+        
+        https://svn.plone.org/svn/collective/gsxml/buildout/trunk
+        
+        This package needs lxml_, see the buildout example.
+        
+        .. _lxml: http://www.codespeak.net/lxml
+        
+        
+        Usage
+        =====
+        
+        After installation, you'll get two new
+        items in Plone's **action** menu, one for *import*, and
+        one for *export*.
+        
+        Bugs, Annoyances, Caveats
+        =========================
+        
+        This package relies pretty much on the **Marshal_** product
+        for plone (which is shipped with Plone).  This product, is, while offering
+        great functionality, a bit convoluted and does not allow to hook in
+        using the ZCA.
+        
+        Also, this package tries to export **references**, and this is currently done
+        using pickles, which is not safe.  References should be exported by using adapters
+        defined by those who actually use the references and know how to export them (it's
+        impossible to do this in a generic way IMHO).
+        
+        Bugs
+        ----
+        
+        - exports references using pickles
+        - messes with the internals of the Marshal product due to lack of
+        hooks
+        - uses pickles, this is not secure
+        - manifest XML is not yet parsed
+        
+        Annoyances
+        ----------
+        
+        - convoluted code. The code of this package needs cleanup. This will be done in due
+        course.
+        
+        Caveats
+        -------
+        
+        - This package can export AT based content only.
+        - This package does NOT export dynamically marked interfaces
+        - This package does NOT export annotations on content
+        
+        
+        Change history
+        ==============
+        
+        0.4.6 (2008-12-16)
+        ------------------
+        
+        - Fixed tests and moved them into the source package. [seletz]
+        
+        - Added fix for ``PloneArticle``.
+        Thanks to Freshmilk Entertainment GmbH for sponsoring this.
+        [seletz]
+        
+        - Added a events notified for ``ObjectWillBeExportedEvent``, ``ObjectExportedEvent``,
+        ``ObjectWillBeImportedEvent`` and ``ObjectImportedEvent``.
+        [seletz]
+        
+        - Added ``lxml`` and ``libxml2-python`` to the buildout.  Added ZOPE-enabled
+        ipython to the buildout. [seletz]
+        
+        - Changes package layout to have the sources under ``src`` -- this
+        allows to have the buildout include development packages during
+        development [seletz]
+        
+        - Fix bug wrt. handling of blob fields.  These are now treated like the file
+        fields. [seletz]
+        
+        - Added ``plone.app.blob`` to buildout to test for #10 [seletz]
+        
+        - Switched buildout to plone 3.2a1 [seletz]
+        
+        0.4.5 (2008-06-23)
+        ------------------
+        
+        - More importview work. [seletz]
+        
+        - Added missing file. [seletz]
+        
+        - Fix typo [seletz]
+        
+        Detailed Documentation
+        ======================
+        
+        Exporting content
+        -----------------
+        
+        To test exporting some content, we'll create content::
+        
+        >>> _ = self.folder.invokeFactory("Folder", "content")
+        >>> folder = self.folder["content"]
+        >>> _ = folder.invokeFactory("Document", "doc1", title="A Document")
+        >>> _ = folder.invokeFactory("Document", "doc2", title="A second Document")
+        >>> folder.keys()
+        ['doc1', 'doc2']
+        
+        Now we create a ``export context`` -- this will act like a container
+        holding the exported data.  We'll use the ``TarballExportContext``
+        here::
+        
+        >>> from collective.plone.gsxml.context import TarballExportContext
+        >>> export_context = TarballExportContext()
+        
+        Now we create a exporter object, which will use the export context
+        created above to store the export data, and use the Marshaller to
+        actually marshall content.  We initialize the exporter with the
+        ``root`` folder which we want to export::
+        
+        >>> from collective.plone.gsxml.content import XMLContentFSExporter
+        >>> exporter = XMLContentFSExporter(folder)
+        
+        Now we're able to start the export.  We supply the **export context**
+        and a folder *inside the export context* (thus, one export context can
+        be used multiple times by supplying different root folders).  We also
+        specify that this is a root-level export::
+        
+        >>> exporter.export(export_context, "structure", True)
+        
+        Ok, that's it.  The archive stream may now be fetched from the export
+        context::
+        
+        >>> archive = export_context.getArchiveStream()
+        >>> archive.seek(0)
+        
+        Importing content
+        -----------------
+        
+        To test importing, we'll delete the objects exported above::
+        
+        >>> folder.manage_delObjects(['doc1', 'doc2'])
+        >>> folder.keys()
+        []
+        
+        Now we create a ``import context``, which will hold our exported
+        stream, and a importer, which will use that import context to read
+        marshalled data from::
+        
+        >>> from collective.plone.gsxml.context import TarballImportContext
+        >>> import_context = TarballImportContext(archive)
+        
+        The importer -- we initialize the importer with the *target* folder::
+        
+        >>> from collective.plone.gsxml.content import XMLContentFSImporter
+        >>> importer = XMLContentFSImporter(folder)
+        
+        Now we start the import. We supply the **import context** and the root
+        folder *within* the import context.  Also, we indicate that this is
+        indeed a root-level import::
+        
+        >>> importer.import_(import_context, "structure", True)
+        
+        We're now able to get the documents again::
+        
+        >>> folder.keys()
+        ['doc1', 'doc2']
+        >>> folder.doc1.Title()
+        'A Document'
+        
+        
+        Contributors
+        ============
+        
+        (in no particular order. These are the nicks on #plone)
+        
+        - fschulze
+        - magnon
+        - ramonski
+        - seletz
+        - hannosch
+        - witsch
+        
+        Download
+        ========
+        
+Keywords: Plone import export XML
+Platform: UNKNOWN
+Classifier: Framework :: Zope2
+Classifier: Framework :: Zope3
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
