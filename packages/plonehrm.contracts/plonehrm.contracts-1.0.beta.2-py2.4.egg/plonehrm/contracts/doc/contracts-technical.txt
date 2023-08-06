@@ -1,0 +1,196 @@
+Technical Details for Contracts
+===============================
+
+plonehrm.contracts expects to be run as a Zope2 add-on product with
+a corresponding product initalize function.  But before we can confirm
+this is working, we need some mock objects.
+
+    >>> class MockContext(object):
+    ...     classes = []
+    ...     def registerClass(self, *args, **kwargs):
+    ...         self.classes.append((args, kwargs))
+
+    >>> from plonehrm import contracts
+    >>> appcontext = MockContext()
+    >>> contracts.initialize(appcontext)
+    >>> len(appcontext.classes)
+    1
+    >>> appcontext.classes[0][1]['meta_type']
+    'plonehrm.contracts Content'
+
+And then we setup more mock classes.
+
+    >>> class Mock(object):
+    ...     def __init__(self, **kwargs):
+    ...         for k, v in kwargs.items(): setattr(self, k, v)
+    >>> class MockFolder(Mock):
+    ...     def __getitem__(self, k):
+    ...         return self.__dict__[k]
+    ...     def contentValues(self):
+    ...         return self.__dict__.values()
+    ...     def contentIds(self):
+    ...         return self.__dict__.keys()
+    >>> from zope.interface import Interface
+    >>> from zope.interface import implements
+    >>> class IMockRequest(Interface):
+    ...     pass
+    >>> class MockRequest(Mock):
+    ...     implements(IMockRequest)
+
+
+Content
+=======
+
+Contract
+--------
+
+The Contract content type is the focus of all logic.  It uses ``_templates``
+to retrieve a vocabulary of templates made available by the contracts
+tool.  But since no tool exists yet, it'll just return ``[]``.
+
+    >>> from plonehrm.contracts.content.contract import Contract
+    >>> contract = Contract('contract')
+    >>> contract._templates()
+    []
+
+So we go ahead and setup a tool.
+
+    >>> tool = MockFolder(item1=Mock(id='item1',
+    ...                              Title=lambda: 'Item 1',
+    ...                              getText=lambda: 'item1 text'))
+    >>> contract.portal_contracts = tool
+    >>> contract._templates()
+    <DisplayList [('item1', 'Item 1')] ...>
+
+At first the template won't be defined.
+
+    >>> contract.getTemplate()
+    ''
+
+But we can set the template to be a value we need.  When the template
+id is not available, the set call is ignored.  Although this exposes the
+fact that we have not yet setup a mock view for subsitution.
+
+    >>> contract.setTemplate('foo')
+    Traceback (most recent call last):
+    ValueError: Components are not properly...
+
+So we register the mock view.
+
+    >>> from zope.component import provideAdapter
+    >>> class MockSubstituter(object):
+    ...     def __init__(self, context, request):
+    ...         self.context = context
+    ...         self.request = request
+    ...     def substitute(self, v):
+    ...         return v
+    >>> provideAdapter(MockSubstituter,
+    ...                adapts=(Contract, object),
+    ...                name=u'substituter',
+    ...                provides=Interface)
+
+Now we resume the testing.
+
+    >>> texts = []
+    >>> def setText(v):
+    ...     texts.append(v)
+    >>> contract.setText = setText
+    >>> contract.setTemplate('foo')
+    >>> contract.getTemplate()
+    ''
+    >>> texts
+    []
+
+When we set the template to a template made available by the tool, all
+is well.
+
+    >>> contract.setTemplate('item1')
+    >>> contract.getTemplate()
+    'item1'
+    >>> texts
+    ['item1 text']
+
+This will of course allow template_chosen to return True.
+
+    >>> contract.template_chosen()
+    True
+
+There are several other vocabularies that are used.  The first is
+``_available_functions``.
+
+    >>> del contract.portal_contracts
+    >>> contract._available_functions()
+    []
+
+    >>> tool.getFunctions = lambda: ['foo']
+    >>> contract.portal_contracts = tool
+    >>> contract._available_functions()
+    ['foo']
+
+The next vocab is ``_available_employment_types``.
+
+    >>> del contract.portal_contracts
+    >>> contract._available_employment_types()
+    []
+
+    >>> tool.getEmploymentTypes = lambda: ['footype']
+    >>> contract.portal_contracts = tool
+    >>> contract._available_employment_types()
+    ['footype']
+
+Letter
+------
+
+The Letter content type is used for change of contract.  At first the
+methods will be pretty useless because no parent contract has been defined.
+
+    >>> from plonehrm.contracts.content.letter import Letter
+    >>> letter = Letter('foo')
+    >>> letter.base_contract() is None
+    True
+    >>> letter.default_wage()
+    '0.00'
+    >>> letter.default_function()
+    ''
+
+So we go ahead and setup a mock contract.  Of course we still have the
+problem that the ``base_contract`` method does a view lookup which we
+haven't yet setup.
+
+    >>> from Products.plonehrm.interfaces import IEmployee
+    >>> from Acquisition import Explicit
+    >>> class MockEmployee(Explicit):
+    ...     implements(IEmployee)
+    >>> letter = letter.__of__(MockEmployee())
+    >>> letter.REQUEST = MockRequest()
+    >>> letter.base_contract()
+    Traceback (most recent call last):
+    ComponentLookupError: ...
+
+So we go ahead and setup a mock view for this.
+
+    >>> from zope.component import provideAdapter
+    >>> class MockContracts(object):
+    ...     current = Contract('current_contract')
+    ...     def __init__(self, context, request):
+    ...         self.context = context
+    ...         self.request = request
+    ...     def current_contract(self):
+    ...         return self.current
+    >>> from plonehrm.contracts.interfaces import ILetter
+    >>> provideAdapter(MockContracts,
+    ...                adapts=(IEmployee, IMockRequest),
+    ...                name=u'contracts',
+    ...                provides=Interface)
+
+And now try getting the base contract again.
+
+    >>> letter.base_contract()
+    <Contract at current_contract>
+
+The rest of the methods should now fall in place.
+
+    >>> letter.default_wage()
+    '0.00'
+    >>> letter.default_function()
+    ''
