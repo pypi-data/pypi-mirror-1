@@ -1,0 +1,115 @@
+#!/bin/sh
+#
+# A generic control script for Zope
+# Meant to be constructed by buildout.
+#
+# Copyright (c) 2008, Plone Foundation
+# Created by Steve McMahon
+
+SERVER=%(zeoserver)s
+CLIENTS="%(clients)s"
+MYPATH=%(bin_dir)s
+
+SERVER_COMMANDS=" start | stop | status | restart "
+CLIENT_COMMANDS=" start | stop | status | restart | fg | debug | run "
+
+if [ ! -w %(file_storage_dir)s ]; then
+    echo "You lack the rights necessary to run this script; Try sudo $0"
+    exit 1
+fi
+
+usage () {
+    if [ $SERVER ]; then
+        echo "usage: plonectl $CLIENT_COMMANDS [component]\n"
+        echo "Available components:"
+        echo "    Server : $SERVER"
+        echo "    Clients: $CLIENTS"
+        echo "\nIf no component is specified, command will be applied to all."
+        echo 'You may also use "clients" to refer to all clients.\n'
+    else
+        echo "usage: plonectl $CLIENT_COMMANDS\n"
+    fi
+    exit 1
+}
+
+
+if [ -e %(file_storage)s ]
+then
+	FIRST_TIME="N"
+else
+	FIRST_TIME="Y"
+fi
+
+
+init_storage() {
+    if [ $FIRST_TIME = "Y" ]; then
+        sleep 1
+        for component in $CLIENTS; do
+            sleep 1
+        	echo 'This is the first start of this instance.'
+        	echo 'Creating Data.fs and a Plone site.'
+        	echo 'We only need to do this once, but it takes some time.'
+        	echo 'Creating Plone site at /Plone in ZODB...'
+        	$MYPATH/$component run %(bin_dir)s/mkPloneSite.py 2>> %(location)s/var/log/firststart.log
+        	# remove plone content directory
+        	rm -r %(location)s/plone_init_content 2>> %(location)s/var/log/firststart.log
+        	FIRST_TIME="N"
+        	break
+        done
+    fi
+}
+
+
+if [ $# -eq 1 ]; then
+    if [ $SERVER ]; then
+        # we're going to restrict ourselves to the
+        # subset of commands that make sense
+        # when starting both a server and clients.
+        VALID_COMMANDS=$SERVER_COMMANDS
+    else
+        VALID_COMMANDS=$CLIENT_COMMANDS
+    fi
+    echo "$VALID_COMMANDS" | grep " ${1} " > /dev/null
+    if [ $? -eq 0 ]; then
+        if [ $SERVER ]; then
+            printf "$SERVER: "
+            $MYPATH/$SERVER $1
+            init_storage
+        fi
+        for component in $CLIENTS; do
+            sleep 1
+            printf "$component: "
+            $MYPATH/$component $1
+        done
+    else
+        echo "Invalid command: $1"
+        echo "Valid commands in this context are: $VALID_COMMANDS\n"
+        usage
+    fi
+elif [ $# -eq 2 ]; then
+    echo "$CLIENT_COMMANDS" | grep " ${1} " > /dev/null
+    if [ $? -eq 0 ]; then
+        if ( [ $2 = 'zeoserver' ] || [ $2 = 'zeo' ] || [ $2 = 'server' ] ) && [ $SERVER ]; then
+            printf "$SERVER: "
+            $MYPATH/$SERVER $1
+            init_storage
+        elif [ -x "$MYPATH/$2" ]; then
+            printf "$2: "
+            $MYPATH/$2 $1
+        elif [ $2 = 'clients' ]; then
+            for component in $CLIENTS; do
+                sleep 1
+                printf "$component: "
+                $MYPATH/$component $1
+            done
+        else
+            echo "No such component: $2\n"
+            usage
+        fi
+    else
+        echo "Invalid command: $1\n"
+        usage
+    fi
+else
+    usage
+fi
