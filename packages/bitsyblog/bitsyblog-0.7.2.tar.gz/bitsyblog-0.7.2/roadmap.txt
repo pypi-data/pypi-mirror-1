@@ -1,0 +1,208 @@
+bitsyblog, middleware, and the roadmap to the future
+
+the nice thing with working like software like bitsyblog is that the
+intent of the software is clear.  bitsyblog aims to provide a solution
+for users to keep a log of their activities on the web.  When thinking of
+software in terms of the narrow intent of a component, it becomes much
+easier to divine what sort of framework would look like around it and
+how this framework might be applicable to other types of software.
+
+Firstly, I noticed that the bitsyblog component app is not as small as
+it could be.  bitsyblog provides a multi-user solution to (personal)
+blogging.  This level of solution should exist, but thinking in terms
+of components it is easy to see that users may want a personal blog
+that is not multi-user.  lammy wants a blog on his desktop computer.
+When at his computer, he probably wants to be logged in all the time
+(always accept connections from 127.0.0.1).  He doesn't want other
+people to be able to make a blog there.  When not at his desktop, he
+wants to be able to login and post through the web and maybe used the
+blogme.py script too. In bitsyblog terms, '/lammy'
+becomes '/' and all urls ('preferences', 'post', 'css/') become
+relative to this.  Doing this involves separating out the individual
+blog components from the multi-user component and probably having
+different .ini files from which to run paste.
+
+I've also realized that the way I handle CSS is a solution to a
+problem that has nothing to do with bitsyblog.  The other items in
+preferences ('date', 'subject', but not 'friends' which has to do with
+roles) are about formatting the blog posts.  The CSS is about themeing
+pages which has nothing to do with blog posts.  So what is needed is a
+CSS component, which is possibly linked to from the preferences page.
+Lets put this at '/lammy/css'.  This pages may have the fields for
+preferences, but also provides an interface for managing the CSS.  A
+user may want to delete CSS or edit them, render the current page with
+a selected stylesheet or what's in the editor, or render an arbitrary web page
+This is like CSS zen garden, but more interactive, and
+(optionally) allowing the user to save the CSS and apply it to their
+pages.  I can also imagine, in a 2.0 version, an implementation that
+allows permits transforming of CSS to suitable to theming a page with
+a stylesheet intended for another page.  One has a stylesheet with a
+bunch of rules.  Using javascript, one mouses over the DOM of the
+other page.  The rules are modified in order to applied to the
+appropriate container on the page.  This sounds much like what
+deliverance is supposed to do, and maybe it could be utilized for this
+intent, though perhaps the intents are different and its better not to
+use it (to be investigated).
+
+Both of the above components fall into a general pattern:  there is a
+component which is the multi-user blog manager.  Lets call this
+bitsyblog.  There are microcomponents, the single-user blog (lets call
+this microblog) and the CSS zen garden component which lets you play
+with stylesheets (I dub thee samadhi).  microblog and samadhi can live
+on their own, in which case they live at '/', or they might be managed
+by an external component -- microblog by bitsyblog, or samadhi
+by...not really sure, either a microblog instance or bitsyblog.  In
+the latter case, they need to know where they live.  I'm not sure what
+provides the rewrite rule telling them where they live.  Ian?  Ethan?
+There are a few configuration type details -- like auth, whether
+samadhi needs to know about where to put these CSS files or how
+bitsyusers can fetch them, but essentially if you give these the
+appropriate path, they should be able to work relatively
+independently.
+
+In a different class of components are comments and tagging.  While it
+is easy to imagine bitsyblog managing comments and tags, it is also
+fairly easy to see that these services really don't need to know what
+is being commented or tagged on.  For commenting, I imagine an app
+similar to smokesignals, but with a different persistence model.  Lets
+call it commentator.  Commentator is a javascript app with no
+intrinsic URLs.  Given a set of rules (for instance, "allow commenting
+on <div>s with an id attribute) a block of text is shown as the last child
+of each <div> (or conditionally on mouseover).  This will initially
+say something like "No comments | Add a comment" where each of these
+do what you think ('N comments' displays the comments, 'Add a comment'
+gives a textarea where you can say your mind).  When a comment is
+added, it is put in a database (presumedly SQL, though really on a
+super-simple db is necessary) with the URL and/or id
+as its key.  When the page is loaded, the text of the page is examined
+on response and the appropriate comments are displayed.  It is also
+necessary to have some sort of mapping optionally between URL and id
+to another URI, as blog posts both are displayed as part of the user's
+entire blog and also have a unique URL.  Notice that nothing here is
+particularly unique to blogs.  Commenting on <div>s or <p>s in a wiki
+page is essentially the same (though in this case, it might be better
+to comment on the entire page, as these may not have ids and the page
+can be editted all willy-nilly like that.  Commenting on individual
+<p>s and <div>s is, however, a really nice thing to have, so in a 2.0
+type incarnation of commentator, this should be added regardless of
+the difficulty).  If bitsyblog was part of a
+site with a wiki, then commentator could deal with them both nicely.
+Optionally, one might specify the rule that if an item had comments,
+it either could not be deleted or that an alert would pop up before
+deletion with [Confirm] and [Cancel] buttons.  This is easy to do if a
+browser could do a DELETE request and things behaved all RESTful.
+Otherwise, this would also be a non-trivial problem.
+
+Tagging is very similar to commentator, though it might have a few
+intrinsic URLs too.  You specify a similar set of rules concerning
+what can be tagged ("all <div>s with ids in /%(user)s/ and
+/%(user)s/200*") and a method pointing the ids to URLs.  Then you have
+a database, which again is pretty simple and again in its simplest
+form could be a dictionary.  Though here, the tags are the keys and
+the URLs are the values.  You could also record number of tags per
+item, specify whether non-authenticated members can tag, etc.  As the
+first or last child of each (say) <div>, you have what it has been
+tagged with, maybe weighted by how many times it has been tagged.  You
+have a URL for searching by tags, maybe on a per-path basis ("I want
+to see all the tags under /k0s that have been tagged with 'cats' and
+'cute'").  You could also have a URL for the tag cloud.  Again, what
+is being tagged is pretty divorced from the tagging component itself
+(lets call it tagit, unless that name is taken).
+
+I have presented samadhi as being managed by bitsyblog or microblog
+and commentator and tagit living outside of bitsyblog in the
+middleware stack.  I've done this because this "feels right" to me
+right now, though I reseve my right to change my mind about it.  The
+thing I want emphasize is the difference in the two approaches:
+
+* When a WSGI app is "managed" by another component app, the manager
+  has to know about the managed app and dispatch the appropriate
+  information (request, etc) to it, though in doing so it has the
+  opportunity to have more control over the URL structure and what the
+  component app does.  It is also easier to return HTML this way.
+
+* When a WSGI "app" is used as middleware and needs to markup the
+  returned page in HTML, this is conducive to using javascript in
+  order to insert nodes into the DOM dynamically, presumedly based on
+  some rule set.  Alternatively, the middleware may decompose the page
+  with lxml and insert HTML where it needs to go that way.  In this
+  approach, the middleware need not have a URL (this may be
+  preferable).
+
+It is not necessarily clear to me at this time which approach is
+better for different apps.  I have put commenting and tagging in the
+latter category because commenting and tagging on web pages seems
+divorced (save by a rule set) from what is being commented on or
+tagged.  I have put microblog in the first category because it is
+clearly in the same layer of software as bitsyblog, and some
+management tasks will be necessary even for microblog.  samadhi I put
+in the first category as well (though I hesistate right now) because
+otherwise the rewriting of URLs makes me nervous.  Perhaps there is
+need of a WSGI dispatcher that fetches apps based on some sort of rule
+concerning the URL?  Also, it seems
+necessary to put the CSS on user data.  This could also be
+accomplished the other way:  1. abstract out members and roles
+(teamroler?) and store the data (CSS, etc) on them here; 2. have
+samadhi write a defined set of urls (how defined?  not sure) including
+the stylesheets that it knows about, presumedly putting the 'foo'
+stylesheet at '/lammy/css/foo.css'.  This still involves samadhi
+knowing something about the url structure, and now it is dependent on
+the user/role thing, though this could be a configuration option.
+
+This is the middleware story.  Other things could also be done
+internally to bitsyblog and its supporting software to make the
+experience more seamless.  
+
+I am bothered by the fact that the logic supporting the form and user
+settings is somewhat divorced.  Ideally, rendering the form should do
+all the validation and return the settings in a sensible way to use.
+I don't think this is hard -- the settings.py should just be
+incorporated into markup.form.  This goes some ways to reinventing
+things like formencode and zope.schema, so if we can get these to do
+what we want, maybe we shouldn't write our own.  But at cursory
+glance, formencode won't and zope.schema isn't easily usable outside
+of zope.  So maybe rolling our own isn't bad.
+
+There's more middleware, but its hidden and is a bad coupling (that
+is, the app will depend on the middleware unless its done cleverly).
+The site nav does not appear on '/login' or '/join' (or any url not
+specified internally to bitsyblog, for that matter).  It would be
+conceivable to have a SiteNav middleware that (either through
+javascript or lxml decomposition) writes the site nav at the top of
+the screen.  bistyblog and bitsyauth would have to know about this
+though, so that they could add the relevent links into environ.  Maybe
+this isn't horrible, but it seems so.  Likewise, the site css doesn't
+show up here.  Should it?  Is this another piece of middleware or part
+of samadhi?
+
+An important piece of middleware should involve members and roles.  I
+really don't want to write this one, but I would like to consume it.
+It should live just inside of bitsyauth and make the users.py file
+unnecessary.  It might be better to sit on this one until last.
+
+So should be bitsyblog 2.0.
+There are a few other streamlining things (see the TODO.txt), but if
+all of this was implemented, bitsyblog would be a rich web experience
+that was highly componentized with each of the components doing one
+thing well.  Moreso, since coupling is avoided, save through
+configuration, auth, and other loose links, each of these components
+could be used independently of bitsyblog or turned off without
+undesirable consequences.
+
+At least as much as being a good blogging app, bitsyblog is about
+elegant design and component architecture.  This roadmap shows what is
+possible in terms of having a fully functional blogging application
+with middleware that can be used outside of just bitsyblog.  To take
+the other end of the spectrum, wordpress says "Hey, write plugins that
+will make me work better."  As a programmer, I really hate this
+approach.  If I write a commenting plugin for wordpress, then I have
+just that.  If I want to use it to comment on a wiki page, I'm out of
+luck.  If I write commenting middleware, then it can be used for any
+WSGI app with minimal configuration.  As a programmer, I generally
+want the freedom to assemble a webapp however I want.  With this
+freedom comes some work, but for me its a worthy sacrifice.  As a web
+consumer, I understand that site administrators want out of the box
+solutions.  bitsyblog will offer this too.  The default deployment of
+bitsyblog will pull down commentator, samadhi, and tagit and have an
+.ini file pointing to the appropriate factory to create the chain of
+middleware to have all of these pieces in place.  There is no contradiction.
