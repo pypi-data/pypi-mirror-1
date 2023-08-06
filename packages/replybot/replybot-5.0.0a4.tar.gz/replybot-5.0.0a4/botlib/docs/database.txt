@@ -1,0 +1,216 @@
+The database interface
+======================
+
+First of all, we have to initialize a database connection. So as not to
+pollute our file system, let's create an in-memory SQLite database.
+
+    >>> from botlib import database
+    >>> db = database.Database('sqlite:')
+
+Make sure we get the right schema version number.
+
+    >>> db.get_version(database.SCHEMA_KEY).version
+    4
+
+Make sure we have no entries for the addresses and keys were going to use.
+The key is just the way we distinguish between multiple email targets.
+
+    >>> geddy = u'geddy@example.com'
+    >>> jaco  = u'jaco@example.com'
+
+    >>> print db.get_entry(geddy, u'one')
+    None
+    >>> print db.get_entry(geddy, u'two')
+    None
+    >>> print db.get_entry(jaco,  u'one')
+    None
+    >>> print db.get_entry(jaco,  u'two')
+    None
+
+We should also have no notices yet.
+
+    >>> print db.get_notice(u'file://one_notice.txt')
+    None
+    >>> print db.get_notice(u'file://two_notice.txt')
+    None
+
+And nobody should be whitelisted yet.
+
+    >>> db.is_whitelisted(geddy)
+    False
+    >>> db.is_whitelisted(jaco)
+    False
+
+Nor are there any whitelisted patterns.
+
+    >>> db.is_whitelisted(u'^.*@example.com')
+    False
+
+
+Changing the database
+---------------------
+
+Go ahead and whitelist an email address.
+
+    >>> db.put_whitelist(geddy)
+    >>> db.is_whitelisted(geddy)
+    True
+    >>> db.is_whitelisted(jaco)
+    False
+
+Purge the whitelist.
+
+    >>> db.purge_whitelisted()
+    >>> db.is_whitelisted(geddy)
+    False
+    >>> db.is_whitelisted(jaco)
+    False
+
+Now, put a pattern into the whitelist and check to make sure all matching
+email addresses are now whitelisted.
+
+    >>> db.put_whitelist(u'^.*@example.com')
+    >>> db.is_whitelisted(geddy)
+    True
+    >>> db.is_whitelisted(jaco)
+    True
+
+Add a notice to the database...
+
+    >>> import os, tempfile
+    >>> tmpdir = tempfile.mkdtemp()
+    >>> notice_file = os.path.join(tmpdir, 'one_notice')
+    >>> fp = open(notice_file, 'w')
+    >>> print >> fp, 'This is a notice'
+    >>> fp.close()
+
+    >>> import datetime
+    >>> now = datetime.datetime(2007, 8, 1)
+    >>> db.put_notice(notice_file, u'file://one_notice.txt', now)
+    ... # doctest: +ELLIPSIS
+    <botlib.database.Notice ...>
+
+...and check to see if the notice is in the database.
+
+    >>> notice = db.get_notice(u'file://one_notice.txt')
+    >>> os.path.basename(notice.filename)
+    u'one_notice'
+    >>> notice.uri
+    u'file://one_notice.txt'
+    >>> str(notice.retrieved)
+    '2007-08-01 00:00:00'
+    >>> os.path.exists(notice_file)
+    True
+
+Check to make sure that the notice can be purged.
+
+    >>> db.purge_notices(tmpdir)
+    >>> print db.get_notice(u'file://one_notice.txt')
+    None
+    >>> os.path.exists(notice_file)
+    False
+
+Now clean up the notices temporary directory.
+
+    >>> import shutil
+    >>> shutil.rmtree(tmpdir)
+
+Let's make sure the entry table is still empty.
+
+    >>> print db.get_entry(geddy, u'one')
+    None
+    >>> print db.get_entry(geddy, u'two')
+    None
+    >>> print db.get_entry(jaco,  u'one')
+    None
+    >>> print db.get_entry(jaco,  u'two')
+    None
+
+Alright, put an entry, then make sure it's still there under the key we
+stored it with.
+
+    >>> last_sent = datetime.datetime(2007, 8, 1)
+    >>> db.put_entry(geddy, last_sent, u'one')
+    ... # doctest: +ELLIPSIS
+    <botlib.database.Entry ...>
+    >>> entry = db.get_entry(geddy, u'one')
+    >>> entry.address
+    u'geddy@example.com'
+    >>> str(entry.last_sent)
+    '2007-08-01 00:00:00'
+    >>> entry.context
+    u'one'
+
+Put another address/key pair in the database.
+
+    >>> db.put_entry(jaco, last_sent, u'two')
+    ... # doctest: +ELLIPSIS
+    <botlib.database.Entry ...>
+    >>> entry = db.get_entry(jaco, u'two')
+    >>> entry.address
+    u'jaco@example.com'
+    >>> str(entry.last_sent)
+    '2007-08-01 00:00:00'
+    >>> entry.context
+    u'two'
+
+And make sure that the address under another key does not exist.  Also, check
+that a different address under the same key also does not exist.
+
+    >>> print db.get_entry(geddy, u'two')
+    None
+    >>> print db.get_entry(jaco, u'one')
+    None
+
+Go ahead and purge the database of one key and make sure the stored address is
+missing...
+
+    >>> db.purge_entries(u'one')
+    >>> print db.get_entry(geddy, u'one')
+    None
+
+...but that the address stored in the other key is still there.
+
+    >>> db.get_entry(jaco, u'two')
+    ... # doctest: +ELLIPSIS
+    <botlib.database.Entry ...>
+
+Now purge the other key.
+
+    >>> db.purge_entries(u'two')
+    >>> print db.get_entry(jaco, u'two')
+    None
+
+
+Purging the database
+--------------------
+
+You can also purge all entries, regardless of key.
+
+    >>> ignore = db.put_entry(geddy, last_sent, u'one')
+    >>> ignore = db.put_entry(jaco, last_sent, u'two')
+
+    >>> from operator import attrgetter
+    >>> def print_entries():
+    ...     for entry in sorted(db.entries, key=attrgetter('address')):
+    ...         print entry.address, entry.context
+
+    >>> print_entries()
+    geddy@example.com one
+    jaco@example.com two
+
+    >>> db.purge_entries()
+    >>> print_entries()
+
+When purging entries, we can also use the interface that the command line
+uses, where we choose the purge set by name.
+
+    >>> ignore = db.put_entry(geddy, last_sent, u'one')
+    >>> ignore = db.put_entry(jaco, last_sent, u'two')
+
+    >>> print_entries()
+    geddy@example.com one
+    jaco@example.com two
+
+    >>> db.do_purges(['replies'])
+    >>> print_entries()
