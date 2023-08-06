@@ -1,0 +1,218 @@
+RPX - Reverse ProXy accelerator
+
+ (Yes, it is a very lame name, so sue me!)
+
+
+Summary
+
+1. What it is
+2. How it works (the big plan)
+    2.1 How works a normal reverse proxy
+    2.2 How works RPX
+3. How it works (implementation details)
+4. Apache setup
+    4.1 Example Apache configuration snippet
+    4.2 The important details
+5. RPX daemon setup
+    5.1 Example RPX configuration file
+    5.2 What will RPX daemon do
+    5.3 What RPX do if there is an error
+    5.4 What will not RPX daemon do
+6. Apache and RPX logs
+7. Usage
+
+
+1. What it is
+~~~~~~~~~~~~~
+
+ RPX is useful when you have a mostly static website, but on a slow server
+ platform. 
+ 
+ For instance, a public website with content handled by a full-fledged CMS like 
+ Plone.
+
+ It works a bit like a real proxy, but it is NOT a real proxy. It violates many
+ aspects of many RFC : it will totally ignore HTTP headers about aging, 
+ expiration and caching of web pages and other HTTP content.
+
+
+2. How it works (the big plan)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+ 2.1 A normal reverse proxy works like this :
+ -------------------------------------------
+
+ - client sends HTTP request to server
+
+ - the HTTP request is actually intercepted by the reverse proxy
+
+ - if the proxy has the requested content, and the content is not outdated, then
+   it will return the content
+ 
+ - else, the proxy retrieves the content from the real server, and stores it on 
+   disk if possible (if it is not a dynamic content for instance)
+
+ 2.2 RPX works like this :
+ ------------------------
+
+ - client sends HTTP request to server
+
+ - the HTTP request is also intercepted, but in a different way (it is just an
+   implementation detail, not very important)
+
+ - if the proxy has the requested content, it serves it right away (without 
+   taking care of aging, expiry, etc.)
+
+ - the proxy writes all accesses in a separate log (a bit like the Apache 
+   access.log file)
+
+ - a separate process parses the log on-the-fly, and for each parsed request, 
+   if the content in the proxy cache is missing or outdated, it will download it
+   from the server, and put it in the proxy cache
+
+3. How it works (implementation details) 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+ The proxy itself is just Apache with an appropriate configuration.
+ 
+ The proxy cache is stored into a local directory (and served as static files 
+ by Apache).
+ 
+ When a request must go to the real server, it will use mod_rewrite and mod_proxy.
+ 
+ The separate process (responsible of refreshing the content cache) is a small
+ and simple Python script.
+ 
+
+4. Apache setup
+~~~~~~~~~~~~~~~
+
+ 4.1 Example configuration snippet :
+ ---------------------------------
+
+ - See in Examples
+
+ 4.2 The important details are :
+ -----------------------------
+
+ - definition of a DocumentRoot (which will be used by the RPX daemon)
+
+ - rewrite conditions (they are used to bypass the cache for dynamic queries, 
+   and to check for presence of the file in the cache)
+
+ - the final rewrite rule, which proxies requests to the backend server
+
+ - the customized log, which will be used in the RPX daemon, too.
+
+5. RPX daemon setup
+~~~~~~~~~~~~~~~~~~~
+
+ The daemon, rpx.py, is supposed to be started with a configuration file as its
+ first argument.
+
+ 5.1 In the configuration file, you must specify the following parameters :
+ ------------------------------------------------------------------------
+ 
+    apachelogfile="/var/log/apache2/rpx-prod.log"
+    rpxlogfile="/var/log/rpx-prod.log"
+
+    docroot="/var/www/zope/rpx-prod"
+    docfile="+htbody+"
+    backend=("http://localhost:8080/VirtualHostBase"
+           "/http/www.test.net:80"
+           "/zope/portal/VirtualHostRoot")
+    backendtimeout=10
+    rpxuser="zopecache"
+
+ 5.2 The rpx daemon will :
+ -----------------------
+
+ - read on-the-fly from the specified "apachelogfile" (which must have the 
+   LogFormat specified above)
+
+ - write static files in the "docroot" directory (of course, you should specify
+   the same DocumentRoot as in the Apache configuration)
+
+ - the static files will be called "docfile" (same thing : the value should be
+   the same as the one in the Apache configuration)
+
+ - the files will be downloaded from the "backend" server (the example here is
+   for a Zope backend)
+
+ - if a file takes longer than "backendtimeout" to download, the download will
+   be aborted and an error will be reported
+
+ - all operation will be logged to "rpxlogfile" (you can specify None or "" to
+   cause operation to be directed to stdout)
+
+ - the daemon will be setuid to "rpxuser" (unless rpxuser is "" or None)
+
+ 5.3 If there is an error (Python exception or timeout from the backend server), 
+ ------------------------------------------------------------------------------
+ the daemon will :
+ ----------------
+
+ - log the exception to its log file and to syslog
+
+ - wait 1 minute
+
+ - try to reopen its log file (this will fail if the log file has disappeared
+   and the daemon has dropped its privileges, so be careful to recreate an empty
+   log file when you rotate the log file)
+
+ - try to recreate the documentroot (useful if you carelessly "rm -rf" this
+   directory)
+
+ 5.4 The rpx daemon will not :
+ ----------------------------
+
+ - write its PID to a file
+
+ - put itself to the background
+
+ You can use start-stop-daemon or whatever you want for that. A sample 
+ init-script is supplied. The script can be used to start, stop and restart many
+ RPX daemons, and check if they are running (for trivial Nagios scripts).
+
+6. Apache and RPX logs :
+~~~~~~~~~~~~~~~~~~~~~~
+
+    6.1 Apache logs :
+    ---------------
+
+    127.0.1.1    	-   	200213	    GET	    200 	/path/file?....   
+       ip          user     svctime    method  status       url   qstring
+
+    6.2 RPX logs :
+    ------------
+
+    2009/07/28 14:02:29     QSTRING     /events
+           date              what         url
+
+    what :
+        STARTING    The main function start
+        CTRL-C      User keyboard interrupt
+        ERROR       there is an error
+        SLEEPING    RPX sleeps 60s after an error 
+
+        TIMEOUT     The refresh cache is too long
+
+        EF          Error Front - the passthru server has sent an error
+        POST        Method is POST
+        QSTRING     Qstring start with ?
+        DOTDOT      To prevent attempts to get out of the cache
+        FRESH       The file is up-to-date
+        STALE       The file is not up-to-date
+        MISS        The file is missing
+        FETCHING    The missing file or not is being up-to-dated
+        EB          Error Back - the refresh cache has made an error
+        FETCHED     The missing file or not has been up-to-dated
+
+7. Usage :
+~~~~~~~~
+ First, configure Apache (see 4.) and RPX daemon (see 5.).
+
+ sudo ./etc-init.d-rpx <start|stop|restart|status>
+
+ This bash script will launch a rpx deamon (rpx.py) with the configuration
+ file *.conf.
