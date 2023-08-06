@@ -1,0 +1,197 @@
+Tests and Handbook
+======================
+
+First, we need to instantiate the sources where we come from::
+
+    >>> from collective.anonymousbrowser.browser import Browser, FF2_USERAGENT
+
+ 
+User Agent
+------------
+Oh, my god, we have a brand new user agent by default::
+
+        >>> br = Browser()
+        >>> br.open('http://localhost:45678')
+        >>> FF2_USERAGENT in br.contents
+        True                
+        >>> br2 = Browser('http://localhost:45678')
+        >>> FF2_USERAGENT in br2.contents
+        True
+
+
+Proxy mode
+------------
+But, we want to be anonymous, and we ll set a proxy
+To define those proxies, just just a config.ini file like::
+
+    [collective.anonymousbrowser]
+    proxies =
+        host1:port
+        host2:port
+
+When the browser has many proxies defined, it will circly through those ones.
+But, it will not use the same host indefinitivly, just set the ``proxy_max_use`` argument::
+
+    >>> from StringIO import StringIO
+    >>> from tempfile import mkstemp
+    >>> __, config = mkstemp()
+    >>> open(config, 'w').write("""[collective.anonymousbrowser]
+    ... proxies =
+    ...     127.0.0.1:45675
+    ...     127.0.0.1:45676
+    ...     127.0.0.1:45677
+    ...     127.0.0.1:45678
+    ...     127.0.0.1:45679
+    ...     """)
+    >>> b = Browser(config=config, proxy_max_use=3)
+    >>> b._config._sections
+    {'collective.anonymousbrowser': {'__name__': 'collective.anonymousbrowser', 'proxies': '\n127.0.0.1:45675\n127.0.0.1:45676\n127.0.0.1:45677\n127.0.0.1:45678\n127.0.0.1:45679'}}
+    >>> b.proxies
+    ['127.0.0.1:45675', '127.0.0.1:45676', '127.0.0.1:45677', '127.0.0.1:45678', '127.0.0.1:45679']
+    >>> b.proxified
+    True
+    >>> b.open('http://localhost:45678')
+    >>> 'Host: localhost:45678' in b.contents
+    True
+    >>> b._lastproxy['count'] == 1 and b._lastproxy['proxy'] in [0,1,2,3,4]
+    True
+
+We can have a normal unproxified browser too ::
+
+    >>> b1 = Browser(proxify=False)
+    >>> b1.proxified
+    False
+
+Next thing to verify is that we have our pseudo-random loop running
+First thing is we will choose 2 times the 2nd proxy, then the third
+And of course, we will set the mocker to change the proxy at each row.::
+
+    >>> import mocker
+    >>> import random
+    >>> mocked = mocker.Mocker()
+    >>> custom_random_int = mocked.replace('random.randint')
+    >>> custom_random_int(0, 4)
+    <mocker.Mock ...
+    >>> mocked.result(2)
+    >>> custom_random_int(0,1)
+    <mocker.Mock ...
+    >>> mocked.result(0)
+    >>> custom_random_int(0, 4)
+    <mocker.Mock ...
+    >>> mocked.result(2)
+    >>> custom_random_int(0,1)
+    <mocker.Mock ...
+    >>> mocked.result(0)
+    >>> custom_random_int(0, 4)
+    <mocker.Mock ...
+    >>> mocked.result(2)
+    >>> custom_random_int(0,1)
+    <mocker.Mock ...
+    >>> mocked.result(0)
+    >>> custom_random_int(0, 4)
+    <mocker.Mock ...
+    >>> mocked.result(3)
+    >>> custom_random_int(0,1)
+    <mocker.Mock ...
+    >>> mocked.result(0)
+    >>> custom_random_int(0, 4)
+    <mocker.Mock ...
+    >>> mocked.result(4)
+    >>> custom_random_int(0,1)
+    <mocker.Mock ...
+    >>> mocked.result(0)
+    >>> custom_random_int(0, 4)
+    <mocker.Mock ...
+    >>> mocked.result(2)
+    >>> custom_random_int(0,1)
+    <mocker.Mock ...
+    >>> mocked.result(0)
+    >>> custom_random_int(0, 4)
+    <mocker.Mock ...
+    >>> mocked.result(1)
+    >>> custom_random_int(0,1)
+    <mocker.Mock ...
+    >>> mocked.result(0)
+    >>> mocked.replay()
+    >>> b = Browser('http://localhost:45678', config=config, proxy_max_use=3)
+    >>> b.open('http://localhost:45678')
+    >>> b._lastproxy
+    {'count': 1, 'proxy': 2}
+    >>> b.open('http://localhost:45678')
+    >>> b._lastproxy
+    {'count': 2, 'proxy': 2}
+    >>> b.open('http://localhost:45678')
+    >>> b._lastproxy
+    {'count': 3, 'proxy': 2}
+    >>> b.open('http://localhost:45678')
+    >>> b._lastproxy
+    {'count': 1, 'proxy': 0}
+    >>> b.open('http://localhost:45678')
+    >>> b._lastproxy
+    {'count': 1, 'proxy': 3}
+    >>> b.open('http://localhost:45678')
+    >>> b._lastproxy
+    {'count': 1, 'proxy': 4}
+    >>> b.open('http://localhost:45678')
+    >>> b._lastproxy
+    {'count': 1, 'proxy': 2}
+    >>> b.open('http://localhost:45678')
+    >>> b._lastproxy
+    {'count': 1, 'proxy': 1}
+    >>> mocked.restore()
+
+If the proxies are dead, we remove them from the list::
+
+    >>> __, config = mkstemp()
+    >>> open(config, 'w').write("""[collective.anonymousbrowser]
+    ... proxies =
+    ...     127.0.0.1:35675
+    ...     127.0.0.1:35676
+    ...     127.0.0.1:35677
+    ...     127.0.0.1:45678
+    ...     """)
+    >>> mybrowser = Browser(config=config, proxy_max_use=3)
+    >>> mybrowser.proxies
+    ['127.0.0.1:35675', '127.0.0.1:35676', '127.0.0.1:35677', '127.0.0.1:45678']
+    >>> mybrowser.open('http://localhost:45678')
+    >>> mybrowser.proxies
+    ['127.0.0.1:45678']
+    >>> mybrowser.proxies = ['127.0.0.1:34785']
+    >>> mybrowser.open('http://localhost:45678')
+    Traceback (most recent call last):
+    ...
+    Exception: There are no valid proxies left
+
+
+The loop is recursion protected. If we return always the same host, so the chooser cannot choose anything else.
+It will loop until it crashes or it handle the recursion::
+
+    >>> def randomint(a,b):
+    ...     return 2
+    >>> import random; random.randint = randomint
+    >>> b2 = Browser(config=config, proxy_max_use=3)
+    >>> b2.proxy_max_use
+    3
+    >>> b2._lastproxy['count']
+    0
+    >>> b2.chooseProxy()
+    '...
+    >>> b2._lastproxy['count']
+    1
+    >>> b2.chooseProxy()
+    '...
+    >>> b2._lastproxy['count']
+    2
+    >>> b2.chooseProxy()
+    '...
+    >>> b2._lastproxy['count']
+    3
+    >>> b2.chooseProxy()
+    '...
+    >>> b2.chooseProxy()
+    Ho, seems we got the max wills to choose, something has gone wrong
+    '127.0.0.1:35675'
+
+
+
+..  vim:set ft=doctest:
