@@ -1,0 +1,124 @@
+How and why we are proxying DOM nodes.
+
+ Parsed XML consists of two DOM interfaces.  Our DOM is a tight and fast
+ implementation.  Our ManageableDOM (of which the ParsedXML object that
+ is instantiated acts as the top object) contains an instance of a DOM
+ tree, proxies its DOM interface, and also provides Zope support such
+ as management interfaces.
+
+ A Parsed XML object can be created from scratch, in which case its DOM
+ document will be created with it, or it can be wrapped around an
+ existing DOM document.
+ 
+ Parsed XML objects should be able to provide some management support
+ for any compliant DOM document, since it proxies DOM calls.  However,
+ since it uses our builder, which is optimized for our DOM storage,
+ parsing will not work on storages other than our DOM.
+
+Why are we proxying?
+
+ Our DOM implementation is fast and scalable, and we didn't want to
+ compromise this with our extras.  Some users won't want or need the
+ Zopish features to be married to the DOM implementation.
+
+When should the proxy be used, and when should the simple DOM be used?
+
+ There's no reason to use the proxies when you don't need their
+ features.  If all that you need is a DOM storage, then the proxies
+ aren't necessary, and you can create and use a DOM document without
+ the proxy wrappers.  However, you will have to know what you are
+ doing; some Zope machinery won't be taken care of for you:
+
+  - The DOM storage doesn't keep track of any non-DOM attributes.
+    For example, namespace usage and content type are stored by the
+    proxy Document, and if you're not using this, you'll have
+    to keep track of these attributes yourself, since the DOM doesn't
+    keep track of them.
+ 
+  - The DOM storage doesn't know about Zope permissions, so your
+    containing object must handle this.
+
+  - The DOM storage doesn't provide any persistence machinery,
+    although it will acquire and call the persistence triggering
+    methods when available, so storing it in a persistent container
+    will suffice to persist the DOM.
+
+ To create a DOM Document without any proxy wrappers, see
+ createDOMDocument() in ParsedXML.py.
+
+When should the proxy not be used?
+
+ When you reference the proxied DOM object through a different
+ persistent object, *and* change the DOM through that reference, *and*
+ rely on get_size() or use a ZCache, *and* the ParsedXML Document
+ isn't notified when the change occurs.
+
+ The DOM objects persist by acquiring persistence methods from their
+ containers.  The proxy objects update certain cached values when
+ these methods are called.  That means that if a DOM Document is
+ referenced by a different persistent object, and changes are made
+ through that reference, the ParsedXML proxy won't know to update its
+ cached values.
+
+ ParsedXML caches the result of get_size(), and provides support for a
+ ZCache to cache index_html.  If you use a ZCache with a ParsedXML
+ instance, or rely on the result of get_size(), you will need to make
+ sure that these values are updated if the DOM is modified through a
+ reference other than the ParsedXML Document.  This can be done by
+ calling __changed__() on the ParsedXML Document.
+
+How are we proxying?
+
+ Our DOM implementation is in the DOM subdirectory.
+
+ The baseclasses for the DOMImplementation is in DOMProxy.py.  These
+ define the machinery for proxying our DOM tree.  The basic proxying is
+ defined here, except for methods to create the proxy nodes, which
+ we'll describe soon.
+
+ The base proxy class is DOMProxy.  It contains a reference to the
+ actual DOM node it is proxying for.
+
+ NodeProxy, ElementProxy, etc. all specialize DOMProxy for the
+ appropriate DOM classes.
+
+ These proxy classes all lack the ability to actually create instances
+ of the proxy nodes.  This is because they are designed to be
+ subclassed, and they don't yet know what class to wrap a DOM node into
+ when they want a proxy object.  Subclasses should define the methods
+ wrapDOMObj(), wrapNodeList() and wrapNamedNodeMap(). wrapDOMObj()
+ and it should take a DOM Node and return the appropriate
+ proxy node; wrapNodeList() and wrapNamedNodeMap() should take a 
+ NodeList and NamedNodeMap object respectively and returned proxied
+ versions.
+
+ Because these methods are undefined, these baseclasses cannot be
+ instantiated, they must be subclassed.  A simple example of a working
+ implementation is in TransPubDOMProxy.py.
+
+ The actual proxy classes that Parsed XML uses are in ManageableDOM.py,
+ and the basic DOM baseclass is ManageableNode, which corresponds to a
+ DOM node.  It mixes DOMProxy.NodeProxy with ManageableWrapper, which
+ provides the needed methods that return ManageableNode, ManageableNodeList
+ and ManageableNamedNodeMap subclasses. ManageableNode also mixes in
+ DOMManageable, which provides our management and publishing support,
+ and an Acquisition class.
+
+ When a Parsed XML product is added to a Zope installation, a ParsedXML
+ object is instantiated, which is a subclass of ManageableDocument.
+ It is important to note that none of the other proxy nodes are
+ persistent!  wrapDOMObj() wraps a new proxy node around an existing
+ DOM node whenever it is called.  It never reuses existing proxy nodes,
+ or even knows of their existence.  So although you can do things like
+ assign non-DOM attributes to a ManageableNode, re-navigating to the
+ ManageableNode corresponding to the same place in the DOM tree won't
+ get you a node with those attributes, since it's a whole new instance.
+ This also means that navigating with DOM calls is slower, because
+ of all that instantiating and wrapping.  It's more efficient to work
+ through the proxied DOM objects when you can and wrap the result when
+ you must.
+
+ There are ways to make persistent proxy objects if you're developing
+ your own proxy classes based on ours, by inheriting a wrapDOMObj()
+ method that makes persistent proxy objects and returns existing ones
+ when appropriate.
