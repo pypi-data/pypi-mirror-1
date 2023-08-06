@@ -1,0 +1,241 @@
+======================
+Using ObjectCollection
+======================
+
+Initialization
+==============
+
+First we need a ZODB for the IndexSupport used by ObjectCollection:
+
+    >>> from ZODB import MappingStorage, DB
+    >>> from persistent import Persistent
+    >>> import transaction
+    >>> storage = MappingStorage.MappingStorage()
+    >>> db = DB(storage)
+    >>> conn = db.open()
+    >>> dbroot = conn.root()
+
+Then we need some testobjects, which we will store into the ObjectCollection:
+
+    >>> from gocept.objectquery import testobjects
+
+Using the ObjectCollection
+==========================
+
+
+Adding items to the ObjectCollection
+------------------------------------
+
+Before you can start, you should add objects to the collection. In most cases,
+it is sufficient to add the root object of your database. The collection will
+index all objects referenced by this root object recursively by its own.
+
+First of all, we create some objects for our test-database:
+
+    >>> hans = testobjects.Person(name="Hans")
+    >>> marie = testobjects.Person(name="Marie")
+    >>> zodb_book = testobjects.Book(
+    ...                 author=hans,
+    ...                 title='Ad-hoc Anfragen an die ZODB',
+    ...                 written=2004,
+    ...                 isbn=3404159063)
+    >>> halle = testobjects.Library(location="Halle")
+
+Now we create a hierachy between those objects and add them to the ZODB. Don't
+forget to commit the transaction, because the ObjectCollection needs the OID of
+your peristant objects for internal storage:
+
+    >>> halle.add_book(zodb_book)
+    >>> dbroot['test'] = halle
+    >>> transaction.commit()
+
+    >>> from gocept.objectquery.collection import ObjectCollection
+    >>> oc = ObjectCollection(conn)
+
+It is possible to index items individually:
+
+    >>> oc.index(dbroot)
+    >>> oc.index(halle)
+
+or recursively. Indexing the ``zodb_book`` recursively is equal to indexing
+``zodb_book`` and ``hans`` individually:
+
+    >>> oc.rindex(zodb_book)
+
+
+Internal representation of the indexes
+--------------------------------------
+
+The ObjectCollection has a index called ClassIndex, which is a mapping of
+classnames to OIDs of this class. It returns a generator object with all found
+results.
+
+    >>> persons = oc.class_index.query(testobjects.Person)
+    >>> persons
+    <generator object at 0x...>
+
+    >>> persons = list(persons)
+    >>> len(persons)
+    1
+
+As shortly mentioned above, the ObjectCollection stores OID instead of objects.
+To have a look at these objects, we have to ask the connection object:
+
+    >>> person = conn.get(persons[0])
+    >>> person
+    <gocept.objectquery.testobjects.Person object at 0x...>
+    >>> person == hans
+    True
+
+There is also an index available, which maps attribute names to OIDs of
+classes, which have that attribute. It returns a generator object, too:
+
+    >>> names = oc.attribute_index.query("name")
+    >>> names
+    <generator object at 0x...>
+
+    >>> names = list(names)
+    >>> len(names)
+    1
+    >>> hans = conn.get(names[0])
+    >>> hans.name
+    'Hans'
+
+
+Adding some more objects to the ObjectCollection
+------------------------------------------------
+
+Lets add some more objects to the collection. This is done in the same way as
+mentioned above:
+
+    >>> zope_book = testobjects.Book(
+    ...         author=marie,
+    ...         title='Zope in action',
+    ...         written=2003,
+    ...         isbn=123456789)
+    >>> halle.add_book(zope_book)
+    >>> transaction.commit()
+    >>> oc.index(halle)
+    >>> oc.index(zope_book)
+    >>> oc.index(marie)
+
+There are now two books inside the database:
+
+    >>> len(oc.by_class(testobjects.Book))
+    2
+
+There are now two persons available:
+
+    >>> len(oc.by_class(testobjects.Person))
+    2
+
+
+Testing the database hierarchie
+-------------------------------
+
+To test, wheather an object is a child of another or not, the ObjectCollection
+uses another index for performance reason, the structure index. It returns the
+result independent from the depth of the graph and the distance of the two
+objects. Because it is only used internally, we must provide the OIDs here
+instead of objects:
+
+    >>> oc.is_child(zope_book._p_oid, marie._p_oid)
+    False
+    >>> oc.is_child(marie._p_oid, zope_book._p_oid)
+    True
+    >>> oc.is_child(hans._p_oid, zodb_book._p_oid)
+    True
+
+
+Removing objects from the ObjectCollection
+------------------------------------------
+
+When removing objects, all child objects, which are no longer referenced by
+others, are removed as well.
+
+    >>> halle.delete_book(zope_book)
+    >>> oc.index(halle)
+
+There is one person and one book remaining:
+
+    >>> len(oc.by_class(testobjects.Person))
+    1
+    >>> len(oc.by_class(testobjects.Book))
+    1
+
+
+Automatic index updates on transaction boundaries
+-------------------------------------------------
+
+When making changes to objects, the index can be updated at transaction
+boundaries automatically for all objects that where changed.
+
+A synchronizer needs to be registered with the transaction manager first and
+the object collection needs to be registered as a utility:
+
+    >>> from gocept.objectquery import indexsupport
+    >>> index_synch = indexsupport.IndexSynchronizer()
+    >>> transaction.manager.registerSynch(index_synch)
+    >>> dbroot['_oq_collection'] = oc
+
+We add a new Person, Christian, as a contributor of the Zope book:
+
+    >>> chris = testobjects.Person(name='Christian')
+    >>> zodb_book.author = chris
+    >>> transaction.commit()
+
+    >>> books = oc.by_class(testobjects.Book)
+    >>> len(books)
+    1
+    >>> book = conn.get(books[0][0])
+    >>> book.title
+    'Ad-hoc Anfragen an die ZODB'
+    >>> persons = oc.by_class(testobjects.Person)
+    >>> len(persons)
+    1
+    >>> person = conn.get(persons[0][0])
+    >>> book.author == person
+    True
+    >>> oc.is_child(chris._p_oid, zodb_book._p_oid)
+    True
+
+Automatic updates stop when disabling the index synchronizer again:
+
+
+Adding circles to collection
+----------------------------
+
+It is possible, to add circle references to a ObjectCollection. First we need
+a new ObjectCollection:
+
+
+Then create two objects and add one under the other:
+
+    >>> first = testobjects.Dummy(id=1)
+    >>> second = testobjects.Dummy(id=2)
+
+    >>> dbroot['test'] = first
+    >>> transaction.commit()
+
+    >>> first.add_item(second)
+    >>> transaction.commit()
+
+
+Furthermore, second is a child of first, but first is no child of second:
+
+    >>> oc.is_child(second._p_oid, first._p_oid)
+    True
+    >>> oc.is_child(first._p_oid, second._p_oid)
+    False
+
+Adding first under second will create a cycle, which is possible at all:
+
+    >>> second.add_item(first)
+    >>> transaction.commit()
+
+To test the cycle, second should be a child of first and vice versa:
+
+    >>> oc.is_child(second._p_oid, first._p_oid)
+    True
+    >>> oc.is_child(first._p_oid, second._p_oid)
+    True

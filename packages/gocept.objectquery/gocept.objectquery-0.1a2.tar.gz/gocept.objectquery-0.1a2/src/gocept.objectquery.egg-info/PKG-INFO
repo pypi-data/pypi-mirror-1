@@ -1,0 +1,347 @@
+Metadata-Version: 1.0
+Name: gocept.objectquery
+Version: 0.1a2
+Summary: A framework for indexing and querying the ZODB
+Home-page: https://intra.gocept.com/projects/projects/show/objectquery
+Author: Sebastian Wehrmann
+Author-email: sw@gocept.com
+License: ZPL 2.1
+Description: ===========
+        ObjectQuery
+        ===========
+        
+        ObjectQuery is licensed under ZPL 2.1.
+        
+        Copyright 2007-2009 by `gocept gmbh & co. kg`_.
+        
+        ObjectQuery enables you to query for persistent objects (e.g. objects in the
+        ZODB). This is done with a XPath-like language named Regular Path Expressions
+        (RPE). ObjectQuery also includes indexstructures for performance reasons.
+        
+        It uses SimpleParse_ to parse the RPE-query.
+        
+        
+        Please report bugs to `gocept project portal`_.
+        
+        .. _gocept gmbh & co. kg: http://www.gocept.com/
+        .. _gocept project portal: https://intra.gocept.com/projects/projects/show/objectquery
+        .. _SimpleParse: http://pypi.python.org/pypi/SimpleParse/
+        
+        
+        ==============================================
+        Querying objects with regular path expressions
+        ==============================================
+        
+        Initialization
+        ==============
+        
+        First load the test database. For more information about that, please have a
+        look inside testobjects.py.
+        
+        >>> from gocept.objectquery.testobjects import *
+        >>> import ZODB.MappingStorage
+        >>> import ZODB
+        >>> from gocept.objectquery.collection import ObjectCollection
+        >>> storage = ZODB.MappingStorage.MappingStorage()
+        >>> db = ZODB.DB(storage)
+        >>> conn = db.open()
+        >>> dbroot = conn.root()
+        >>> dbroot['_oq_collection'] = objects = ObjectCollection(conn)
+        >>> import transaction
+        >>> import gocept.objectquery.indexsupport
+        >>> index_synch = gocept.objectquery.indexsupport.IndexSynchronizer()
+        >>> transaction.manager.registerSynch(index_synch)
+        
+        >>> p_orwell = Person(name="George Orwell")
+        >>> p_lotze = Person(name="Thomas Lotze")
+        >>> p_goethe = Person(name="Johann Wolfgang von Goethe")
+        >>> p_weitershausen = Person(name="Philipp von Weitershausen")
+        
+        >>> b_1984 = Book(author=p_orwell,
+        ...               title="1984",
+        ...               written=1990,
+        ...               isbn=3548234100)
+        >>> b_plone = Book(author=p_lotze,
+        ...                title="Plone-Benutzerhandbuch",
+        ...                written=2008,
+        ...                isbn=3939471038)
+        >>> b_faust = Book(author=p_goethe,
+        ...                title="Faust",
+        ...                written=1811,
+        ...                isbn=3406552501)
+        >>> b_farm = Book(author=p_orwell,
+        ...               title="Farm der Tiere",
+        ...               written=2002,
+        ...               isbn=3257201184)
+        >>> b_zope = Book(author=p_weitershausen,
+        ...               title="Web Component Development with Zope 3",
+        ...               written=2007,
+        ...               isbn=3540338071)
+        
+        >>> l_halle = Library(location="Halle",
+        ...                   books=[b_1984, b_plone, b_farm, b_zope])
+        >>> l_berlin = Library(location="Berlin",
+        ...                    books=[b_1984, b_plone, b_faust, b_farm, b_zope])
+        >>> l_chester = Library(location="Chester",
+        ...                     books=[b_1984, b_faust, b_farm])
+        
+        >>> dbroot['librarydb'] = persistent.list.PersistentList()
+        >>> dbroot['librarydb'].extend([l_halle, l_berlin, l_chester])
+        
+        >>> librarydb = dbroot['librarydb']
+        >>> transaction.commit()
+        
+        >>> from pprint import pprint
+        
+        Create QueryProcessor and initialize the ObjectCollection
+        =========================================================
+        
+        You create a QueryProcessor like this:
+        
+        >>> from gocept.objectquery.pathexpressions import RPEQueryParser
+        >>> from gocept.objectquery.processor import QueryProcessor
+        >>> parser = RPEQueryParser()
+        >>> query = QueryProcessor(parser, objects)
+        >>> query
+        <gocept.objectquery.processor.QueryProcessor object at 0x...>
+        
+        Some example usecases
+        ---------------------
+        
+        Root joins:
+        
+        >>> r = query('/PersistentList/Library')
+        >>> sorted(elem.location for elem in r)
+        ['Berlin', 'Chester', 'Halle']
+        
+        Search for the authors of all Books named "Faust":
+        
+        >>> r = query('/PersistentList/Library/Book[@title="Faust"]/Person')
+        >>> sorted(elem.name for elem in r)
+        ['Johann Wolfgang von Goethe']
+        
+        Search for all books written after year 2000:
+        
+        >>> r = query('/PersistentList/Library/Book[@written>=2000]')
+        >>> len(r)
+        3
+        >>> pprint(sorted(elem.title for elem in r))
+        ['Farm der Tiere',
+        'Plone-Benutzerhandbuch',
+        'Web Component Development with Zope 3']
+        
+        Search for all authors of books written after year 2000:
+        
+        >>> r = query('/PersistentList/Library/Book[@written>=2000]/Person')
+        >>> len(r)
+        3
+        >>> pprint(sorted(elem.name for elem in r))
+        ['George Orwell', 'Philipp von Weitershausen', 'Thomas Lotze']
+        
+        Search for all Books, that have are located in Halle and have been written in
+        2007:
+        
+        >>> r = query('/PersistentList/Library[@location="Halle"]/Book[@written==2007]')
+        >>> sorted((elem.title, elem.isbn) for elem in r)
+        [('Web Component Development with Zope 3', 3540338071L)]
+        
+        Handle Wildcards correctly:
+        
+        >>> r = query('/PersistentList/Library/_/Person')
+        >>> pprint(sorted(elem.name for elem in r))
+        ['George Orwell',
+        'Johann Wolfgang von Goethe',
+        'Philipp von Weitershausen',
+        'Thomas Lotze']
+        
+        What about precedence:
+        
+        >>> r = query('/PersistentList/Library[@location="Halle"]/Book/Person')
+        >>> pprint(sorted(elem.name for elem in r))
+        ['George Orwell', 'Philipp von Weitershausen', 'Thomas Lotze']
+        
+        >>> r = query('(/PersistentList/Library[@location="Halle"]/Book)/Person')
+        >>> pprint(sorted(elem.name for elem in r))
+        ['George Orwell', 'Philipp von Weitershausen', 'Thomas Lotze']
+        
+        >>> r = query('/PersistentList/Library[@location="Halle"]/(Book/Person)')
+        >>> len(r)
+        0
+        >>> r = query('(/PersistentList/Library/Book[@title="Faust"])/(Book/Person)')
+        >>> sorted(elem.name for elem in r)
+        ['Johann Wolfgang von Goethe']
+        
+        But pay attention. If you change the query from .."]/(Book.. to .."](/Book..
+        you get an Library-Result with location in "Halle". This is, because the
+        subquery (in brakets) returns no results:
+        
+        >>> r = query('/PersistentList/Library[@location="Halle"](/Book/Person)')
+        >>> len(r)
+        1
+        >>> r[0].location
+        'Halle'
+        
+        Unions:
+        
+        >>> r = query('(/PersistentList/Library[@location="Halle"])|(Book/Person)')
+        >>> len(r)
+        5
+        >>> pprint(sorted(elem for elem in r))
+        [<gocept.objectquery.testobjects.Library object at 0x...>,
+        <gocept.objectquery.testobjects.Person object at 0x...>,
+        <gocept.objectquery.testobjects.Person object at 0x...>,
+        <gocept.objectquery.testobjects.Person object at 0x...>,
+        <gocept.objectquery.testobjects.Person object at 0x...>]
+        
+        >>> r = query('(/PersistentList/Library)|(Book[@written=1990])')
+        >>> len(r)
+        4
+        >>> pprint(sorted(elem for elem in r))
+        [<gocept.objectquery.testobjects.Book object at 0x...>,
+        <gocept.objectquery.testobjects.Library object at 0x...>,
+        <gocept.objectquery.testobjects.Library object at 0x...>,
+        <gocept.objectquery.testobjects.Library object at 0x...>]
+        
+        >>> transaction.commit()
+        
+        Kleene Closure
+        --------------
+        
+        First we need a new database:
+        
+        >>> doc1 = Document()
+        >>> doc2 = Document()
+        >>> doc3 = Document()
+        >>> fol4 = Folder([doc2])
+        >>> fol3 = Folder([doc1])
+        >>> fol2 = Folder([fol3])
+        >>> fol1 = Folder([fol2])
+        >>> plo1 = Plone([fol1, fol4, doc3])
+        >>> root = Root([plo1])
+        
+        >>> dbroot['test'] = root
+        >>> transaction.commit()
+        
+        Now there should be one Plone object under root:
+        
+        >>> r = query('/Root/Plone')
+        >>> len(r) == 1 and r[0] == plo1
+        True
+        
+        >>> r = query('/Root/Plone/Folder/Document')
+        >>> len(r)
+        1
+        >>> r[0] == doc2
+        True
+        
+        Get all Documents which are under any number of Folders:
+        
+        >>> r = query('/Root/Plone/Folder*/Document')
+        >>> r[0] != r[1] != r[2] and isinstance(r[0], Document)
+        True
+        
+        >>> r = query('Plone/Folder*/Document')
+        >>> r[0] != r[1] != r[2] and isinstance(r[0], Document)
+        True
+        
+        >>> r = query('Folder*/Document')
+        >>> r[0] != r[1] != r[2] and isinstance(r[0], Document)
+        True
+        
+        Get all Documents which are under one or zero number of Folders:
+        
+        >>> r = query('/Root/Plone/Folder?/Document')
+        >>> len(r) == 2 and (r[0] == doc2 or r[1] == doc2) and (r[0] == doc3 or r[1] == doc3) and r[0] != r[1]
+        True
+        
+        >>> r = query('Folder?/Document')
+        >>> len(r) == 3 and r[0] != r[1] != r[2]
+        True
+        
+        Get all Documents which are under one or more number of Folders:
+        
+        >>> r = query('/Root/Plone/Folder+/Document')
+        >>> len(r) == 2 and (r[0] == doc1 or r[1] == doc1) and (r[0] == doc2 or r[1] == doc2) and r[0] != r[1]
+        True
+        
+        >>> r = query('Folder+/Document')
+        >>> len(r) == 2 and (r[0] == doc1 or r[1] == doc1) and (r[0] == doc2 or r[1] == doc2) and r[0] != r[1]
+        True
+        
+        You may also query absolute path lengths:
+        
+        >>> len(query('Plone/Document'))
+        1
+        >>> len(query('Plone/Folder/Document'))
+        1
+        >>> len(query('Plone/Folder/Folder/Document'))
+        0
+        >>> len(query('Plone/Folder/Folder/Folder/Document'))
+        1
+        
+        Furthermore, it is possible to query all Documents, which are located under 2
+        or more Folders:
+        
+        >>> r = query('Plone/Folder+/Folder/Document')
+        >>> len(r) == 1 and r[0] == doc1
+        True
+        
+        >>> r = query('Plone/Folder/Folder+/Document')
+        >>> len(r) == 1 and r[0] == doc1
+        True
+        
+        A special case is the combination of wildcard and '*' closure:
+        
+        >>> r = query('Plone/_*/Document')
+        >>> len(r) == 3
+        True
+        
+        
+        =======
+        CHANGES
+        =======
+        
+        0.1a2 (2009-06-17)
+        ==================
+        
+        - Better handling of unpersistent objects.
+        
+        
+        0.1a1 (2009-06-05)
+        ==================
+        
+        - Stop ignoring callable objects (e.g. a Plone site) for indexing, just once
+        ignore methods.
+        
+        - Do not break during indexing if added object is not added to the ZODB
+        (doesn't have the `_p_oid` attribute). Those objects are ignored for now
+        and not added to the index structures.
+        
+        - Add ``rindex`` method for adding objects to the collection recursively.
+        
+        - Add SimpleParse as a 3rdparty egg because it can't be retrieved from pypi
+        for some months now.
+        
+        
+        0.1pre (2009-02-04)
+        ===================
+        
+        - first alpha release
+        
+        
+        0.1pre (2008-08-19)
+        ===================
+        
+        - initial functionality based on the work from the `diploma thesis`_
+        
+        
+        .. _diploma thesis: http://archiv.tu-chemnitz.de/pub/2008/0081/data/diplomarbeit.pdf
+        
+Platform: UNKNOWN
+Classifier: Development Status :: 2 - Pre-Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Database
