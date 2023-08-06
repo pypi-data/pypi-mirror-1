@@ -1,0 +1,187 @@
+# Logilab lgp configuration file for pbuilder.
+# Copyright (c) 2003-2009 LOGILAB S.A. (Paris, FRANCE).
+# http://www.logilab.fr/ -- mailto:contact@logilab.fr
+
+# The file in /usr/share/pbuilder/pbuilderrc is the default template.
+# /etc/pbuilderrc is the one meant for editing.
+#
+# Read pbuilderrc.5 document for notes on specific options.
+
+# This file is largely inspired by:
+#     https://wiki.ubuntu.com/PbuilderHowto
+# Thanks a lot, guys !
+
+# List of Debian suites
+DEBIAN_SUITES=("unstable" "testing" "stable" "oldstable" "sid" "etch" "lenny" "squeeze")
+# List of Ubuntu suites. Update these when needed
+UBUNTU_SUITES=("jaunty" "intrepid" "hardy" "gutsy" "feisty" "dapper")
+
+# Mirrors to use. Update these to your preferred mirror.
+#DEBIAN_MIRROR="cdn.debian.net/debian"
+DEBIAN_MIRROR="ftp.fr.debian.org"
+UBUNTU_MIRROR="fr.archive.ubuntu.com"
+
+# You can use valid sources.list files to add your personal repositories...
+DEBIAN_SOURCESLIST="/etc/lgp/sources.list.debian"
+UBUNTU_SOURCESLIST="/etc/lgp/sources.list.ubuntu"
+# Note: files matching *_SOURCESLIST.${DIST} in the same directory can be used
+#       to override generic values
+# ... or set theses variables in a sources.list format (see pbuilder man page)
+# They will be used in the distribution image to fetch developped packages
+DEBIAN_OTHERMIRROR=
+UBUNTU_OTHERMIRROR=
+
+# Set a default distribution if none is used.
+#: ${DIST:="$(lsb_release --short --codename)"}
+#: ${DIST:="unstable"}
+
+# Optionally use the changelog of a package to determine the suite to use if
+# none set.
+if [ -z "${DIST}" ] && [ -r "debian/changelog" ]; then
+	DIST=$(dpkg-parsechangelog | awk '/^Distribution: / {print $2}')
+	# Use the unstable suite for Debian experimental packages.
+	if [ "${DIST}" == "experimental" -o \
+		 "${DIST}" == "UNRELEASED" -o \
+		 "${DIST}" == "DISTRIBUTION" ]; then
+		DIST="unstable"
+	fi
+	echo "Retrieve distribution from debian/changelog: $DIST"
+fi
+
+# Optionally set the architecture to the host architecture if none set. Note
+# that you can set your own default (i.e. ${ARCH:="i386"}).
+: ${ARCH:="$(dpkg --print-architecture)"}
+#export DEBIAN_BUILDARCH=athlon
+
+DISTRIBUTION="${DIST}"
+NAME="${DIST}"
+if [ -n "${ARCH}" ]; then
+    NAME="$NAME-$ARCH"
+
+    # The name of debootstrap command. Only cdebootstrap is supported
+    DEBOOTSTRAP="cdebootstrap"
+
+    DEBOOTSTRAPOPTS=()
+    DEBOOTSTRAPOPTS=("--include" "sysv-rc" "--debug" "-v" "--arch" "$ARCH" "${DEBOOTSTRAPOPTS[@]}")
+    DEBOOTSTRAPOPTS=("--allow-unauthenticated" "${DEBOOTSTRAPOPTS[@]}")
+fi
+
+# BASETGZ directory
+# FIXME source a /etc/default/lgp file ?
+# FIXME the default path should /var/cache/lgp
+#BASETGZ="/var/cache/lgp/buildd/$NAME.tgz"
+BASETGZ="/opt/buildd/$NAME.tgz"
+if [ "$PBCURRENTCOMMANDLINEOPERATION" == "create" ]; then
+	mkdir -p $(dirname $BASETGZ) 2>/dev/null
+fi
+if [ ! -r ${BASETGZ} -a "$PBCURRENTCOMMANDLINEOPERATION" != "create" ]; then
+	echo "Error: pbuilder image '$BASETGZ' has not been created" >/dev/stderr
+	exit 2
+fi
+
+# FIXME Manage OTHER_MIRROR settings by hooks ?
+if $(echo ${DEBIAN_SUITES[@]} | grep -q $DIST); then
+    # Debian configuration
+    MIRRORSITE="http://$DEBIAN_MIRROR/debian/"
+    COMPONENTS="main contrib non-free"
+    eval "OTHERMIRROR=\"$(grep -v '#' $DEBIAN_SOURCESLIST | tr '\n' '|')\""
+    [[ -f $DEBIAN_SOURCESLIST.$DIST ]] && OTHERMIRROR=$(grep -v '#' $DEBIAN_SOURCESLIST.$DIST | tr '\n' '|')
+    OTHERMIRROR=${OTHERMIRROR:-$DEBIAN_OTHERMIRROR}
+elif $(echo ${UBUNTU_SUITES[@]} | grep -q $DIST); then
+    # Ubuntu configuration
+    MIRRORSITE="http://$UBUNTU_MIRROR/ubuntu/"
+    COMPONENTS="main restricted universe multiverse"
+    eval "OTHERMIRROR=\"$(grep -v '#' $UBUNTU_SOURCESLIST | tr '\n' '|')\""
+    [[ -f $UBUNTU_SOURCESLIST.$DIST ]] && OTHERMIRROR=$(grep -v '#' $UBUNTU_SOURCESLIST.$DIST | tr '\n' '|')
+    OTHERMIRROR=${OTHERMIRROR:-$UBUNTU_OTHERMIRROR}
+else
+    # FIXME Should be dead code now (managed in lgp)
+    # Debian could be the default case
+    echo "Unknown distribution: $DIST"
+    exit 3
+fi
+
+#export http_proxy=http://your-proxy:8080/
+USEPROC=yes
+USEDEVPTS=yes
+USEDEVFS=no
+
+# Default value set to be used by hooks # Internally, lgp uses --buildresult option
+export BUILDRESULT="${HOME}/dists/${DIST}"
+
+# BINDMOUNTS is a space separated list of things to mount # inside the chroot.
+BINDMOUNTS="/sys"
+if [ -d "$BUILDRESULT" ]; then
+	BINDMOUNTS=("${BINDMOUNTS[@]}" "$BUILDRESULT")
+fi
+
+# Specify a cache for APT
+APTCACHE="/var/cache/pbuilder/$NAME/aptcache/"
+
+# 26. Using tmpfs for buildplace ($BUILDPLACE)
+# To improve speed of operation, it is possible to use tmpfs for pbuilder build
+# location. Mount tmpfs for $BUILDPLACE, and set:
+#APTCACHEHARDLINK=no
+
+#REMOVEPACKAGES="lilo bash"
+REMOVEPACKAGES="lilo"
+#EXTRAPACKAGES=gcc3.0-athlon-builder
+
+# "debconf: delaying package configuration, since apt-utils is not installed"
+EXTRAPACKAGES="apt-utils nvi"
+
+# command to satisfy build-dependencies; the default is an internal shell
+# implementation which is relatively slow; there are two alternate
+# implementations, the "experimental" implementation,
+# "pbuilder-satisfydepends-experimental", which might be useful to pull
+# packages from experimental or from repositories with a low APT Pin Priority,
+# and the "aptitude" implementation, which will resolve build-dependencies and
+# build-conflicts with aptitude which helps dealing with complex cases but does
+# not support unsigned APT repositories
+PBUILDERSATISFYDEPENDSCMD="/usr/lib/pbuilder/pbuilder-satisfydepends"
+
+#Command-line option passed on to dpkg-buildpackage.
+#DEBBUILDOPTS="-IXXX -iXXX"
+DEBBUILDOPTS=""
+
+# Hooks directory for pbuilder
+# Force an alternate value of hookdir since hooks can be sensitive
+HOOKDIR=${HOOKDIR:+"/etc/lgp/hooks"}
+
+# APT configuration files directory
+#APTCONFDIR="/etc/lgp/apt.d"
+
+# the username and ID used by pbuilder, inside chroot. Needs fakeroot, really
+#BUILDUSERID=$SUDO_UID
+BUILDUSERID=1234
+#BUILDUSERNAME=$SUDO_USER
+BUILDUSERNAME=pbuilder
+BUILDRESULTUID=$SUDO_UID
+
+# Set the PATH I am going to use inside pbuilder
+#export PATH="/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/X11R6/bin"
+
+# SHELL variable is used inside pbuilder by commands like 'su'; and they need sane values
+export SHELL=/bin/sh
+
+# enable pkgname-logfile
+#PBUILDER_BUILD_LOGFILE="${BUILDRESULT}/"$(basename "${PACKAGENAME}" .dsc)"${PKGNAME_LOGFILE_EXTENTION}"
+PKGNAME_LOGFILE_EXTENTION="_${ARCH}_${DIST}.lgp-build"
+PKGNAME_LOGFILE=yes
+
+# pdebuild wants invoke debsign command after building
+# We use pdebuild only for package debugging. Say 'no' (or commented) here.
+#AUTO_DEBSIGN=no
+
+# for pbuilder debuild
+BUILDSOURCEROOTCMD="fakeroot"
+PBUILDERROOTCMD="sudo"
+
+#TIMEOUT_TIME=20min
+#DEBEMAIL=""
+export TERM=linux
+export IGNOREEOF=1
+export TMPDIR=/tmp
+
+# Make debconf not interact with user
+export DEBIAN_FRONTEND="noninteractive"
