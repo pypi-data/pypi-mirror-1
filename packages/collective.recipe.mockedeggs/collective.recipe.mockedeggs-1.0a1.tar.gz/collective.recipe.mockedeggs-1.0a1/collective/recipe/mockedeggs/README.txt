@@ -1,0 +1,76 @@
+Usage
+=====
+
+Sometimes you can't add eggs through your buildout engine,
+for example if some dev libraries are lacking on your system, or are too old, etc.
+But you can install module directly on your system.
+Then, whereas you get all you need in your python environment, your buildout may fail
+because egg is lacking.
+
+This recipe will simulate an egg installed on your system has been added as an egg in your buildout.
+This is bad. Don't use this recipe :)
+
+Supported options
+=================
+
+The recipe supports the following options:
+
+mocked-eggs
+    The list of eggs you want to mock, with their version number, as for example :
+
+    mocked-eggs =
+        python-ldap=2.3.10
+        Markdown=1.7
+
+
+Example usage
+=============
+
+We'll start by creating a buildout that uses the recipe::
+
+    >>> write('buildout.cfg',
+    ... """
+    ... [buildout]
+    ... parts = mocked-eggs-test
+    ...         zopepy
+    ...
+    ... eggs = mocked1
+    ...        mocked2
+    ...
+    ... [mocked-eggs-test]
+    ... recipe = collective.recipe.mockedeggs
+    ... mocked-eggs =
+    ...      mocked1=1.0
+    ...      mocked2=2.0
+    ...
+    ... [zopepy]
+    ... recipe = zc.recipe.egg
+    ... interpreter = zopepy
+    ... eggs = mocked1
+    ...        mocked2
+    ...
+    ... """)
+
+Running the buildout gives us::
+    >>> print 'start...\n', system(buildout)
+    start...
+    Installing mocked-eggs-test.
+    mocked-eggs-test: Mocked eggs mocked1, mocked2.
+    ...
+
+    >>> import os
+    >>> os.path.exists('mocked-eggs-test')
+    True
+	>>> os.path.exists('mocked-eggs-test/fake-mocked1')
+	True
+	>>> os.path.exists('mocked-eggs-test/fake-mocked2')
+	True
+
+	>>> setup1 = open('mocked-eggs-test/fake-mocked1/setup.py').read()
+	>>> '1.0' in setup1
+	True
+	>>> "'mocked1'" in setup1
+	True
+	>>> binary = open('bin/zopepy', 'r').read()
+	>>> 'mocked-eggs-test/fake-mocked1' in binary
+	True
