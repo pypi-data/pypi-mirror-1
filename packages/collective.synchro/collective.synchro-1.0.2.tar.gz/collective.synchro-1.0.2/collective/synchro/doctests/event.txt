@@ -1,0 +1,64 @@
+------------------------------------
+event system for synchronize content
+------------------------------------
+
+    >>> self.portal
+    <PloneSite ...
+    >>> self.loginAsPortalOwner()
+    >>> from Testing import makerequest
+    >>> self.portal = makerequest.makerequest(self.portal)
+
+Install collective.synchro in portal::
+
+    >>> context = self.portal
+    >>> self.install_portal_synchronisation()
+    True
+
+
+Configure portal_synchronisation::
+
+    >>> self.portal.portal_synchronisation.expression = """python:object.Title() == 'To be Exported'"""
+    >>> self.portal.portal_synchronisation._expression
+    <Products.CMFCore.Expression.Expression ...
+
+    >>> from tempfile import gettempdir
+    >>> import os
+    >>> path_queue = os.path.join(gettempdir(),'queue')
+
+Add a queue::
+    >>> self.portal.portal_synchronisation.addQueue(path_queue)
+
+Add a document::
+    >>> self.portal.invokeFactory("Document", 'tobeexported')
+    'tobeexported'
+    >>> from transaction import commit
+    >>> commit()
+
+Notify::
+    >>> self.portal.portal_synchronisation.notifyModified(self.portal.tobeexported)
+
+    >>> import os
+    >>> os.listdir(self.portal.portal_synchronisation._queues[0].export_to_process_path)
+    []
+    >>> self.portal.tobeexported.update(title='To be Exported')
+
+
+We notify that object is modified (done by processForm)::
+
+    >>> self.portal.portal_synchronisation.notifyModified(self.portal.tobeexported)
+    >>> len(os.listdir(self.portal.portal_synchronisation._queues[0].export_to_process_path))
+    1
+
+
+Delete all things in portal::
+
+    >>> obj = self.portal.tobeexported
+    >>> self.portal.manage_delObjects('tobeexported')
+    >>> self.portal.portal_synchronisation.notifyDeleted(obj)
+    >>> len(os.listdir(self.portal.portal_synchronisation._queues[0].export_to_process_path))
+    2
+    >>> import shutil
+    >>> shutil.rmtree(path_queue)
+    >>> self.uninstall_portal_synchronisation()
+    True
+
