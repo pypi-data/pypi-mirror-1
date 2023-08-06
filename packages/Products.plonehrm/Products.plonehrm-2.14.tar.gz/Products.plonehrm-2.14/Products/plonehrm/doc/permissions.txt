@@ -1,0 +1,203 @@
+ Permissions, roles, security
+==============================
+
+
+Extra permissions
+-----------------
+
+Plonehrm defines three extra permissions. ``plonehrm.viewHrmContent`` as a
+special view permission as we want to make sure our senstive personal
+information is safe. ``plonehrm.addEmployee`` and ``plonehrm.addWorklocation``
+safeguard our two main contenttypes.
+
+  >>> checkPermission = self.portal.portal_membership.checkPermission
+  >>> self.portal.permission_settings('plonehrm: View hrm content')
+  [{...}]
+  >>> self.portal.permission_settings('plonehrm: Add employee')
+  [{...}]
+  >>> self.portal.permission_settings('plonehrm: Add worklocation')
+  [{...}]
+
+
+Extra roles
+-----------
+
+Plonehrm defines two extra roles, all intended for local use.
+
+- HrmManager is mostly the same as the normal Manager, but it is defined as an
+  extra role to make it easier to allow people to manage the plonehrm
+  application without immediately giving them admin powers in the whole site.
+
+- WorklocationManager is a local role that should be dished out to the manager
+  of a worklocation locally, so on the worklocation itself. The goal is to
+  give someone local worklocation administration rights. As there might be
+  tasks that are restricted to HrmManagers, the worklocation manager should
+  not be made owner of the worklocation, as that effectively gives him local
+  manager rights.
+
+  >>> data = list(portal.__ac_roles__)
+  >>> 'HrmManager' in data
+  True
+  >>> 'WorklocationManager' in data
+  True
+
+
+Extra workflow for employees
+----------------------------
+
+Employees have a new workflow. It is a simple two-state workflow that only
+distinguishes between active and non-active employees. This way, ex-employees
+can be omitted from the employee listing, but can remain stored in the
+system. The workflow doesn't actually do anything with permissions currently.
+
+First some setup code. We add a regular manager and both a hrm manager and a
+worklocation manager. Those last two will later on get a local role. And we
+add an employee to use that as a regular site member.
+
+  >>> self.loginAsPortalOwner()
+  >>> self.portal.portal_membership.addMember('admin', 'secret',
+  ...                                         ['Manager'], [])
+  >>> self.portal.portal_membership.addMember('hrmmanager', 'secret',
+  ...                                         ['Member'], [])
+  >>> self.portal.portal_membership.addMember('wlmanager', 'secret',
+  ...                                         ['Member'], [])
+  >>> self.portal.portal_membership.addMember('employee1', 'secret',
+  ...                                         ['Member'], [])
+  >>> from Products.CMFCore.utils import getToolByName
+  >>> wf_tool = getToolByName(portal, 'portal_workflow')
+
+Managers or other local contributors can add worklocations.
+
+  >>> self.login('admin')
+  >>> checkPermission('plonehrm: Add worklocation', self.portal)
+  1
+  >>> self.portal.invokeFactory('WorkLocation', id='worklocation')
+  'worklocation'
+  >>> checkPermission('plonehrm: View hrm content', self.portal.worklocation)
+  1
+  >>> self.portal.worklocation.manage_addLocalRoles('wlmanager',
+  ...                                               ('WorklocationManager',))
+  >>> self.portal.worklocation.manage_addLocalRoles('hrmmanager',
+  ...                                               ('HrmManager',))
+  >>> factory = self.portal.worklocation.restrictedTraverse('invokeFactory')
+  >>> factory('Employee', id='employee')
+  'employee'
+  >>> self.portal.worklocation.invokeFactory('Employee', id='employee2')
+  'employee2'
+  >>> employee = self.portal.worklocation.employee
+
+When a WorkLocation is created it gets a placeful workflow.
+Unfortunately in this test we need to fire the proper event ourselves.
+In the browser this happens automatically.
+
+  >>> from zope.event import notify
+  >>> from Products.Archetypes.event import ObjectInitializedEvent
+  >>> notify(ObjectInitializedEvent(self.portal.worklocation))
+  >>> placeful_wf = getToolByName(self.portal, 'portal_placeful_workflow')
+  >>> config = placeful_wf.getWorkflowPolicyConfig(self.portal.worklocation)
+  >>> config
+  <WorkflowPolicyConfig at /plone/worklocation/.wf_policy_config>
+  >>> config.getPolicyIn()
+  <DefaultWorkflowPolicyDefinition at /plone/portal_placeful_workflow/plonehrm>
+
+The initial state of an employee is "active".
+
+  >>> wf_tool.getInfoFor(employee, 'review_state')
+  'active'
+  >>> wf_tool.doActionFor(employee, 'deactivate')
+  >>> wf_tool.getInfoFor(employee, 'review_state')
+  'inactive'
+
+If we're anonymous, we cannot yet access the worklocation as the
+intranet_folder_workflow does not allow us to see the worklocation.
+
+  >>> self.logout()
+  >>> self.portal.restrictedTraverse('worklocation')
+  Traceback (most recent call last):
+  ...
+  Unauthorized: You are not allowed to access 'worklocation' in this context
+
+The same is True for Members.  They also cannot see the Employee inside.
+
+  >>> self.login('employee1')
+  >>> checkPermission('plonehrm: View hrm content', self.portal.worklocation) is None
+  True
+  >>> self.portal.restrictedTraverse('worklocation')
+  Traceback (most recent call last):
+  ...
+  Unauthorized: You are not allowed to access 'worklocation' in this context
+  >>> self.portal.restrictedTraverse('worklocation/employee')
+  Traceback (most recent call last):
+  ...
+  Unauthorized: You are not allowed to access 'worklocation' in this context
+
+If we log in as the worklocation manager we can see the worklocation
+and both employees.
+
+  >>> self.login('wlmanager')
+  >>> checkPermission('plonehrm: View hrm content', self.portal.worklocation)
+  1
+  >>> self.portal.restrictedTraverse('worklocation')
+  <WorkLocation at /plone/worklocation>
+  >>> self.portal.restrictedTraverse('worklocation/employee')
+  <Employee at /plone/worklocation/employee>
+  >>> self.portal.restrictedTraverse('worklocation/employee2')
+  <Employee at /plone/worklocation/employee2>
+
+We'll activate the employee again.
+
+  >>> self.login('admin')
+  >>> wf_tool.doActionFor(employee, 'activate')
+
+
+Employee modules
+----------------
+
+We don't provide an employee module ourselves, so we'll have to mimic
+one. For this, we shall create an ordinary folder, without a workflow.
+
+  >>> self.login('admin')
+  >>> wf_tool.setChainForPortalTypes(['Folder'], '')
+  >>> employee.invokeFactory('Folder', 'empmod')
+  'empmod'
+
+The initial state is that a module is visible for both employees and
+worklocation managers, but not for anonymous.
+
+The worklocation manager can see it and the employee not.
+
+  >>> self.login('wlmanager')
+  >>> self.portal.restrictedTraverse('worklocation/employee/empmod')
+  <ATFolder at /plone/worklocation/employee/empmod>
+  >>> self.login('employee1')
+  >>> self.portal.restrictedTraverse('worklocation/employee/empmod')
+  Traceback (most recent call last):
+  ...
+  Unauthorized: You are not allowed to access 'worklocation' in this context
+
+Some employee modules are folderish. The same rules as for editing
+should be in effect for adding content. A manager can add things:
+
+  >>> self.login('admin')
+  >>> empmod = self.portal.worklocation.employee.empmod
+  >>> method = empmod.restrictedTraverse('invokeFactory')
+
+A worklocation manager can also add items:
+
+  >>> self.login('wlmanager')
+  >>> empmod = self.portal.restrictedTraverse('worklocation/employee/empmod')
+  >>> empmod
+  <ATFolder at /plone/worklocation/employee/empmod>
+  >>> checkPermission('Add portal content', empmod)
+  1
+  >>> checkPermission('List folder contents', empmod)
+  1
+  >>> method = empmod.restrictedTraverse('invokeFactory')
+
+An employee cannot edit the module and he also cannot add items:
+
+  >>> self.login('employee1')
+  >>> method = empmod.restrictedTraverse('invokeFactory')
+  Traceback (most recent call last):
+  ...
+  Unauthorized: You are not allowed to access 'invokeFactory' in this context
