@@ -1,0 +1,167 @@
+$hr
+# BASE  BUILDOUT
+$hr
+
+#if 'zeo' in $mode:
+#set $zeocomment=''
+#else
+#set $zeocomment='#'
+#end if
+#if $with_ploneproduct_fss
+#set $fsscomment=''
+#else
+#set $fsscomment='#'
+#end if
+#if $with_indexing_solr
+#set $solrcomment=''
+#else
+#set $solrcomment='#'
+#end if
+#if $with_ploneproduct_sgdcg
+#set $sgdgcomment=''
+#else
+#set $sgdgcomment='#'
+#end if
+
+
+[buildout]
+timeout=3
+extensions = buildout.minitagificator mr.developer
+extends-cache = \${buildout:directory}/etc/cache
+# this allow you to run buildout on offline mode and to use only the downloaded plonev3.versions.cfg
+extends -= http://dist.plone.org/release/${plone_version}/versions.cfg
+extends = #slurp
+    plone/plone3.versions.cfg#slurp
+    plone/plone3.buildout.cfg#slurp
+    project/patches.cfg#slurp
+    sys/settings.cfg#slurp
+#if $with_indexing_solr:
+    backends/solr.cfg#slurp
+#end if
+#if $with_ploneproduct_fss:
+    backends/fss.cfg#slurp
+#end if
+#if $with_experimental:
+    plone/experimental.cfg#slurp
+#end if
+#if $with_ploneproduct_sgdcg:
+    project/newsletter.cfg#slurp
+#end if
+    project/versions.cfg#slurp
+    project/sources.cfg#slurp
+    project/${project}-kgs.cfg #slurp
+    project/${project}.cfg#slurp
+    hudson/${project}/hudson.cfg#slurp
+
+
+parts +=backup
+${sgdgcomment}    instance-newsletter
+${fsscomment}${sgdgcomment}    fss-newsletter
+${fsscomment}    fss
+${solrcomment}    solr
+${solrcomment}    solrinstance
+    mkdirs
+    omelette
+    fakeproducts
+    ${sane_name}.test
+${zeocomment}    zeoserver
+# hudson integration
+    ${sane_name}_hudson_env
+    ${sane_name}_hudson_job
+    ${sane_name}_hudson_deploy
+    ${sane_name}_hudson_chmod
+
+find-links = \${groups:find-links}
+eggs += zopelib
+develop += \${buildout:directory}/src.mrdeveloper/zopelib
+versions = versions
+# see http://pypi.python.org/pypi/mr.developer for documentation
+# auto tracked developement products, see project/sources.cfg
+sources = sources
+auto-checkout +=
+
+# auto tracked developement products, see project/sources.cfg
+[sources]
+
+# Zope operating instances are created elsewhere.
+# For options see http://pypi.python.org/pypi/plone.recipe.zope2install
+[zope2]
+# fake eggs are required to satisfy Zope dependencies while
+# zope is not yet eggified.
+fake-zope-eggs = true
+additional-fake-eggs +=
+    ZConfig
+    pytz
+    zope.testing
+skip-fake-eggs +=
+    ZODB3
+
+# eggs & scripts installation
+[zopepy]
+recipe = minitage.recipe.scripts
+# Important for you to note the installation of the ZODB as an egg . We will not
+# use the zodb code from the zope source distribution !!!!!!!
+#if not $inside_minitage:
+urls=http://download.zope.org/distribution/PILwoTk-1.1.6.4.tar.gz
+#end if
+eggs = \${instance:eggs}
+interpreter = zopepy
+env-file=\${buildout:directory}/etc/${project}.env
+
+# here is defined the Zope instance running your plone site
+# beware that zopepy part must run before isntance in order to have the right version
+# pinned for relstorage
+[instance]
+order=\${zopepy:recipe}
+http-address=\${hosts:instance}:\${ports:instance}
+user = \${zope:user}:\${zope:password}
+session-timeout-minutes = \${cache:session-timeout-minutes}
+verbose-security=\${zope:verbose-security}
+debug-mode=\${zope:debug-mode}
+event-log-level=\${zope:event-log-level}
+z2-log-level=\${zope:z2-log-level}
+extra-paths+=
+    \${buildout:extra-paths}
+
+# KGS generation
+[kgs]
+recipe=minitage.recipe.printer
+quiet=
+eggs=\${instance:eggs}
+
+#if not $inside_minitage:
+#[openldap]
+#recipe = minitage.recipe.cmmi
+#url = ftp://gd.tuwien.ac.at/infosys/network/OpenLDAP/openldap-stable/openldap-stable-20090411.tgz
+#
+#[python-ldap]
+#recipe = minitage.recipe.egg
+#egg = python-ldap
+#include-dirs  = \${openldap:location}/include
+#library-dirs  = \${openldap:location}/lib
+#end if
+
+[backup]
+recipe = collective.recipe.backup
+
+# Traditionnal Plone products to install
+[productdistros]
+recipe = plone.recipe.distros
+urls=\${groups:products-urls}
+version-suffix-packages = \${groups:version-suffix-packages}
+nested-packages = \${groups:nested-packages}
+
+[omelette]
+recipe = collective.recipe.omelette
+eggs = \${instance:eggs}
+products = \${instance:products}
+packages = \${zope2:location}/lib/python ./
+
+# Command below is important
+# if not, fss tests or tests using fss in their configuration will fail
+[mkdirs]
+recipe = plone.recipe.command
+update-command = \${mkdirs:command}
+command +=
+
+\# vim: set ft=cfg:
