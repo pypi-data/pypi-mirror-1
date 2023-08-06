@@ -1,0 +1,147 @@
+   YABT (Yet another braille translator)
+   Author: Michael Whapples, mwhapples@users.sourceforge.net
+
+Contents
+1. Introduction
+2. Using YABT in a program
+3. Writing YABT tables
+
+
+  1. Introduction
+
+YABT (Yet another braille translator) is a general translation system written in python. It is currently being planned 
+to be used for braille translation, but in theory, it should be possible to use YABT for other translation work. Other 
+uses might be preparing text for use with a speech synthesiser, or other uses unimaginable by the author.
+
+In the distribution there is a test script "YABT_translate" which is able to translate text files. The usage of this is:
+YABT_translate infile state
+Where infile is the filename of the file to be translated and state is either 1 for grade 1 or 2 for grade 2. Output 
+from this script is standard output, but this may be redirected using standard OS redirects.
+
+Currently the license for YABT is the RPL, although this is planned to be relaxed when a suitable license is found. A 
+copy of the license can be found in the file LICENSE.
+
+
+  2. Using YABT in programs
+
+Currently YABT is written in the python programming language, and only has a python interface, so developers of other 
+languages will need to write their own bindings to interface with the python API. Only usage from python will be 
+discussed here.
+
+An example program making use of YABT can be found in the script YABT_translate, which is an automatically generated 
+script which uses the module YABT.app from the egg file.
+
+The following will assume that you have already got the egg on your python path.
+
+First of all you will need to import the module.
+>>> import YABT
+Now you have the module, create a translator object
+>>> mytrans = YABT.translator()
+Now you have a translator object, you probably will want to load rules from a configuration file. To do this for a file 
+mytable.xml
+>>> mytrans.loadConfigFile('mytable.xml')
+At this point we will not concern ourselves with how this file is structured or how the system loads the rules.
+
+If you wish to use one of the supplied tables, then you may do this by using the pkg_resources module of setuptools. If 
+you are doing this, then you can use resource_string with the loadConfigString method,
+
+>>> from pkg_resources import resource_string
+>>> mytrans.loadConfigString(resource_string("YABT", "tables/britishtobrl.xml")
+
+Now we have done all this set up stuff, we can translate text with the following
+>>> mytrans.translateText(text_to_translate, state, before_context, after_context, buffered, buffer_char)
+With in this:
+text_to_translate is the text you wish to transalte. YABT can cope with unicode, but the table will need to be up to 
+this.
+state is the state you wish to start with. Please check the table docs for details of the different states.
+before_context and after_context are strings which should be considered as appearing before or after the text you wish 
+to translate, without these strings being translated themselves. This is designed so that joins should be done smoothly. 
+This can also be used for screen readers and cursor positioning, and is discussed later.
+buffered is a boolean value. If set to True then YABT will split text down into smaller chunks, which may lead to better 
+performance for large documents.
+buffer_char is a character which is used to split the text up to smaller chunks when buffered is set to True. Choose 
+this character carefully, as it might affect the outcome, IE. in braille should the character be the middle of a 
+contraction then the contraction could not be used. By default this is a page feed character. If buffered is set to 
+False, then this is ignored.
+
+the function translateText returns the translated text.
+
+You may optionally wish to use some of the preprocessing functions in the module YABT.preprocess. You may use these 
+before the translator object is created. Currently the only function in this file is addCapMarks which will insert 
+braille capital markers. You are requested to try and keep these functions used to a minimum as they may take some time 
+to complete depending on the input text, eg. if you have a text you contains no capitals, then don't use addCapMarks.
+
+As mentioned, it is possible to use YABT for cursor positioning when used by a screen reader. This can be achieved by 
+the following:
+>>> braille_to_display = YABT.translateText(text_to_translate[:cursor], 2, ' ', text_to_translate[cursor:], False)
+>>> brl_cursor = len(braille_to_display)
+>>> braille_to_display += YABT.translateText(text_to_translate[cursor:], 2, text_to_translate[:cursor], ' ', False)
+Now you will have the braille in braille_to_display, and the cursor position for the braille is in brl_cursor.
+
+
+  3. Writing YABT translation tables
+
+YABT translation tables are in the XML format. Currently there is no tools for writing or editing YABT tables, so you 
+will need to write them in a text editor by hand for now. You may find it useful to refer to an existing YABT 
+translation table whilst reading this documentation.
+
+The root node for a YABT table is the <transtable> node. For YABT there are two main sections, the metadata and YABTdata 
+elements which may appear in any order. The metadata node contains information about the table which may be used to 
+identify it, eg. the table version. Currently this is not used by YABT but in the future as the format develops 
+tblversion may be used. If you are writing extra software which uses YABT, you may use the metadata section for table 
+information for your software, but you are warned to keep this to a minimum and make sure that your node names are 
+unique to any other packages.
+
+The main section is the YABTdata node. There are three main components to the translation system:
+1. charmap nodes - These nodes are for the character mappings which should take place before YABT actually does the 
+translation. The idea of this is so characters which mean the same can be mapped to one character and keep the rule set 
+lower, such as lower case letters can be mapped to upper case for braille tables which do not use capital signs. These 
+charmap nodes have two child nodes each, orig and repl respectively. NOTE: you should not surround these child nodes 
+with whitespace and should always have them in the order orig repl, failure to do so may lead to unexpected results.
+2. decission nodes - These specify which inputclasses may apply to which states. When used for braille translation, 
+states relate to different braille modes eg. grade 1, grade 2, computer braille, etc. The node only has attributes, 
+which are inputclass and states. The attribute inputclass should be a single integer, and states should be a lit of 
+integers separated by commas.
+3. rule nodes - These are the rules themselves. They have six child nodes, which should not be separated by whitespace 
+and kept to the order they will be introduced. The iclass child node should contain the integer of the inputclass the 
+rule applies to. This works by checking the states in the inputclass as specified in the decission nodes and if the 
+current machine state is in the list of states for that inputclass then the rule will be applied if the rest matches. 
+The focus child node is next, this contains a string which will be matched exactly to the text, and if the rule is 
+applied is replaced by the translation. Next is the bfcontext and then the afcontext child nodes. These are the before 
+context and after context respectively. There are a few differentcontext systems used by YABT. These are specified as 
+a two character type code followed by context pattern, see below information for detail on this. The types are:
+ ^a - always matches context regardless of the actual context. It needs no pattern, and if a pattern is specified it is 
+ignored.
+ ^c - Character match, will see if the character immediately adjacent to the focus in the direction specified (before 
+for before context or after for after context) is in a list of characters. The pattern is the name of a group of 
+characters, the groups can be found in the translation table in the <YABT_custom_matches> tag in the metadata section. 
+These types are specified by the name of the group being the tag name for the group, and the text content being the 
+characters in the group.
+ ^s - String match. This is not recommended, but is a test like the ^c type, but it uses the string test functions in 
+python (eg. mystring.isalpha()). This is not recommended due to it being slower than the ^c type, which is felt to be 
+able to do the same. The pattern string in this case is the function name without the brackets (eg. for the isalpha 
+function, the pattern is isalpha and the whole context string would be ^sisalpha).
+ ^t - Text match. This will match the string in the pattern exactly to the adjacent text (eg. ^tED in the after context 
+would specify that the rule should only apply if the focus is immediately followed by ED).
+ ^r - Regular expression match. Possibly the most powerful, but the slowest type, it takes a regular expression as the 
+pattern and matches it adjacent to the focus in the direction given by the context it is specified in. NOTE: There is 
+syntax to make regular expressions match in a particular part of a string, do not use the regular expression syntax for 
+that as YABT adds this in according to the context it is specified in. Failure to follow that note may lead to 
+unexpected results.
+The next child node is trans which is a string which should be put in the place of the focus if the rule is applied. The 
+final child node is fstate which is the state the translator is left in after the rule is applied. If you don't wish to 
+change the state, use a value of -1.
+
+Table authors should note, that character maps are applied in the order they are written, and that rules are checked in 
+the order specified in the file and the first matching one is applied. The order of these different types do not matter, 
+IE. you may have rules before character maps and no difference will be made to the output.
+
+Also table authors should be aware of the limitations of xml 1.0, and to get round some of these limitations on 
+characters, in any of the sections described here for YABT (custom match types, character mappings, or rules) you may 
+use the <char> tag in text to specify a character. The value of the character is given in this tag by the ord attribute. 
+So for the form feed character, you need to use <char ord="12" />.
+
+Software developers who may wish to use YABT in their projects and are extending it, and so wish to add extra sections 
+to YABT tables, may, but we suggest that they do this in a different node to YABTdata. When choosing a name for your new 
+node, try and make it unique, something such as <softwarename>data (where <softwarename> stands for the name of their 
+software).
