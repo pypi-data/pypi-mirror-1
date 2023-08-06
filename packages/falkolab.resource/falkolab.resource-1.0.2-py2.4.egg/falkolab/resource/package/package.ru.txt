@@ -1,0 +1,153 @@
+Package resource
+================================================================================
+
+  >>> from zope import component, interface
+  >>> from falkolab.resource import interfaces, resourcetypes
+
+  >>> import falkolab.resource
+  >>> import falkolab.resource.package
+  >>> import os, os.path
+
+  >>> import tempfile
+  >>> imageFileName =  tempfile.mktemp('image.jpg')
+  >>> open(imageFileName, 'w').write('jpg image data')
+
+  >>> dirName = tempfile.mkdtemp()
+  >>> os.mkdir(os.path.join(dirName, 'subfolder'))
+  >>> open(os.path.join(dirName, 'script.js'), 'w').write('script data')
+  >>> open(os.path.join(dirName, 'style.css'), 'w').write('style data')
+  >>> open(os.path.join(dirName, 'image.png'), 'w').write('png image data')
+
+Ресурсы можно группировать в логические пакеты
+
+  >>> zcml("""
+  ... <configure
+  ...   xmlns="http://namespaces.falkolab.ru/zope"
+  ...   package="falkolab.resource">
+  ...
+  ...   <resource
+  ...       name="image-resource"
+  ...       src="%s" />
+  ...
+  ...   <resource
+  ...       name="resdir"
+  ...       type="directory"
+  ...       src="%s" />
+  ...
+  ...   <resourcePackage
+  ...       name = "package1"
+  ...       include = "resdir image-resource" />
+  ...
+  ... </configure>
+  ... """ % (imageFileName, dirName))
+
+Проверим все ли нормально:
+
+  >>> from zope.publisher.browser import TestRequest
+  >>> request = TestRequest()
+
+  >>> resource = component.getAdapter(
+  ...    request, interface.Interface, name='image-resource')
+
+  >>> isinstance(resource.context, resourcetypes.Image)
+  True
+
+  >>> resource = component.getAdapter(
+  ...    request, interface.Interface, name='image-resource')
+
+  >>> dirResource = component.getAdapter(
+  ...    request, interface.Interface, name='resdir')
+  >>> dirResource
+  <falkolab.resource.resourcetypes.DirectoryResource object at ...>
+
+
+Получим ресурс пакета (да, пакеты являются дргим типом ресурсов):
+
+  >>> pkgResource = component.getAdapter(
+  ...    request, interface.Interface, name='package1')
+
+  >>> pkgResource
+  <falkolab.resource.package.resourcepackage.PackageResource object at ...>
+  >>> pkgResource.context.resources
+  [u'resdir', u'image-resource']
+
+Проверим доступ к директории ресурсов, являющуюся частью пакета:
+
+  >>> dirResource = None
+  >>> dirResource = pkgResource.publishTraverse(request, 'resdir')
+  >>> dirResource
+  <falkolab.resource.resourcetypes.DirectoryResource object at ...>
+
+  >>> resource = None
+  >>> resource = dirResource.publishTraverse(request, 'style.css')
+  >>> resource
+  <falkolab.resource.resourcetypes.FileResource object at ...>
+  >>> isinstance(resource.context, resourcetypes.File)
+  True
+  >>> print resource.GET()
+  style data
+
+Проверим доступ к изображению
+
+  >>> resource = None
+  >>> resource = pkgResource.publishTraverse(request, 'image-resource')
+  >>> resource
+  <falkolab.resource.resourcetypes.FileResource object at ...>
+  >>> isinstance(resource.context, resourcetypes.Image)
+  True
+
+  >>> print resource.GET()
+  jpg image data
+
+Сам пакет может быть частью другого пакета
+
+  >>> zcml("""
+  ... <configure
+  ...   xmlns="http://namespaces.falkolab.ru/zope"
+  ...   package="falkolab.resource">
+  ...
+  ...   <resourcePackage
+  ...       name = "package2"
+  ...       include = "package1 image-resource" />
+  ...
+  ... </configure>
+  ... """)
+
+  >>> pkg2Resource = component.getAdapter(
+  ...    request, interface.Interface, name='package2')
+
+  >>> pkg2Resource
+  <falkolab.resource.package.resourcepackage.PackageResource object at ...>
+  >>> pkg2Resource.context.resources
+  [u'package1', u'image-resource']
+
+  >>> pkg1Resource = pkg2Resource.publishTraverse(request, 'package1')
+
+  >>> pkg1Resource
+  <falkolab.resource.package.resourcepackage.PackageResource object at ...>
+  >>> pkg1Resource.context.resources
+  [u'resdir', u'image-resource']
+
+  >>> dirResource = None
+  >>> dirResource = pkg1Resource.publishTraverse(request, 'resdir')
+  >>> dirResource
+  <falkolab.resource.resourcetypes.DirectoryResource object at ...>
+
+  >>> resource = None
+  >>> resource = dirResource.publishTraverse(request, 'style.css')
+  >>> print resource.GET()
+  style data
+
+  >>> resource = None
+  >>> resource = pkg1Resource.publishTraverse(request, 'image-resource')
+  >>> print resource.GET()
+  jpg image data
+
+
+  >>> os.unlink(imageFileName)
+
+  >>> os.unlink(os.path.join(dirName, 'script.js'))
+  >>> os.unlink(os.path.join(dirName, 'style.css'))
+  >>> os.unlink(os.path.join(dirName, 'image.png'))
+  >>> os.rmdir(os.path.join(dirName, 'subfolder'))
+  >>> os.rmdir(dirName)
