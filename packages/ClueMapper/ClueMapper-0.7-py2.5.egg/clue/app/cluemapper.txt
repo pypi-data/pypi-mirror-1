@@ -1,0 +1,121 @@
+;-*-Doctest-*-
+
+=====================
+ClueMapper Code Usage
+=====================
+
+ProjectManager
+==============
+
+The ProjectManager is a component which is used to query, create, and
+otherwise manipulate projects.
+
+  >>> from clue.app.project import ProjectManager
+
+Before any testing can begin, we must setup a mock environment.
+
+  >>> from clue.tools.testing import Mock, gen_tempfile, gen_tempdir
+  >>> from clue.app.config import ClueMapperConfig
+  >>> import os
+  >>> tempdir = gen_tempdir()
+  >>> svntempdir = os.path.join(tempdir, 'svn')
+  >>> tractempdir = os.path.join(tempdir, 'trac')
+  >>> workingtempdir = os.path.join(tempdir, 'working')
+  >>> os.mkdir(svntempdir); os.mkdir(tractempdir)
+  >>> cfgfile = gen_tempfile()
+  >>> clueconfig = ClueMapperConfig(cfgfile)
+  >>> clueconfig['base'].update({'tracenv_base': tractempdir,
+  ...                            'svnrepo_base': svntempdir,
+  ...                            'auth_file': '',
+  ...                            'managers': 'manager1, manager2',
+  ...                            'svnauthzfile': ''})
+  >>> clueconfig['base:permissions'].update({'abc': 'def'})
+
+Next we can instantiate the ProjectManager component itself and start
+querying it's information.
+
+  >>> pmanager = ProjectManager({'REMOTE_USER': 'foo'},
+  ...                           {'cluemapper.config': clueconfig,
+  ...                            'cluemapper.workingdir': workingtempdir},
+  ...                           )
+
+The ``_username`` property gets its information from environ's
+``REMOTE_USER`` value.
+
+  >>> pmanager._username
+  'foo'
+
+In order to query and create projects we must setup some mock
+security.
+
+  >>> def new_project(*args, **kwargs):
+  ...     return Mock(args=args, prjid='abc', **kwargs)
+  >>> pmanager._project_factory = new_project
+  >>> pmanager._can_access = lambda *args: True
+  >>> pmanager._can_manage = lambda *args: True
+
+Querying the projects will show us our one Mock object.
+
+  >>> pmanager.projects
+  []
+
+Since we didn't create a project with prjid "def" yet, this lookup
+will fail.
+
+  >>> pmanager.get_project('def')
+  Traceback (most recent call last):
+  KeyError: 'def'
+
+Making sure the unique id generation normalizes the name properly.
+
+  >>> pmanager._gen_unique_id('Abc Def  123')
+  'abc-def-123'
+
+And creating a project should return with the correct project stub.
+
+  >>> pmanager.create_project('Some Project')
+  <clue.tools.testing.Mock ...>
+
+
+Server
+======
+
+The ``main`` function is used to launch the application itself
+typically from a console.
+
+  >>> from clue.app.server import main
+  >>> tmpdir = gen_tempdir()
+  >>> os.mkdir(os.path.join(tmpdir, 'etc'))
+  >>> ini = os.path.join(tmpdir, 'etc', 'clue.ini')
+  >>> f = open(ini, 'w')
+  >>> f.write('[base]\\nport=10993\\n\\n')
+  >>> f.close()
+  >>> main(cmdargs=['-w', tmpdir, '-t'])
+  0
+
+The ``Server`` object in the ``server`` module is used to serve up the
+actual application via HTTP requests.
+
+  >>> from clue.app.server import Server
+  >>> tmpdir = gen_tempdir()
+  >>> os.mkdir(os.path.join(tmpdir, 'etc'))
+  >>> ini = os.path.join(tmpdir, 'etc', 'cluemapper.ini')
+  >>> os.mkdir(os.path.join(tmpdir, 'etc', 'themes'))
+  >>> f = open(ini, 'w')
+  >>> f.write('''[base]
+  ... port=10993
+  ... [project:foo]
+  ... tracenv=nowhere
+  ... theme=footheme
+  ... [project:bar]
+  ... tracenv=nowhere
+  ... ''')
+  >>> f.close()
+  >>> server = Server(tmpdir, False)
+  >>> server._run = lambda: None
+  >>> server.serve_forever()
+  >>> del server._run
+
+  >>> server._listen = lambda x: None
+  >>> server._run()
+  >>> del server._listen
