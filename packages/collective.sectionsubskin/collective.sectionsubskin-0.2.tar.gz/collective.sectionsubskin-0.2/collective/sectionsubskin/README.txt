@@ -1,0 +1,161 @@
+Section Sub Skin
+================
+
+Section Sub Skin is a system for applying an interface to a request that maps 
+into a description of how a theme should change for a subsection of the site.
+These mappings do not automatically change things about the theme, but they 
+are available in Zope3 style browser views for conditional inclusion.  
+
+The recommended way of doing this currently (as DTML views are not supported)
+is to create a view that uses TAL rather than the standard DTML method of 
+generating customised CSS files.
+
+Browser views that inherit from `collective.sectionsubskin.browser.subskin.SubSkin` 
+have a "subskin" variable set which is accessible from the view.
+
+For example, if all subskins contain a `colour` attribute, the current colour can be found with::
+
+    <tal:colour replace="view/subskin/colour" on-error="string:MyDefaultColour"/>
+
+Boring imports and setup (move to tests.py?).  You probably want to ignore all this.::
+
+    >>> from zope.app.testing import ztapi
+    >>> import zope.interface
+    >>> from AccessControl.SecurityManagement import newSecurityManager
+    >>> from AccessControl.User import UnrestrictedUser
+    >>> from Testing.makerequest import makerequest
+    >>> app = makerequest(app)
+    >>> portal = portal.__of__(app)
+    >>> newSecurityManager(None, UnrestrictedUser('god', '', ['Manager'], ''))
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser()
+    >>> from Testing.ZopeTestCase import user_password
+    >>> browser.addHeader('Authorization', 'Basic %s:%s' % ('portal_owner', user_password)) # Only needed as our view is a dummy, if registered through ZCML we'd use permission=zope2.View
+    
+
+Creating a new theme definition is very easy::
+  
+    >>> from collective.sectionsubskin.definition import BaseDefinition 
+    >>> from collective.sectionsubskin.interfaces import ISubskinDefinition
+    >>> from collective.sectionsubskin.test_support import IRedSkin, RedSkin
+
+Again, on the filesystem, the value of this code is::
+
+    class IRedSkin(ISubskinDefinition): 
+        pass
+    
+    class RedSkin(BaseDefinition):
+         title = u"RedSkin"
+         colour = u"FF0000"
+         type_interface = IRedSkin
+
+We can keep an instance of this in a list so we can poke it later::
+
+    >>> skins = []
+    >>> skins.append(RedSkin())
+    >>> skins
+    [<SectionSubSkin named RedSkin>]
+    >>> skins[0].colour
+    u'FF0000'
+
+These are just basic python objects that inherit from BaseDefinition, which 
+conditionally inherits from p4a.subtyper as well as providing some helper methods.
+This means you can do anything with them that you can with normal objects::
+
+    >>> from collective.sectionsubskin.test_support import IBlueSkin, BlueSkin
+    >>> skins.append(BlueSkin())
+
+
+Again, on the filesystem, the value of this code is::
+
+    class IBlueSkin(ISubskinDefinition): 
+        pass
+    
+    class BlueSkin(BaseDefinition):
+         title = u"BlueSkin"
+         colour = u"0000FF"
+         type_interface = IBlueSkin
+
+
+The skins variable now contains both skins::    
+
+    >>> skins
+    [<SectionSubSkin named RedSkin>, <SectionSubSkin named BlueSkin>]
+    >>> skins[1].colour
+    u'0000FF'
+
+Now, if we create a browser view for the site (registed in test_support)::
+
+    >>> from collective.sectionsubskin.test_support import colours
+
+These things need to be in filesystem code so Zope doesn't throw a paddy, so it's actually::
+
+    from collective.sectionsubskin.browser.subskin import SubSkin
+    class colours(SubSkin):
+        """ Colours. """
+        
+        def render(self):
+            """ Render the CSS. """
+            try:
+                return """html { background-color: #%s; }""" % (self.subskin.colour)
+            except:
+                return """"""
+
+        __call__ = render
+
+        def __of__(self, parent):
+            # We don't care about acquisition for this toy example
+            return self
+
+    
+We can instantiate one directly, traverse to it or visit it in a browser::
+
+    >>> colours(portal, app.REQUEST).render()
+    ''
+    >>> portal.unrestrictedTraverse("colours.css").render()
+    ''
+    >>> browser.open("%s/colours.css" % self.portal.absolute_url())
+    >>> browser.contents
+    ''
+
+Only the last of these will trigger the subskin, as it only activates on HTTP requests traversing over the object.
+
+As there is no subskin active for the root it correctly renders an empty string.  
+If, however, we create some subfolders we can assign them subskins::
+
+    >>> red = portal[portal.invokeFactory("Folder","red")]
+    >>> zope.interface.alsoProvides(red, (IRedSkin, ))
+    >>> blue = portal[portal.invokeFactory("Folder","blue")]
+    >>> zope.interface.alsoProvides(blue, (IBlueSkin, ))
+    >>> noskin = portal[portal.invokeFactory("Folder","noskin")]
+    
+
+Now when we traverse to the red folder we see the red skin::
+    
+    >>> browser.open("%s/red/colours.css" % self.portal.absolute_url())
+    >>> browser.contents
+    'html { background-color: #FF0000; }'
+
+But if we go blue we see the other option::
+    
+    >>> browser.open("%s/blue/colours.css" % self.portal.absolute_url())
+    >>> browser.contents
+    'html { background-color: #0000FF; }'
+
+Any unmarked folders still show no subskin::
+    
+    >>> browser.open("%s/noskin/colours.css" % self.portal.absolute_url())
+    >>> browser.contents
+    ''
+
+Weird traversal will give the last skin encountered::
+    
+    >>> browser.open("%s/red/blue/colours.css" % self.portal.absolute_url())
+    >>> browser.contents
+    'html { background-color: #0000FF; }'
+
+and::
+
+    >>> browser.open("%s/blue/red/colours.css" % self.portal.absolute_url())
+    >>> browser.contents
+    'html { background-color: #FF0000; }'
