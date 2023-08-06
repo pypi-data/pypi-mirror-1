@@ -1,0 +1,61 @@
+CAPTCHA Middleware
+==================
+
+CAPTCHAmiddleware is a WSGI middleware python packages for putting
+CAPTCHAs on forms for unauthorized users (those that haven't logged in
+yet).  If you aren't authorized -- in python terms, if remote_user is
+not set on the request -- then CAPTCHAs and a hidden key will be added
+to forms with ``method=POST``.  You will be required to correctly
+solve the CAPTCHA in order to submit the POST request.  Otherwise, the
+CAPTCHAmiddleware will stop your request and redirect you back to
+the form.
+
+
+What are CAPTCHAs?  -or- I hate those things
+--------------------------------------------
+
+CAPTCHAs are admittedly imperfect ways of telling humans and computers
+apart.  Presumedly if you are already identified (logged in), then the
+computer is satisfied that you are you.  But what if you want to make
+an anonymous comment on someone's blog post?  In a perfect world,
+there would be no CAPTCHAs.  In the real world, there is SPAM.  So if
+I want to protect my blog from SPAM-bots, I need to do something.
+Again, CAPTCHAs aren't perfect, but they're at least something.
+
+
+Why SkimpyGimpy?
+----------------
+
+I used SkimpyGimpy because it is free, open souce, and has an easy to
+use API.  People complain that the CAPTCHAs are hard to read.  I'm
+sorry about that.  If you really want to help, I'm sure the
+SkimpyGimpy developers would be more than glad for a hand.
+
+
+Why not reCAPTCHA?
+------------------
+
+reCAPTCHA is annoying because it uses an API key and is not open
+source.  I have no idea why either of those things are true.  If
+someone wanted to help include reCAPTCHA support in this package, I'd be happy
+to help.  But because my opposition to closed source software (yes,
+even if they are web services) and API keys, its not a priority for
+me.
+
+
+Why do this with middleware instead of in an app?
+-------------------------------------------------
+
+This is a long debate and the subject of many blog posts.  In short, both
+approaches are valid.  If you want to integrated with application
+logic, you shouldn't use middleware for something like this.  If you
+just want this functionality and don't care about tight integration,
+then this approach might work for you.
+
+
+Why does CAPTCHAmiddleware look half done?
+----------------------------------------------
+
+Because it is.  This is very much a work in progress.  Its target
+audience is clearly developers who want to get their hands dirty.  So,
+as per the usual disclaimer, sorry for the mess, am working on it.
