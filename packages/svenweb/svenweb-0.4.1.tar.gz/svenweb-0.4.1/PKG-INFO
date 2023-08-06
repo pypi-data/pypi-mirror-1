@@ -1,0 +1,231 @@
+Metadata-Version: 1.0
+Name: svenweb
+Version: 0.4.1
+Summary: web frontend to versioncontrolled document repository for read-write-index-history operations
+Home-page: UNKNOWN
+Author: Ethan Jucovy and Jeff Hammel
+Author-email: ejucovy@gmail.com
+License: GPLv3 or later
+Description: Svenweb is a web environment for editing and publishing versioned documents.
+        
+        It uses a version-controlled repository as its database and works against a
+        checkout. Currently supported backends are SVN and BZR.
+        
+        To use the BZR backend you should be running bzr 2.0 or so[1]
+        
+        Alternative backends may be supported one day.
+        
+        To configure it, edit the paste.ini configuration:
+        
+        [app:svenweb]
+        ...
+        svenweb.checkout_dir = /path/to_your/svn/checkout/
+        
+        The checkout must already exist; svenweb won't create it for you.
+        
+        Then you can run it with `paster serve paste.ini`
+        
+        
+        What it doesn't do
+        ==================
+        
+        Svenweb doesn't care about authentication. If you do, you should configure
+        this outside of svenweb or in an additional WSGI middleware layer.
+        
+        Likewise svenweb doesn't respect authentication. Commits will all be made
+        by the system's default user. In a future version this will change to respect
+        environment variables.
+        
+        Svenweb doesn't provide in-browser diffs between revisions. I'd like to add
+        this eventually.
+        
+        Svenweb doesn't provide RSS for changes. It should.
+        
+        Svenweb doesn't provide facilities for moving, copying or deleting files
+        through the web. Adding these will likely be my next priority.
+        
+        
+        Usage
+        =====
+        
+        Svenweb uses a wiki-style workflow for adding new documents: just visit
+        the URL of the document you want to create. You'll find an edit form.
+        
+        If you visit /baz/bar/foo/ then the directories /baz/ and /baz/bar/ will
+        be created and checked in to the repository if they do not yet exist.
+        
+        Svenweb aggressively redirects redundant versions of all its views:
+        
+        * If a document /foo was last changed in r5 and you visit /foo?version=8,
+        you will be redirected to /foo?version=5.
+        
+        * If /foo's last change was in r5 and you visit /foo you will be redirected
+        to /foo?version=5.
+        
+        This means that every URL with a ?version parameter can be cached forever
+        if you want.
+        
+        Read
+        ----
+        
+        Visit a document's URL to view its latest version.
+        
+        Append ?version=5 to view it as of r5.
+        
+        Write
+        -----
+        
+        Visit /foo?view=edit to edit the document stored at /foo.
+        
+        You can edit the file, and also set a mimetype which will be used when
+        serving the file.
+        
+        You can also add a commit message. If you don't, the default commit message
+        is "foom."
+        
+        Index
+        -----
+        
+        You can view the contents of a directory by visiting the directory's URL.
+        Versions work here too; visiting directory /baz/bar/?version=5 will display
+        the contents of that directory as of r5.
+        
+        History
+        -------
+        
+        You can view a history (changelog) for any file or directory's URL by using
+        the querystring ?view=history.
+        
+        For directories, this will display the history of changes within that directory,
+        including file additions and modifications in subdirectories.
+        
+        You can use ?version=5 modifiers as well, to see a history of changes up through
+        the version specified.
+        
+        
+        Miscellany
+        ==========
+        
+        Tests
+        -----
+        
+        There are the beginnings of a test suite in the ./ftests directory. These are
+        flunc tests, which run twill scripts over HTTP. You should `easy_install flunc`
+        if you want to run the tests.
+        
+        To run them, start a svenweb server on localhost:5052 with
+        svenweb.checkout_dir = /tmp/svnco/
+        
+        Then run
+        ./run-flunc.sh
+        
+        It should work with both the SVN and BZR backends.
+        
+        
+        Templates
+        ---------
+        
+        The templates are Tempita templates. They are minimal by design. You can fork
+        them; just change the value of `svenweb.templates_dir` in the `paste.ini` file.
+        
+        
+        
+        [1] This is for the "index" view specifically i.e. for directory views.
+        In 2.0 bzr makes it easier to find the last changed revision of any
+        file within a directory. See https://bugs.edge.launchpad.net/bzr/+bug/97715
+        
+        Note that svenweb's current implementation of the index view WILL NOT WORK
+        with mod_wsgi because of a call to sys.stdout.flush() in bzrlib.commands
+        which is triggered by sven.bzr.log -- I really ought to fix this in sven.bzr
+        by implementing the `log` method more properly, somehow.
+        
+        
+        Changelog
+        =========
+        
+        New in this version
+        -------------------
+        
+        * Better hbmp handling
+        
+        
+        What's next
+        -----------
+        
+        
+        A little speculative roadmap:
+        
+        0.3: This version.
+        
+        0.4: Copying, moving and deleting files. Some refactoring of WSGI components.
+        
+        0.5: Using REMOTE_USER to determine the username to commit with, or something
+        like that. More refactoring of WSGI components.
+        
+        0.6: RSS or atom feeds. Diffs between arbitrary revisions. More refactoring.
+        
+        
+        History
+        -------
+        
+        0.4 (2010-01-30)
+        ----------------
+        
+        * Fix mimetype handling which seems to have been really quite broken
+        for god knows how long. It now all behaves as you'd expect.
+        
+        * Abstract out template_loader option, which should be a callable
+        which takes a (template_name, data_dict) and returns a string.
+        The default is the existing Tempita stuff. This interface will
+        probably change. It can be an object configured however it likes,
+        currently that's just handled in the paste.deploy factory.
+        
+        * Internal refactoring of components for easier pluggability of
+        custom edit apps (which handle editform, addform and save) and
+        view apps (which handle rendering)
+        
+        Demo of custom view apps: custom display for text/csv+hbmp format!
+        
+        
+        0.3 (2010-01-30)
+        ----------------
+        
+        * When displaying an edit form for a file that does not exist,
+        use the return value of mimetypes.guess_type as the default
+        mimetype for the file in the form. If no guessable mimetype
+        is found, the default is 'text/html'.
+        
+        This behavior can be overridden by subclassing SvnWikiView
+        and implementing a custom `new_file_default_mimetype_policy`
+        method. The method should take a `request` argument.
+        
+        
+        0.2 (2010-01-26)
+        ----------------
+        
+        * BZR repositories are now supported. This is much faster than
+        SVN. To use, simply add 'svenweb.repo_type=bzr' to your
+        paste.deploy configuration.
+        
+        * Added a WSGI middleware filter to set a response's Content-type
+        header based on the versioned mimetype property of a resource.
+        It can be used independent of the rest of svenweb, for example
+        if you want to publish the current contents of your versioned
+        resources with a static file server. Use like
+        
+        [filter:contenttype]
+        use = egg:svenweb#content_type
+        checkout_dir = /path/to_your/checkout/
+        default_content_type = text/plain
+        repo_type = bzr
+        
+        The 'repo_type' and 'default_content_type' settings are optional.
+        
+        
+        0.1.1 (2010-01-03)
+        ------------------
+        
+        First release.
+        
+        
+Platform: UNKNOWN
