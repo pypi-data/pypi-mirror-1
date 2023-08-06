@@ -1,0 +1,154 @@
+#!/usr/bin/python
+"""
+Find information about gitology-repo.
+"""
+# imports # {{{
+import sys, gitology, textwrap, os, path
+from optparse import OptionParser
+
+from gitology import utils
+
+try:
+    from gitology.config import settings as gsettings
+except utils.ImproperlyConfigured, e:
+    print "ImproperlyConfigured:", e
+    raise SystemExit
+
+from gitology.document import Document
+# }}}
+
+# build_parser # {{{
+def build_parser():
+    parser = OptionParser(
+        version = "%prog " + gitology.VERSION,
+        usage = "Usage: %prog [options]",
+    )
+    parser.add_option(
+        "--rc-file", action="store_true", dest="show_rc_file",
+        default=False, help="show rc file"
+    )
+    parser.add_option(
+        "--repo-path", action="store_true", dest="show_repo_path",
+        help="show repo path", default=False
+    )
+    parser.add_option(
+        "--repo-size", action="store_true", dest="show_repo_size",
+        help="show repo size", default=False
+    )
+    parser.add_option(
+        "-n", "--number-of-documents", action="store_true", dest="show_num_documents",
+        help="show number of documents in repository", default=False
+    )
+    parser.add_option(
+        "-d", "--document", action="store", dest="document_name",
+        help="show informations about document named DOCUMENT_NAME"
+    )
+    parser.add_option(
+        "--blogs", action="store_true", dest="show_blogs",
+        default=False, help="show information about all blogs"
+    )
+    parser.add_option(
+        "-b", "--blog", action="store", dest="blog_name",
+        help="show information about blog named BLOG_NAME"
+    )
+    parser.add_option(
+        "--url", action="store", dest="url",
+        help="show information about the given URL"
+    )
+    parser.add_option(
+        "--about", action="callback", callback=print_about,
+        help="find out more about this script"
+    )
+    return parser
+# }}}
+
+# print_about # {{{
+def print_about(*args, **kw):
+    print utils.smart_wrap(
+        """If no command line arguments are supplied, this command prints a summary of gitology repository."""
+    )
+    raise SystemExit
+# }}}
+
+def main():
+    # get arguments # {{{
+    parser = build_parser()
+    (options, args) = parser.parse_args()
+    # }}}
+    if options.show_rc_file:
+        print gsettings.RC_FILE
+        return 0
+    if options.show_repo_path:
+        print gsettings.LOCAL_REPO_PATH
+        return 0
+    # show repo size
+    if options.show_repo_size:
+        print "%.2f %s" % utils.getDirSize(gsettings.LOCAL_REPO_PATH)
+        return 0
+    # show number of documents
+    if options.show_num_documents:
+        print len(gsettings.LOCAL_REPO_PATH.joinpath("documents").dirs())
+        return 0
+    # show all blogs
+    if options.show_blogs:
+        print "\n".join(
+            p.namebase for p in
+            gsettings.LOCAL_REPO_PATH.joinpath("blogs").dirs()
+        )
+        return 0
+    # show info about one blog:
+    #   title of the blog, url of the blog.
+    #   number of posts, labels, number of posts per label
+    if options.blog_name:
+        doc = Document("blogs@%s" % options.blog_name)
+        if not doc.exists():
+            print 'Blog "%s" does not exists.' % options.blog_name
+            return 4
+
+        print "Title:", doc.meta.title
+        print "URL:", doc.meta.url
+
+        print "Number of blog posts:",
+
+        gen_lst = utils.gen_find(
+            "*.lst", gsettings.LOCAL_REPO_PATH.joinpath("blogs")
+        )
+        date_files = utils.gen_exclude(
+            r"blogs\/%s\/labels" % options.blog_name,
+            gen_lst
+        )
+        date_files_opened = utils.gen_open(date_files)
+        all_lines = utils.gen_cat(date_files_opened)
+
+        print utils.counter(all_lines)
+
+        print 
+        print "Labels:"
+        print
+
+        for label in gsettings.LOCAL_REPO_PATH.joinpath(
+            "blogs/%s/labels" % options.blog_name
+        ).files():
+            label_doc = Document(
+                "blogs@%s@label@%s" % (options.blog_name, label.namebase)
+            )
+            print "%s (%s) - %s posts" % (
+                label_doc.meta.title, label.namebase,  
+                len(label.open().readlines())
+            )
+        return 0
+    # show info about some url: this should be done using urlpatterns
+    # built for django application
+    print "RC_FILE:", gsettings.RC_FILE
+    print "REPO_PATH:", gsettings.LOCAL_REPO_PATH
+    print "Number of documents:", len(
+        gsettings.LOCAL_REPO_PATH.joinpath("documents").dirs()
+    )
+    print "Blogs:", ", ".join(
+        p.namebase for p in
+        gsettings.LOCAL_REPO_PATH.joinpath("blogs").dirs()
+    )
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
