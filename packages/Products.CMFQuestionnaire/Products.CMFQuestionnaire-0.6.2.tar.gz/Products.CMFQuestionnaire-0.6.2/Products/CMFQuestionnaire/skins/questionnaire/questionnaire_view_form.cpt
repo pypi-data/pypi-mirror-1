@@ -1,0 +1,190 @@
+<html
+    xmlns="http://www.w3.org/1999/xhtml"
+    xml:lang="en"
+    xmlns:tal="http://xml.zope.org/namespaces/tal"
+    xmlns:metal="http://xml.zope.org/namespaces/metal"
+    xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+    lang="en"
+    metal:use-macro="here/main_template/macros/master"
+    i18n:domain="cmfquestionnaire">
+<body>
+  <metal:main fill-slot="main">
+  <tal:main-macro
+      metal:define-macro="main"
+      tal:define="kssClassesView context/@@kss_field_decorator_view;
+                  getKssClasses nocall:kssClassesView/getKssClassesInlineEditable;
+                  templateId template/getId;">
+
+  <div tal:replace="structure provider:plone.abovecontenttitle"/>
+
+  <h1 class="documentFirstHeading">
+    <metal:field use-macro="python:here.widget('title', mode='view')">
+      Title
+    </metal:field>
+  </h1>
+
+  <div tal:replace="structure provider:plone.belowcontenttitle"/>
+
+  <p class="documentDescription">
+    <metal:field use-macro="python:here.widget('description', mode='view')">
+      Description
+    </metal:field>
+  </p>
+
+  <div tal:replace="structure provider:plone.abovecontentbody"/>
+
+  <form action="questionnaire_view_form"
+        class="enable_autofocus"
+        name="questionnaire_view_form"
+        method="post"
+        tal:define="ticket request/ticket | nothing;
+                    ticketValid python:here.checkTicket(ticket);
+                    global questionCounter python:int(0);
+                    disabled python:not here.isOpen() or (here.use_ticket and not ticketValid);"
+        tal:attributes="action string:${here/absolute_url}/${template/id}">
+
+    <input type="hidden"
+            name="form.submitted"
+            value="1"/>
+
+    <fieldset tal:condition="python:here.isOpen() and here.use_ticket and not ticketValid">
+      <legend i18n:translate="label_ticket">Ticket</legend>
+      <p class="discreet"
+         i18n:translate="help_enter_ticket">
+        Enter a valid ticket and the questionnaire will be enabled for you to
+        fill out.
+      </p>
+
+      <input type="text"
+             id="ticket"
+             name="ticket"
+             size="10"/>
+
+      <input type="submit"
+             class="context"
+             name="form.button.fillout"
+             value="Fillout"
+             i18n:attributes="value label_fillout"/>
+    </fieldset>
+
+    <tal:block tal:repeat="item here/getItems">
+    <fieldset tal:condition="python:item['type']=='q'">
+    <table class="listing"
+           style="width: 100%">
+      <thead>
+        <tr>
+          <th class="nosort"></th>
+          <th class="nosort"></th>
+          <th class="nosort"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr tal:define="answer python:here.getAnswer(ticket, item['id'])"
+            tal:attributes="class python:test(questionCounter%2==0, 'odd', 'even')">
+          <th style="width: 2em"
+              tal:define="global questionCounter python:questionCounter+1"
+              tal:content="string:${questionCounter}.">Counter</th>
+          <td tal:content="item/text">Question text</td>
+          <td style="text-align: right">
+            <select name="questionId"
+                    tal:attributes="name item/id;
+                                    disabled disabled;">
+              <tal:block tal:repeat="option item/options">
+              <option tal:define="value repeat/option/number"
+                      tal:content="option"
+                      tal:attributes="value value;
+                                      selected python:test(value==answer, 1, None)">
+                Option
+              </option>
+              </tal:block>
+            </select>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    </fieldset>
+
+    <tal:group tal:condition="python:item['type']=='g'">
+    <fieldset tal:define="questions python:here.getQuestionsInGroup(item['id'])"
+              tal:condition="questions">
+      <legend tal:content="item/title">Group Title</legend>
+
+      <div class="formHelp"
+           tal:content="item/description">Group description</div>
+
+      <table class="listing"
+             style="width: 100%">
+        <caption class="formHelp">
+          <tal:legend tal:repeat="option python:item['options']">
+          <tal:block tal:replace="repeat/option/number">number</tal:block>:
+          <tal:block tal:replace="option">option</tal:block>
+          <tal:block tal:condition="not:repeat/option/end">/</tal:block>
+          </tal:legend>
+        </caption>
+        <thead>
+          <tr>
+            <th class="nosort"
+                style="width: 2em"></th>
+            <th class="nosort"></th>
+            <th class="nosort"
+                style="width: 2em"
+                tal:repeat="option python:range(1, item['scale']+1)"
+                tal:content="option"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tal:block tal:repeat="question questions">
+          <tr tal:define="answer python:here.getAnswer(ticket, question['id'])"
+              tal:attributes="class python:test(questionCounter%2==0, 'odd', 'even')">
+            <th tal:define="global questionCounter python:questionCounter+1"
+                tal:content="string:${questionCounter}.">Counter</th>
+            <td tal:content="question/text">Question</td>
+            <td tal:repeat="option python:range(1, item['scale']+1)">
+              <input type="radio"
+                     name="questionId"
+                     tal:attributes="name question/id;
+                                     value option;
+                                     disabled disabled;
+                                     checked python:test(option==answer, 1, None);"/>
+            </td>
+          </tr>
+          </tal:block>
+        </tbody>
+      </table>
+    </fieldset>
+    </tal:group>
+    </tal:block>
+
+    <fieldset>
+      <legend i18n:translate="label_comment">Comment</legend>
+      <textarea id="comment"
+                name="comment"
+                rows="5"
+                cols="40"
+                tal:attributes="disabled disabled"
+                tal:content="python:here.getComment(ticket)"></textarea>
+    </fieldset>
+
+    <tal:block tal:condition="not:disabled">
+    <input type="hidden"
+           name="ticket"
+           value="1"
+           tal:attributes="value ticket" />
+    <input type="submit"
+           class="context"
+           name="form.button.submit"
+           value="Submit"
+           i18n:attributes="value"/>
+    </tal:block>
+  </form>
+
+  <div metal:use-macro="here/document_relateditems/macros/relatedItems">
+    show related items if they exist
+  </div>
+
+  <div tal:replace="structure provider:plone.belowcontentbody"/>
+
+  </tal:main-macro>
+  </metal:main>
+</body>
+</html>
