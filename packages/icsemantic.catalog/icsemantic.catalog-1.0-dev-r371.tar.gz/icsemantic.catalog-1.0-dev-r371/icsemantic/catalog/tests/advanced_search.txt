@@ -1,0 +1,310 @@
+-*- coding: utf-8 -*-
+
+==============================================================================
+Test advanced search with ontocatalog criteria
+==============================================================================
+
+The overall plan is:
+1. Configure the site to allow searching by synonym, relation and translation in
+the advanced search form.
+2. Create some content to test the advanced search.
+3. Do the searches and see that the results match the expected results.
+
+Create the browser object we'll be using.
+
+    >>> from DateTime.DateTime import DateTime
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+    >>> browser.handleErrors = False
+    >>> self.portal.error_log._ignored_exceptions = ()
+
+Import a variable to decide if we are in Plone 3 or not.
+
+    >>> from icsemantic.catalog.config import HAS_PLONE3
+
+Hide the recent changes portlet.
+
+    >>> self.portal.left_slots = ()
+
+Log in into the site as manager.
+
+    >>> from Products.PloneTestCase.setup import portal_owner, default_user, default_password
+    >>> login_url = portal_url + '/login_form'
+    >>> logout_url = portal_url + '/logout'
+    >>> browser.open(login_url)
+
+We have the login portlet, so let's use that.
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url)
+    >>> browser.url == portal_url
+    True
+
+Let's make three languages available in the site: English, Spanish and French.
+The default language is English.
+
+    >>> browser.getLink('Site Setup').click()
+    >>> browser.getLink('Language Settings').click()
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='en').selected = True
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='es').selected = True
+    >>> browser.getControl(name='supportedLanguages:list').getControl(value='fr').selected = True
+    >>> browser.getControl('Save').click()
+    >>> prefs_languages_url = portal_url + '/portal_languages/prefs_languages'
+    >>> browser.open(prefs_languages_url)
+    >>> browser.getControl(name='defaultLanguage').value = ('en',)
+    >>> browser.getControl('Save').click()
+
+Check that by default the OntoCatalog options are not in the advanced search.
+
+    >>> browser.open(portal_url+'/search_form')
+    >>> 'Synonyms' not in browser.contents
+    True
+
+Configure the site to show the ontocatalog search options in the advanced search
+form.
+
+    >>> browser.getLink('Site Setup').click()
+    >>> browser.getLink('icSemantic').click()
+    >>> browser.getLink('Advanced Search Options').click()
+    >>> browser.getControl(name='form.include_ontocatalog_criteria').value = True
+    >>> browser.getControl("Apply").click()
+
+Check that the configuration was applied.
+
+    >>> browser.open(portal_url+'/search_form')
+    >>> 'Include Synonyms' in browser.contents
+    True
+    >>> 'Include Related Content' in browser.contents
+    True
+    >>> 'Include Translations' in browser.contents
+    True
+
+And check that by default:
+* The 'include synonyms' option is turned off.
+* No languages are selected in the 'include translations' option.
+* The 'include related content' option is turned off.
+
+    >>> browser.getControl('Include Synonyms').selected == False
+    True
+    >>> browser.getControl('Include Related Content').selected == False
+    True
+    >>> browser.getControl(name='languages:list').value == []
+    True
+
+Create a new user with the "icsemantic.langfallback" property set.
+
+    >>> member1 = portal.portal_registration.addMember('test1', 'test1')
+    >>> member1.setMemberProperties({'language': 'en', 'icsemantic.preferred_languages': ('fr',)})
+
+First, let's create a folder to put a few documents.
+
+    >>> browser.open(portal_url)
+    >>> if HAS_PLONE3:
+    ...     browser.getLink('Add new').click()
+    ...     browser.getControl('Folder').click()
+    ...     browser.getControl(name='form.button.Add').click()
+    ... else:
+    ...     browser.getLink('Add to folder').click()
+    ...     browser.getControl('Add Folder').click()
+    >>> browser.getControl(name='title').value = 'My Folder'
+    >>> browser.getControl('Save').click()
+    >>> browser.getLink('View').click()
+    >>> browser.url == portal_url + '/my-folder/'
+    True
+
+Now let's create three pages according to these tables:
+Language      Title             Contains
+en            First Page        soccer
+es            Primera página    football, fútbol
+
+Language      Title             Contains
+en            Second Page       football
+
+Language      Title             Contains
+en            Third Page        mundial
+fr            Troisième page    football
+
+So, if the user test1 searches for the synonyms of "soccer" in English, she will
+get: First Page, Second Page and Troisième page; but not Primera página or Third
+Page, since Spanish is not a preferred language for user test1 and Third page
+doesn't contain any symonyms of 'soccer'.
+
+We are going to make sure that the first page we create includes the word
+'soccer' in the body.
+
+    >>> if HAS_PLONE3:
+    ...     browser.getLink('Add new').click()
+    ...     browser.getControl('Page').click()
+    ...     browser.getControl(name='form.button.Add').click()
+    ... else:
+    ...     browser.getLink('Add item').click()
+    ...     browser.getControl('Page').click()
+    >>> browser.getControl(name='title').value = 'First Page'
+    >>> browser.getControl(name='description').value = 'First page description'
+    >>> browser.getControl(name='text').value = 'Soccer is very popular in England.'
+    >>> browser.getControl('Save').click()
+
+Let's translate the page into Spanish.
+
+    >>> browser.open(portal_url+'/my-folder/first-page/createTranslation?set_language=es&current=en')
+    >>> browser.getControl('Title').value = 'Primera página'
+    >>> browser.getControl('Description').value = 'Descripción de la primera página'
+    >>> browser.getControl('Body Text').value = 'El balón pie es muy popular en Inglaterra. Football. Mundial.'
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+We are creating another page. This time around, we are making sure that the page
+contains the word 'football', which is a synonym of 'soccer' in English.
+
+    >>> browser.open(portal_url+'/my-folder?set_language=en')
+    >>> browser.getLink('My Folder').click()
+    >>> browser.url == portal_url + '/my-folder'
+    True
+    >>> if HAS_PLONE3:
+    ...     browser.getLink('Add new').click()
+    ...     browser.getControl('Page').click()
+    ...     browser.getControl(name='form.button.Add').click()
+    ... else:
+    ...     browser.getLink('Add item').click()
+    ...     browser.getControl('Page').click()
+    >>> browser.getControl(name='title').value = 'Second Page'
+    >>> browser.getControl(name='description').value = 'This is another test description'
+    >>> browser.getControl(name='text').value = "Football is a nice word, isn't it?"
+    >>> browser.getControl('Save').click()
+
+A third page is created with some completely unrelated content.
+
+    >>> browser.getLink('My Folder').click()
+    >>> browser.url == portal_url + '/my-folder'
+    True
+    >>> if HAS_PLONE3:
+    ...     browser.getLink('Add new').click()
+    ...     browser.getControl('Page').click()
+    ...     browser.getControl(name='form.button.Add').click()
+    ... else:
+    ...     browser.getLink('Add item').click()
+    ...     browser.getControl('Page').click()
+    >>> browser.getControl(name='title').value = 'Third Page'
+    >>> browser.getControl(name='description').value = 'Yet another test description'
+    >>> browser.getControl(name='text').value = 'Nothing to do, but fútbol.'
+    >>> browser.getControl('Save').click()
+
+Let's translate the page into French.
+
+    >>> browser.open(portal_url+'/my-folder/third-page/createTranslation?set_language=fr&current=en')
+    >>> browser.getControl('Title').value = 'Troisième page'
+    >>> browser.getControl('Description').value = ''
+    >>> browser.getControl('Body Text').value = 'Football.'
+    >>> browser.getControl('Save').click()
+    >>> 'Your changes have been saved.' in browser.contents
+    True
+
+Login with the user we created.
+
+    >>> logout_url = portal_url + '/logout'
+    >>> browser.open(logout_url)
+    >>> browser.open(login_url)
+    >>> browser.getControl(name='__ac_name').value = 'test1'
+    >>> browser.getControl(name='__ac_password').value = 'test1'
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url+"?set_language=en")
+    >>> browser.open(portal_url)
+    >>> browser.url == portal_url
+    True
+
+Let's search for 'soccer' and check that only First Page is in the results.
+
+    >>> browser.open(portal_url+'/search_form')
+    >>> browser.getControl(name='SearchableText', index=1).value = 'soccer'
+    >>> browser.getControl(name='submit').click()
+    >>> 'First Page' in browser.contents
+    True
+    >>> 'Primera página' in browser.contents
+    False
+    >>> 'Second Page' in browser.contents
+    False
+    >>> 'Third Page' in browser.contents
+    False
+    >>> 'Troisième page' in browser.contents
+    False
+
+And now we repeat the search but with the 'include synonyms' option checked.
+
+    >>> browser.open(portal_url+'/search_form')
+    >>> browser.getControl(name='SearchableText', index=1).value = 'soccer'
+    >>> browser.getControl('Include Synonyms').selected = True
+    >>> browser.getControl('Include Synonyms').selected == True
+    True
+    >>> browser.getControl(name='submit').click()
+    >>> 'First Page' in browser.contents
+    True
+    >>> 'Primera página' in browser.contents
+    False
+    >>> 'Second Page' in browser.contents
+    False
+    >>> 'Third Page' in browser.contents
+    False
+    >>> 'Troisième page' in browser.contents
+    True
+
+Time to give a try to the 'Include Translation' option. Let's search for
+'soccer' and include translations to Spanish.
+
+    >>> browser.open(portal_url+'/search_form')
+    >>> browser.getControl(name='SearchableText', index=1).value = 'soccer'
+    >>> browser.getControl(name='languages:list').value = ['es']
+    >>> browser.getControl(name='submit').click()
+    >>> 'First Page' in browser.contents
+    True
+    >>> 'Primera página' in browser.contents
+    True
+    >>> 'Second Page' in browser.contents
+    False
+    >>> 'Third Page' in browser.contents
+    False
+    >>> 'Troisième page' in browser.contents
+    False
+
+We change the test1 user languages settings.
+
+    >>> browser.open(logout_url)
+    >>> browser.open(login_url)
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url)
+    >>> browser.url == portal_url
+    True
+    >>> member1.setMemberProperties({'language': 'en', 'icsemantic.preferred_languages': ('es', 'fr',)})
+
+Finally, let's search related content.
+
+    >>> logout_url = portal_url + '/logout'
+    >>> browser.open(logout_url)
+    >>> browser.open(login_url)
+    >>> browser.getControl(name='__ac_name').value = 'test1'
+    >>> browser.getControl(name='__ac_password').value = 'test1'
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url+"?set_language=en")
+    >>> browser.open(portal_url)
+    >>> browser.url == portal_url
+    True
+
+    >>> browser.open(portal_url+'/search_form')
+    >>> browser.getControl(name='SearchableText', index=1).value = 'mundial'
+    >>> browser.getControl('Include Related Content').selected = True
+    >>> browser.getControl(name='submit').click()
+    >>> 'First Page' in browser.contents
+    False
+    >>> 'Primera página' in browser.contents
+    True
+    >>> 'Second Page' in browser.contents
+    False
+    >>> 'Third Page' in browser.contents
+    True
+    >>> 'Troisième page' in browser.contents
+    False
