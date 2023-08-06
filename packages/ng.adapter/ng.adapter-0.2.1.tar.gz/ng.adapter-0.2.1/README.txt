@@ -1,0 +1,263 @@
+Short description of ng.adapter
+===============================
+
+This package has developed as the library of small adapters for the
+different dark purposes.
+
+Adapter mtime
+-------------
+
+Adapter mtime intdends for getting object modification time. Object
+modification time determine on the IPersistent level and this is an exactly
+in the most cases, but sometimes we need some of hooks to know object
+modification time and adapter mtime helps us in this.
+
+Adapter mtime adapts IPersistent interface to IMTime interface. IMTime interface
+has the following fields:
+    
+    mtime
+       time of the last modification of object
+
+    strftime(format)
+        return time as format string, fromat see in man strftime
+
+Adapter path
+------------
+
+Adapter path intends for getting path from root object to current, Adapter can adopt
+any objects to IPath interface. Interface IPath provide followed fields:
+
+    path
+        Path from root to current object maked from attribute __name__ of object in between;
+
+    titledpath
+        Path from root to current object maked from titles object in between. Titles getting from
+        adapter title (ITitle interface);
+
+
+Adapter title
+-------------
+
+Adapter title intends for getting object title (for any object).  Adapter can adopt
+any objects to ITitle interface. Interface IPath provide followed fields:
+
+    title
+        Object title
+
+If current object has not title property, property title of object, adopted
+ti IZopeDublinCore return instead, If adopt to IZopeDublinCore is not possible,
+property __name__ or class name return instead.
+
+Adapter has been wrote in goot component style and it's posible to write adapter
+to ITitle for any specific cases.
+
+
+Adapter nsinterface
+-------------------
+   
+Adapter nsinterface define nsinterface namespace to get possibility adopt current
+object to any interfacr. Some syntax sample followed::   
+
+    <tal:block define="path context/++nsinterface++ng.adapter.IPath/path">
+    
+    </tal:block>
+    
+It usefaul, basicaly, in debugging purpose.
+
+A few adapters to INameChooser
+------------------------------
+
+If any of this adapters will be actvated to some container, object, created in this
+container will be accept __name__ from ITitle adapter. To activate adapter interface one of marker interfaces
+are to set to container.  There are three INameChooser adapter:
+
+NameChooser 
+    This adapter turn on by ng.adapter.interfaces.INameChooserAble. Adapter set __name__ from ITitle
+    adapter without any changes.
+    
+NameChooserSafe    
+    This adapter turn on by ng.adapter.interfaces.INameChooserSafeAble.
+    Before set as __name__ adapter changing string accepted from ITitle to
+    discard a few symbols not recommended in URL: '/', '?' and other.
+    
+NameChooserSafeWithoutSpaces
+    This adapter turn on by ng.adapter.interfaces.INameChooserSafeWithoutSpacesAble.
+    Before set as __name__ adapter changing string accepted from ITitle to
+    discard a few symbols not recommended in URL: '/', '?' and other. Adapter replace white-spaces
+    by '_'symbol also.
+    
+
+Adapter pager
+-------------
+
+Adapter allow make pagers by list adopted to IPagerSource. Adapter quicly 
+doing all evaluatiion needed  to provede ready results as methods.
+
+Product content adapters from components with interfaces IContainer, IOrderedContainer and
+ResultSet (returned by zope.catalog). 
+
+Список методов IPager
+.....................
+
+    setPagerParameters(revert=None, orphan=None,size=None)
+        Set pager parameters:
+        
+        revert
+            Show list reverted;
+            
+        orphan
+            Maximum orphaned items;
+         
+        size 
+            One page chunk size;
+         
+        have_before
+            True, if page before current exist;
+
+        befores
+            Key list from previos pages begins;
+            
+        beforeURLs
+            URL list of previous pages;
+
+        before
+            Previous page;
+
+        beforeURL = Field()
+            URL of prefvious page;
+
+        chunk
+            Component list showed in current chunk (page);
+
+        after
+            Key of first item on next page;
+            
+        afterURL
+            URL of next page;
+            
+        afters 
+            Key list of first items on followed pages;
+
+        afterURLs
+            URL list of nest pages;
+
+        have_after
+            True, if next page exist;
+
+        len 
+            Common length of list;
+        
+Code Sample::
+
+  <tal:block tal:condition="python:len(context) > 0">
+    <table cellspacing="0" cellpadding="3" bgcolor="#CCDDFF" width="100%" 
+        border="1" bordercolor="black" bordercolordark="#CCDDFF">
+	    <tr><td>
+		    <p class="docttl">Вложенные материалы
+		</td></tr>
+			
+		<tal:block define="pager context/@@pager">
+		<tal:block define="q python:pager.setPagerParameters(revert=True)"/>
+			
+		<tr tal:condition="pager/have_before"><td align="left">
+			    <a href="" tal:attributes="href pager/beforeURL"> &lt;&lt;&lt;&lt;&lt;&lt;</a>
+			  <tal:block repeat="item python:zip(range(1,10),pager.beforeURLs)">
+			    [<a href="" tal:attributes="href python:item[1]" tal:content="python:item[0]"/>]
+              </tal:block>			    
+	    </td></tr>
+			
+		<div tal:repeat="item pager/chunk">
+		    tal:block tal:on-error="structure python:'<tr><td>'+item.__name__+'</td></tr>'" 
+		    tal:content="structure item/@@short"/>
+		</div>
+
+		<tr tal:condition="pager/have_after"><td align="right">
+		    <tal:block repeat="item python:zip(range(1,10),pager.afterURLs)">
+			    [<a href="" tal:attributes="href python:item[1]" tal:content="python:item[0]"/>]
+            </tal:block>			    
+			<a href="" tal:attributes="href pager/afterURL">  &gt;&gt;&gt;&gt;&gt; </a>
+	    </td></tr>
+      </tal:block>
+			
+    </table>
+
+  </tal:block>
+
+
+Adapter recordsize 
+------------------
+
+Apapter allow get object record size of ZODB. Any object can be adopted to
+ng.adapter.recordsize.IRecordSize interface and size can be read from size
+attribute. IRecordSize interface contents:
+
+    size 
+        Object record size;
+
+Object size evaluated by means of transformation into filestorage-like
+format.
+
+Adapter checktocontain
+----------------------
+Adapter define name space **++checktocontain++** to allow check possibility context to contain the class from paramenter.
+Usualy namespace used in different adding-like menu::
+
+    <menuItem
+        menu = "profilemenu"
+        title = "Add Image"
+        for = "ng.content.article.interfaces.ICommonContainer"
+        action = "+/AddPhoto.html="
+        filter = "context/++checktocontain++ng.app.photo.photo.Photo"
+        permission = "zope.ManageContent"
+        />
+
+The parameter **filter** contain code to return True if **ng.app.photo.photo.Photo** can be contained in **context**
+container.
+
+Adapter requestcache
+--------------------
+The **requestcache** adapter can adopt **IHTTPRequest** request to IRequestCache interface. IRequestCache provide
+method to set cache headers:
+
+cache(period=600)
+    Set cache headers to cache during **period** second;
+    
+nocache()
+    Set cache headers to avoid cacheing;
+    
+Adapter provide view **@@requestcache** with methods cache and nocache. Cache headers setted by the view can
+be managed by **IRegistry** keys mentioned below:
+
+request_cache_use (True/False)
+    Allow or deny cache management use. When parameter is False cache headers not set at all;
+    
+request_cache_period (int)
+    Set cache period;
+    
+request_cache_use_as_nocache (True/False)
+
+    Deny use any cache. When parameter is True cache headers set to deny cache by **nocache** method.
+    
+The "toolchanger" tool set
+--------------------------
+The "**toolchanger**" tool set allow to make rare choice of view 
+during site navigtion.
+
+Each site component provide a few views allowed unique interaction with the
+component. The toolURL is adapter allow to generate URL based on choice maked
+user in past. There is simple using sample::
+
+    <tal:block tal:repeat="ob context/values">
+        <a href="" tal:attributes="ob/@@toolURL" tal:content="ob/title"/> 
+    </tal:block>
+
+Algorithm of view selection requires unification view names: all views provided
+by different components and named equally allow to execute similar
+operations. Therefore choice selected by user is preferable choice in subsequent 
+site navigation, Name of view choosed by user are stored
+in URL. Code in sample above check existence of view with the same name for
+other object and, if it possible, URL to call it is generated. Default method used
+otherwise. Using this idea allow to strong simplify site navigation.
+
+Unification of view names has to enforced during site development.
+
