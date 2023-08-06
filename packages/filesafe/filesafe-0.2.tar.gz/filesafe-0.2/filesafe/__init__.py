@@ -1,0 +1,76 @@
+# Copyright 2009 Douglas Mayle
+
+# This file is part of filesafe.
+
+# filesafe is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or (at your
+# option) any later version.
+
+# filesafe is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+
+# You should have received a copy of the GNU Lesser General Public License
+# along with filesafe.  If not, see <http://www.gnu.org/licenses/>.
+from os import path
+from re import compile
+
+INVALID_FILE_CHARS = compile(r'[?%*:|"<>/]')
+INVALID_DIR_CHARS = compile(r'[?%*:|"<>]')
+filetypes = {'dir': INVALID_DIR_CHARS,
+             'file': INVALID_FILE_CHARS}
+
+
+def get_sanitized_path(pathlist):
+    """Turn a list of path elements into a path, while sanitizing the characters"""
+    return path.join(*[INVALID_FILE_CHARS.sub('_', subpath) for subpath in pathlist])
+
+class Chroot(object):
+    """\
+    The Chroot class gives you an easy way to protect your filestore from the
+    ravages of user input.  All error handling is via raised IOError
+    exceptions.  This allows you to use the same error handling mechanisms
+    already in place for your file handling code.
+    """
+    def __init__(self, chrootpath, sanitize_method=None):
+        """\
+        Initialize a Chroot class by passing in the directory to restrict file
+        operations to.  Additionally, you can pass in a sanitization method to
+        decide how to handle unwanted characts.  The only currently supported
+        sanitization method is None, i.e. raise an IOError exception for
+        invalid filenames.
+
+        
+        """
+        if sanitize_method not in [None, 'strip', 'encode']:
+            sanitize_method = None
+        self.sanitize_method = sanitize_method
+
+        # For safety reasons, the chroot path must start with a seperator to
+        # remove directory confusion. e.g. /etc and /etc2
+        self.chroot = path.abspath(self.__sanitize('dir', chrootpath)) + path.sep
+
+        if not path.isdir(self.chroot):
+            raise IOError
+
+    def __sanitize(self, filetype, dirname):
+        if not self.sanitize_method:
+            if filetypes[filetype].search(dirname):
+                raise IOError
+            return dirname
+        raise NotImplementedError('The only sanitization method currently supported is none')
+
+    def __call__(self, filepath):
+        filechroot = path.abspath(self.__sanitize('dir', filepath))
+
+        # Test
+        if not filechroot.startswith(self.chroot):
+            raise IOError
+        if filechroot == self.chroot:
+            raise IOError
+
+        # Return the modified version.  We should change this to edit the
+        # passed in variable.  Less confusion
+        return filechroot
