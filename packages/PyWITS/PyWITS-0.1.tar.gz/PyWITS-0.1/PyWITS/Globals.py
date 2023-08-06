@@ -1,0 +1,6 @@
+DATA_RECORD_BEGIN = '&&\r\n' #HEX 26,26,OD,OA
+DATA_RECORD_END = '!!\r\n' #HEX 21,21,0D,0A
+DATA_ITEM_SEPERATOR = '\r\n'
+DATA_REQUEST = '&&\r\n!!\r\n' 
+
+
