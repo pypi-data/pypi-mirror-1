@@ -1,0 +1,159 @@
+Metadata-Version: 1.0
+Name: sven
+Version: 0.6
+Summary: sven is a document-oriented programming library that helps you put content in a version-controlled document repository
+Home-page: UNKNOWN
+Author: Ethan Jucovy & Jeff Hammel
+Author-email: ejucovy+sven@gmail.com
+License: GPL
+Description: It requires `pysvn` which you will probably want to install system-wide[1].
+        
+        Alternatively, you can use Sven with mercurial. This is highly experimental
+        at present. Look at ./sven/hg-doctest.txt for details. Sven's hg interface
+        is (mostly) the same as the svn interface.
+        
+        Basic usage:
+        
+        from sven.backend import SvnAccess
+        client = SvnAccess(my_svn_server_repo_uri, my_local_checkout_dir)
+        
+        client.write('path/to/a/file/to/write', "Lovely content to be versioning!")
+        client.write('path/to/another/file', "Aw shucks, I'll version this too..",
+        msg="My commit message", kind='text/plain')
+        
+        last_rev_int = client.last_changed_rev('path/to/another/file')
+        
+        last_rev_int = last_rev_int - 1
+        from sven.exc import ResourceUnchanged
+        try:
+        earlier_version = client.read('path/to/another/file', rev=last_rev_int)
+        except ResourceUnchanged, exc:
+        last_rev_int = exc.last_change
+        earlier_version = client.read('path/to/another/file', rev=last_rev_int)
+        
+        changelog = client.log('path/to/another/file', rev=last_rev_int)
+        
+        Each `.write` writes the content to the path on the local filesystem's checkout
+        and then commits it to the repository. The workflow of one-write-per-commit is
+        by design and is not likely to change soon; if you need a different workflow,
+        you probably ought to just be using svn clients directly, anyway.
+        
+        Currently sven does not help you set up an svn client or server.  It assumes
+        you've already got a repository and checkout set up.
+        
+        The formats returned by some of its methods (particularly .log and .ls) are
+        totally ad-hoc right now and strange; they'll probably be formalized sooner
+        or later.
+        
+        For more detailed usage documentation please see ./sven/doctest.txt (which
+        can be run as a test suite by `python sven/backend.py`)
+        
+        [1] If you start to experience Segmentation faults while using sven, especially
+        during .write operations, your versions of ``svn`` and ``pysvn`` are likely
+        incompatible (e.g. svn 1.5 with pysvn compiled against your earlier svn 1.4)
+        If this happens, you should uninstall pysvn, then compile it from source.
+        You might want to test for this upfront by running the test suite:
+        python sven/backend.py
+        
+        
+        New in version 0.6:
+        
+        * SvnBackend.__init__ no longer takes a 'svnuri' argument to the
+        remote repository as its first positional argument; it's not
+        used anywhere. This is a backwards-incompatible change.
+        
+        * The strange ad-hoc JSONish object returned by SvnAccess.ls had an
+        extra `/` prefixed to the object's 'href' erroneously; now fixed.
+        
+        * Experimental implementation of the Sven API for Mercurial backends
+        now lives in sven.hg.HgAccess; it is documented in hg-doctest.txt
+        and has a few small differences from the SvnAccess backend. It is
+        highly incomplete (think of it as an alpha stage) and requires
+        `mercurial` to be installed. Sven does not install mercurial, just
+        like it doesn't install pysvn.
+        
+        
+        History:
+        
+        0.5
+        ===
+        
+        The 0.5 release does not exist. Sven went straight to 0.6 after 0.4.1
+        with some backwards-incompatible changes.
+        
+        0.4.1 (2009-08-10)
+        ==================
+        
+        * Fixed several embarrassing typos in the 0.4 release
+        
+        0.4 (2009-08-10)
+        ================
+        
+        * Added simple_backend.FSAccess class, which partially implements
+        the SVNAccess API, but on a plain old filesystem. Needs tests
+        and documentation, among other things (e.g. justification)
+        
+        * Refactored SvnAccess to split out recently-added options for
+        update_before/after_write into logically separate component
+        
+        * SvnAccess.set_kind and .write now return the pysvn.Revision of
+        the (last) commit instead of None
+        
+        * Added SvnAccessEventEmitter class which executes a list of callback
+        functions at the end of every successful .write and .set_kind action
+        
+        Callbacks should have the signature
+        (uri, contents, msg, kind, (pre_rev, post_rev))
+        
+        
+        0.3.1 (2009-07-28)
+        ==================
+        
+        * Fixed bug: SvnAccess.ls was returning its contents with absolute URIs,
+        rather than URIs relative to the root of the repository.
+        
+        
+        0.3 (2009-07-25)
+        ================
+        
+        * Removed `SvnAccess.update_after_write` knob and instead set default value of True
+        to the `update_after_write` argument to `SvnAccess.write`; callers can implement
+        alternatives trivially by subclassing.
+        
+        * Added `update_before_write` argument to .write with default value of True. Turn
+        this off as well as `update_after_write` if you want to manage synchronicity in
+        exchange for potentially significant performance improvements.
+        
+        * Added `default_commit_message` argument to `SvnAccess` constructor. The default
+        is "foom".
+        
+        * Throw `exc.ResourceChanged` exceptions when a file is found to be out of date
+        during a write operation (which will only happen if `update_before_write` is
+        unset by the caller) and revert local changes if this happens, to restore the
+        checkout to an unconflicting state.
+        
+        
+        0.2 (2009-07-25)
+        ================
+        
+        * Now with doctests!
+        
+        * `SvnAccess.write` now supports an optional `update_after_write` argument.
+        If set to a True value, calls to .write will end with an `svn up` to
+        resynchronize the checkout with the repository. Default is False.
+        
+        * `SvnAccess.__init__` now supports an optional `update_after_write` argument.
+        If set to a True value, all calls to .write will end with an `svn up`
+        even if .write is not sent a True `update_after_write` value. Default
+        is True, so if you are concerned with performance and willing to maintain
+        synchronicity on your own, you should explicitly set this to False.
+        
+        * `SvnAccess.__init__` no longer executes a silent `os.chdir`.
+        
+        
+        0.1.2 (2009-07-24)
+        ==================
+        
+        First release.
+        
+Platform: UNKNOWN
