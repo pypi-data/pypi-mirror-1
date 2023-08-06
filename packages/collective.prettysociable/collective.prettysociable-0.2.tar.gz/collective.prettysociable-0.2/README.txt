@@ -1,0 +1,1 @@
+see collective/prettysociable/README.txt
