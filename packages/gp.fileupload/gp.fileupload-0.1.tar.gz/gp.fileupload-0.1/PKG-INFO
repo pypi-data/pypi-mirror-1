@@ -1,0 +1,217 @@
+Metadata-Version: 1.0
+Name: gp.fileupload
+Version: 0.1
+Summary: A WSGI middleware to get some stats on large files upload
+Home-page: http://www.gawel.org
+Author: Gael Pasgrimaud
+Author-email: gael@gawel.org
+License: GPL
+Description: .. contents::
+        
+        Principle
+        =========
+        
+        `gp.fileupload` is a wsgi middleware to get the stat of large files uploaded to
+        the server.
+        
+        The principle is to write the size read to a temporary file and get
+        the stats from the temporary file.
+        
+        Low level usage
+        ===============
+        
+        Middleware
+        ----------
+        
+        Wrap your wsgi application with the middleware::
+        
+        from gp.fileupload import FileUpload
+        
+        app = FileUpload(my_application, tempdir='/tmp/fileupload',
+        max_size=None)
+        
+        def application(environ, start_response):
+        return app(environ, start_response)
+        
+        The `FileUpload` middleware has the following options:
+        
+        - `tempdir`: A path to en temporary folder
+        
+        - `max_size`: Max allowed size. If the file size is larger than `max_size` a
+        `RuntimeError` is raised.
+        
+        - `include_files`: A list of static files to include to the html body. See
+        below.
+        
+        Application code
+        ----------------
+        
+        Write a html form like this::
+        
+        <form enctype="multipart/form-data"
+        method="POST"
+        action=".?gp.fileupload.id=1">
+        <input type="file" name="file" />
+        <input type="submit" />
+        </form>
+        
+        Where 1 is the session id. The session id **must** be a digit.
+        
+        When the form is submitted, you can use some ajax stuff to get the stats of the upload with the url::
+        
+        http://yourhost/gp.fileupload.stat/1
+        
+        This will return some JSON data like::
+        
+        {'state': 1, 'percent': 69}
+        
+        `state` can have the following values:
+        
+        - `0`: nothing done yet.
+        
+        - `1`: upload is active
+        
+        - `-1`: file is larger than max_size.
+        
+        You can use this to display the upload progress.
+        
+        Paste factories
+        ===============
+        
+        The package provide a filter factory usable in `PasteDeploy
+        <http://pythonpaste.org/deploy/>`_ configuration files.
+        
+        The factory provide the middleware itself::
+        
+        [pipeline:main]
+        pipeline = fileupload egg:myapp
+        
+        [filter:fileupload]
+        use = egg:gp.fileupload
+        # temporary directory to write streams
+        tempdir = %(here)s/data/fileupload
+        
+        # file to inject in the html code
+        include_files = *.css jquery.*
+        
+        # max upload size is 50Mo
+        max_size = 50
+        
+        Then you can access the javascript stuff at `/gp.fileupload.static/`.
+        
+        The `include_files` parameters will inject those tags in your application::
+        
+        <link type="text/css" rel="Stylesheet" media="screen"
+        href="/gp.fileupload.static/fileupload.css"/>
+        <script type="text/javascript"
+        src="/gp.fileupload.static/jquery.js"/>
+        <script type="text/javascript"
+        src="/gp.fileupload.static/jquery.fileupload.js"/>
+        <script type="text/javascript"
+        src="/gp.fileupload.static/jquery.fileupload.auto.js"/>
+        
+        And feel free to use ajax stuff. Notice that those tags are included at the end
+        of the html body.
+        
+        Available files are:
+        
+        - `jquery.js`: jquery 1.1.2
+        
+        - `jquery.fileupload.js`: the `jQuery().fileUpload` plugin.
+        
+        - `jquery.fileupload.auto.js`: auto bind form tags with a `multipart/form-data`
+        enctype.
+        
+        - `fileupload.css`: a few css to display the progress bar.
+        
+        Ajax stuff
+        ==========
+        
+        Description
+        -----------
+        
+        A `jQuery <http://jquery.com>`_ plugin is provided as an helper.
+        
+        To use it, you only need to add a script tag to your html head section::
+        
+        <script type="text/javascript">
+        jQuery(document).ready(function() { jQuery('#sample').fileUpload(); });
+        </script>
+        
+        The `fileUpload` plugin has the following options:
+        
+        - `add_link`:  Add a link to add more than one file.
+        
+        - `link_label`: Label of the link.
+        
+        - `submit_label`: The label of the button.
+        
+        - `field_name`: A string to use as file fields names. Default to `file`.
+        
+        - `submit_empty_forms`: if true, submit forms with empty file fields. Default:
+        true.
+        
+        - `stat_delay`: stat request delay. Default: 300.
+        
+        - `success`: A javascript function evaluated when all files are uploaded. The
+        default one do nothing.
+        
+        Examples
+        --------
+        
+        You want multiple file forms::
+        
+        <div id="forms"></div>
+        
+        <script type="text/javascript">
+        jQuery(document).ready(function() {
+        jQuery('#forms').fileUpload({action:'/upload', field_name:'file_field'})
+        });
+        </script>
+        
+        This will show a form with addable file field and upload them to `/upload`.
+        The form are submited in iframes as target so the page does not change after
+        upload.
+        
+        You already have forms. This is what is done in the
+        `jquery.fileupload.auto.js`::
+        
+        <script type="text/javascript">
+        jQuery(document).ready(function() {
+        jQuery('form[enctype^='mulitpart/form-data]')
+        .fileUpload({use_frames: false});
+        });
+        </script>
+        
+        This will show a progress bar when the form is uploaded then redirect to the
+        application page when the upload is completed. So the usage is totally
+        transparent for you.
+        
+        Tested with
+        ===========
+        
+        This middleware is tested with `Paste` servers and `Pylons` / `zope3` as
+        application but it should work with all wsgi servers and applications.
+        
+        Bugs
+        ====
+        
+        Found a bug ? Please mail at gael@gawel.org with the full traceback
+        and your
+        application environment.
+        
+        Contributors
+        ============
+        
+        - Gael Pasgrimaud <gael@gawel.org> - Original author
+        
+        - Christophe Combelles - Bug hunter, tester and ideas provider.
+        
+        
+Keywords: wsgi middleware upload
+Platform: UNKNOWN
+Classifier: Programming Language :: Python
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Topic :: Internet :: WWW/HTTP :: WSGI :: Middleware
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
