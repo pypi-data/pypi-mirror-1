@@ -1,0 +1,61 @@
+----------------
+Terrafirma Theme
+----------------
+
+Terrafirma is a visual theme for Plone 3. This theme is based on the following:
+
+terrafirma1.0 by nodethirtythree design
+http://www.freecsstemplates.org/preview/terrafirma
+
+In order to comply with the original author's requirements the theme provides
+a viewlet bellow the footer with a link to http://www.nodethirtythree.com/
+
+We tested on Safari 3 and FF2/3 on Mac, FF2, IE6, Opera 9.5 on PC.
+
+This theme was initially generated with the plone3_theme recipe from ZopeSkel,
+using paster and adopted for Plone by:
+
+"Aleksandr Vladimirskiy" <sasha@theotheralex.com>
+http://plone.org/author/shurik
+
+Done with help from #plone on freenode. Thanks to limi for early feedback and
+vedawms for full review. Let me know if anything looks wrong.
+
+It is distributed as an egg. Include it in your buildout... and simply run:
+
+$: my_plone_instance: bin/instance test -s plonetheme.terrafirma
+...
+    Ran 5 tests with 0 failures and 0 errors in 9.160 seconds.
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+    >>> browser.handleErrors = False
+    >>> self.portal.error_log._ignored_exceptions = ()
+    
+Login as portal owner
+---------------------
+    
+    >>> from Products.PloneTestCase.setup import portal_owner, default_password
+    
+    >>> browser.open(portal_url + '/login_form?came_from=' + portal_url)
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+    
+Test theme is installed and selected
+------------------------------------
+    
+    >>> browser.open("http://nohost/plone/@@skins-controlpanel")
+    >>> browser.getControl('Terrafirma Theme').selected == True
+    True
+    
+Test for viewlets
+-----------------
+    
+    >>> browser.open("http://nohost/plone")
+    >>> "Node Thirty Three" in browser.contents
+    True
+    
+    >>> "plone-logo.png" in browser.contents
+    True
