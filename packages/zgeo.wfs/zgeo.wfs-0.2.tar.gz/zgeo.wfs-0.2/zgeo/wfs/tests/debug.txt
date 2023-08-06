@@ -1,0 +1,143 @@
+debug
+=========================
+
+    >>> self.setRoles(['Manager'])
+	>>> from zope.interface import implements
+    >>> from Products.ATContentTypes.content.folder import ATFolder
+    >>> from zgeo.wfs.interfaces import IWebFeatureServiceable
+    >>> class MyGeoFolder(ATFolder):
+    ...    implements(IWebFeatureServiceable)
+
+    >>> from zgeo.wfs.interfaces import IWebFeatureService
+    >>> f=MyGeoFolder('f')
+    >>> wfs=IWebFeatureService(f)
+    >>> type(wfs)
+    <class 'zgeo.wfs.webfeatureservice.WebFeatureService'>
+    >>> wfs.addFeatureType('Cities')
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Cities': {'boundingbox': None, 'elements': {'Title': 'string'}}}
+    >>> wfs.addFeatureType('Rivers')
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Cities': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Rivers': {'boundingbox': None, 'elements': {'Title': 'string'}}}
+    >>> wfs.addElementToFeatureType('Cities', 'mayor', 'string')
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Cities': {'boundingbox': None, 'elements': {'mayor': 'string', 'Title': 'string'}}, 'Rivers': {'boundingbox': None, 'elements': {'Title': 'string'}}}
+    >>> wfs.addElementToFeatureType('Cities', 'population', 'integer')
+    >>> wfs.removeElementsFromFeatureType('Cities', ['mayor'])
+    >>> wfs.featuretypes
+    {'default': {'boundingbox': None, 'elements': {'Title': 'string'}}, 'Cities': {'boundingbox': None, 'elements': {'population': 'integer', 'Title': 'string'}}, 'Rivers': {'boundingbox': None, 'elements': {'Title': 'string'}}}
+    >>> wfs.addElementToFeatureType('Cities', 'mayor', 'string')
+    >>> wfs.addElementToFeatureType('Rivers', 'length', 'float')
+    >>> wfs.getGeoCatalog().indexes()
+    ['featureType', 'name', 'geometry', 'id', 'length', 'mayor', 'population']
+    >>> wfs.getGeoCatalog().schema()
+    ['geometryAsWKT', 'name', 'Title', 'getGML', 'length', 'mayor', 'population']
+    >>> wfs.addElementToFeatureType('Cities', 'area', 'integer')
+    >>> wfs.getGeoCatalog().indexes()
+    ['featureType', 'name', 'area', 'geometry', 'id', 'length', 'mayor', 'population']    
+
+    >>> from zope import event
+    >>> from Products.Archetypes.event import ObjectEditedEvent
+    >>> from Products.ATContentTypes.content.document import ATDocument
+    >>> from zgeo.geographer.interfaces import IGeoreferenceable
+    >>> from zgeo.wfs.interfaces import IWFSGeoItem
+    >>> class MyCityGeoObject(ATDocument):
+    ...    implements(IGeoreferenceable)
+    ...    area=0
+    ...    population=0
+    ...    @property
+    ...    def featureType(self):
+    ...       return 'Cities'
+    ...    @property
+    ...    def mayor(self):
+    ...       return 'Me'
+    ...    def getPopulation(self):
+    ...       return self.population
+    ...    def setPopulation(self,v):
+    ...       self.population=v
+    ...    def getArea(self):
+    ...       return self.area
+    ...    def setArea(self,v):
+    ...       self.area=v
+
+    >>> class MyRiverGeoObject(ATDocument):
+    ...    implements(IGeoreferenceable)
+    ...    length=0
+    ...    @property
+    ...    def featureType(self):
+    ...       return 'Rivers'
+    ...    def getLength(self):
+    ...       return self.length
+    ...    def setLength(self,v):
+    ...       self.length=v
+
+    >>> f.city1=MyCityGeoObject('city1')
+    >>> f.city1.setTitle('Bamako')
+    >>> f.city1.setPopulation(100)
+    >>> f.city1.getPopulation()
+    100
+    >>> IWFSGeoItem(f.city1).setGeometry(fromwkt='POINT (10 10)')
+    >>> [o.__class__ for o in wfs.getFeatureTypeItems('Cities')[0]]
+    [<class 'Products.ZCatalog.Catalog.mybrains'>]
+    >>> [(o.Title, o.mayor, o.population) for o in wfs.getFeatureTypeItems('Cities')[0]]
+    [('Bamako', 'Me', 100)]
+    >>> [o.geometry.wkt for o in wfs.getFeatureTypeItems('Cities')[0]]
+    ['POINT (10.0000000000000000 10.0000000000000000)']
+    
+    >>> from zgeo.wfs.geoitem import bboxAsTuple, bboxFromTuple
+    >>> bboxAsTuple(wfs.getFeatureTypeBoundingBox('Cities'))
+    (10.0, 10.0, 10.0, 10.0)
+    >>> f.city2=MyCityGeoObject('city2')
+    >>> f.city2.setTitle('Tegucigalpa')
+    >>> f.city2.setPopulation(500)
+    >>> f.city2.getPopulation()
+    500
+    >>> IWFSGeoItem(f.city2).setGeometry(fromwkt='LINESTRING (20 20, 30 60, 100 80, 20 20)')
+    >>> bboxAsTuple(wfs.getFeatureTypeBoundingBox('Cities'))
+    (10.0, 10.0, 100.0, 80.0)
+
+    >>> [o.Title for o in wfs.getFeatureTypeItems('Cities')[0]]
+    ['Bamako', 'Tegucigalpa']
+    >>> [o.Title for o in wfs.getFeatureTypeItems('Cities', (0,0,15,15))[0]]
+    ['Bamako']
+    >>> f.city2.setArea(10.0)
+    >>> f.city2.getArea()
+    10.0
+    >>> event.notify(ObjectEditedEvent(f.city2))
+    >>> [(o.Title, o.mayor, o.population, o.area) for o in wfs.getFeatureTypeItems('Cities')[0]]
+    [('Bamako', 'Me', 100, 0), ('Tegucigalpa', 'Me', 500, 10.0)]
+
+
+ 	>>> f.river1=MyRiverGeoObject('river1')
+    >>> f.river1.setTitle('Adour')
+    >>> f.river1.setLength(150)
+    >>> f.river1.getLength()
+    150
+    >>> IWFSGeoItem(f.river1).setGeometry(fromwkt='LINESTRING (5 5, 10 10)')
+    >>> [o.Title for o in wfs.getFeatureTypeItems('Rivers')[0]]
+    ['Adour']
+
+	>>> f.city3=MyCityGeoObject('city3')
+    >>> f.city3.setTitle('Toulouse')
+    >>> f.city3.setPopulation(300)
+    >>> IWFSGeoItem(f.city3).setGeometry(fromwkt='POINT (15 15)')
+    >>> [o.Title for o in wfs.getFeatureTypeItems('Cities')[0]]
+    ['Bamako', 'Tegucigalpa', 'Toulouse']
+
+	>>> [o.Title for o in wfs.getFeatureTypeItems('Cities',None,None,2)[0]]
+	['Bamako', 'Tegucigalpa']
+	
+    >>> [o.Title for o in wfs.getFeatureTypeItems('Cities',None,None,50)[0]]
+	['Bamako', 'Tegucigalpa', 'Toulouse']
+	
+	>>> from zope.app.container.contained import ObjectRemovedEvent
+	>>> event.notify(ObjectRemovedEvent(f.city2, f))
+	>>> bboxAsTuple(wfs.getFeatureTypeBoundingBox('Cities'))
+	dsd
+    
+	
+	
+Tear down
+
+  >>> wfs.getGeoCatalog()._catalog.getIndex('geometry').destroy_spatialindex()
+	
