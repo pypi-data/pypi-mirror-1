@@ -1,0 +1,2229 @@
+Metadata-Version: 1.0
+Name: minitage.recipe
+Version: 1.15
+Summary: zc.buildout recipes to compile and install software or python packages and generate scripts or configuration files.
+Home-page: http://cheeseshop.python.org/pypi/minitage.recipe
+Author: Mathieu Pasquet
+Author-email: kiorky@cryptelium.net
+License: GPL
+Description: ******************************************************************************
+        Recipe for compiling and installing software with or without minitage
+        ******************************************************************************
+        
+        .. contents::
+        
+        =======================
+        Introduction
+        =======================
+        
+        This is a collection of recipe which can be use inside or outside a minitage environment.
+        What is interresting in using them in minitage is that you ll have all your system dependencies in
+        the build environment automaticly.
+        
+        The egg has those entry point:
+        - *cmmi*: install configure/make/make install softwares
+        - *fetch*: fetch something, somewhere, with git, http, frp, static, hg, svn or bzr.
+        - *egg*: install python eggs / packages 'setuptoolisables'
+        - *printer*: print or dump to a file all versions needed to achieve eggs
+        requirements (versions.cfg made easy)
+        - *scripts*: install scripts from an egg and install egg dependencies if they
+        are not already in the cache
+        - *wsgi*: Make a Python paste configuration file eatable by mod_wsgi with
+        all the eggs dependencies you need.
+        
+        The reasons why i have rewrite yet another buildout recipes builder are:
+        - Support for downloading stuff
+        - Do not rely on easy_install dependency system
+        - Support on the fly patchs for eggs and other distribution.
+        - Support multiple hooks at each stage of the build system.
+        - Support for distutils
+        - Robust offline mode
+        - We like pypi, but offer a mode to scan for eggs without need to check
+        the index,
+        - Support malformed or not indexed distributions.
+        In other terms, we provide an url, and the recipe builds it, that's all.
+        - All recipes must support automaticly minitage dependencies and rpath linking.
+        
+        You can browse the code on minitage's following resources:
+        
+        - http://git.minitage.org/git/minitage/eggs/minitage.recipe/
+        - http://www.minitage.org/trac/browser/minitage/eggs/minitage.recipe
+        
+        You can migrate your buldouts without any effort with buildout.minitagificator:
+        
+        * http://pypi.python.org/pypi/buildout.minitagificator
+        
+        
+        
+        
+        ====================================
+        Options shared by all the recipes
+        ====================================
+        
+        Notes
+        --------
+        
+        - All recipes inherit all these options, depending which you are using, those options will have an incidence on the build.
+        - Useless to say that the recipes code is not difficult, and as a deployer, its your job to have a look at the code to avoid surprises.
+        - If you are inside a minitage all recipes will look on your minibuild dependencies section to get things into the environment at execution time. Like feeding CFLAGS, pkgconfig, ldflags and so on.
+        - All recipes look for a minitage section in your buildout file and take dependencies and eggs as minitage projects to get into the environnment too::
+        
+        ...
+        [minitage]
+        dependencies = postgresql-8.3
+        eggs = py-libxslt-1.1
+        
+        Options
+        -------------
+        * urls
+        A set of urls to checkout in the form
+        
+        
+        - The last part or the urls will be the name of your checkout dir unless you have precised the name in "destination directory name"
+        - If you don't specify any scm_type, it will be static unless you specify it in options (see scm)
+        - If you don't specify any revision, it will be not set unless you specify it in options (see scm_revision)
+        - The form is a New line separated list of urls to fetcha in the following form (*the | is part of the line ;)*)::
+        
+        url to checkout | fetch_type | revision | destination directory name | fetcher_args
+        
+        Here are valid inputs ::
+        
+        svn://toto | svn | 666 | mydirectoryname | --ignore-externals
+        svn://toto | svn | 666 | mydirectoryname
+        svn://toto | svn | 666
+        svn://toto | svn | | | --ignore-externals
+        svn://toto | svn
+        file://toto
+        http://tata/toto.tgz
+        
+        Where::
+        
+        fetch_type ::= bzr | hg | git | static (for ftp://, file://, http:// and local files) | svn
+        
+        - executable
+        python executable to use
+        - url (backward cmpatibility)
+        url to get the source from, in the previous urls syntax
+        - scm
+        default scm to use (a valid minitage fetch factory to use (static, git, svn, bzr, hg).)
+        defaults to static.
+        - scm_revision
+        default revision to checkout if scm is not static
+        - md5sum
+        md5sum of the checkouted source [see cmmi recipe for documentation]
+        - patch-binary
+        path to the patch program
+        - patch-options
+        options to feed the patch program with [see cmmi recipe for documentation]
+        - patches
+        patches to apply [see cmmi recipe for documentation]
+        - patch
+        A patch to apply, compatibility with zc.recipe.cmmi
+        - location
+        where to put the build result. (default to parts/PART_NAME)
+        - includes
+        CFLAGS to give to the compiler [see cmmi recipe for documentation]
+        - includes-dirs
+        Directories to add to the include paths  [see cmmi recipe for documentation]
+        - library-dirs
+        Directories to add to the linker, and they will be added as -rpath too. [see cmmi recipe for documentation]
+        - environment
+        a part name where we can get key/values to add to the build environment [see cmmi recipe for documentation]
+        - path
+        line separated list of paths to append to $PATH during build
+        - pkgconfigpath
+        line separated list of paths to append to $PKGCONFIGPATH during build [see cmmi recipe for documentation]
+        - pythonpath
+        line separated list of paths to append to $PYTHONPATH during build
+        
+        Options incidences
+        ----------------------
+        
+        - `minitage.recipe:cmmi`
+        executable is not taken in account.
+        - `minitage.recipe:fetch`
+        only the download related options are used.
+        - `minitage.recipe:eggs`, `minitage.recipe:wsgi`, `minitage.recipe:scripts`, `minitage.recipe:printer`
+        the configure-*, and make-*, and extra_options are not used
+        
+        Patches
+        -----------
+        
+        - They can be either a file or an url.
+        - You have means to specify options to the patch program, like -pXXX, abuses of it.
+        
+        
+        
+        ===============================================
+        minitage.recipe:scripts
+        ===============================================
+        
+        
+        Abstract
+        -----------------
+        - This recipe intends to install eggs and python software and on top of installed stuff, generating scripts and envrionment files.
+        - This recipe inherit from minitage;recipe:egg.
+        - Its heavilly inspired by zc.recipe.eggs* and try to completly replace it whereas be API compatbile.
+        - You can use it in conjunction with the buildout.minitagificator extension which monkey patch zc.buildout to use minitage recipes.
+        - What we can do that zc.recipe.egg wouldnt do, either at all or not in the way we want to:
+        
+        * All scripts support initialisation code
+        * The 'scripts' egg metadata is also handled
+        - You can use it as you would use minitage.recipe:egg, use patch facility and etc.
+        - Ths recipe is also declared under those entry points:
+        
+        * minitage.recipe:eggs
+        * minitage.recipe:script
+        
+        Specific options
+        -----------------
+        
+        * All the shared options and the options from minitage.recipe:egg +
+        * scripts
+        
+        - Scripts to generate, if empty, generate scripts for all the working set.
+        - If your egg have an old 'scripts' metadata, and old scripts where you want wrappers to be generated, just add the egg name to the scripts entry.
+        - If you want to rename a script, just enter something like entrypoint|scriptname=NewName::
+        
+        s=NewName
+        
+        * zap
+        If you do not want to a script, just enter a line separated list of not wanted scripts
+        
+        * entry-points
+        A list of entry-point identifiers of the form:::
+        
+        name=module:attrs
+        
+        where name is a script name, module is a dotted name resolving to a module name, and attrs is a dotted name resolving to a callable object within a module.
+        This option is useful when working with distributions that don't declare entry points, such as distributions not written to work with setuptools.
+        
+        * interpreter
+        The name of a script to generate that allow access to the Python interpreter with the PYTHONPATH set with all the working set entries.
+        * dependent-scripts
+        compatibility option, has no effect
+        * arguments
+        Specify some arguments to be passed to entry points as Python source.
+        * initialization
+        Python code to run prior to call the entry point
+        
+        
+        Detailled documentation
+        -------------------------
+        
+        Let's create a buildout configuration file::
+        
+        >>> rmdir(tempdir)
+        >>> mkdir(tempdir)
+        >>> cd(tempdir)
+        >>> a = [mkdir(d) for d in ('eggs', 'develop-eggs', 'bin', 'src')]
+        >>> install_develop_eggs(['minitage.recipe'])
+        >>> install_eggs_from_pathes(['zc.buildout'], sys.path)
+        >>> touch('buildout.cfg')
+        >>> sh('buildout -o bootstrap')
+        buildout -o bootstrap...
+        >>> index_url = start_server(os.path.sep.join(tempdir))
+        
+        Initializing test env.
+        +++++++++++++++++++++++
+        ::
+        
+        >>> if os.path.exists('foo'): rmdir(dl)
+        >>> mkdir('dl')
+        >>> if os.path.exists('foo'): rmdir(foo)
+        >>> mkdir('foo')
+        >>> mkdir('foo/src/toto')
+        >>> touch('foo/setup.py', data="""
+        ... from setuptools import setup, find_packages
+        ... setup(name='foo', version='1.0',
+        ...     packages=find_packages('src'),
+        ...     package_dir = {'': 'src'},
+        ...     include_package_data=True,
+        ...     scripts=['src/toto/toto.py'],
+        ...     entry_points={'console_scripts': ['s=toto.toto:f']},
+        ...     )
+        ... """)
+        >>> touch('foo/src/toto/__init__.py')
+        >>> touch('foo/src/toto/toto.py', data="""
+        ... def f():
+        ...     print "foo"
+        ... if __name__ == '__main__' :
+        ...     print 'called'
+        ...
+        ... """)
+        >>> noecho = [os.remove(d) for d in os.listdir('.') if '.tar.gz' in d]
+        >>> os.chdir('foo')
+        >>> sh('python setup.py sdist')
+        p...
+        >>> noecho = [shutil.copy(os.path.join('dist', d), os.path.join('..', d)) for d in os.listdir('dist')]
+        >>> os.chdir('..')
+        
+        Generating all scripts
+        +++++++++++++++++++++++++++
+        Thus by not specifying any scripts entry in the buildout part.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}/dl
+        ... parts = part
+        ... [part]
+        ... recipe=minitage.recipe:scripts
+        ... find-links=%(index)s
+        ... eggs=foo
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> noecho = [remove(os.path.join('eggs', egg)) for egg in os.listdir('eggs') if 'foo' in egg]
+        >>> sh('bin/buildout -vvvvv install')
+        b...
+        minitage.recipe: Got foo 1.0.
+        minitage.recipe: Picked: foo = 1.0
+        minitage.recipe: All egg dependencies seem to be installed!
+        minitage.recipe: Generated scripts: 's', 'toto.py'...
+        
+        
+        Look at what have been generated.
+        
+        >>> cat('bin', 'toto.py')
+        #!...
+        # ! GENERATED BY minitage.recipe !
+        import os
+        import sys
+        import subprocess...
+        sys.path[0:0] = ['/tmp/buildout.test/eggs/foo-1.0-py....egg' ]...
+        # EXEC ORGINAL CODE WITHOUT SHEBANG
+        __doc__  = 'I am generated by minitage.recipe.script recipe'...
+        os.environ['PYTHONPATH'] = ':'.join(sys.path + os.environ.get('PYTHONPATH', '').split(':'))
+        sys.argv.pop(0)
+        sys.exit(
+        subprocess.Popen(
+        [sys.executable, '/tmp/buildout.test/eggs/foo-1.0-py....egg/EGG-INFO/scripts/toto.py']+sys.argv,
+        env=os.environ
+        ).wait()
+        )...
+        >>> cat('bin', 's')
+        #!...
+        #!!! #GENERATED VIA MINITAGE.recipe !!!...
+        import sys...
+        sys.path[0:0] = [ '/tmp/buildout.test/eggs/foo-1.0-py....egg' ]...
+        import toto.toto...
+        if __name__ == '__main__':
+        toto.toto.f()...
+        
+        
+        Selecting scripts to install
+        +++++++++++++++++++++++++++++++
+        Installing only s.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}/dl
+        ... parts = part
+        ... [part]
+        ... recipe=minitage.recipe:scripts
+        ... find-links=%(index)s
+        ... scripts =
+        ...     s
+        ... eggs=foo
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install')
+        b...
+        minitage.recipe: Generated scripts: 's'....
+        
+        Installing only toto.py.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}/dl
+        ... parts = part
+        ... [part]
+        ... recipe=minitage.recipe:scripts
+        ... find-links=%(index)s
+        ... scripts =
+        ...     toto.py
+        ... eggs=foo
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install')
+        b...
+        minitage.recipe: Generated scripts: 'toto.py'....
+        
+        .. desactivated because caused more harm than good... too much scripts no filtered
+        .. Installing scripts from the foo distribution.
+        ..
+        ..     >>> data = """
+        ..     ... [buildout]
+        ..     ... download-cache=${buildout:directory}/dl
+        ..     ... parts = part
+        ..     ... [part]
+        ..     ... recipe=minitage.recipe:scripts
+        ..     ... find-links=%(index)s
+        ..     ... scripts =
+        ..     ...     foo
+        ..     ... eggs=foo
+        ..     ... """%{'index': index_url}
+        ..     >>> touch('buildout.cfg', data=data)
+        ..     >>> sh('bin/buildout -vvvvv install')
+        ..     b...
+        ..     minitage.recipe: Generated scripts: 's', 'toto.py'....
+        
+        Declaring entry-points
+        +++++++++++++++++++++++
+        We ll add an entry point 't' to be generated.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}/dl
+        ... parts = part
+        ... [part]
+        ... recipe=minitage.recipe:scripts
+        ... find-links=%(index)s
+        ... entry-points=t=toto.toto:f
+        ... eggs=foo
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install')
+        b...
+        minitage.recipe: Generated scripts: 't'....
+        
+        Adding initialization code
+        ++++++++++++++++++++++++++++
+        What about adding environment variables for gis env.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}/dl
+        ... parts = part
+        ... [part]
+        ... recipe=minitage.recipe:scripts
+        ... find-links=%(index)s
+        ... entry-points=t=toto.toto:f
+        ... eggs=foo
+        ... initialization = import os;os.environ.set('GDAL', 'TRUE')
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install')
+        b...
+        
+        >>> "import os;os.environ.set('GDAL', 'TRUE')" in open(os.path.join('bin', 't')).read()
+        True
+        
+        Adding arguments
+        ++++++++++++++++++
+        What about adding arguments to our launchers.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}/dl
+        ... parts = part
+        ... [part]
+        ... recipe=minitage.recipe:scripts
+        ... find-links=%(index)s
+        ... eggs = foo
+        ... entry-points=t=toto.toto:f
+        ... arguments = ['a', 'b']
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install')
+        b...
+        
+        >>> "toto.toto.f(['a', 'b'])" in open(os.path.join('bin', 't')).read()
+        True
+        
+        Generating a python interpreter
+        ++++++++++++++++++++++++++++++++++
+        Here is how you can generate a specific python interpreter will all the environement of the working set.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}/dl
+        ... parts = part
+        ... [part]
+        ... recipe=minitage.recipe:scripts
+        ... find-links=%(index)s
+        ... interpreter = mypy
+        ... arguments = ['a', 'b']
+        ... eggs=foo
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install')
+        b...
+        minitage.recipe: Generated scripts: 'mypy'....
+        
+        >>> cat('bin', 'mypy')
+        #!...
+        #!!! #GENERATED VIA MINITAGE.recipe !!!...
+        sys.path[0:0] = [ '/tmp/buildout.test/eggs/foo-1.0-py....egg' ]...
+        if _interactive:
+        import code
+        code.interact(banner="", local=globals())...
+        
+        Generating an envrionment file
+        ++++++++++++++++++++++++++++++++++
+        Here is how you can generate a specific envrionment file that you can source from to get the PYTHONPATH populated with eggs that you have configured.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}/dl
+        ... parts = part
+        ... [part]
+        ... recipe=minitage.recipe:scripts
+        ... find-links=%(index)s
+        ... env-file = mypy
+        ... eggs=foo
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install')
+        b...
+        minitage.recipe: Generated scripts: '/tmp/buildout.test/bin/mypy'....
+        
+        >>> cat('bin', 'mypy')
+        #!/usr/bin/env sh
+        <BLANKLINE>
+        PYTHONPATH="/tmp/buildout.test/eggs/foo-1.0-py....egg:$PYTHONPATH"
+        export PYTHONPATH
+        <BLANKLINE>
+        <BLANKLINE>
+        
+        
+        
+        
+        ===============================================
+        minitage.recipe:egg
+        ===============================================
+        
+        
+        Abstract
+        -----------------
+        - This recipe intends to install eggs and python software
+        - Its heavilly inspired by zc.recipe.eggs* and try to completly replace it whereas be API compatbile.
+        - You can use it in conjunction with the buildout.minitagificator extension which monkey patch zc.buildout to use minitage recipes.
+        - The recipe has a robust offline mode.
+        - What we can do that zc.recipe.egg wouldnt do, either at all or not in the way we want to:
+        
+        * Don't rely on easy_install to detect and install dependencies, that can lead to versions inccompatibilities
+        * Handles and preserve eggs extra dependencies
+        * Apply specific patches for eggs based on their name and them generate a specific egg with a specific version, burried in the buildout via the "versions".
+        * Make the minitage environnent comes into the environment when building if any, making compilation steps easy if you have declared and build the neccessary dependencies.
+        * Be able to install unindexed at all stuff, just by precising url to install, that can be even an automatic checkout from any repository.
+        * You have hooks to play with the recipe, if it doesnt fit exactly to your need, you can hook for a specific egg at any point of the build.
+        * Check md5 on indexes which append md5 fragments on urls, to verify package integrity
+        
+        - If you need scripts generation, just use the minitage.recipe:scripts recipe, it's a specialized recipe of this one. Its use is similar, with just a bunch more options.
+        
+        Specific options
+        -----------------
+        
+        * urls
+        
+        See the shared options for more information on how to set them.
+        This is how to specify a distrbituion with is not indexed on pypi and where find-links dance can not work.
+        This is also how to specify to install something from svn::
+        
+        urls = http://foo.tld/my_super_egg|svn|666 # checkout and install this egg from svn at revision 666
+        * eggs
+        
+        A list of egg requirements to install without the version specs bit.::
+        
+        Plone
+        lxml
+        
+        * EGGNAME-patch-options
+        patch binary to use for this egg
+        * EGGNAME-patch-binary
+        Options to give to the patch program when applying patches for this egg
+        * EGGNAME-patches
+        Specific patchs for an egg name to apply at install time::
+        
+        Django-patches = ${buildout:directory}/foo.patch
+        * EGGNAME-UNAME-patches
+        Same as previous, but will just occurs on this UNAME specifc OS (linux|freebsd|darwin)
+        Specific patchs for an egg name to apply at install time::
+        
+        Django-linux-patches = ${buildout:directory}/foo.patch
+        
+        * versions
+        Default to buildout:versions. versions part to use to pin the version of the installed eggs.
+        It defaults to buildout's one
+        * index
+        Custom eggs index (not pypi/simple). It defaults to buildout's one
+        * find-links
+        additionnal links vhere we can find eggs. It defaults to buildout's one
+        * extra-paths
+        Extra paths to include in a generated script or at build time.
+        * relative-paths
+        If set to true, then egg paths will be generated relative to the script path.
+        This allows a buildout to be moved without breaking egg paths.
+        This option can be set in either the script section or in the buildout section.
+        * Specifying the python to use, two ways:
+        
+        * python
+        The name of a section to get the Python executable from. If not specified, then
+        the buildout python option is used. The Python executable is found in the
+        executable option of the named section. It defaults to buildout's one
+        * executable
+        path to the python executable to use.
+        
+        * hooks
+        
+        A hook is in the form /path/to/hook:CALLABLE::
+        
+        myhook=${buildout:directory}/toto.py:foo
+        
+        Where we have toto.py::
+        
+        def foo(options, buildout):
+        return 'Hourray'
+        
+        The complete possible hooks list:
+        
+        * post-download-hook
+        hook executed after each download
+        * post-checkout-hook
+        hook executed after each checkout
+        * EGGNAME-pre-setup-hook
+        hook executed before running the setup.py dance
+        * EGGNAME-post-setup-hook
+        hook executed after running the setup.py dance
+        
+        Patches
+        --------
+        
+        * When you use patches for an egg, his version will become ::
+        
+        Django-1.0-final -> Django-1.0-final-ZMinitagePatched-$PatchesNamesComputation$
+        
+        * This name have some Z* inside to make some precedence on other eggs at the same version. (see setuptools naming scheme)
+        * After that the egg is created, the buildout is backed up and patched to point to this version
+        * Thus, you can have in your common egg cache, this egg for your specific project, and the classical one for others.
+        This can be interessant, for example, for the zope RelStorage patch to apply on ZODB code.
+        
+        Detailled documentation
+        -------------------------
+        
+        Let's create a buildout configuration file::
+        
+        >>> rmdir(tempdir)
+        >>> mkdir(tempdir)
+        >>> cd(tempdir)
+        >>> a = [mkdir(d) for d in ('eggs', 'develop-eggs', 'bin', 'src')]
+        >>> install_develop_eggs(['minitage.recipe'])
+        >>> install_eggs_from_pathes(['zc.buildout'], sys.path)
+        >>> touch('buildout.cfg')
+        >>> sh('buildout -o bootstrap')
+        buildout -o bootstrap...
+        >>> index_url = start_server(os.path.sep.join(tempdir))
+        
+        Initializing test env.
+        +++++++++++++++++++++++
+        ::
+        
+        >>> if not os.path.exists('foo'):
+        ...     mkdir('foo')
+        ... else:
+        ...     rmdir(foo)
+        ...     mkdir('foo')
+        >>> touch('foo/setup.py', data="""
+        ... from setuptools import setup
+        ... setup(name='foo', version='1.0')
+        ...
+        ... """)
+        >>> touch('foo/toto.py', data="""
+        ... def f():
+        ...     print "foo"
+        ...
+        ... """)
+        >>> noecho = [os.remove(d) for d in os.listdir('.') if '.tar.gz' in d]
+        >>> os.chdir('foo')
+        >>> sh('python setup.py sdist')
+        p...
+        >>> touch('setup.py', data="""
+        ... from setuptools import setup
+        ... setup(name='foo', version='2.0')
+        ...
+        ... """)
+        >>> sh('python setup.py sdist')
+        p...
+        >>> noecho = [shutil.copy(os.path.join('dist', d), os.path.join('..', d)) for d in os.listdir('dist')]
+        >>> os.chdir('..')
+        >>> touch('patch', data="""
+        ... --- foo.old/setup.py    2009-04-18 13:36:40.199680168 +0200
+        ... +++ foo/setup.py        2009-04-18 13:26:12.307692349 +0200
+        ... @@ -2,3 +2,7 @@
+        ...  from setuptools import setup
+        ...  setup(name='foo', version='2.0')
+        ...
+        ... +
+        ... +
+        ... +print 'patched'
+        ... +
+        ... """)
+        
+        Installing eggs from index or find links, the classical way to install python packages
+        +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        We need to specify a find-links entry to make the recipe find our 'foo' egg as it is not on pypi
+        As we want to show the update capability of the recipe, we will first install the oldest foo version.
+        
+        >>> noecho = [remove(os.path.join('eggs', egg)) for egg in os.listdir('eggs') if 'foo' in egg]
+        >>> data = """
+        ... [versions]
+        ... foo=1.0
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:egg
+        ... find-links=%(index)s
+        ... eggs=foo
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> noecho = [remove(os.path.join('eggs', egg)) for egg in os.listdir('eggs') if 'foo' in egg]
+        >>> sh('bin/buildout install part')
+        bin/buildout install part...
+        Installing part.
+        minitage.recipe: Installing python egg(s).
+        minitage.recipe: Trying to get  distribution for 'foo'
+        minitage.recipe: Download archive
+        minitage.recipe: Downloading http://...:.../foo-1.0.tar.gz in /tmp/buildout.test/minitage/eggs/foo-1.0.tar.gz
+        minitage.recipe: Unpacking in ...
+        Processing foo-1.0.tar.gz...
+        Location : /tmp/buildout.test/eggs/foo-1.0-py...egg...
+        
+        Installing eggs with a patch
+        +++++++++++++++++++++++++++++++++++
+        Patching is easy, just put your patches in YouEgg-patches.
+        
+        >>> data = """
+        ... [versions]
+        ... foo=1.0
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:egg
+        ... find-links=%(index)s
+        ... foo-patches = ${buildout:directory}/patch
+        ... eggs=foo
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout install part')
+        bin/buildout install part...
+        minitage.recipe: Running patch -t -Np0 < /tmp/buildout.test/minitage/eggs/patches/foo/1.0/patch_d96115b00b41e282469f73708c68bdaf/patch
+        can't find file to patch at input line 4
+        Perhaps you used the wrong -p or --strip option?
+        The text leading up to this was:
+        --------------------------
+        |
+        |--- foo.old/setup.py...
+        |+++ foo/setup.py...
+        --------------------------
+        No file to patch.  Skipping patch.
+        1 out of 1 hunk ignored
+        <BLANKLINE>
+        While:
+        Installing part...
+        SystemError: ('Failed', 'patch -t -Np0 < /tmp/buildout.test/minitage/eggs/patches/foo/1.0/patch_d96115b00b41e282469f73708c68bdaf/patch')
+        <BLANKLINE>
+        
+        Oups, the patch level ! .
+        
+        >>> data = """\
+        ... [versions]
+        ... foo=1.0
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:egg
+        ... find-links=%(index)s
+        ... eggs=foo
+        ... foo-patches = ${buildout:directory}/patch
+        ... foo-patch-options = -Np1
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install part')
+        b...
+        minitage.recipe: Pinning custom egg version in buildout, trying to write the configuration
+        minitage.recipe: CREATING buildout backup in /tmp/buildout.test/buildout.cfg.before.fixed_version.bak...
+        minitage.recipe: All egg dependencies seem to be installed!...
+        
+        Now that we have it, try to resintall.
+        
+        >>> sh('bin/buildout -vvvvv install part')
+        bin/buildout...
+        minitage.recipe: We have the distribution that satisfies 'foo==1.0-ZMinitagePatched-Patch'.
+        minitage.recipe: Pinning custom egg version in buildout, trying to write the configuration
+        minitage.recipe: Version already pinned, nothing has been wroten...
+        
+        In all cases our buildout is patched.
+        
+        >>> cat('buildout.cfg')
+        [versions]
+        foo...=...1.0-ZMinitagePatched-Patch...
+        
+        .. Desactivated, i had bugs in buildout internals with that.
+        .. Another interresint thing is that if a part wants an egg wich is requiring a patch
+        .. in the minitage's sense, it will try to find a part providing this patch automaticly.
+        ..
+        .. In the following exemple, we ll remark that t will call the 'part' part to build
+        .. the foo-1.0_ZMinitagePatched_Patch egg as it was not there before.
+        ..
+        ..     >>> data = """[versions]
+        ..     ... foo = 1.0-ZMinitagePatched-Patch
+        ..     ... [buildout]
+        ..     ... download-cache=${buildout:directory}
+        ..     ... parts =
+        ..     ...     part
+        ..     ... versions = versions
+        ..     ... [part]
+        ..     ... recipe=minitage.recipe:egg
+        ..     ... find-links=%(index)s
+        ..     ... eggs=foo
+        ..     ... foo-patches = ${buildout:directory}/patch
+        ..     ... foo-patch-options = -Np1
+        ..     ... [t]
+        ..     ... recipe=minitage.recipe:egg
+        ..     ... find-links=%(index)s
+        ..     ... eggs=foo
+        ..     ... """%{'index': index_url}
+        ..     >>> touch('buildout.cfg', data=data)
+        ..     >>> noecho = [remove(os.path.join('eggs', egg)) for egg in os.listdir('eggs') if 'foo' in egg]
+        ..     >>> sh('bin/buildout -vvvvv install t')
+        ..     b...
+        ..     minitage.recipe: Installing python egg(s).
+        ..     minitage.recipe: We have no distributions for foo that satisfies 'foo==1.0-ZMinitagePatched-Patch'.
+        ..     minitage.recipe: Althought [t] doesn't provide appropriate patches for foo==1.0-ZMinitagePatched-Patch, we found [part] which provide them, running it!...
+        ..     Location : /tmp/buildout.test/eggs/foo-1.0_ZMinitagePatched_Patch-py...egg...
+        
+        Offline and newest modes
+        +++++++++++++++++++++++++++
+        
+        We have ways to make buildout not download the latest versions found
+        on indexes and be very conservative on what we akready got local.
+        
+        Removing the version bit, but choosing to be non newest will make
+        buildout not to install the new foo-2.0 version.
+        
+        >>> data = """\
+        ... [versions]
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... versions = versions
+        ... [t]
+        ... recipe=minitage.recipe:egg
+        ... find-links=%(index)s
+        ... eggs=foo
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -Nvvvvv install t')
+        b...
+        minitage.recipe: Installing python egg(s).
+        minitage.recipe: Picked: foo = 1.0-ZMinitagePatched-Patch
+        minitage.recipe: All egg dependencies seem to be installed!...
+        
+        Idem in offline mode.
+        
+        >>> sh('bin/buildout -ovvvvv install t')
+        b...
+        minitage.recipe: Picked: foo = 1.0-ZMinitagePatched-Patch
+        minitage.recipe: All egg dependencies seem to be installed!...
+        
+        But then, going online/newest will trigger the installation of the 2.0 egg.
+        
+        >>> sh('bin/buildout -nvvvvv install t')
+        b...
+        Location : /tmp/buildout.test/eggs/foo-2.0-py...egg
+        minitage.recipe: Got foo 2.0.
+        minitage.recipe: Picked: foo = 2.0
+        minitage.recipe: All egg dependencies seem to be installed!...
+        
+        Installing eggs from an url, the specific way
+        ++++++++++++++++++++++++++++++++++++++++++++++++
+        It s possible to install an egg from a known url without any indexing system.
+        
+        >>> noecho = [remove(os.path.join('eggs', egg)) for egg in os.listdir('eggs') if 'foo' in egg]
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:egg
+        ... urls=file://${buildout:directory}/foo-1.0.tar.gz
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install part')
+        bin/buildout -vvvvv install part...
+        minitage.recipe: We found a source distribution for 'foo==1.0' in '/tmp/buildout.test/minitage/eggs/foo-1.0.tar.gz'...
+        minitage.recipe: Unpacking in /tmp/...
+        minitage.recipe: Pinning custom egg version in buildout, trying to write the configuration
+        minitage.recipe: CREATING buildout backup in /tmp/buildout.test/buildout.cfg.before.fixed_version.bak...
+        
+        As we are installing from an url, we must pin the version to be sure to use this egg,
+        even if we have some other similar egg on index or find-links.
+        
+        >>> cat('buildout.cfg')
+        <BLANKLINE>
+        [buildout]
+        download-cache=${buildout:directory}
+        parts =
+        part
+        versions = versions
+        [part]
+        recipe=minitage.recipe:egg
+        urls=file://${buildout:directory}/foo-1.0.tar.gz...
+        [versions]
+        foo...=...1.0...
+        
+        See that a versions section, and a key in the buildout section have been added.
+        
+        If we try to install a newer version, via an url, it will work, even if the version is pinned.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:egg
+        ... urls=file://${buildout:directory}/foo-2.0.tar.gz
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install part')
+        b...
+        >>> cat('buildout.cfg')
+        <BLANKLINE>
+        [buildout]
+        download-cache=${buildout:directory}
+        parts =
+        part
+        versions = versions
+        [part]
+        recipe=minitage.recipe:egg
+        urls=file://${buildout:directory}/foo-2.0.tar.gz...
+        [versions]
+        foo = 2.0...
+        
+        File urls work in offline mode.
+        
+        >>> noecho = [remove(os.path.join('eggs', egg)) for egg in os.listdir('eggs') if 'foo' in egg]
+        >>> [egg for egg in os.listdir('eggs') if 'foo' in egg]
+        []
+        >>> sh('bin/buildout -o install part')
+        b...
+        >>> [egg for egg in os.listdir('eggs') if 'foo' in egg]
+        ['foo-2.0-py...egg']
+        
+        If we try to rebuild the egg, we cannot, as the same egg is already built.
+        This is to prevent rebuilding triggered by buildout each time we launch it,
+        and also to delete already good versions present in the cache.
+        
+        >>> sh('bin/buildout -ovvvvv install part')
+        b...
+        minitage.recipe: If you want to rebuild, please do 'rm -rf /tmp/buildout.test/eggs/foo-2.0-py...egg'...
+        
+        Pypi md5 check support
+        +++++++++++++++++++++++++
+        
+        Pypi has the habit to append an md5 fragment to its egg urls,
+        we ll use it to check the already present distribution files in the cache.
+        
+        >>> dlcache = os.path.join('minitage', 'eggs')
+        >>> noecho = [(egg, remove(os.path.join(dlcache, egg))) for egg in os.listdir(dlcache) if 'developer' in egg]
+        >>> data = """
+        ... [versions]
+        ... mr.developer=0.15
+        ... [buildout]
+        ... versions = versions
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe = minitage.recipe:egg
+        ... eggs=mr.developer
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout install part')
+        b...
+        >>> egg = [egg for egg in os.listdir(dlcache) if 'mr.developer' in egg][0]
+        >>> egg
+        'mr.developer-0.15.zip'
+        
+        Resetting the file contents.
+        
+        >>> touch(os.path.join(dlcache, egg), data='')
+        
+        Deleting the installed egg.
+        
+        >>> noecho = [(egg, remove(os.path.join('eggs', egg))) for egg in os.listdir('eggs') if 'developer' in egg]
+        
+        Trying to reinstall.
+        
+        >>> sh('bin/buildout -vvvvv install part')
+        b...
+        minitage.recipe: Searching cache at /tmp/buildout.test/minitage/eggs
+        minitage.recipe: MD5SUM mismatch for /tmp/buildout.test/minitage/eggs/mr.developer-0.15.zip: Good:796babbb65820f6c052141cae1fb3e8d != Bad:d41d8cd98f00b204e9800998ecf8427e
+        Backuping the old file but re download it!
+        A bakcup will be made in /tmp/buildout.test/minitage/eggs/mr.developer-0.15.zip.md5sum_mismatch.0.
+        minitage.recipe: Cache download http://pypi.python.org/packages/source/m/mr.developer/mr.developer-0.15.zip#md5=796babbb65820f6c052141cae1fb3e8d as /tmp/buildout.test/minitage/eggs
+        minitage.recipe: Downloading http://pypi.python.org/packages/source/m/mr.developer/mr.developer-0.15.zip#md5=796babbb65820f6c052141cae1fb3e8d in /tmp/buildout.test/minitage/eggs/mr.developer-0.15.zip...
+        
+        
+        Static distribution dev+static urls
+        ++++++++++++++++++++++++++++++++++++++++++++++++++
+        
+        You can also install directly from urls.
+        we ll use it to check the already present distribution files in the cache.
+        
+        >>> data = """
+        ... [versions]
+        ... mr.developer=0.15
+        ... [buildout]
+        ... versions = versions
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe = minitage.recipe:egg
+        ... eggs=mr.developer
+        ... [a]
+        ... recipe=minitage.recipe:egg
+        ... urls=
+        ...     http://pypi.python.org/packages/source/m/minitage.core/minitage.core-1.0.4.tar.gz#md5=1e30ceabd1b012e33b1d2f327f6609b5
+        ...     http://pypi.python.org/packages/source/m/minitage.paste/minitage.paste-1.1.tar.gz#md5=b9076b78a17f2247f68d232368fcc8f0
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvvv install a')
+        b...
+        Installing a...
+        minitage.recipe: Downloading http://pypi.python.org/packages/source/m/minitage.core/minitage.core-1.0.4.tar.gz#md5=1e30ceabd1b012e33b1d2f327f6609b5 in /tmp/buildout.test/minitage/eggs/minitage.core-1.0.4.tar.gz_c3e78ea4294cdd0a243fbea6e2aa9757/minitage.core-1.0.4.tar.gz...
+        minitage.recipe: Downloading http://pypi.python.org/packages/source/m/minitage.paste/minitage.paste-1.1.tar.gz#md5=b9076b78a17f2247f68d232368fcc8f0 in /tmp/buildout.test/minitage/eggs/minitage.paste-1.1.tar.gz_d3403e6128eddb2b99063674ff8105a1/minitage.paste-1.1.tar.gz...
+        Location : ...
+        minitage.recipe: All egg dependencies seem to be installed!...
+        
+        The versions are pinned to use your downloaded stuff
+        
+        >>> cat('buildout.cfg')
+        <BLANKLINE>
+        [versions]
+        mr.developer=0.15
+        minitage.core = 1.0.4
+        minitage.paste = 1.1
+        [buildout]
+        versions = versions
+        download-cache=${buildout:directory}
+        parts =
+        part
+        [part]
+        recipe = minitage.recipe:egg
+        eggs=mr.developer
+        [a]
+        recipe=minitage.recipe:egg
+        urls=
+        http://pypi.python.org/packages/source/m/minitage.core/minitage.core-1.0.4.tar.gz#md5=1e30ceabd1b012e33b1d2f327f6609b5
+        http://pypi.python.org/packages/source/m/minitage.paste/minitage.paste-1.1.tar.gz#md5=b9076b78a17f2247f68d232368fcc8f0
+        
+        
+        
+        ===============================================
+        minitage.recipe:cmmi
+        ===============================================
+        
+        Abstract
+        -----------------
+        - UNAME-patches
+        OS specific (sys.platform.lower()) patches to apply  [see cmmi recipe for documentation]
+        - make-targets
+        default to all and install, make targets to run
+        - The cmmi recipe use abusivly or -rpath to save you from settings LD_LIBRARY_PATH at run time.
+        - If you are inside a minitage environment, all the dependencies of your minibuild are put in the environment.
+        That mean that CFLAGS, LDFLAGS, PKG_CONFIG_PATH, and so on are updated to reference your minibuild's dependencies.
+        - minitage.recipe:cmmi is a replacment fo ``zc.recipe.cmmi``.
+        - It intends to do the *configure && make && make install* dance with hooks where you can do (in python) specific stuff at each stage of the build cursus.
+        - With this recipe, if the destination directory exists, we only remove it
+        when we can sucessfully install something, unless that we never touch to it,
+        or it is a bug.
+        - LOOK ALSO AT THE *SHARED VARIABLES* AS ALL THE MINITAGE RECIPES SHARE A LOT OF VARIABLES
+        
+        Specific options
+        -----------------
+        
+        * build-dir
+        inner directory to execute the build dance [see cmmi recipe for documentation]
+        * configure-options-UNAME
+        Os specific options to give to configure
+        uname can be either linux2|freebsd6|freebsd7|darwin
+        Its the result of sys.platform.lower() [see cmmi recipe for documentation]
+        * configure
+        configure script to use (default to ./configure)
+        * prefix-separator [see cmmi recipe for documentation]
+        prefix separator to use between --prefix and location (default to =)
+        * prefix-options [see cmmi recipe for documentation]
+        what to put for the "prefix" expression, default to --prefix$PREFIX_SEPARATOR$LOCATION
+        * autogen
+        autogen script to use if any [optionnal]
+        * configure-options
+        options to feed configure with [see cmmi recipe for documentation]
+        * extra_options
+        appendended to configure-options  [see cmmi recipe for documentation]
+        
+        * hooks
+        
+        A hook is in the form /path/to/hook:CALLABLE::
+        
+        myhook=${buildout:directory}/toto.py:foo
+        
+        Where we have toto.py::
+        
+        def foo(options, buildout):
+        return 'Hourray'
+        
+        The complete possible hooks list:
+        
+        * pre-unpack-hook
+        hook executed before the unpack dance
+        * post-unpack-hook
+        hook executed after the unpack dance
+        * post-unpack-hook
+        hook executed after the unpack dance
+        * pre-configure-hook
+        hook executed before the configure is run
+        * pre-make-hook
+        hook executed before the first make target is run
+        * post-build-hook
+        hook executed after the build make targets are done
+        * pending-make-install
+        hook executed after the make and before the make install is done
+        * post-make-hook
+        hook executed after the make install is done
+        * noconfigure
+        do not run ./configure
+        * noinstall
+        do not run make install
+        
+        Detailled documentation
+        -------------------------
+        
+        Let's create a buildout configuration file.
+        
+        >>> rmdir(tempdir)
+        >>> mkdir(tempdir)
+        >>> cd(tempdir)
+        >>> a = [mkdir(d) for d in ('eggs', 'develop-eggs', 'bin', 'src')]
+        >>> install_develop_eggs(['minitage.recipe'])
+        >>> install_eggs_from_pathes(['zc.buildout'], sys.path)
+        >>> touch('buildout.cfg')
+        >>> sh('buildout -o bootstrap')
+        buildout -o bootstrap...
+        
+        This first buildout is classical, trying to build some url.
+        
+        >>> touch('buildout.cfg',
+        ... data="""
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... """)
+        >>> sh('bin/buildout install part')
+        bin/buildout install part...
+        <BLANKLINE>
+        While:
+        Installing part.
+        <BLANKLINE>
+        A...
+        MinimergeError: URL was not set!
+        <BLANKLINE>
+        
+        Oups, we forgot the url, we will make a basic distribution package to test our stuff
+        Running the buildout with the url bit.
+        
+        >>> if not os.path.exists('foo'):
+        ...     mkdir('foo')
+        ... else:
+        ...     rmdir(foo)
+        ...     mkdir('foo')
+        >>> touch('foo/configure', data ="""echo configure $@\n""")
+        >>> sh('chmod +x foo/configure')
+        c...
+        >>> touch('foo/Makefile',
+        ... data = """
+        ... all:
+        ... \t@echo all
+        ...
+        ... install:
+        ... \t@echo install
+        ...
+        ... """)
+        >>> sh('tar cfz  foo.tgz foo')
+        tar cfz  ...
+        <BLANKLINE>
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... url = file://${buildout:directory}/foo.tgz
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        bin/buildout -o install part...
+        Installing part.
+        minitage.recipe: Download archive
+        minitage.recipe: Downloading file:///tmp/buildout.test/foo.tgz in /tmp/buildout.test/minitage/foo.tgz
+        minitage.recipe: Unpacking in /tmp/buildout.test/__minitage__part__tmp.
+        minitage.recipe: Guessing compilation directory
+        minitage.recipe: Setting path
+        minitage.recipe: Setting pkgconfigpath
+        minitage.recipe: Setting compilation flags
+        minitage.recipe: Setting path
+        minitage.recipe: Running /tmp/buildout.test/__minitage__part__tmp/foo/configure --prefix=/tmp/buildout.test/parts/part
+        configure --prefix=/tmp/buildout.test/parts/part
+        minitage.recipe: Running make
+        all
+        minitage.recipe: Running make  install
+        install
+        minitage.recipe: Completed install.
+        
+        General usage
+        ++++++++++++++++++++++
+        This first buildout does nothing except print us the hooks calls. We have desactivated the configure and make dance!.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... url = file://${buildout:directory}/foo.tgz
+        ... noconfigure=true
+        ... noinstall = true
+        ... nomake = true
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        bin/buildout -o install part...
+        Installing part.
+        minitage.recipe: Download archive
+        minitage.recipe: Unpacking in /tmp/buildout.test/__minitage__part__tmp.
+        minitage.recipe: Guessing compilation directory
+        minitage.recipe: Setting path
+        minitage.recipe: Setting pkgconfigpath
+        minitage.recipe: Setting compilation flags
+        minitage.recipe: Setting path
+        minitage.recipe: Completed install...
+        
+        Applying patches
+        ++++++++++++++++++++
+        This second one aimes to show us the patch capababilities.
+        
+        >>> sh('cp foo/Makefile foo/Makefile.old')
+        cp foo/Makefile foo/Makefile.old
+        >>> sh('echo >> foo/Makefile')
+        echo >> foo/Makefile
+        >>> sh('diff -u foo/Makefile.old foo/Makefile > patch')
+        diff -u foo/Makefile.old foo/Makefile > patch
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... url = file://${buildout:directory}/foo.tgz
+        ... patches = ${buildout:directory}/patch
+        ... noconfigure=true
+        ... noinstall = true
+        ... nomake = true
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        bin/buildout -o install part...
+        minitage.recipe: Running patch -t -Np0 < /tmp/buildout.test/minitage/patch_d96115b00b41e282469f73708c68bdaf/patch
+        can't find file to patch at input line 3
+        Perhaps you used the wrong -p or --strip option?
+        The text leading up to this was:
+        --------------------------
+        |--- foo/Makefile.old ...
+        |+++ foo/Makefile  ...
+        --------------------------
+        No file to patch.  Skipping patch.
+        1 out of 1 hunk ignored
+        <BLANKLINE>
+        While:
+        Installing part.
+        <BLANKLINE>
+        An internal error occured due to a bug in either zc.buildout or in a...
+        SystemError: ('Failed', 'patch -t -Np0 < /tmp/buildout.test/minitage/patch_d96115b00b41e282469f73708c68bdaf/patch')
+        <BLANKLINE>
+        
+        
+        The patch level is wrong !
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... url = file://${buildout:directory}/foo.tgz
+        ... patches = ${buildout:directory}/patch
+        ... patch-options = -p1
+        ... noconfigure=true
+        ... noinstall = true
+        ... nomake = true
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        bin/buildout -o install part...
+        minitage.recipe: Running patch -t -p1 < /tmp/buildout.test/minitage/patch...
+        patching file Makefile
+        minitage.recipe: Completed install...
+        
+        
+        Using hooks
+        ++++++++++++++
+        But now that we have some sort of messy packages, can we not intercale some python to code to arrange things upside down ?
+        We have hooks to achieve that. A hook is a python callable which takes at least the options part and the buildout.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... url = file://${buildout:directory}/foo.tgz
+        ... pre-unpack-hook    = ${buildout:directory}/hooks.py:pre_unpack_hook
+        ... post-unpack-hook   = ${buildout:directory}/hooks.py:post_unpack_hook
+        ... pre-configure-hook = ${buildout:directory}/hooks.py:pre_configure_hook
+        ... pre-make-hook      = ${buildout:directory}/hooks.py:pre_make_hook
+        ... post-build-hook    = ${buildout:directory}/hooks.py:post_build_hook
+        ... post-make-hook     = ${buildout:directory}/hooks.py:post_make_hook
+        ... """
+        >>> touch('hooks.py', data="""
+        ... def  pre_unpack_hook    (o, b, hook='pre_unpack_hook'):
+        ...     print "%s in %s target %s" % (hook, b['buildout']['directory'], o['location'])
+        ... def  post_unpack_hook   (o, b, hook='post_unpack_hook'):
+        ...     print "%s in %s target %s" % (hook, b['buildout']['directory'], o['location'])
+        ... def  pre_configure_hook (o, b, hook='pre_configure_hook'):
+        ...     print "%s in %s target %s" % (hook, b['buildout']['directory'], o['location'])
+        ... def  pre_make_hook      (o, b, hook='pre_make_hook'):
+        ...     print "%s in %s target %s" % (hook, b['buildout']['directory'], o['location'])
+        ... def  post_build_hook    (o, b, hook='post_build_hook'):
+        ...     print "%s in %s target %s" % (hook, b['buildout']['directory'], o['location'])
+        ... def  post_make_hook     (o, b, hook='post_make_hook'):
+        ...     print "%s in %s target %s" % (hook, b['buildout']['directory'], o['location'])
+        ... """)
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        ... bin/buildout -o install part...
+        bin/buildout -o install part...
+        minitage.recipe: Download archive
+        minitage.recipe: Executing pre-unpack-hook
+        pre_unpack_hook in /tmp/buildout.test target /tmp/buildout.test/parts/part...
+        minitage.recipe: Setting path
+        minitage.recipe: Executing post-unpack-hook
+        post_unpack_hook in /tmp/buildout.test target /tmp/buildout.test/parts/part
+        minitage.recipe: Executing pre-configure-hook
+        pre_configure_hook in /tmp/buildout.test target /tmp/buildout.test/parts/part
+        minitage.recipe: Running /tmp/buildout.test/__minitage__part__tmp/foo/configure --prefix=/tmp/buildout.test/parts/part
+        configure --prefix=/tmp/buildout.test/parts/part
+        minitage.recipe: Executing pre-make-hook
+        pre_make_hook in /tmp/buildout.test target /tmp/buildout.test/parts/part
+        minitage.recipe: Running make
+        all
+        minitage.recipe: Executing post-build-hook
+        post_build_hook in /tmp/buildout.test target /tmp/buildout.test/parts/part
+        minitage.recipe: Running make  install
+        install
+        minitage.recipe: Executing post-make-hook
+        post_make_hook in /tmp/buildout.test target /tmp/buildout.test/parts/part
+        minitage.recipe: Completed install.
+        <BLANKLINE>
+        
+        
+        MD5 check
+        +++++++++++++
+        Can we check md5, of course!
+        As we have already the foo package in our download cache, we try to download something else.
+        
+        >>> shutil.copy2('foo.tgz', 'bar.tgz')
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... md5sum = b4d
+        ... url = file://${buildout:directory}/bar.tgz
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        bin/buildout -o install part
+        Uninstalling part.
+        Unused options for buildout: 'download-directory'.
+        Installing part.
+        minitage.recipe: Download archive
+        minitage.recipe: Downloading file:///tmp/buildout.test/bar.tgz in /tmp/buildout.test/minitage/bar.tgz
+        <BLANKLINE>
+        While:
+        Installing part.
+        <BLANKLINE>
+        A...
+        MinimergeError: Failed download for file:///tmp/buildout.test/bar.tgz:      MD5SUM mismatch for /tmp/buildout.test/minitage/bar.tgz: Good:b4d != Bad:...
+        <BLANKLINE>
+        
+        Controlling configure
+        ++++++++++++++++++++++++++++++
+        Giving configure options the two possible ways.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... url = file://${buildout:directory}/bar.tgz
+        ... configure-options = foo
+        ... extra_options = bar
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        bin/buildout -o install part...
+        minitage.recipe: Running /tmp/buildout.test/__minitage__part__tmp/foo/configure --prefix=/tmp/buildout.test/parts/part foo bar
+        configure --prefix=/tmp/buildout.test/parts/part foo bar ...
+        
+        Use OS Specific rules
+        +++++++++++++++++++++++++
+        Giving os specific rules.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... url = file://${buildout:directory}/foo.tgz
+        ... configure-options-linux = linuxoptions
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        b...
+        minitage.recipe: Running /tmp/buildout.test/__minitage__part__tmp/foo/configure --prefix=/tmp/buildout.test/parts/part    linuxoptions...
+        
+        Or, in the same manner, you can specify OS specific patches: (darwin, linux, freebsd6, freebsd7). sys.platform is your friend :) ('linux', for all linuxes).
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... patch-options = -p1
+        ... url = file://${buildout:directory}/foo.tgz
+        ... """
+        >>> data += '%s-patches =${buildout:directory}/patch' % uname
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        b...
+        minitage.recipe: Running patch -t -p1 < /tmp/buildout.test/minitage/patch...
+        
+        
+        Using underlying minitage environment
+        ++++++++++++++++++++++++++++++++++++++++++++
+        If you are in a minitage, all your minibuild dependencies come automaticly in the env, no need to do the following code :)
+        As you can have CFLAGS and so on added to your env., you can specify manual things too, the underlying code is the same.
+        The goal is to proove that all is preprended as we would have think.
+        We will use some hook to print the relevant parts.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... url = file://${buildout:directory}/foo.tgz
+        ... pre-make-hook    = ${buildout:directory}/hooks.py:pre_unpack_hook
+        ... includes-dirs = /foo/include
+        ... rpath = /someruntimespath/lib
+        ... library-dirs = /bar/lib
+        ... pkgconfigpath = /lib/pkgconfig/
+        ... noconfigure = true
+        ... nomake = true
+        ... noinstall = true
+        ... """
+        >>> touch('hooks.py', data="""
+        ... import os
+        ... def  pre_unpack_hook(o, b):
+        ...     flags = [(a, os.environ.get(a, 'not_set')) for a in ('CFLAGS', 'LDFLAGS', 'PKG_CONFIG_PATH', 'LD_RUN_PATH',)]
+        ...     for flag in flags:
+        ...         print flag
+        ... """)
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        b...
+        minitage.recipe: Executing pre-make-hook
+        ('CFLAGS', '-I/foo/include')
+        ('LDFLAGS', '-L/bar/lib -Wl,-rpath -Wl,/bar/lib -L/tmp/buildout.test/parts/part/lib -Wl,-rpath -Wl,/tmp/buildout.test/parts/part/lib')
+        ('PKG_CONFIG_PATH', '/lib/pkgconfig/...')
+        ('LD_RUN_PATH', '/someruntimespath/lib:/tmp/buildout.test/parts/part/lib')...
+        
+        
+        Playing with the environment
+        ++++++++++++++++++++++++++++++++
+        You can play also with the environment directly in two ways.
+        
+        * Precising a buildout part
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [foo]
+        ... CFLAGS=bar
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... url = file://${buildout:directory}/foo.tgz
+        ... pre-make-hook    = ${buildout:directory}/hooks.py:pre_unpack_hook
+        ... environment = foo
+        ... noconfigure = true
+        ... nomake = true
+        ... noinstall = true
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        bi...
+        ('CFLAGS', 'bar')...
+        
+        * Entering an option formed by key=value pair
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... url = file://${buildout:directory}/foo.tgz
+        ... pre-make-hook    = ${buildout:directory}/hooks.py:pre_unpack_hook
+        ... noconfigure = true
+        ... nomake = true
+        ... noinstall = true
+        ... environment=
+        ...     CFLAGS=myvalue
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        bin/buildout -o install part...
+        minitage.recipe: Executing pre-make-hook
+        ('CFLAGS', 'myvalue')...
+        
+        Autogen can be your friend
+        +++++++++++++++++++++++++++++
+        It is possible to autogenerate the configure files.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... url = file://${buildout:directory}/foo.tgz
+        ... noconfigure = true
+        ... nomake = true
+        ... noinstall = true
+        ... autogen = configure
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        bin/buildout -o install part...
+        minitage.recipe: Auto generating configure files
+        minitage.recipe: Running /tmp/buildout.test/__minitage__part__tmp/foo/configure
+        configure...
+        
+        shared builds
+        ++++++++++++++++++++
+        Handling shared mode as a backward compatibility with zc.recipe.cmmi.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:cmmi
+        ... url = file://${buildout:directory}/foo.tgz
+        ... shared = true
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -o install part')
+        bin/buildout -o install part...
+        minitage.recipe: Running /tmp/buildout.test/__minitage__part__tmp/foo/configure --prefix=/tmp/buildout.test/minitage/cmmi/...
+        
+        
+        
+        ===============================================
+        minitage.recipe:fetch
+        ===============================================
+        
+        
+        Abstract
+        -----------------
+        - This recipe can be used to fetch something from somewhere to some location of your local fileystem
+        This something can be either an url or a set of urls.
+        - Thus by:
+        
+        * git
+        * svn
+        * ftp, http, file:// (urllib)
+        * bazaar
+        * mercurial
+        
+        Specific options
+        -----------------
+        
+        * urls
+        See the shared options for more information on how to set them.
+        
+        Detailled documentation
+        -------------------------
+        The divide url function test::
+        
+        - If you dont precise the directory, its the basename of the url::
+        
+        >>> divide_url ('http://foo/bar|svn|666||--ignore-externals')
+        ('http://foo/bar', 'svn', '666', 'http.foo.bar', '--ignore-externals')
+        
+        - Static as a default::
+        
+        >>> divide_url ('')
+        ('', 'static', '', '', '')
+        
+        - arguements can be optionnal::
+        
+        >>> divide_url ('http://foo/bar')
+        ('http://foo/bar', 'static', '', 'http.foo.bar', '')
+        
+        
+        Let's create a buildout configuration file::
+        
+        >>> rmdir(tempdir)
+        >>> mkdir(tempdir)
+        >>> cd(tempdir)
+        >>> a = [mkdir(d) for d in ('eggs', 'develop-eggs', 'bin', 'src')]
+        >>> install_develop_eggs(['minitage.recipe'])
+        >>> install_eggs_from_pathes(['zc.buildout'], sys.path)
+        >>> touch('buildout.cfg')
+        >>> sh('buildout -o bootstrap')
+        buildout -o bootstrap...
+        
+        
+        Initializing test env.
+        
+        >>> if not os.path.exists('foo'):
+        ...     mkdir('foo')
+        ... else:
+        ...     rmdir(foo)
+        ...     mkdir('foo')
+        >>> touch('foo/configure', data ="""echo configure $@\n""")
+        >>> sh('chmod +x foo/configure')
+        c...
+        >>> touch('foo/Makefile',
+        ... data = """
+        ... all:
+        ... \t@echo all
+        ...
+        ... install:
+        ... \t@echo install
+        ...
+        ... """)
+        >>> sh('tar cfz  foo.tgz foo')
+        tar cfz  ...
+        <BLANKLINE>
+        
+        
+        Downloading some urls, files, git checkouts with one in a particular checkout directory and a particular revision::
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts =
+        ...     part
+        ... [part]
+        ... recipe=minitage.recipe:fetch
+        ... urls =file://${buildout:directory}/foo.tgz
+        ...        http://git.minitage.org/git/minitage/eggs/minitage.core|git
+        ...        http://git.minitage.org/git/minitage/eggs/minitage.recipe|git|e1f30b9d7a89572fa87fe26f8e353304532a281c|minitage.recipe.alt
+        ... """
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout install part')
+        bin/buildout  install part...
+        minitage.recipe: Start checkouts
+        minitage.recipe: Download archive
+        minitage.recipe: Downloading file:///tmp/buildout.test/foo.tgz in /tmp/buildout.test/parts/part/foo.tgz
+        minitage.recipe: Completed dowbload of file:///tmp/buildout.test/foo.tgz in /tmp/buildout.test/parts/part/
+        minitage.recipe: Download archive
+        minitage.recipe: Setting path
+        Initialized empty Git repository in /tmp/buildout.test/parts/part/minitage.recipe.alt/.git/
+        HEAD is now at e1f30b9 0.28
+        minitage.recipe: Completed dowbload of http://git.minitage.org/git/minitage/eggs/minitage.recipe in /tmp/buildout.test/parts/part/minitage.recipe.alt
+        minitage.recipe: Download archive
+        minitage.recipe: Setting path
+        Initialized empty Git repository in /tmp/buildout.test/parts/part/http.git.minitage.org.git.minitage.eggs.minitage.core/.git/
+        HEAD is now at ...
+        minitage.recipe: Completed dowbload of http://git.minitage.org/git/minitage/eggs/minitage.core in /tmp/buildout.test/parts/part/http.git.minitage.org.git.minitage.eggs.minitage.core
+        minitage.recipe: Finnished checkouts...
+        <BLANKLINE>
+        g...
+        <BLANKLINE>
+        
+        
+        
+        ===============================================
+        minitage.recipe:printer
+        ===============================================
+        
+        
+        Abstract
+        -----------------
+        - This recipe intends to install eggs and python software and on top of installed stuff, generating KGS (Known good Set) versions file.
+        - This will help you to pion all the eggs used by a specific application by generating nicely configs will all eggs pinned insude?
+        - This recipe inherit from minitage;recipe:egg.
+        
+        Specific options
+        -----------------
+        
+        * All the shared options and the options from minitage.recipe:egg +
+        * quiet
+        if set: do not print anything to stdout
+        * file
+        file to write the version to
+        
+        Detailled documentation
+        -------------------------
+        
+        Let's create a buildout configuration file::
+        
+        >>> rmdir(tempdir)
+        >>> mkdir(tempdir)
+        >>> cd(tempdir)
+        >>> a = [mkdir(d) for d in ('eggs', 'develop-eggs', 'bin', 'src')]
+        >>> install_develop_eggs(['minitage.recipe'])
+        >>> install_eggs_from_pathes(['zc.buildout'], sys.path)
+        >>> touch('buildout.cfg')
+        >>> sh('buildout -o bootstrap')
+        buildout -o bootstrap...
+        >>> index_url = start_server(os.path.sep.join(tempdir))
+        
+        Initializing test env.
+        +++++++++++++++++++++++
+        ::
+        
+        >>> if os.path.exists('foo'): rmdir(foo)
+        >>> mkdir('foo')
+        >>> mkdir('foo/src/toto')
+        >>> touch('foo/setup.py', data="""
+        ... from setuptools import setup, find_packages
+        ... setup(name='foo', version='1.0',
+        ...     packages=find_packages('src'),
+        ...     package_dir = {'': 'src'},
+        ...     include_package_data=True,
+        ...     scripts=['src/toto/toto.py'],
+        ...     entry_points={'console_scripts': ['s=toto.toto:f']},
+        ...     )
+        ... """)
+        >>> touch('foo/src/toto/__init__.py')
+        >>> touch('foo/src/toto/toto.py', data="""
+        ... def f():
+        ...     print "foo"
+        ... if __name__ == '__main__' :
+        ...     print 'called'
+        ...
+        ... """)
+        >>> noecho = [os.remove(d) for d in os.listdir('.') if '.tar.gz' in d]
+        >>> os.chdir('foo')
+        >>> sh('python setup.py sdist')
+        p...
+        >>> noecho = [shutil.copy(os.path.join('dist', d), os.path.join('..', d)) for d in os.listdir('dist')]
+        >>> os.chdir('..')
+        
+        Writing only to output
+        +++++++++++++++++++++++++++++++
+        Do not specify the file option.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts = part
+        ... [part]
+        ... recipe=minitage.recipe:printer
+        ... find-links=%(index)s
+        ... eggs=foo
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install')
+        b...
+        minitage.recipe: Maybe put this in a cfg like file ;)
+        #--- 8-< 8-<  8-<  8-<  8-<  8-<  8-<  ---...
+        [versions]
+        foo=1.0...
+        [buildout]
+        versions=versions...
+        #--- 8-< 8-<  8-<  8-<  8-<  8-<  8-<  ---...
+        
+        Writing to a file
+        ++++++++++++++++++++++++
+        Feed the part with the file option.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts = part
+        ... [part]
+        ... recipe=minitage.recipe:printer
+        ... find-links=%(index)s
+        ... eggs=foo
+        ... file=toto.cfg
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install')
+        b...
+        #--- 8-< 8-<  8-<  8-<  8-<  8-<  8-<  ---
+        minitage.recipe: Generated: toto.cfg...
+        
+        >>> cat('toto.cfg')
+        <BLANKLINE>
+        <BLANKLINE>
+        [versions]
+        foo=1.0
+        <BLANKLINE>
+        [buildout]
+        versions=versions
+        <BLANKLINE>
+        <BLANKLINE>
+        
+        Be quiet please, baby is sleeping
+        ++++++++++++++++++++++++++++++++++++++
+        Set the quiet flag.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts = part
+        ... [part]
+        ... recipe=minitage.recipe:printer
+        ... find-links=%(index)s
+        ... eggs=foo
+        ... quiet=1
+        ... file=toto.cfg
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install')
+        b...
+        minitage.recipe: All egg dependencies seem to be installed!
+        minitage.recipe: Generated: toto.cfg...
+        
+        
+        
+        ===============================================
+        minitage.recipe:wsgi
+        ===============================================
+        
+        Abstract
+        -----------------
+        
+        - This recipe is inspired by collective.recipe.modwsgi but use
+        minitage code to generate  a wrapper to launch a paste configuration file, suitable for mod_mwsgi.
+        - This recipe inherit from minitage;recipe:egg.
+        - I recommend Spawning to be the WSGI server, but in the wonderful world of system administration, you
+        don't have always the choice of the final technology to use. This will help to to use mod_wsgi with
+        buildout based installations.
+        
+        Specific options
+        -----------------
+        
+        * All the shared options and the options from minitage.recipe:egg +
+        * config-file
+        full path to the paste configuration file to use
+        
+        
+        Detailled documentation
+        -------------------------
+        
+        Let's create a buildout configuration file::
+        
+        >>> rmdir(tempdir)
+        >>> mkdir(tempdir)
+        >>> cd(tempdir)
+        >>> a = [mkdir(d) for d in ('eggs', 'develop-eggs', 'bin', 'src')]
+        >>> install_develop_eggs(['minitage.recipe'])
+        >>> install_eggs_from_pathes(['zc.buildout'], sys.path)
+        >>> touch('buildout.cfg')
+        >>> sh('buildout -o bootstrap')
+        buildout -o bootstrap...
+        >>> index_url = start_server(os.path.sep.join(tempdir))
+        
+        Initializing test env.
+        +++++++++++++++++++++++
+        ::
+        
+        >>> if os.path.exists('foo'): rmdir(foo)
+        >>> mkdir('foo')
+        >>> mkdir('foo/src/toto')
+        >>> touch('foo/setup.py', data="""
+        ... from setuptools import setup, find_packages
+        ... setup(name='foo', version='1.0',
+        ...     packages=find_packages('src'),
+        ...     package_dir = {'': 'src'},
+        ...     include_package_data=True,
+        ...     scripts=['src/toto/toto.py'],
+        ...     entry_points={'console_scripts': ['s=toto.toto:f']},
+        ...     )
+        ... """)
+        >>> touch('foo/src/toto/__init__.py')
+        >>> touch('toto.cfg')
+        >>> touch('foo/src/toto/toto.py', data="""
+        ... def f():
+        ...     print "foo"
+        ... if __name__ == '__main__' :
+        ...     print 'called'
+        ...
+        ... """)
+        >>> noecho = [os.remove(d) for d in os.listdir('.') if '.tar.gz' in d]
+        >>> os.chdir('foo')
+        >>> sh('python setup.py sdist')
+        p...
+        >>> noecho = [shutil.copy(os.path.join('dist', d), os.path.join('..', d)) for d in os.listdir('dist')]
+        >>> os.chdir('..')
+        
+        Generating a mod_mwsgi friendly configuration
+        +++++++++++++++++++++++++++++++++++++++++++++++++++
+        Do not specify the file option.
+        
+        >>> data = """
+        ... [buildout]
+        ... download-cache=${buildout:directory}
+        ... parts = part
+        ... [part]
+        ... recipe=minitage.recipe:wsgi
+        ... config-file = toto.cfg
+        ... find-links=%(index)s
+        ... eggs=foo
+        ... """%{'index': index_url}
+        >>> touch('buildout.cfg', data=data)
+        >>> sh('bin/buildout -vvvvv install')
+        b...
+        minitage.recipe: Generated script: '/tmp/buildout.test/parts/part/wsgi'...
+        
+        >>> cat('parts', 'part', 'wsgi')
+        #!...
+        #!!! #GENERATED VIA MINITAGE.recipe !!!...
+        import sys
+        sys.path[0:0] = [ '/tmp/buildout.test/eggs/foo-1.0-py....egg', ]...
+        from paste.deploy import loadapp
+        application = loadapp("config:toto.cfg")...
+        
+        
+        
+        ===============================================
+        minitage.recipe API tests
+        ===============================================
+        
+        The divide url function
+        ------------------------------
+        
+        - If you dont precise the directory, its the basename of the url::
+        
+        >>> divide_url ('http://foo/bar|svn|666||--ignore-externals')
+        ('http://foo/bar', 'svn', '666', 'http.foo.bar', '--ignore-externals')
+        
+        - Static as a default::
+        
+        >>> divide_url ('')
+        ('', 'static', '', '', '')
+        
+        - arguements can be optionnal::
+        
+        >>> divide_url ('http://foo/bar')
+        ('http://foo/bar', 'static', '', 'http.foo.bar', '')
+        
+        
+        
+        =======================
+        CHANGELOG
+        =======================
+        
+        1.14
+        -----
+        
+        - add enrionment file generation to the scripts recipe
+        
+        1.13
+        ---------
+        
+        - cmmi buggy update methods
+        
+        1.11 - 1.12
+        ----------------
+        
+        - rescan egg direcrectories at install time because there may be new
+        develop eggs or eggs installed by buildout extensions (mr.developer)
+        - fix for interaction with buildout.minitagificator and
+        zc.buildout.easy_install..*script
+        
+        
+        1.-1.10
+        ---------
+        
+        - bugfix with cache and static distributions.
+        
+        1.8
+        -------
+        
+        - make patches go in a personnal directory with some md5 mecanism to redownload them.
+        
+        1.4->1.7
+        ----------
+        
+        - x64 fixes
+        - bugfix in static distribution install when you have patches to apply.
+        
+        1.3
+        ----
+        
+        - release uncomitted unittests updates
+        
+        1.2
+        -------
+        
+        - make it compatible with zc.buildout 1.0
+        
+        1.1
+        -----
+        
+        - md5 bug
+        
+        1.0
+        ------
+        
+        * first stable release.
+        * All recipe are documented and well tested.
+        * buildout.minitagificator is completed.
+        * stabilized and synced with other minitage components
+        * minitage.recipe:eggs has been drasticly improved in term of algorythms and speed.
+        
+        0.33->0.34
+        -----------
+        
+        - Fix python executable computation
+        
+        0.32
+        -----
+        
+        - Documentation and tests release
+        
+        0.29
+        ----
+        
+        - Fix bug in recipes initialization because of buildout auto-ordering
+        
+        
+        0.28
+        ----
+        
+        - Add another hook to the cmmi recipe: post-download
+        
+        0.27
+        -----
+        
+        - Fix an annoying bug when you are using virtualenv and a classical
+        python as executable in your recipe, it may occur that sometimes, the
+        virtualenv site-packages is appended to PYTHONPATH. As a fix, we now
+        filter all python core lib directories and site packages that are not
+        relevant to the python used by the recipe.
+        
+        0.26
+        -----
+        
+        - Introduce the minitage.recipe:wsgi recipe wich wraps a paste wsgi application
+        in a script eatable by mod_wsgi
+        
+        0.25
+        ------
+        
+        - stop lowering project_name
+        
+        
+        0.23->0.24
+        -----------
+        
+        - Fix small bugs in printer
+        
+        0.22
+        -----
+        
+        - Introduce a new recipe : minitage.recipe:printer which prints/dumps to a
+        file all versions eggs needed to achieve requirements.
+        
+        0.21
+        -----
+        
+        - Fix bug in compilation  directory guessing
+        
+        0.20
+        ------
+        
+        - Fix bug in distribution reloading
+        - Better handling of pkg_resources's working set
+        
+        0.19
+        --------
+        
+        - add a post build hook
+        
+        0.18
+        -------
+        
+        - Change installation order
+        
+        0.16
+        -------
+        
+        - Fix index and find links options
+        
+        0.14 -> 0.15
+        -------------
+        - logging output improved
+        - newest mode handling
+        
+        0.13
+        -----
+        - fix static dist install
+        
+        
+        
+        0.12
+        ------
+        
+        - bugfix for zipped eggs
+        
+        0.11
+        -----
+        
+        - import bugfix for minitagificator
+        
+        0.10
+        -----------
+        
+        - Change some logging options
+        - follow allow host option from buildout for eggs installation
+        
+        0.9
+        -----------
+        
+        - Do not rely anymore on zc.buildout ez for script generation
+        
+        0.7 -> 0.8
+        -----------
+        
+        - egg and scripts recipes were rewritten a lot to adapt their api to
+        zc.recipe.egg
+        - Common to all recipes: all arguements are now identicak to zc.recipe.cmmi
+        or zc.recipe.egg
+        - Dependencies resolver has been improved a lot
+        - For static distribution, you can know speicify multiple urls with 'urls'
+        
+        
+        0.6
+        ------
+        
+        - fix bug in path generation in minitage.recipe:scripts
+        
+        0.2 -> 0.5
+        -------------
+        
+        - add make-options for make option in minitage.recipe.cmmi
+        - multiple bugfixes
+        - make things append in subprocess for environment conversation
+        - add initiaiization code for generated python interpreter in
+        minitage.recipe:scripts
+        
+        0.1
+        ------
+        - add fetch recipe
+        
+        0.0.13
+        -------
+        - fix zip safe flag
+        
+        0.0.11
+        -------
+        - Include eggs dependencies by default
+        - Modulate the script recipe to append in the PYTHONPATH all egg dependencies
+        found into the local eggs cache.
+        
+        0.0.10
+        -------
+        - Add pyc regeneration feature stolen from zc.buildout
+        
+        0.0.9
+        -------
+        - minor fix for run without minitage
+        - fix for long path/compilation flags
+        
+        0.0.8
+        -------
+        - minor fix for scm check outs
+        
+        0.0.7
+        -------
+        - add C compiler cflags/ldflags/makeopts customistation options
+        
+        0.0.6
+        -------
+        - Change the eggs installation way to do, now using easy_install everywhere
+        Also include a buildout option to allow to include eggs dependencies (ez-dependencies-true)
+        - Set the __doc__ variable in scripts to fix some scripts like bzr.
+        
+        0.0.3
+        -------
+        - fix scm choice when there are eggs and url in the same part
+        
+        0.0.2
+        ------
+        - bugfix version
+        - fix linking problem
+        
+        0.0.1
+        ------
+        - Initial version
+        
+        
+        
+        
+Keywords: development buildout recipe
+Platform: UNKNOWN
+Classifier: Framework :: Buildout
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: GNU General Public License (GPL)
+Classifier: Topic :: Software Development :: Build Tools
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
