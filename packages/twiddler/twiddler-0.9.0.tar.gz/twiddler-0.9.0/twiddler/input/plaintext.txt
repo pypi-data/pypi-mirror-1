@@ -1,0 +1,184 @@
+Plain Text Input Parser
+
+  This document decribes the alternative input parser which takes
+  plain text as its input.
+
+  Substitution markers are formed by placing a dollar sign followed by
+  a series of alphanumeric characters. You can also identify a whole
+  section for substitution or repeating by using an xml-like tag.
+
+  Here's an example:
+
+  >>> from twiddler import Twiddler
+  >>> from twiddler.input.plaintext import PlainText
+
+  >>> t = Twiddler("""
+  ... To: $to1
+  ... From: webmaster@example.com
+  ... Subject: Order No $order_no
+  ... Dear $to2,
+  ... The following order is on it's way:
+  ... <items>$sku $description $quantity $code</items>
+  ... Sincerely,
+  ... ExampleCo Order Team""",input=PlainText)
+  >>> print t.render()
+  <BLANKLINE>
+  To: $to1
+  From: webmaster@example.com
+  Subject: Order No $order_no
+  Dear $to2,
+  The following order is on it's way:
+  $sku $description $quantity $code
+  Sincerely,
+  ExampleCo Order Team
+
+  As you can see, substitution markers are inserted unless replaced
+  but section markers are not displayed by default.
+
+  Now that we have parsed the input, we can perform normal twiddler
+  operations:
+
+  >>> t['to1'].replace('chris@simplistix.co.uk')
+  >>> t['order_no'].replace(str(1234))
+  >>> t['sku'].remove()
+ 
+  In fact, the identifiers for substitution and section markers are
+  indexed in the 'id' attribute:
+
+  >>> t.getBy(id='to2').replace('Chris Withers')
+  >>> row = t.getBy(id='items').repeater()
+  >>> orders = (('fish',2,'F00'),
+  ...           ('bread',5,'B01'),)
+  >>> for description,quantity,code in orders:
+  ...   r = row.repeat()
+  ...   r['description'].replace(description.capitalize())
+  ...   r['quantity'].replace(str(quantity))
+  ...   r['code'].replace(code)
+
+  Now we can see what the end result looks like:
+  >>> print t.render()
+  <BLANKLINE>
+  To: chris@simplistix.co.uk
+  From: webmaster@example.com
+  Subject: Order No 1234
+  Dear Chris Withers,
+  The following order is on it's way:
+   Fish 2 F00
+   Bread 5 B01
+  Sincerely,
+  ExampleCo Order Team
+
+  Nesting Sections
+ 
+    Sections can be nested with the plain text parser in much the same
+    way as they can in XML:
+
+    >>> t = Twiddler("""Consignment list:
+    ... <consignment>  
+    ...   Customer No: $customer_no
+    ...    <items>$name $quantity $price</items>
+    ...    </consignment>""",input=PlainText)
+    >>> def currency(n): return '%5.2f' % float(n)
+    >>> c = t['consignment'].repeater()
+    >>> for customer,items in ((1,(('apples',100,20.07),
+    ...                            ('oranges',54,25),)),
+    ...                        (2,(('pears',99,21),
+    ...                            ('grapefruit',1,1.27),)),):
+    ...    n = c.repeat()
+    ...    n['customer_no'].replace(str(customer))
+    ...    i = n['items'].repeater()
+    ...    for name,quantity,price in items:
+    ...      ni = i.repeat()
+    ...      ni['name'].replace('%-10s'%name)
+    ...      ni['quantity'].replace('%3i'%quantity)
+    ...      ni['price'].replace(price,filters=currency)
+    >>> print t.render()
+    Consignment list:
+    <BLANKLINE>
+      Customer No: 1
+       apples     100 20.07
+       oranges     54 25.00
+    <BLANKLINE>
+      Customer No: 2
+       pears       99 21.00
+       grapefruit   1  1.27
+    <BLANKLINE>
+
+  Whitespace and Repeating
+
+    With substitution markers, no whitespace is repeated when a marker
+    is used in a repeat operation:
+
+    >>> t = Twiddler("$1 $2*",input=PlainText)
+    >>> n1 = t['1'].repeater()
+    >>> j = n1.repeat('1,')
+    >>> j = n1.repeat('2')
+    >>> n2 = t['2'].repeater()
+    >>> j = n2.repeat('one,')
+    >>> j = n2.repeat('two')
+    >>> t.render()
+    u'1,2 one,two*'
+
+    With section markers, whitespace following the section is repeated
+    when a marker is used in a repeat operation:
+
+    >>> t = Twiddler("<1></1> \n <2></2>*",input=PlainText)
+    >>> n1 = t['1'].repeater()
+    >>> j = n1.repeat('1,')
+    >>> j = n1.repeat('2')
+    >>> n2 = t['2'].repeater()
+    >>> j = n2.repeat('one,')
+    >>> j = n2.repeat('two')
+    >>> t.render()
+    u'1, \n 2 \n one,two*'
+
+    If this behaviour causes layout problems, the solution is the
+    inclusion of an extra section marker:
+
+    >>> t = Twiddler("<dummy><1></1></dummy> \n <2></2>*",input=PlainText)
+    >>> n1 = t['1'].repeater()
+    >>> j = n1.repeat('1,')
+    >>> j = n1.repeat('2')
+    >>> n2 = t['2'].repeater()
+    >>> j = n2.repeat('one,')
+    >>> j = n2.repeat('two')
+    >>> t.render()
+    u'1,2 \n one,two*'
+
+  Including tags and dollar signs in output
+
+    If you want to include a literal dollar sign in your template
+    output, you can just include it in the template source:
+
+    >>> t = Twiddler("Price $$price",input=PlainText)
+    >>> t['price'].replace('%.2f' % (2.0/3.0))
+    >>> t.render()
+    u'Price $0.67'
+
+    If you wish to include something that looks like an XML tag, then
+    you should probably think harder about if you're using the right
+    input parser. However, it is possible:
+
+    >>> t = Twiddler("<rant>!??!</rant>",input=PlainText)
+    >>> t['rant'].replace(tag='rant',id=False)
+    >>> t.render()
+    u'<rant>!??!</rant>'
+
+  Unicode
+
+    The source for the plain text parser must either be unicode or
+    must be decodable into a unicode using the default python
+    decoder. If not, an exception will be raised:
+
+    >>> t = Twiddler("\xc2\x82",input=PlainText)
+    Traceback (most recent call last):
+    ...
+    UnicodeDecodeError:...
+
+    As with any other Twiddler, when rendered, a Twiddler created with
+    the plain text input parser will produce a unicode string,
+    regardless of the input:
+
+    >>> t = Twiddler("\xc2\x82".decode('utf-8'),input=PlainText)
+    >>> t.render()
+    u'\x82'

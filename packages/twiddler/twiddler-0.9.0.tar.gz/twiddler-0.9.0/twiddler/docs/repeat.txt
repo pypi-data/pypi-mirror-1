@@ -1,0 +1,243 @@
+Repeat Reference
+
+    This document covers all the ways of repeating elements found in a
+    Twiddler.
+   
+    Lets start with a simple example which shows how you repeat
+    elements by creating a repeater from an element and then calling
+    its repeat method.
+
+    With this example, we'll also show how the repeat method takes the
+    same parameters as replace and applies them to the newly inserted element:
+
+    >>> from twiddler import Twiddler
+    >>> t = Twiddler('''<html>
+    ...   <body>
+    ...   <div name="stuff">row</div>
+    ...   </body>
+    ... </html>''')
+    >>> e = t['stuff'].repeater()
+    >>> for i in range(3):
+    ...   e.repeat('row %i'%i,tag='span',id='row'+str(i))
+    <twiddler...>
+    >>> print t.render()
+    <html>
+      <body>
+      <span id="row0" name="stuff">row 0</span>
+      <span id="row1" name="stuff">row 1</span>
+      <span id="row2" name="stuff">row 2</span>
+      </body>
+    </html>
+
+    As can sort of be seen above, repeat returns the newly inserted
+    element. This is to allow us to easily do more complicated repeats:    
+
+    >>> t = Twiddler('''<html>
+    ...   <body>
+    ...   <div name="stuff"><span name="substuff"/></div>
+    ...   </body>
+    ... </html>''')
+    >>> e = t['stuff'].repeater()
+    >>> for i in range(4):
+    ...   if i % 2:
+    ...     e.repeat('Number %i' % i)
+    ...   else:
+    ...     n = e.repeat()
+    ...     c = n['substuff'].repeater()
+    ...     for j in range(2):
+    ...      c.repeat('Number %i' % j,name=False)
+    <twiddler...>
+    >>> print t.render()
+    <html>
+      <body>
+      <div name="stuff"><span>Number 0</span><span>Number 1</span></div>
+      <div name="stuff">Number 1</div>
+      <div name="stuff"><span>Number 0</span><span>Number 1</span></div>
+      <div name="stuff">Number 3</div>
+      </body>
+    </html>
+
+    This behaviour also lets us gracefully tackle problems that some
+    templating systems find difficult. For example, the generation of
+    HTML tables where the data is in columns, rather than rows:
+
+    >>> class Person: 
+    ...   def __init__(self,**kw): 
+    ...     self.__dict__.update(kw)
+    >>> people = [
+    ...   Person(firstname='Tom',surname='Smith'),
+    ...   Person(firstname='Dick',surname='Jones'),
+    ...   Person(firstname='Harry',surname='Doe'),
+    ... ]
+    >>> t = Twiddler('''<html>
+    ...   <body>
+    ...     <table>
+    ...       <tr>
+    ...         <th>First Name</th>
+    ...         <td name="firstname">John</td>
+    ...       </tr>
+    ...       <tr>
+    ...         <th>Last Name</th>
+    ...         <td name="lastname">Doe</td>
+    ...       </tr>
+    ...     </table>
+    ...   </body>
+    ... </html>''')
+    >>> firstname = t['firstname'].repeater()
+    >>> lastname = t['lastname'].repeater()
+    >>> for person in people:
+    ...   firstname.repeat(person.firstname)
+    ...   lastname.repeat(person.surname)
+    <twiddler...>
+    >>> print t.render()
+    <html>
+      <body>
+        <table>
+          <tr>
+            <th>First Name</th>
+            <td name="firstname">Tom</td>
+          <td name="firstname">Dick</td>
+          <td name="firstname">Harry</td>
+          </tr>
+          <tr>
+            <th>Last Name</th>
+            <td name="lastname">Smith</td>
+          <td name="lastname">Jones</td>
+          <td name="lastname">Doe</td>
+          </tr>
+        </table>
+      </body>
+    </html>
+
+    NB: Once an element has been turned into a repeater, it is removed
+    from the Twiddler as can be seen in this example:
+
+    >>> t = Twiddler('<node id="repeat">A node!</node>')
+    >>> print t.render()
+    <node id="repeat">A node!</node>
+    >>> r = t['repeat'].repeater()
+    >>> t.render()
+    u''
+    >>> t['repeat']
+    Traceback (most recent call last):
+    ...
+    KeyError:...
+
+    Now, you may be wondering how to repeat elements when the
+    structure to be generated is recursive, such as a navigation tree.
+    To explain this, lets look at an example of how to generate the
+    following xml: 
+
+    <a><b /><c><e /><f /></c><d /></a>
+
+    We'll start with the following data structure:
+
+    >>> data = {
+    ...     'tag':'a',
+    ...     'children':[
+    ...         {
+    ...         'tag':'b',
+    ...         'children':[]
+    ...         },
+    ...         {
+    ...         'tag':'c',
+    ...         'children':[
+    ...             {
+    ...             'tag':'e',
+    ...             'children':[]
+    ...             },
+    ...             {
+    ...             'tag':'f',
+    ...             'children':[]
+    ...             },
+    ...         ]
+    ...         },
+    ...         {
+    ...         'tag':'d',
+    ...         'children':[]
+    ...         },
+    ...    ]
+    ... }
+
+    The Twiddler we'll start with looks like this:
+
+    >>> t = Twiddler('<tag id="parent"><tag id="child"/></tag>')
+
+    Now we need to actually manipulate the above Twiddler to give us
+    the required output. Recursion like this is always tricky, but the
+    following pattern will solve most problems of this type:
+
+    >>> n = t['parent']
+    >>> p = n.clone()
+    >>> stack = [(data,n)]
+    >>> while stack:
+    ...     d,n = stack.pop(0)
+    ...     n.replace(p.clone(),tag=d['tag'],id=False)
+    ...     r = n['child'].repeater()
+    ...     for child in d['children']:
+    ...         stack.append((child,r.repeat(n)))
+   
+    Our Twiddler is now as we need it to be:
+
+    >>> print t.render()
+    <a><b /><c><e /><f /></c><d /></a>
+
+    The important method above is the 'clone' method of the
+    repeater. This returns a copy of the repeater element but does not
+    insert it into the Twidder in the same way that the 'repeat'
+    method does. The returned element can be inserted in place of any
+    element in any Twiddler by passing it as the content for an
+    appropriate replace call.
+
+    NB: While the element returned by the clone method can be
+    manipulated in the same way as any other Twiddler element, it
+    cannot be searched until it has been inserted into a Twiddler. As
+    can be seen in the following example, you'll get an error if you
+    try to do this:
+
+    >>> t = Twiddler('''<node id="root">
+    ... <node id="parent"><node id="child"/></node>
+    ... </node>''')
+    >>> e = t['parent'].clone()
+    >>> e.replace(tag="child",id=False)
+    >>> e['child'].replace(tag="subchild",id=False)
+    Traceback (most recent call last):
+    ...
+    AttributeError:...
+
+    However, once inserted into a Twiddler, everything works as
+    normal:
+
+    >>> t['root'].replace(e)
+    >>> e['child'].replace(tag="subchild",id=False)
+    >>> print t.render()    
+    <child><subchild /></child>
+    <BLANKLINE>
+
+    Another common way of generating recursive structures of this
+    nature is to use a recursive function. The only wart here is
+    that we need to do slightly more work to keep a pristine copy of
+    the source element and its children. The following shows how to
+    achieve this, using the example data structures from above:
+
+    >>> t = Twiddler('<tag id="parent"><tag id="child"/></tag>')
+
+    >>> def handle(d,n,p=None):
+    ...     if p is None:
+    ...         p = n.clone()
+    ...     n.replace(p.clone(),tag=d['tag'],id=False)
+    ...     r = n['child'].repeater()
+    ...     for child in d['children']:
+    ...         handle(child,r.repeat(n),p)
+    
+    To render the required xml, we now call the recursive function
+    with the complete data structure and the first parent:
+
+    >>> handle(data,t['parent'])
+   
+    Our Twiddler is now as we need it to be:
+
+    >>> print t.render()
+    <a><b /><c><e /><f /></c><d /></a>
+
+    

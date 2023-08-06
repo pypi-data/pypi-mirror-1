@@ -1,0 +1,161 @@
+Filters
+
+  Twiddler allows the use of filters to manipulate text that is
+  inserted by the 'replace' and 'repeat' method of TwiddlerElements.
+  In fact, by default, a filter is used that will replace characters
+  that mean something in xml and html with their escaped equivalents:
+
+    >>> from twiddler import Twiddler
+    >>> t = Twiddler('''<html>
+    ...   <body id="body">
+    ...   </body>
+    ... </html>''')
+    >>> t['body'].replace('<div/>foo & bar',title='<baz> & <bob>')
+    >>> print t.render()
+    <html>
+      <body id="body" title="&lt;baz&gt; &amp; &lt;bob&gt;">&lt;div/&gt;foo &amp; bar</body>
+    </html>
+      
+  Now, in certain circumstances, you may want to override filtering
+  for a specific operation. In the above example, we may be
+  deliberately trying to insert html. In this case, filtering can be
+  turned off:
+
+    >>> t['body'].replace('<div id="foo">foo</div>',title=False,filters=False)
+    >>> print t.render()
+    <html>
+      <body id="body"><div id="foo">foo</div></body>
+    </html>
+
+  NB: Inserting tagged content in this way does not created new
+      elements in the twiddler:
+
+    >>> t['foo']
+    Traceback (most recent call last):
+    ...
+    KeyError:...
+
+  You may also want to provide your own filters for specific
+  operations. A common example of this is for internationalising
+  content. In this case you will likely have a function that can be
+  imported to do the translation:
+
+    >>> phrases = {'hello':'bonjour'}
+    >>> def translate(phrase):
+    ...     return phrases.get(phrase,'untranslated: '+phrase)
+    
+  This can now be used as a filter as follows:
+  
+    >>> t['body'].replace('hello',title='hello',filters=(translate,))
+    >>> print t.render()
+    <html>
+      <body id="body" title="bonjour">bonjour</body>
+    </html>
+ 
+  As an aside, some translation functions require the translation
+  domain to be supplied: 
+
+    >>> domains = {'mydomain':{'hello':'bonjour'}}
+    >>> def anothertranslate(domain,phrase):
+    ...     return domains.get(domain).get(phrase,'untranslated: '+phrase)
+
+  Where this is the case, you can manually use the function
+  prior to the twiddler operation:
+
+    >>> t['body'].replace(anothertranslate('mydomain','hello'))
+    >>> print t.render()
+    <html>
+      <body id="body" title="bonjour">bonjour</body>
+    </html>
+  
+  You can also construct a helper object to use as a filter:
+
+    >>> class Translator:
+    ...   def __init__(self,domain):self.domain=domain
+    ...   def __call__(self,phrase):return anothertranslate(self.domain,phrase)
+    >>> translate = Translator('mydomain')
+    >>> t['body'].replace('hello',title='hello',filters=(translate,))
+    >>> print t.render()
+    <html>
+      <body id="body" title="bonjour">bonjour</body>
+    </html>
+
+  As you may have guessed from the syntax above, multiple filters can
+  be supplied. In this case, they are applied in order. To demonstrate
+  this, we need an example filter that is somewhat meaningless:
+
+    >>> mungers = {'hello':'we got hello!','bonjour':'we got bonjour!'}
+    >>> def munge(text):
+    ...     return mungers.get(text,text)
+
+  We can now see the results of applying filters in different orders:
+
+    >>> t['body'].replace('hello',filters=(translate,munge))
+    >>> print t.render()
+    <html>
+      <body id="body" title="bonjour">we got bonjour!</body>
+    </html>
+    >>> t['body'].replace(title='hello',filters=(munge,translate))
+    >>> print t.render()
+    <html>
+      <body id="body" title="untranslated: we got hello!">we got bonjour!</body>
+    </html>
+
+  We've seen already that specifying filters like this overrides any
+  default filters. This can have downsides:
+
+    >>> t['body'].replace('hello',title='<eep>',filters=translate)
+    >>> print t.render()
+    <html>
+      <body id="body" title="untranslated: <eep>">bonjour</body>
+    </html>
+
+  So, you can specify that the default filters should be included. You
+  do this by including True somewhere in the sequence of filters you
+  provide:
+
+    >>> t['body'].replace('hello',title='<eep>',filters=(translate,True))
+    >>> print t.render()
+    <html>
+      <body id="body" title="untranslated: &lt;eep&gt;">bonjour</body>
+    </html>
+
+  It may be that you want some filters, such as translation, to be
+  applied for every operation you perform on a twiddler. This can be
+  achieved by passing a sequence of filters during instantiation of
+  the twiddler:
+
+    >>> t2 = Twiddler('''<html>
+    ...   <body id="body">
+    ...   </body>
+    ... </html>''', filters=(translate,))
+
+  The translate filter will now be used for every operation, but the
+  default quoting filter will not be applied, since we did not include
+  it in the sequence:
+
+    >>> t2['body'].replace('hello',title='<eep>')
+    >>> print t2.render()
+    <html>
+      <body id="body" title="untranslated: <eep>">bonjour</body>
+    </html>
+  
+  Now, it may be that you want to do a set of operations where you
+  don't want the default filters supplied during instantiation of the
+  twiddler to be applied and yet you don't want to explicitly specify
+  the filters on every call. In this case, you should use the
+  setFilters method:
+
+    >>> t.setFilters(translate,munge,True)
+
+    >>> t['body'].replace('hello',title='<eep>')
+    >>> print t.render()
+    <html>
+      <body id="body" title="untranslated: &lt;eep&gt;">we got bonjour!</body>
+    </html>
+
+  As you can see, True can be used in the same way when calling
+  setFilters as when passing the filters parameter to a twiddler operation.
+  Be aware that calling setFilters modifies the twiddler in the same
+  way as a replace or repeat call does, so you may want to take a
+  clone of the source twiddler before calling it.
