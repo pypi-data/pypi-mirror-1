@@ -1,0 +1,170 @@
+plonehrm overview
+=================
+
+Plonehrm provides a worklocation and an employee contenttype plus some extra
+features like an employee updater (to make sure all employee modules are
+initialized when needed) and a parameter replacement tool.
+
+Employee updater
+----------------
+
+  >>> self.setRoles(['Manager'])
+  >>> self.loginAsPortalOwner()
+  >>> from Products.CMFCore.utils import getToolByName
+  >>> from Products.plonehrm.utils import updateEmployee
+
+The aim of the updater is to keep track of the employee modules that need to
+have an object pre-installed. Like the checklist employee module that needs a
+Checklist object with the id 'checklist' pre-created. So it needs the
+following pieces of info:
+
+- The ID associated with the employee module when it is created inside
+  the employee (the employee is a folderish item, btw).
+
+- The content type that we have to create (using above ID) if that ID
+  is missing inside our employee.
+
+We register two items:
+
+  >>> portal_props = getToolByName(self.portal, 'portal_properties')
+  >>> hrm_props = getattr(portal_props, 'plonehrm_properties')
+  >>> org_hrm_portal_types = hrm_props.portal_types_to_create
+  >>> settings = ['Folder,something', 'Document,another_thing']
+  >>> hrm_props.portal_types_to_create = tuple(settings)
+
+The utility can take care of checking whether employee modules are missing for
+a certain employee. As new employees always automatically add them, we'll test
+it with a simple folder.
+
+  >>> self.portal.invokeFactory('Folder', id='dummy')
+  'dummy'
+  >>> emp = self.portal.dummy
+
+The bare-bones "employee" is missing some items at the moment. A call
+to updateEmployee() adds the missing items.
+
+  >>> emp.something
+  Traceback (most recent call last):
+  ...
+  AttributeError: something
+  >>> updateEmployee(emp)
+  >>> emp.something
+  <ATFolder at ...>
+  >>> emp.another_thing
+  <ATDocument at ...>
+
+If we do it for real, we'll see that a real employee takes care of
+updating itself automatically right after creation.
+
+  >>> hrm_props.portal_types_to_create = org_hrm_portal_types
+  >>> self.portal.invokeFactory('WorkLocation', id='unit1')
+  'unit1'
+  >>> self.portal.unit1.invokeFactory('Employee', id='employee')
+  'employee'
+  >>> emp2 = self.portal.unit1.employee
+  >>> updateEmployee(emp2)
+
+
+Parameter replacement
+---------------------
+
+An extra service of plonehrm is to replace parameters in text. Just
+simple parameters like `$PARAM` or `[param]`. The goal is to have a
+set of documents somewhere that are treated as templates or example
+documents. Sample contracts, for example. A real contract (probably a
+subclass of ATDocument) could then copy the text of a chosen template.
+
+Inside such a template, things like wage, name, start date and so need
+to be filled in: that's where $NAME, $WAGE and so come in. The names
+and actual contents of those parameters will differ widely from site
+to site, also because you probably want to use $NAAM and $LOON in the
+Netherlands instead of $NAME and $WAGE: to make it more friendly for
+the actual users.
+
+First we want to get a list of parameters from a browser view. It will
+be called on a child of an employee module, so it should make sure it
+grabs its grandparent (the employee) and grand grandparent (the
+worklocation).
+
+  >>> emp2.invokeFactory('Document', id='dummy')
+  'dummy'
+  >>> context = emp2.dummy
+  >>> params = context.restrictedTraverse('@@substituter').params
+  >>> type(params)
+  <type 'dict'>
+
+The dummy python script returns the employee name and worklocation
+name by grabbing their titles. We'll set them here first to test.
+
+  >>> self.portal.unit1.setTitle("Worklocation name")
+  >>> self.portal.unit1.reindexObject()
+  >>> emp2.setLastName("Employee name")
+  >>> emp2.reindexObject()
+  >>> params = context.restrictedTraverse('@@substituter').params
+  >>> params['[employee_last_name]']
+  'Employee name'
+  >>> params['[worklocation_trade_name]']
+  'Worklocation name'
+
+With that browser view you can also do the conversion.
+
+  >>> portal.invokeFactory('Document', id='sample')
+  'sample'
+  >>> sampleText = "[employee_last_name],\n\nYou work at [worklocation_trade_name], you earn [your_wage]."
+
+Now we'll substitute the text. [employee_last_name] and
+[worklocation_trade_name] should be substituted, [your_wage] should stay
+as-is as that's no known parameter.
+
+  >>> view = context.restrictedTraverse('@@substituter')
+  >>> # Start of workaround for zest's kantoorsetup overrides.zcml
+  >>> from Products.plonehrm.browser.substitution import BaseSubstitutionView
+  >>> original_subs = BaseSubstitutionView.substitution_translations
+  >>> view.substitution_translations = original_subs
+  >>> view.keys = view.substitution_translations.values()
+  >>> view.keys.sort()
+  >>> # ^^^ could have been modified by a dirty overrides.zcml
+  >>> new = view.substitute(sampleText)
+  >>> print new
+  Employee name,
+  <BLANKLINE>
+  You work at Worklocation name, you earn [your_wage].
+
+There's a simple mechanism in place that allows localization of the
+substitution keys::
+
+  >>> view.substitution_translations = {
+  ...   '[employee_last_name]': '[medewerker_achternaam]',
+  ...   '[worklocation_trade_name]': '[vestiging_naam]',
+  ...   '[today]': '[vandaag]',
+  ... }
+  >>> sampleText = '[medewerker_achternaam],\n\nU werkt bij [vestiging_naam], U verdient [contract_loon].'
+  >>> new = view.substitute(sampleText)
+  >>> print new
+  Employee name,
+  <BLANKLINE>
+  U werkt bij Worklocation name, U verdient [contract_loon].
+
+When desired, the substitution format can be changed, the mechanism caters for
+e.g. $<name> substitution (and related problems)::
+
+  >>> view.substitution_translations = {
+  ...   '[employee_last_name]': '$aa',
+  ...   '[worklocation_trade_name]': '$a',
+  ...   '[today]': '$aaa',
+  ... }
+  >>> sampleText = '$aa,\n\nU werkt bij $a, U verdient $b.'
+  >>> new = view.substitute(sampleText)
+  >>> print new
+  Employee name,
+  <BLANKLINE>
+  U werkt bij Worklocation name, U verdient $b.
+
+For documentation purposes, we should be able to call the script on
+anything and still get a list of keys back, provided that we pass
+along a parameter to that effect.
+
+  >>> isinstance(view.keys, list)
+  True
+  >>> '[employee_official_name]' in view.keys
+  True
