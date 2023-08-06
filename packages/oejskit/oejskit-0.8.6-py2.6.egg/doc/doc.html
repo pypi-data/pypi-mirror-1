@@ -1,0 +1,340 @@
+<?xml version="1.0" encoding="latin1" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=latin1" />
+<meta name="generator" content="Docutils 0.5: http://docutils.sourceforge.net/" />
+<title>jskit</title>
+<link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+<body>
+<div class="document" id="jskit">
+<h1 class="title">jskit</h1>
+
+<p>jskit contains infrastructure and in particular a <a class="reference external" href="http://codespeak.net/py/dist/test/test.html">py.test</a>  plugin to
+enable running tests for JavaScript code inside browsers directly
+using py.test as the test driver. Running inside the browsers comes
+with some speed cost, on the other hand it means for example the code
+is tested against the real-word DOM implementations.</p>
+<p>The approach also enables to write integration tests such that the
+JavaScript code is tested against server-side Python code mocked as
+necessary. Any server-side framework that can already be exposed
+through WSGI (or for which a subset of WSGI can be written to
+accommodate the jskit own needs) can play along.</p>
+<p>jskit also contains code to help modularizing JavaScript code
+which can be used to describe and track dependencies dynamically
+during development and that can help resolving them statically when
+deploying/packaging.</p>
+<p>jskit depends on simplejson. It also uses <a class="reference external" href="http://mochikit.com/">MochiKit</a> - of
+which it ships a version within itself for convenience - for its own
+working though in does not imposes its usage on tested code.</p>
+<p>jskit was initially developed by <em>Open End</em> AB and is released under the MIT license.</p>
+<div class="section" id="basics-of-writing-and-running-tests">
+<span id="rest-of-the-docs"></span><h1>Basics of writing and running tests</h1>
+<p>For the simplest cases jskit allows to write tests simply as just
+JavaScript files. As an example one could have a <tt class="docutils literal"><span class="pre">jstest_example_any.js</span></tt>
+in a test directory in a project:</p>
+<pre class="literal-block">
+Tests = {
+
+test_simple: function() {
+    ais(21*2, 42)
+}
+
+}
+</pre>
+<p><tt class="docutils literal"><span class="pre">jstest_*.js</span></tt> is the globbing pattern used by jskit to recognize
+JavaScript test files. Each of these need to contain a <tt class="docutils literal"><span class="pre">Tests</span></tt>
+object with test methods starting with <tt class="docutils literal"><span class="pre">test_</span></tt>. <tt class="docutils literal"><span class="pre">ais</span></tt> is one of
+the assertion functions predefined by jskit, it raises an exception
+causing the test to fail if the two arguments are not equal (in
+JavaScript <tt class="docutils literal"><span class="pre">=</span></tt> sense).</p>
+<p>The suffix <tt class="docutils literal"><span class="pre">any</span></tt> separated by an underscore (<tt class="docutils literal"><span class="pre">_</span></tt>) in the test file name controls the kind of browsers the test should be run against, <tt class="docutils literal"><span class="pre">any</span></tt> is predefined by jskit to be</p>
+<ul class="simple">
+<li>Firefox and Safari on Mac OS X</li>
+<li>Internet Explorer and Firefox on Windows</li>
+<li>Firefox (started as <tt class="docutils literal"><span class="pre">firefox</span></tt>) otherwise (e.g. Linux)</li>
+</ul>
+<p>later we'll see how to define other groups of browsers.</p>
+<p>To run the test we need to use py.test with the jskit plugin
+activated, a <tt class="docutils literal"><span class="pre">conftest.py</span></tt> file at the top of the project with:</p>
+<pre class="literal-block">
+pytest_plugins = [&quot;jstests&quot;]
+</pre>
+<p>should work (see also the <a class="reference external" href="http://codespeak.net/py/dist/test/extend.html">py.test and plugin usage docs</a>).</p>
+<p>Running the test is just a matter of invoking <tt class="docutils literal"><span class="pre">py.test</span></tt> that has an installed jskit available on the Python path:</p>
+<pre class="literal-block">
+$ ../v/bin/py.test test/
+inserting into sys.path: /u/pedronis/scratch/oejskit-play/v/lib/python2.5/site-packages
+========================================= test session starts =========================================
+python: platform linux2 -- Python 2.5.2
+test object 1: /u/pedronis/scratch/oejskit-play/proj/test
+
+test/jstest_example_any.js .
+
+====================================== 1 passed in 2.52 seconds =======================================
+</pre>
+<p>(concretely here I'm using a <cite>virtualenv</cite> with both the <cite>py.lib</cite> and the <tt class="docutils literal"><span class="pre">oejskit</span></tt> egg installed in it)</p>
+<p>Tests from different <tt class="docutils literal"><span class="pre">Tests</span></tt> objects are run isolated in IFRAMEs
+which will also display test results enumerating both assertions and
+tests, not just tests. Each JavaScript <tt class="docutils literal"><span class="pre">test_</span></tt> method is run and its
+result reported by py.test as it would for Python tests. <tt class="docutils literal"><span class="pre">test_</span></tt>
+methods from a <tt class="docutils literal"><span class="pre">Tests</span></tt> object are run in alphabetical order.</p>
+</div>
+<div class="section" id="finding-javascript-code">
+<h1>Finding JavaScript code</h1>
+<p>Tests of course need to be able to load and refer to tested
+code. Let's assume for example that JavaScript code lives under the
+<tt class="docutils literal"><span class="pre">static/js</span></tt> directory in the project, for example there could be a
+file <tt class="docutils literal"><span class="pre">ex.js</span></tt> there:</p>
+<pre class="literal-block">
+function ok() {
+    return &quot;ok&quot;
+}
+</pre>
+<p>jskit way to refer to tested code is based on its modularity
+functionality, though for the simplest cases this is involve just
+providing enough information such that parts of the URL space can be
+mapped back to parts of the filesystem where JavaScript lives.</p>
+<p>Adding the following to the <tt class="docutils literal"><span class="pre">conftest.py</span></tt> of the project:</p>
+<pre class="literal-block">
+class jstests_setup:
+    staticDirs = {
+       '/static': os.path.join(os.path.dirname(__file__), 'static')
+    }
+    jsRepos = ['/static']
+</pre>
+<p>tells jskit to serve files from the <tt class="docutils literal"><span class="pre">static</span></tt> directory (the value in
+the <tt class="docutils literal"><span class="pre">staticDirs</span></tt> mapping) for the <tt class="docutils literal"><span class="pre">static</span></tt> subtree of the URL space
+(the key).</p>
+<p>The values in <tt class="docutils literal"><span class="pre">jsRepos</span></tt> list which prefixes of the URL space contain
+JavaScript, they play a bigger role when using the full modularity
+functionality, they are ncessary for the simple case too though.</p>
+<p>With this configuration we can write a test <tt class="docutils literal"><span class="pre">jstest_ok_any.js</span></tt> for
+the <tt class="docutils literal"><span class="pre">ok</span></tt> function in <tt class="docutils literal"><span class="pre">ex.js</span></tt> that looks like this:</p>
+<pre class="literal-block">
+OpenEnd.require(&quot;/static/js/ex.js&quot;)
+
+Tests = {
+test_ok: function() {
+   var res = ok()
+   ais(res, &quot;ok&quot;)
+}
+}
+</pre>
+<p>With the information provided jskit can infer that <tt class="docutils literal"><span class="pre">ex.js</span></tt> is needed for the test and serve it.</p>
+<p>Running all the tests now should give:</p>
+<pre class="literal-block">
+$ ../v/bin/py.test
+inserting into sys.path: /u/pedronis/scratch/oejskit-play/v/lib/python2.5/site-packages
+========================================= test session starts =========================================
+python: platform linux2 -- Python 2.5.2
+test object 1: /u/pedronis/scratch/oejskit-play/proj
+
+test/jstest_example_any.js .
+test/jstest_ok_any.js .
+
+====================================== 2 passed in 5.06 seconds =======================================
+</pre>
+</div>
+<div class="section" id="assertion-functions-and-helpers">
+<h1>Assertion functions and helpers</h1>
+<p>jskit predefine a set of functions to make assertions in tests,
+JavaScript not having an assertion statement at all</p>
+<ul class="simple">
+<li><tt class="docutils literal"><span class="pre">aok(condition</span> <span class="pre">[,</span> <span class="pre">label])</span></tt> which will succeed respectively fail
+depending on the JavaScript truth value of <tt class="docutils literal"><span class="pre">condition</span></tt></li>
+<li><tt class="docutils literal"><span class="pre">ais(value,</span> <span class="pre">expected</span> <span class="pre">[,</span> <span class="pre">label])</span></tt> which will succeed respectively
+fail depending on whether <tt class="docutils literal"><span class="pre">value</span></tt> and <tt class="docutils literal"><span class="pre">expected</span></tt> are equal in
+JavaScript <tt class="docutils literal"><span class="pre">=</span></tt> operator sense</li>
+<li><tt class="docutils literal"><span class="pre">aisDeeply(value,</span> <span class="pre">expected</span> <span class="pre">[,</span> <span class="pre">label])</span></tt> which differently from <tt class="docutils literal"><span class="pre">ais</span></tt>
+will recursively compare containers (JavaScript non-primitive
+objects and arrays) succeeding when they have the same
+properties/indexes sets with matching values in <tt class="docutils literal"><span class="pre">aisDeeply</span></tt> sense,
+for primitive objects it behaves like <tt class="docutils literal"><span class="pre">ais</span></tt></li>
+</ul>
+<p>There's another predefined helper <tt class="docutils literal"><span class="pre">insertTestNode</span></tt> which will return
+a new <tt class="docutils literal"><span class="pre">DIV</span></tt> node at the end of test page styled with a border and
+labeled with the test name, the node can then be used to host DOM
+fragments to be manipulated by the test. If a test using this feature
+fails it should then be easy to identify the relevant DOM part and
+eyeball it or inspect with tools such as Firebug.</p>
+</div>
+<div class="section" id="test-failures">
+<h1>Test failures</h1>
+<p>Given a failing test like (<tt class="docutils literal"><span class="pre">proj/fail/jstest_fail_any.js</span></tt>):</p>
+<pre class="literal-block">
+Tests = {
+
+test_fail: function() {
+    aisDeeply([1].concat([2, 3]), [1,[2,3]])
+}
+
+}
+</pre>
+<p>this is part of the kind of output to be expected at least when the test is run against Firefox which provides proper traceback information:</p>
+<pre class="literal-block">
+...
+           raise JsFailed(name, outcome['diag'])
+E           JsFailed: test_fail: FAILED:     Structures begin differing at:
+E           got[1] = 2
+E           expected[1] = 2,3
+E
+E           stack: Error()&#64;:0
+E           (&quot;isDeeply in test_fail in ?&quot;,&quot;    Structures begin differing at:\r\ngot[1] = 2\r\nexpected[1] = 2,3\r\n&quot;)&#64;http://localhost:49279/browser_testing/rt/testing-new.js:199
+E           (false,&quot;isDeeply in test_fail in ?&quot;,&quot;    Structures begin differing at:\r\ngot[1] = 2\r\nexpected[1] = 2,3\r\n&quot;)&#64;http://localhost:49279/browser_testing/rt/testing-new.js:217
+E           ([object Array],[object Array])&#64;http://localhost:49279/browser_testing/rt/testing-new.js:427
+E           ()&#64;http://localhost:49279/test/jstest_fail_any.js:6
+...
+</pre>
+<p>Notice that the line numbers and involved JavaScript files are presented (<tt class="docutils literal"><span class="pre">&#64;http://localhost:49279/test/jstest_fail_any.js:6</span></tt>).</p>
+</div>
+<div class="section" id="browser-kind-specifications">
+<h1>Browser kind specifications</h1>
+<p>On top of the predefined <tt class="docutils literal"><span class="pre">any</span></tt>, browser kind groupings against which
+to run tests can be defined that are meaningful to one's project. As
+we have seen these are used as suffixes for test files or as values
+for the later introduced <tt class="docutils literal"><span class="pre">jstests_browser_kind</span></tt> class attribute.</p>
+<p>All is needed is to define a <tt class="docutils literal"><span class="pre">jstest_browser_specs</span></tt> mapping in the <tt class="docutils literal"><span class="pre">conftest.py</span></tt> file, with the kinds as keys and lists of browser names as values:</p>
+<pre class="literal-block">
+jstests_browser_specs = {
+    'supported': ['firefox', 'iexplore', 'safari'],
+    'extrafeatures': ['safari']
+}
+</pre>
+<p>browser names themselves can also be used directly as kinds. Given the
+mapping <tt class="docutils literal"><span class="pre">jstests_basic_supported.js</span></tt>,
+<tt class="docutils literal"><span class="pre">jstests_extras_extrafeatures.js</span></tt> and in any case
+<tt class="docutils literal"><span class="pre">jstests_details_firefox.js</span></tt> or <tt class="docutils literal"><span class="pre">jstests_details_iexplore.js</span></tt>
+would be meaningful JavaScript test file names.</p>
+<p>With the plugin activated a <tt class="docutils literal"><span class="pre">py.test</span></tt> command-line option
+<tt class="docutils literal"><span class="pre">--jstests-browser-spec=JSTESTS_BROWSER_SPEC</span></tt> can also be used to
+define browser kinds as in:</p>
+<pre class="literal-block">
+--jstests-browser-spec any=firefox,safari --jstests-browser-spec extra=safari
+</pre>
+<p>As we see here <tt class="docutils literal"><span class="pre">any</span></tt> itself can be redefined this way or via the
+mapping.</p>
+</div>
+<div class="section" id="integration-testing">
+<h1>Integration testing</h1>
+<p>One central jskit feature is the ability to run JavaScript tests
+against server-side Python code setup through test code. For example
+one can add a <tt class="docutils literal"><span class="pre">test_integration.py</span></tt>:</p>
+<pre class="literal-block">
+from oejskit.testing import jstests_suite
+import cgi
+
+class TestIntegration(object):
+    jstests_browser_kind = 'any'
+
+    &#64;jstests_suite('test_integration.js')
+    def integration_server_side(self):
+        def server(environ, start_response):
+            p = environ['PATH_INFO']
+            start_response('200 OK', [('content-type', 'text/plain')])
+            q = cgi.parse_qs(environ['QUERY_STRING'])
+            if p == '/add':
+                a, b = int(q['a'][0]), int(q['b'][0])
+                return [str(a+b)]
+            elif p == '/sub':
+                a, b = int(q['a'][0]), int(q['b'][0])
+                return [str(a-b)]
+            return []
+
+        return server
+</pre>
+<p>with a parallelly located <tt class="docutils literal"><span class="pre">test_integration.js</span></tt>:</p>
+<pre class="literal-block">
+OpenEnd.require(&quot;/static/js/get.js&quot;)
+
+Tests = {
+
+test_add: function() {
+    var res = http_get(&quot;/add?a=2&amp;b=3&quot;)
+    ais(parseInt(res), 5)
+},
+
+test_sub: function() {
+    var res = http_get(&quot;/sub?a=6&amp;b=2&quot;)
+    ais(parseInt(res), 4)
+}
+
+}
+</pre>
+<p>This test code will result in the tests in <cite>test_integration.js`</cite> to
+be run while the testing framework is serving the WSGI application
+<tt class="docutils literal"><span class="pre">server</span></tt> at the root of the URL space. The code in
+<tt class="docutils literal"><span class="pre">integration_server_side</span></tt> will be run once before the JavaScript
+tests in the suite will be run, in a sense it is akin to a setup
+method but <a class="reference external" href="http://codespeak.net/py/dist/test/funcargs.html">funcargs</a>  can be requested in its arguments.</p>
+<p>The tests will be run for each browser identified by the kind put in
+<tt class="docutils literal"><span class="pre">jstests_browser_kind</span></tt>. Both <tt class="docutils literal"><span class="pre">jstests_browser_kind</span></tt> and the
+decorator <tt class="docutils literal"><span class="pre">jstests_suite</span></tt> are required to achieve this behavior,
+<tt class="docutils literal"><span class="pre">jstests_browser_kind</span></tt> marks that the tests in the class need to be
+executed with a browser available to control.</p>
+<p><tt class="docutils literal"><span class="pre">get.js</span></tt> here defines <tt class="docutils literal"><span class="pre">http_get</span></tt> a simple function wrapping  XMLHttpRequest t do synchronous GET requests.</p>
+<!-- XXX pointer to open/eval/travel -->
+</div>
+<div class="section" id="remote-browsers">
+<h1>Remote browsers</h1>
+<p>Contained in the <tt class="docutils literal"><span class="pre">oejskit</span></tt> package there is a module <tt class="docutils literal"><span class="pre">browser.py</span></tt>
+which can be used as standalone script. The script can be run as a
+server that allows starting browsers on a remote machine, this means
+that the platforms for the python/server-side test code and the
+platforms for target browsers don't need to coincide. The script can
+be simply be copied as standalone file and it just needs a plain
+python installed without further dependencies to run. The script uses
+HMAC and a secret token to secure its access though it is still
+recommend to run it behind a firewall.</p>
+<p>Setup servers to start browsers on the the relevant machine:</p>
+<pre class="literal-block">
+Z:\&gt;c:\Python26\python.exe browser.py server 10010
+JSTESTS_REMOTE_BROWSERS_TOKEN=eca424b610245337c80f32e3a08c50c6
+serving browsers on 10010...
+</pre>
+<p>On the machine that will drive the tests set one environment variable
+with the secret token, and another that lists separated by spaces
+<tt class="docutils literal"><span class="pre">&lt;hostname&gt;:&lt;port&gt;:&lt;browsers-separated-by-commas&gt;</span></tt> for the browser
+servers:</p>
+<pre class="literal-block">
+$ export JSTESTS_REMOTE_BROWSERS_TOKEN=eca424b610245337c80f32e3a08c50c6
+$ export JSTESTS_REMOTE_BROWSERS=bigboard:10010:iexplore
+$ ../v/bin/py.test --jstests-browser-spec any=iexplore,firefox
+inserting into sys.path: /u/pedronis/scratch/oejskit-play/v/lib/python2.5/site-packages
+======================================================= test session starts ========================================================
+python: platform linux2 -- Python 2.5.2 -- /u/pedronis/scratch/oejskit-play/v/bin/python
+test object 1: /u/pedronis/scratch/oejskit-play/proj
+
+test/jstest_example_any.js:1: proj.test.jstest_example_any.js[=iexplore][test_simple] PASS
+test/jstest_example_any.js:1: proj.test.jstest_example_any.js[=firefox][test_simple] PASS
+test/jstest_ok_any.js:1: proj.test.jstest_ok_any.js[=iexplore][test_ok] PASS
+test/jstest_ok_any.js:1: proj.test.jstest_ok_any.js[=firefox][test_ok] PASS
+test/test_integration.py:7: TestIntegration[=iexplore].integration_server_side[test_add] PASS
+test/test_integration.py:7: TestIntegration[=iexplore].integration_server_side[test_sub] PASS
+test/test_integration.py:7: TestIntegration[=firefox].integration_server_side[test_add] PASS
+test/test_integration.py:7: TestIntegration[=firefox].integration_server_side[test_sub] PASS
+
+==================================================== 8 passed in 28.39 seconds =====================================================
+</pre>
+<p>Firefox is not listed in the environment variable, so a local one is started or reused.</p>
+<p>There are also commands to shutdown browsers, respectively servers,
+they will also consider the environment variables to find their targets:</p>
+<pre class="literal-block">
+$ ../v/bin/python -m oejskit.browser cleanup iexplore
+
+$ ../v/bin/python -m oejskit.browser shutdown-servers
+</pre>
+<p>For convenience when setting up multiple machines there is the
+possibility to first generate a token and pass it in as an argument to
+the <tt class="docutils literal"><span class="pre">server</span></tt> command:</p>
+<pre class="literal-block">
+Z:\&gt;c:\Python26\python.exe browser.py gentoken
+eca424b610245337c80f32e3a08c50c6
+Z:\&gt;c:\Python26\python.exe browser.py server 10010 eca424b610245337c80f32e3a08c50c6
+serving browsers on 10010...
+</pre>
+</div>
+</div>
+</body>
+</html>
