@@ -1,0 +1,127 @@
+###########################
+Memberreplace control panel
+###########################
+
+The memberreplace control panel may be used to change an user against
+another one in:
+
+* ownership of contents
+* creators of content
+* sharings (local roles)
+* mutable groups
+
+Some settings
+#############
+
+    >>> content_root = self.portal
+
+Test access to control panel
+############################
+
+Misc resources for these tests:
+
+    >>> self.loginAsPortalOwner()
+    >>> self.browser.open('http://nohost/plone/@@memberreplace-controlpanel')
+    >>> self.browser.url.endswith('memberreplace-controlpanel')
+    True
+
+Creating the groups and users
+#############################
+
+Groups 'group1' and 'group2', users 'former' in 'group1' and 'newer'
+in 'group2'.
+
+    >>> dummy = portal.acl_users.userFolderAddGroup('group1', [])
+    >>> 'group1' in portal.acl_users.getGroupIds()
+    True
+    >>> dummy = portal.acl_users.userFolderAddGroup('group2', [])
+    >>> 'group2' in portal.acl_users.getGroupIds()
+    True
+    >>> portal.acl_users.userFolderAddUser('former', 'secret', ['Contributor'], [], groups=['group1'])
+    >>> portal.acl_users.userFolderAddUser('newer', 'secret', ['Contributor'], [], groups=['group2'])
+
+Preparing content and sharings
+##############################
+
+Manager makes some content
+==========================
+
+And we grant local role 'Reviewer' to user 'former' in self.folder.
+
+    >>> self.loginAsPortalOwner()
+    >>> self.folder.invokeFactory('Folder', 'manfolder')
+    'manfolder'
+    >>> manfolder = getattr(self.folder, 'manfolder')
+    >>> manfolder.manage_setLocalRoles('former', ['Reviewer'])
+    >>> manfolder.get_local_roles()
+    (('former', ('Reviewer',)), ('portal_owner', ('Owner',)))
+
+'former' user makes some contents
+=================================
+
+'former' user makes a 'folder/somefolder'.
+
+    >>> self.login('former')
+    >>> self.folder.invokeFactory('Folder', 'somefolder')
+    'somefolder'
+    >>> somefolder = getattr(self.folder, 'somefolder')
+    >>> somefolder
+    <ATFolder at ...>
+    >>> somefolder.Creator()
+    'former'
+    >>> somefolder.Creators()
+    ('former',)
+    >>> somefolder.owner_info()['id']
+    'former'
+    >>> somefolder.get_local_roles()
+    (('former', ('Owner',)),)
+
+Let's process
+#############
+
+The manager changes "former" by "newer" everywhere.
+
+    >>> self.loginAsPortalOwner()
+    >>> self.browser.open('http://nohost/plone/@@memberreplace-controlpanel')
+    >>> self.browser.url.endswith('memberreplace-controlpanel')
+    True
+
+    >>> from iw.memberreplace.browser.controlpanel import MemberReplaceControlPanel
+    >>> form = MemberReplaceControlPanel(self.portal, self.app.REQUEST)
+    >>> formdata = {
+    ...	    'former_member': 'former',
+    ...	    'new_member': 'newer',
+    ...	    'change_ownership': True,
+    ...	    'change_creator': True,
+    ...	    'change_sharings': True,
+    ...	    'change_groups': True,
+    ...     'dry_run': False,
+    ...	    'log_process': False}
+    >>> form._on_save(data=formdata)
+
+Checking the results
+####################
+
+'newer' is owner of somefolder.
+
+    >>> somefolder.owner_info()['id']
+    'newer'
+
+'newer' is creator of somefolder.
+
+    >>> somefolder.Creators()
+    ('newer',)
+
+'newer' is reviewer in manfolder.
+
+    >>> manfolder.get_local_roles()
+    (('newer', ('Reviewer',)), ('portal_owner', ('Owner',)))
+
+'newer' is in group1 and group2, 'former' is removed from 'group1'.
+
+   >>> group1 = portal.acl_users.getGroupById('group1')
+   >>> group1.getAllGroupMemberIds()
+   ['newer']
+   >>> group2 = portal.acl_users.getGroupById('group2')
+   >>> group2.getAllGroupMemberIds()
+   ['newer']
