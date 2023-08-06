@@ -1,0 +1,54 @@
+Using the lockd API
+===================
+
+lockd provides a light-weight implementation of a locking mechanism for
+long-running resources by maintaining lock files in a given directory.
+
+>>> import tempfile
+>>> lockdir = tempfile.mkdtemp()
+>>> from gocept.lockd.lockd import Lockd
+>>> daemon = Lockd(lockdir)
+
+Resources are identified by a string and clients performing the lock are
+identified by another string:
+
+>>> daemon.lock('resource1', 'client1')
+
+Once a resource is locked, it can not be locked again:
+
+>>> daemon.lock('resource1', 'client2')
+Traceback (most recent call last):
+Exception: Resource already locked by 'client1'
+
+However, other resources can be locked in parallel:
+
+>>> daemon.lock('resource2', 'client2')
+
+Clients, other than the client who locked a resource, can not unlock it:
+
+>>> daemon.unlock('resource1', 'client2')
+Traceback (most recent call last):
+Exception: Resource locked by 'client1' cannot be unlocked by 'client2'
+
+The client, who locked the resource, can unlock it again:
+
+>>> daemon.unlock('resource1', 'client1')
+
+Once unlocked, it can not be unlocked a second time:
+
+>>> daemon.unlock('resource1', 'client1')
+Traceback (most recent call last):
+Exception: Resource not locked
+
+
+IMPORTANT security note
+=======================
+
+Resource identification and client authorization are out of scope for
+lockd. It should only be used and exposed within a trusted environment.
+
+
+Cleanup:
+
+>>> import shutil
+>>> shutil.rmtree(lockdir)
