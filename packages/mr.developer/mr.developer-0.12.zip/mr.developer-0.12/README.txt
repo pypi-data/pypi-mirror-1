@@ -1,0 +1,62 @@
+Introduction
+============
+
+.. figure:: http://www.netsight.co.uk/junk/xkcd-buildout.png
+    :figwidth: image
+
+    Let Mr. Developer help you win the everlasting buildout battle!
+
+    (Remixed by Matt Hamilton, original from http://xkcd.com/303)
+
+``mr.developer`` is a ``zc.buildout`` extension which makes it easier to work with
+buildouts containing lots of packages of which you only want to develop some.
+The basic idea for this comes from Wichert Akkerman's ``plonenext`` effort.
+
+
+Usage
+-----
+
+You add ``mr.developer`` to the ``extensions`` option of your ``[buildout]``
+section. Then you can add the following options to your ``[buildout]``
+section:
+
+  ``sources-dir``
+    This specifies the default directory where your development packages will
+    be placed. Defaults to ``src``.
+
+  ``sources``
+    This specifies a section which lists the repository information of your
+    packages. The format is "<kind> <url> [path]". Where <kind> is either
+    ``svn``, ``hg`` or ``git``, <url> is the location of the repository and
+    the optional [path] is the base directory where the package will be
+    checked out (the name of the package will be appended), if it's missing,
+    then ``sources-dir`` will be used.
+
+  ``auto-checkout``
+    This specifies the names of packages which should be checked out during
+    buildout, packages already checked out are skipped.
+
+The following is an example of how your ``buildout.cfg`` may look like::
+
+  [buildout]
+  ...
+  extensions = mr.developer
+  sources = sources
+  auto-checkout = my.package
+
+  [sources]
+  my.package = svn http://example.com/svn/my.package/trunk
+  some.other.package = git git://example.com/git/some.other.package.git
+
+When you run buildout, you will get a script at ``bin/develop`` in your
+buildout directory. With that script you can perform various actions on the
+packages, like checking out the source code, without the need to know where
+the repository is located.
+
+For help on what the script can do, run ``bin/develop help``.
+
+If you checked out the source code of a package, you need run buildout again.
+The package will automatically be marked as an develop egg and, if it's listed
+in the section specified by the ``versions`` option in the ``[buildout]``
+section, the version will be cleared, so the develop egg will actually be
+used.
