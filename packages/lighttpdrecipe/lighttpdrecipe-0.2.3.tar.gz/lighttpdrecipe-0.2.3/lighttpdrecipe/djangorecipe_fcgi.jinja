@@ -1,0 +1,130 @@
+{%- set processes = processes or '4' -%}
+{%- set media_url = media_url or '/media' -%}
+{%- set media_root = media_root or buildout.buildout['directory'] + '/media/' -%}
+{%- set dir_listing = dir_listing or 'enable' -%}
+{%- set socket = redirect_to or buildout.django.project -%}
+{%- set bin_path = bin_path or buildout.buildout['bin-directory'] + '/django.fcgi' -%}
+{%- set document_root = buildout.buildout.directory -%}
+{%- set far_future_expiry = far_future_expiry or 'no' -%}
+
+{%- set rewrite_admin_media = rewrite_admin_media or 'yes' -%}
+{%- set admin_media_url = admin_media_url or "/admin_media" -%}
+{%- set admin_media_path = admin_media_path or buildout.django['location'] + '/django/contrib/admin/media/' -%}
+
+{%- set media = media or '' -%}
+
+{%- if rewrite_admin_media -%}
+    {%- set media = media + '\n' + admin_media_url + ' => ' + admin_media_path -%}
+{%- endif -%}
+
+{%- set media = media + '\n' + media_url + ' => ' + media_root -%}
+
+{%- if far_future_expiry is true -%}
+    {%- set expiry_period = expiry_period or '12 months' -%}
+{%- else -%}
+    {%- set expiry_period = expiry_period or '1 seconds' -%}
+{%- endif -%}
+
+{%- macro host_regexp(hosts) -%}
+    {%- if hosts.splitlines()|length > 1 -%}
+        {%- for h in host.splitlines() -%}({{ h.strip() }}){%- if not loop.last -%}|{%- endif -%}{%- endfor -%}
+    {%- else -%}
+        {{ hosts }}
+    {%- endif -%}
+{%- endmacro -%}
+
+{%- block config -%}
+{%- block host_condition -%}
+{%- if host is simple_host -%}
+$HTTP["host"] == "{{ host }}" {
+{%- else -%}
+$HTTP["host"] =~ "{{ host_regexp(host) }}" {
+{%- endif -%}
+{% endblock %}
+    {%- block configbody %}
+    {%- block documentroot %}
+    server.document-root = "{{ document_root }}"
+    server.follow-symlink = "enable"
+    dir-listing.activate = "{% if dir_listing is true %}enable{% else %}disable{% endif %}"
+    {%- endblock %}
+
+    {%- block fastcgi %}
+
+    fastcgi.server = (
+        "/fcgi" => (
+            (
+                "bin-path" => "{{ bin_path }}",
+                "socket" => "/tmp/{{ socket }}.socket",
+                "check-local" => "disable",
+                "max-procs" => {{ processes }},
+                "min-procs" => {{ processes }},
+            )
+        )
+    )
+    {%- endblock %}
+
+    {%- block aliasurl %}
+
+    {% if media -%}
+    alias.url = (
+        {%- for line in media.splitlines() %}
+        {%- if line.strip() %}
+        {%- set parts = line.split('=>') %}
+        "{{ parts[0].strip() }}" => "{{ parts[1].strip() }}",
+        {%- endif %}
+        {%- endfor %}
+    )
+    {%- endif %}
+    {%- endblock %}
+
+    {%- block rewrites %}
+
+    url.rewrite-once = (
+        {% if media %}
+        {%- for line in media.splitlines() %}
+        {%- if line.strip() %}
+        {%- set fromurl = line.split('=>')[0] -%}
+        "^({{ fromurl.strip() }}.*)$" => "/$1",
+        {% endif %}
+        {%- endfor %}
+        {%- endif -%}
+        "^(/.*)$" => "/fcgi$1",
+    )
+    {%- endblock %}
+
+    {%- block expiry %}
+    {% if media %}
+    expire.url = (
+        {%- for line in media.splitlines() %}
+        {%- if line.strip() %}
+        {%- set fromurl = line.split('=>')[0] %}
+        "{{ fromurl.strip() }}" => "{{ expiry_period }}",
+        {%- endif -%}
+        {%- endfor %}
+    )
+    {%- endif %}
+    
+    $HTTP["url"] =~ "^{{ media_url }}" {
+        expire.url = ( "" => "access {{ expiry_period }}" )
+    }
+    {%- endblock %}
+    {%- endblock %}
+
+    {% if options.extra %}
+    {{ options.extra }}
+    {% endif %}
+}
+
+{%- block redirects %}
+
+{% if redirect_from %}
+{%- if redirect_to is simple_host -%}
+$HTTP["host"] == "{{ redirect_from }}" {
+{%- else -%}
+$HTTP["host"] =~ "{{ host_regexp(redirect_from) }}" {
+{% endif %}
+    url.redirect = ( "^(/.*)" => "http://{{ redirect_to }}$1" )
+}
+{%- endif %}
+{%- endblock %}
+{% endblock %}
