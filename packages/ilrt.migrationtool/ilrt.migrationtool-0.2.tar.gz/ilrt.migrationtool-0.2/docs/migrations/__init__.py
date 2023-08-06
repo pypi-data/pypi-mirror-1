@@ -1,0 +1,3 @@
+# Note: you must import the migrations here for the migration tool to find it ...
+import migration1
+
