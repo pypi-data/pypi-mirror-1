@@ -1,0 +1,255 @@
+===========================================================
+Analyzing the Probabilistic Structure of a Software Project
+===========================================================
+
+:Author: Neil Martinsen-Burrell
+:Date: October 31, 2009
+
+Introduction
+============
+
+A Markov Chain model for the evolution of a software project depends on a
+number of parameters that determine the probabilities of each transition.  In
+turn, the probabilities determine the resulting structure of the project.  For
+a pre-existing software project, although its evolution has not been random,
+the existing structure *implies* something about the values of the
+parameters that would result in such a structure.  Another way to think about
+this is as a way of ensuring that the structures that result from a Markov
+Chain model are *realistic*.
+
+I consider here the Bazaar project (http://bazaar-vcs.org), an open-source
+version control system.  One convenient thing about analyzing this software
+product is that its version control history is well-cared for, readily
+available and of a moderate size.  Bazaar is a distributed version control
+system and it has been self-hosting through much of its history and thus
+Bazaar development takes place in a directed acyclic graph (DAG), rather than
+a straightforward line of development.  The analysis presented here doesn't
+consider multiple parents and so every revision is compared against its
+lefthand ancestor.  Bazaar has (currently) 4,771 mainline revisions with a
+total of 27,918 revisions in the DAG.
+
+Analysis
+========
+
+The Markov Chain model used by MCREPOGEN uses probabilistic information about
+two different types of changes: *mutations* which change the structure of the
+tree and *edits* which change the contents of a file, but not the structure of
+the tree.  There are three kinds of mutations: additions, deletions and
+renames, which can be applied to the two types of nodes in the tree: files and
+directories.  This makes for a total of seven types of changes that we track
+here.
+
+The analysis presented here proceeds by considering all 27,918 revisions in
+the Bazaar history relative to their lefthand ancestor.  Computing the
+difference between those two directory trees, we can count which of the seven
+types of changes occurred in that revision.  Having done this, we have a
+matrix with 27,918 rows and seven columns whose entries count the number of
+times that a particular change occurred in a particular revision.  Note that
+there can be rows of zeros in this matrix because there may be revisions in a
+version control tree that contain none of the changes detailed here.  (There
+are 104 such revisions in the Bazaar history.)
+
+Results
+=======
+
+File modifications are the most common change happening in 98.7\% (27,560) of
+the revisions.  Directory renames are the least common change, occuring in
+only 0.44\% (122) of the revisions.  For each type, the proportion of
+revisions in which at least one change of that type occurred is listed in the
+following table.
+
+.. table:: Frequencies for each type of change
+
+    ===================     ==========          ===================
+    Type of Change          Proportion          Number of Revisions
+    ===================     ==========          ===================
+    Files Modified          0.9872              27560
+    Files Added             0.1232              3439
+    Files Renamed           0.0352              983
+    Directories Added       0.0276              770
+    Files Removed           0.0256              715
+    Directories Removed     0.0065              181
+    Directories Renamed     0.0044              122
+    ===================     ==========          ===================
+
+Note that a single revision may include more than one of the types of changes.
+(There are 3692 such revisions in the Bazaar history.)
+
+Correlations
+------------
+
+Each row of this matrix can be thought of as a single observation of 7
+variables.  We can ask if these seven variables are correlated; that is, does
+variation in one variable imply to some degree variation in one of the other
+variables.  The *coefficient of determination* `R^2` is a measure of the
+correlation between two variables.  By computing the coefficient of
+determination between every pair of variables, we can form a matrix whose
+entries indicate the strength of the relationship between any two variables:
+
+.. table:: Coefficients of Determination for all pairs of variables
+
+    =======================  =====  =====  =====  =====  =====  =====
+    Type of Changes           (1)    (2)    (3)    (4)    (5)    (6) 
+    =======================  =====  =====  =====  =====  =====  =====
+    (1) Files Modified        ---    ---    ---    ---    ---    ---  
+    (2) Files Added          0.080   ---    ---    ---    ---    ---  
+    (3) Files Renamed        0.082  0.044   ---    ---    ---    ---  
+    (4) Directories Added    0.082  0.882  0.112   ---    ---    ---  
+    (5) Files Removed        0.022  0.029  0.021  0.038   ---    ---  
+    (6) Directories Removed  0.049  0.060  0.130  0.091  0.057   ---  
+    (7) Directories Renamed  0.042  0.006  0.061  0.022  0.000  0.013
+    =======================  =====  =====  =====  =====  =====  =====
+
+The matrix is symmetric because the correlation between two variables doesn't
+depend on the order in which it is computed.  There is only one significantly
+large correlation in this matrix between the second and fourth columns.  These
+are the "files added" and "directories added" variables, where significant
+correlation could be expected because new files are often added in new
+directories rather than in existing directories.  The most basic model for
+adding files and directories would consider these two variables to be
+independent, but this is evidence that in real software projects, these two
+variables are correlated.
+
+
+Probabilistic Modeling
+----------------------
+
+Having identified when the different sorts of changes occur, we can see that
+for all but file modifications, those changes don't happen in the great
+majority of revisions.  This means that we should consider a conditional
+probability model where there is a probability that a change happens or not,
+then given that the change had occurred, we consider the probabilities that a
+change of a certain size happened.  Given that a certain type of change has
+occurred, that is, looking at the non-zero entries of a particular column of a
+matrix, we can consider the distribution of those numbers.  Once we know that
+a change of that type has occurred, we need to to know how *large* the change
+was, that is how *many* files/directories were affected.
+
+The following table presents the median, the third quartile and the maximum
+value for the nonzero entries in each of out seven columns of data.  The
+minimum of the nonzero entries is 1 in all cases, as is the first quartile.
+
+.. table:: Median, third quartile and maximum for each type of change
+
+    =================== ======  ==============  =======
+    Type of Change      Median  Third Quartile  Maximum
+    =================== ======  ==============  =======
+    Files Modified      2       4               698
+    Files Added         2       6               825
+    Files Renamed       1       2               47
+    Directories Added   1       3               71
+    Files Removed       1       2               80
+    Directories Removed 1       2               6
+    Directories Renamed 1       2               13
+    =================== ======  ==============  =======     
+
+The distributions are significantly heavy-tailed, with the maximum values far
+exceeding the quartiles.  Another way to say that is that each column has a
+large number of statistical outliers.  One of the challenges in developing a
+traditional statistical model to match this data is to design distributions
+that can produce these anomalously large events.
+
+Another way to view the distribution data is to look at histograms of the data
+which show the number of events in each category.  This provides a visual
+description of the data and in its form suggests appropriate distributions for
+further statistical modeling.
+
+.. figure:: bzrdev_graphical.png
+    :scale: 60%
+
+    Relative frequency histograms for each type of change
+
+As above, we can see that the distributions are skewed to the right and that
+in every case, modifying a single file is the mode.  There are multiple
+smaller peaks in some of the distributions, but these are the ones with the
+smallest number of samples, so it is possible that they are just sampling
+errors in the tail of the distribution, which we should expect to be hard to
+capture without a large sample involving that type of change.
+
+
+Universality
+============
+
+To study whether or not the probabilistic features identified above are
+universal or not, we consider two other open source software projects, one
+much larger than Bazaar and one smaller.  The large project is Emacs, an
+extensible text editor with 105,518 revisions in the history.  The small
+project is Pida, an Integrated development environment framework with 2190
+revisions in its history.  The following figures give the same graphical
+summaries as shown above, giving the relative frequency of how many
+files/directories were affected in revisions where such a change occurred.
+
+.. figure:: emacs_graphical.png
+    :scale: 60%
+
+    Relative frequency histograms for Emacs
+
+.. figure:: pida_graphical.png
+    :scale: 60%
+
+    Relative frequency histograms for Pida
+
+There are some obvious differences among the projects, but the overall
+structure of the distributions (skewed-right, unimodal, heavy-tailed) are
+remarkably similar.  Some of the most obvious differences come from the way
+that version control systems track changes.  Both Emacs and Pida were version
+controlled in tools that did not track renames (CVS and Mercurial
+respectively) and thus there are no revisions with moved files or moved
+directories.  The Emacs history has a much higher proportion of changes that
+affect only a single file or directory.  While such a difference might be
+explained as being due to the language in which each project is written (C for
+Emacs vs. Python for Bazaar), we can also appreciate such a difference as a
+phenomenological description of a difference between the development processes
+of the three projects.
+
+Fitting
+=======
+
+For the purpose of simulating source code histories that are similar to these
+projects, it is necessary to fit theoretical probability distributions to the
+empirical frequency distributions shown in the above figures.  For each type
+of change, we will use the same probabilistic model (motivated by the
+similarities in the above figures) but with different parameters for each type
+of change.  We use the conditional probability model mentioned earlier as a
+first step:  with probability `p_zero` no change of a given type occurs.  With
+probability `1 - p_zero` some change of that type occurs.  The best estimate
+for `p_zero` is simply the proportion of observations in which no change of
+that type occurred.
+
+In the situation where a change has occurred, for the size of the resulting
+change, we will use a geometric random variable inspired by the histograms
+seen above.  If `X` is a geometric random variable with success probability
+`p`, then the value of `X` represents the number of the trial with the first
+success in a sequence of independent Bernoulli trials where each one succeeds
+with probability `p`.  `X` has mean `1/p` and standard deviation
+`(1-p)/p^2`.  By changing `p`, we can find distributions that
+optimally fit the observed data.  We define optimality to mean the least
+squared difference between the observed and theoretical frequency
+distributions.
+
+The fitted distributions are shown below for the Bazaar project.  They give
+the correct structure with surprising agreement between the observations and
+the data for a fit with only a single free parameter.
+
+.. figure:: bzrdev_fit.png
+    :scale: 60%
+
+    Fitted geometric distributions for each type of change
+
+The same type of distribution also gives good agreement with the observed
+frequencies in the case of the other two projects as well.
+
+
+Conclusion
+==========
+
+We considered here the probabilities of certain types of changes occurring in
+the history of software projects.  We determined the frequency with which
+the different types of changes occurred, noting that in many cases there was a
+very large probability that no change of that type occurred in a given
+revision.  Given that a change of a certain type did occur, we considered the
+number of files/directories affected by that change.  Looking at empirical
+observations for a variety of software projects led us to fitting a geometric
+random variable which gave good agreement with the observations.  This
+probabilistic picture of the evolution of a software project can now be used
+to simulate version control histories that are realistic in some sense.
