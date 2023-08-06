@@ -1,0 +1,277 @@
+Checklist employee module
+=========================
+
+Add a checklist:
+
+    >>> self.setRoles(['Manager'])
+    >>> from Products.CMFPlone.utils import _createObjectByType
+    >>> portal.portal_types['Checklist'].global_allow = True
+    >>> ignored = portal.invokeFactory('Checklist', id='checklist')
+    >>> portal['checklist']
+    <Checklist at /plone/checklist>
+
+Call our checklist view:
+
+    >>> view = portal.restrictedTraverse('checklist/@@checklistview')
+    >>> view
+    <Products.Five.metaclass.ChecklistView object at ...>
+
+Grab our portal_checklist tool:
+
+    >>> from Products.CMFCore.utils import getToolByName
+    >>> tool = getToolByName(portal, 'portal_checklist')
+    >>> tool
+    <ChecklistTool at /plone/portal_checklist>
+
+The initial list of default items is empty, so a newly created checklist item
+also has an empty list.
+
+    >>> tool.getDefaultItems()
+    ()
+    >>> tool.getDefaultManagerItems()
+    ()
+    >>> portal.checklist.getAllItems()
+    ()
+    >>> portal.checklist.getAllManagerItems()
+    ()
+    >>> portal.checklist.remainingItems()
+    ()
+    >>> portal.checklist.remainingManagerItems()
+    ()
+
+If we add a item to the tool and create a new checklistitem object, it ought
+to have that item, too.
+
+    >>> tool.addItem('Read harry potter, book 7')
+    <plonehrm.checklist.content.checklist.CheckListItem object at ...>
+    >>> tool.getDefaultItems()
+    ('Read harry potter, book 7',)
+    >>> _createObjectByType('Checklist', portal, 'checklist2')
+    <Checklist at /plone/checklist2>
+    >>> portal.checklist2.getAllItems()
+    ('Read harry potter, book 7',)
+    >>> portal.checklist2.remainingItems()
+    ('Read harry potter, book 7',)
+
+
+Same holds for manager items in the list.
+
+    >>> tool.addManagerItem('See harry potter movie 5')
+    <plonehrm.checklist.content.checklist.CheckListItem object at ...>
+    >>> tool.getDefaultManagerItems()
+    ('See harry potter movie 5',)
+    >>> _createObjectByType('Checklist', portal, 'checklist3')
+    <Checklist at /plone/checklist3>
+    >>> portal.checklist3.getAllManagerItems()
+    ('See harry potter movie 5',)
+    >>> portal.checklist3.remainingManagerItems()
+    ('See harry potter movie 5',)
+
+The original checklist item should still be 'empty':
+
+    >>> portal.checklist.getAllItems()
+    ()
+
+If we add another item, but tell the add method to add it to all existing
+checklists, we ought to see it appear on existing items, too.
+
+    >>> tool.addItem('Drink butterbeer', addToAll=True)
+    <plonehrm.checklist.content.checklist.CheckListItem object at ...>
+    >>> tool.getDefaultItems()
+    ('Read harry potter, book 7', 'Drink butterbeer')
+    >>> _createObjectByType('Checklist', portal, 'checklist4')
+    <Checklist at /plone/checklist4>
+    >>> portal.checklist4.getAllItems()
+    ('Read harry potter, book 7', 'Drink butterbeer')
+    >>> portal.checklist2.getAllItems()
+    ('Read harry potter, book 7', 'Drink butterbeer')
+    >>> portal.checklist.getAllItems()
+    ('Drink butterbeer',)
+
+Adding the same item another time doesn't really add it, when in the
+tool.
+
+    >>> tool.addItem('Drink butterbeer', addToAll=True)
+    >>> tool.getDefaultItems()
+    ('Read harry potter, book 7', 'Drink butterbeer')
+
+In the content type adding an item a second time is allowed,
+except when we call the addItem method with a special setting.
+
+    >>> portal.checklist.getAllItems()
+    ('Drink butterbeer',)
+    >>> portal.checklist.addItem('Drink butterbeer')
+    >>> portal.checklist.getAllItems()
+    ('Drink butterbeer', 'Drink butterbeer')
+    >>> portal.checklist.deleteItem('Drink butterbeer')
+    >>> portal.checklist.getAllItems()
+    ('Drink butterbeer',)
+    >>> portal.checklist.addItem('Drink butterbeer', allow_double=False)
+    >>> portal.checklist.getAllItems()
+    ('Drink butterbeer',)
+
+
+Now we test a potential bug with setting the id. With the previous
+version, the id set to an item was the length of the items list. So if
+the list add three items, their ids were [1, 2, 3].
+If the second item was deleted and a new one was added, the ids would
+have been [1, 3, 3].
+This case was not a real problem has users were not able to delete
+items. Now they have this possibility, so we must ensure that ids are
+correctly set.
+
+    >>> tool.addItem('Read harry potter, book 8')
+    <plonehrm.checklist.content.checklist.CheckListItem object at ...>
+    >>> tool.addItem('Read harry potter, book 9')
+    <plonehrm.checklist.content.checklist.CheckListItem object at ...>
+    >>> [item.id for item in tool.getDefaultItems(objects = True)]
+    [1, 3, 4, 5]
+
+The id '2' is missing because it correspond to a manager item.
+
+We test the potential bug.
+    >>> tool.deleteItem(4)
+    >>> tool.addItem('Read harry potter, book 10')
+    <plonehrm.checklist.content.checklist.CheckListItem object at ...>
+    >>> [item.id for item in tool.getDefaultItems(objects = True)]
+    [1, 3, 5, 6]
+
+Now we check that if the last item is deleted, its id will not be used
+by the next item added.
+
+    >>> tool.deleteItem(6)
+    >>> tool.addItem('Read harry potter, book 11')
+    <plonehrm.checklist.content.checklist.CheckListItem object at ...>
+    >>> [item.id for item in tool.getDefaultItems(objects = True)]
+    [1, 3, 5, 7]
+
+
+Now we remove the items to avoid conflict with the other tests.
+    >>> tool.deleteItem(5)
+    >>> tool.deleteItem(7)
+    >>> tool.getDefaultItems()
+    ('Read harry potter, book 7', 'Drink butterbeer')
+
+We ensure that normal checklist have the same behaviour.
+
+    >>> [item.id for item in portal.checklist4.getAllItems(objects = True)]
+    [1, 2]
+    >>> portal.checklist4.addItem('grep')
+    >>> portal.checklist4.addItem('blabla')
+
+    >>> [item.id for item in portal.checklist4.items]
+    [1, 2, 3, 4, 5]
+
+    >>> portal.checklist4.deleteItem('grep')
+    >>> portal.checklist4.addItem('fich')
+
+    >>> [item.id for item in portal.checklist4.items]
+    [1, 2, 3, 5, 6]
+
+Now we check that the id of the last item can not be reused if this
+one is deleted.
+    >>> portal.checklist4.deleteItem('fich')
+    >>> portal.checklist4.addItem('grep blabla fich')
+    >>> [item.id for item in portal.checklist4.items]
+    [1, 2, 3, 5, 7]
+
+Now the delete those items to avoid conflict with other tests.
+    >>> portal.checklist4.deleteItem('blabla')
+    >>> portal.checklist4.deleteItem('grep blabla fich')
+
+    >>> [item.id for item in portal.checklist4.items]
+    [1, 2, 3]
+
+When adding items, html special characters are escaped.
+    >>> portal.checklist4.addItem('I <will> be escaped.')
+    >>> item = portal.checklist4.items[-1]
+    >>> item.text
+    'I &lt;will&gt; be escaped.'
+
+When editing an item, special characters are also escaped.
+    >>> portal.checklist4.editItem(item.id, 'I\'m <escaped> again.')
+    >>> item.text
+    "I'm &lt;escaped&gt; again."
+
+Now we can delete the escaped item only if we use the escaped text.
+    >>> item.id
+    8
+    >>> portal.checklist4.deleteItem("I'm <escaped> again.")
+    >>> [item.id for item in portal.checklist4.items]
+    [1, 2, 3, 8]
+
+    >>> portal.checklist4.deleteItem("I'm &lt;escaped&gt; again.")
+    >>> [item.id for item in portal.checklist4.items]
+    [1, 2, 3]
+
+Permissions
+-----------
+
+``Products.plonehrm``'s normal employeemodule workflow applies, so only
+HrmManagers and WorklocationManagers can edit. There is one extra restriction:
+the manager checklist items can only be edited by the HrmManager, not by the
+WorklocationManager.
+
+We define two extra permissions:
+
+    >>> self.portal.permission_settings('plonehrm: Modify manager checklist')
+    [{...}]
+    >>> self.portal.permission_settings('plonehrm: Modify checklist')
+    [{...}]
+
+Plonehrm's permissions are also still available:
+
+    >>> checkPermission = self.portal.portal_membership.checkPermission
+    >>> self.portal.permission_settings('plonehrm: View hrm content')
+    [{...}]
+
+We add sample members:
+
+    >>> self.portal.portal_membership.addMember('admin', 'secret', ['Manager', 'HrmManager'], [])
+    >>> self.portal.portal_membership.addMember('wlemployee', 'secret', ['WorklocationEmployee'], [])
+    >>> self.portal.portal_membership.addMember('wlmanager', 'secret', ['WorklocationManager'], [])
+    >>> checkPermission = self.portal.portal_membership.checkPermission
+
+A check to make sure the WorklocationManager role actually exists:
+
+  >>> 'WorklocationManager' in list(portal.__ac_roles__)
+  True
+
+And we dish out the needed local roles:
+
+  >>> self.portal.checklist.manage_addLocalRoles('wlmanager',
+  ...                                            ('WorklocationManager',))
+  >>> self.portal.checklist.manage_addLocalRoles('wlemployee',
+  ...                                            ('WorklocationEmployee',))
+
+The admin can edit:
+
+    >>> self.setRoles([])
+    >>> self.login('admin')
+    >>> method = self.portal.restrictedTraverse('checklist/setCheckedItems')
+    >>> method = self.portal.restrictedTraverse('checklist/setCheckedManagerItems')
+
+The worklocation manager can only edit the normal items:
+
+    >>> self.login('wlmanager')
+    >>> checkPermission('plonehrm: View hrm content', self.portal.checklist)
+    1
+    >>> checkPermission('plonehrm: Modify checklist', self.portal.checklist)
+    1
+    >>> method = self.portal.restrictedTraverse('checklist/setCheckedItems')
+    >>> method = self.portal.restrictedTraverse('checklist/setCheckedManagerItems')
+    Traceback (most recent call last):
+    ...
+    Unauthorized: You are not allowed to access 'setCheckedManagerItems' in this context
+
+The worklocation employee cannot edit:
+
+    >>> self.login('wlemployee')
+    >>> method = self.portal.restrictedTraverse('checklist/setCheckedItems')
+    Traceback (most recent call last):
+    ...
+    Unauthorized: You are not allowed to access 'setCheckedItems' in this context
+    >>> method = self.portal.restrictedTraverse('checklist/setCheckedManagerItems')
+    Traceback (most recent call last):
+    ...
+    Unauthorized: You are not allowed to access 'setCheckedManagerItems' in this context
