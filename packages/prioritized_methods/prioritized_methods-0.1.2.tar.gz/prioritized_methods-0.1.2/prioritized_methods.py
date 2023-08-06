@@ -1,0 +1,172 @@
+"""
+A :class:`PrioritizedMethod` and :class:`PrioritizedAround`
+:class:`peak.rules.Method` subclasses which can disambiguate ambiguous methods
+with a ``prio`` attribute in the Method's body (ie: the function being
+decorated with ``when``/``around``).
+
+This module provides two decorators, ``prioritized_around`` and
+``prioritized_when`` which behave like their ``peak.rules``
+counterparts except that they accept an optional ``prio`` argument which can
+be used to provide a comparable object that will be used to disambiguate
+situations in which more than rule applies to the given arguments and no rule
+is more specific than another. That is, situations in which an
+:exc:`peak.rules.AmbiguousMethods` would have been raised.
+
+This is useful for libraries which want to be extensible via generic functions
+but want their users to easily override a method without figuring out how to
+write a more specific rule or when it is not feasible.
+
+For example, TurboJson provides a ``jsonify`` function that looks like this::
+
+    >>> def jsonify(obj):
+    ...     "jsonify an object"
+    
+
+And extends it so it can handle SqlAlchemy mapped classes in a way
+similar to this one::
+
+
+    >>> from peak.rules import when
+
+    >>> def jsonify_sa(obj):
+    ...     print "You're a SA object and I'm going to jsonify you!"
+
+    >>> when(jsonify, "hasattr(obj, 'c')")(jsonify_sa) # doctest: +ELLIPSIS
+    <function jsonify_sa at ...>
+
+    >>> class Person(object):
+    ...     def __init__(self):
+    ...         self.c = "im a stub"
+
+    >>> jsonify(Person())
+    You're a SA object and I'm going to jsonify you!
+
+So far so good, however, when a user of the library wants to override the built
+in implementation it can become quite hard since they have to write a more
+specific rule which can be tedious, for example:
+
+hasattr(self, 'c') and isinstance(obj, Person)
+
+Notice the ``hasattr`` test, even though ``isinstance(obj, Person)`` implies it,
+just to make it more specific than the built in, this gets more cumbersome the
+more complicated the expression becomes.
+
+Else this is what happens::
+
+    >>> def jsonify_Person(obj):
+    ...     print "No way, I'm going to jsonify you!"
+
+    >>> when(jsonify, (Person,))(jsonify_Person) # doctest: +ELLIPSIS
+    <function jsonify_Person at ...>
+
+    >>> try:
+    ...     jsonify(Person())
+    ... except AmbiguousMethods:
+    ...     print "I told you, gfs can sometimes be a pain"
+    I told you, gfs can sometimes be a pain
+
+
+To remedy this situation ``prioritized_when`` can be used to provide an
+implementation that will override the one declared with ``when``::
+
+    >>> def jsonify_Person2(obj):
+    ...     print "No way, I'm going to jsonify you!"
+
+    >>> prioritized_when(jsonify, (Person,))(jsonify_Person2) # doctest: +ELLIPSIS
+    <function jsonify_Person2 at ...>
+
+    >>> jsonify(Person())
+    No way, I'm going to jsonify you!
+
+Notice that we didn't need a ``prio`` argument. This is because methods
+decorated with ``prioritized_when`` always override those that have been
+decorated with ``peak.rules.when``.
+
+Methods decorated with ``prioritized_when`` can also override other methods
+that have been decorated by the same decorator using the ``prio`` parameter,
+the one which compares greater wins, if both are equal
+:exc:`AmbiguousMethods` will be raised as usual.
+
+    >>> def jsonify_Person3(obj):
+    ...     print "Don't be so smart, I am, my prio is higher!"
+
+    >>> prioritized_when(jsonify, (Person,), 1)(jsonify_Person3) # doctest: +ELLIPSIS
+    <function jsonify_Person3 at ...>
+
+    >>> jsonify(Person())
+    Don't be so smart, I am, my prio is higher!
+"""
+
+from peak.util.decorators import decorate_assignment
+from peak.rules import Method, Around, Before, always_overrides, \
+                AmbiguousMethods
+from peak.rules.core import clone_function
+
+__all__ = ["prioritized_when", "prioritized_around", "PrioritizedMethod",
+           "PrioritizedAround"]
+
+class PrioritizedMethod(Method):
+    """
+    A :class:`peak.rules.Method` subclass that will merge ambiguous
+    methods giving preference to the one that has the ``prio`` attribute
+    in it's body that compares greater.
+    """
+    def merge(self, other):
+        """
+        Merge with other Methods giving priority to the one with the highest
+        ``prio`` attribute in the Method's body.
+
+        If both priorities are equal return :exc:`peak.rules.AmbiguousMethods`
+        """
+        my_prio = getattr(self.body, 'prio', 0)
+        other_prio = getattr(other.body, 'prio', 0)
+        if my_prio < other_prio:
+            return other
+        elif my_prio > other_prio:
+            return self
+        return AmbiguousMethods([self,other])
+
+class PrioritizedAround(PrioritizedMethod):
+    """
+    A :class:`PrioritizedMethod` subclass that has preference
+    over any other :class:`peak.rules.Method`
+    """
+
+always_overrides(Around, PrioritizedMethod)
+always_overrides(PrioritizedMethod, Method)
+always_overrides(PrioritizedAround, PrioritizedMethod)
+always_overrides(PrioritizedAround, Around)
+always_overrides(PrioritizedAround, Before)
+
+_prioritized_when = PrioritizedMethod.make_decorator('prioritized_when')
+def prioritized_when(f, pred=(), prio=0):
+    """
+    Extend a generic function with a new action. Optional parameter ``prio``
+    can be used to prioritize the new action in case adding it causes an
+    :exc:`peak.rules.AmbiguousMethod` exception when the generic function
+    is called.
+    """
+    def callback(frame, name, func, old_locals):
+        if hasattr(func, 'prio'):
+            func = clone_function(func)
+        assert not hasattr(func, 'prio'),"Oppps"
+        func.prio = prio
+        return _prioritized_when(f, pred, frame=frame)(func)
+    return decorate_assignment(callback, 2)
+
+_prioritized_around = PrioritizedAround.make_decorator('prioritized_around')
+def prioritized_around(f, pred=(), prio=0):
+    """
+    Extend a generic function with a new action. This action will be executed
+    before any action registered with ``prioritized_when``.
+    Optional parameter ``prio`` can be used to prioritize the new action in
+    case adding it causes an ``AmbiguousMethod`` exception when the generic
+    function is called.
+    """
+    def callback(frame, name, func, old_locals):
+        if hasattr(func, 'prio'):
+            func = clone_function(func)
+        assert not hasattr(func, 'prio'),"Oppps"
+        func.prio = prio
+        return _prioritized_around(f, pred, frame=frame)(func)
+    return decorate_assignment(callback, 2)
