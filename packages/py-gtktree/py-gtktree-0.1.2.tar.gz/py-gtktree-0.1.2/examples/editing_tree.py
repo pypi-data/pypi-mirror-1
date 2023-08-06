@@ -1,0 +1,123 @@
+#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+
+#--------------------------------------------------------------------------#
+# This file is part of Py-gtktree.                                         #
+#                                                                          #
+# Copyright (C) 2009 Paul Pogonyshev.                                      #
+#                                                                          #
+# This program is free software: you can redistribute it and/or modify it  #
+# under the terms of the GNU Lesser General Public License as published by #
+# the Free Software Foundation, either version 3 of the License, or (at    #
+# your option) any later version.                                          #
+#                                                                          #
+# This program is distributed in the hope that it will be useful, but      #
+# WITHOUT ANY WARRANTY; without even the implied warranty of               #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser #
+# General Public License for more details.                                 #
+#                                                                          #
+# You should have received a copy of the GNU Lesser General Public License #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.    #
+#--------------------------------------------------------------------------#
+
+# Demonstrates how it is possible to edit a RowObjectTreeStore.  All basic editing
+# operations plus drag'n'drop are possible.
+
+
+#-- Importing and other auxiliary stuff ------------------------------
+
+# If standalone, use Py-gtktree from the distribution, not installed.
+if __name__ == '__main__':
+    import os, sys
+    sys.path.insert (0, os.path.join (sys.path[0], os.pardir))
+
+try:
+    from gtktree.model import RowObjectTreeStore, DefaultTreeNode
+    from gtktree.util  import TreeViewUtils
+except ImportError:
+    sys.exit ("Please build Py-gtktree by executing 'python setup.py build' first")
+
+
+import gtk
+import os.path
+import random
+import sys
+
+
+#-- EXAMPLE: Creating the tree model ---------------------------------
+
+class Row (object):
+    def __init__(self, name = None, description = None):
+        self.name        = name
+        self.description = description
+
+store = RowObjectTreeStore ([(str, 'name'),
+                             (str, 'description')])
+
+
+#-- Loading UI definition --------------------------------------------
+
+ui = gtk.Builder ()
+ui.add_from_file (os.path.join (os.path.dirname (sys.argv[0]), 'editing_tree.ui.xml'))
+
+
+#-- EXAMPLE: Setting up the tree view --------------------------------
+
+tree_view = ui.get_object ('tree-view')
+
+tree_view.props.model       = store
+tree_view.props.reorderable = True
+
+tree_view.append_column (gtk.TreeViewColumn ('Name', gtk.CellRendererText (),
+                                             text = store.columns ('name')))
+
+tree_view.append_column (gtk.TreeViewColumn ('Description', gtk.CellRendererText (),
+                                             text = store.columns ('description')))
+
+
+#-- EXAMPLE: Various tree editing functions --------------------------
+
+def on_create_subtree (*ignored):
+    def create_random_children (node, depth):
+        for k in range (random.randint (1 if depth == 0 else 0, 3 - depth)):
+            child = DefaultTreeNode (Row ('Node %d' % random.randint (100, 1000)))
+            create_random_children (child, depth + 1)
+            node.child_nodes.append (child)
+
+            if depth == 0:
+                tree_view.expand_to_path (child.compute_path ())
+                tree_view.expand_row (child.compute_path (), True)
+
+    node = TreeViewUtils.get_selected_node (tree_view) [1]
+    create_random_children (node if node is not None else store.root, 0)
+
+def on_delete_selected (*ignored):
+    node = TreeViewUtils.get_selected_node (tree_view) [1]
+    if node is not None:
+        to_select = (node.next_node or node.previous_node or node.parent_node)
+        node.parent_node.child_nodes.remove (node)
+
+        if to_select is not store.root:
+            tree_view.set_cursor (to_select.compute_path ())
+
+
+#-- General UI setup -------------------------------------------------
+
+ui.connect_signals (locals ())
+
+main_window = ui.get_object ('main')
+main_window.connect ('destroy', lambda *ignored: gtk.main_quit ())
+
+main_window.show_all ()
+main_window.present ()
+
+gtk.main ()
+
+
+
+# Local variables:
+# mode: python
+# python-indent: 4
+# indent-tabs-mode: nil
+# fill-column: 90
+# End:

@@ -1,0 +1,997 @@
+===========================================
+ Py-gtktree: Pythonic Tree Models and More
+===========================================
+
+
+:Author:     Paul Pogonyshev
+:Contact:    pogonyshev@gmx.net
+:Copyright:  © 2008, 2009 Paul Pogonyshev
+
+
+.. contents::  Table of Contents
+
+
+-------------------
+ Document Overview
+-------------------
+
+This document describes Py-gtktree, a set of Pythonic implementations
+of ``gtk.TreeModel`` interface combined with utilities that simplify
+common tree-related tasks.  The document consists of `rationale for
+custom tree models`_, quick `cookbook`_ and, finally, an in-depth
+`reference`_.
+
+Read the rationale section if you are not sure why you should use
+these classes at all and what is problematic with standard GTK+
+implementations of the interface.  Skip to the cookbook to quickly
+start writing code and learn how to apply the models for your problem.
+And read the reference when you need to know more of what and how is
+possible to achieve.
+
+
+
+----------------------------------
+ Rationale for Custom Tree Models
+----------------------------------
+
+This section is abstract discussion trying to highlight
+inconsistencies of standard GTK+ tree models with Python programming
+and advantages of custom models.
+
+
+What’s Wrong with ``gtk.ListStore`` and ``gtk.TreeStore``
+*********************************************************
+
+Standard implementations of ``gtk.TreeModel`` interface —
+``gtk.ListStore`` and ``gtk.TreeStore`` — are written in C and only
+wrapped in PyGTK for access from Python.  Since in C there are no
+objects [#]_, these implementations are not written in object-oriented
+manner.
+
+Typically, data in modern programs is presented in form of objects.
+So, each row in a list or tree usually represents single object in
+code.  For instance, a row may contain name, email address and phone
+number taken from one instance of ``Person`` class.  With stock tree
+model implementations you need to manually extract data from such
+objects and represent it as a set of separate values.  This is not
+much of a problem for one-time model creation, but when you need the
+model to reflect the changes in its back-end or operate on data
+selected in a ``gtk.TreeView``, things start to get ugly.
+
+One quite common approach is to create a column (sometimes the only
+column at all) containing Python objects.  Then you can, for instance,
+use ``gtk.TreeViewColumn.set_cell_data_func()`` method to fetch data
+from that object and set properties on cell renderers.  However, this
+approach has certain flaws.  There is the practical difficulty in that
+it requires some additional code.  You still have to deal with those
+unwieldy ``gtk.TreeIter``, ``gtk.TreeRowReference`` etc. objects.  It
+can be viewed as a breach of model/view pattern where things are just
+done at wrong side — view, not model — though this is admittedly a
+corner case.  It is a workaround over unfortunate interface and, as a
+workaround, not nice at all.  Last but not least, you don’t get
+straightforward Pythonic access to objects in the model.
+
+
+.. [#] Actually, it is possible to implement objects in C, as
+   ``GObject`` proves.  However, it is not easy and requires a lot of
+   code just to define a class, not to mention virtual methods or
+   properties.  So, standard tree models *could* be object-oriented,
+   but were probably not made such to avoid forcing a lot of
+   complexities on users of the library.
+
+
+
+Object-Based Tree Models
+************************
+
+Py-gtktree defines a few new implementations of ``gtk.TreeModel``
+interface, aimed at solving the problem outlined in the previous
+section.  In these models each row directly corresponds to one object.
+Moreover, type of these objects is not fixed and you can use types
+defined in other parts of your program with small, if any,
+modifications.
+
+Most advantages of object-based tree models roughly correspond to the
+problems I see with standard ``gtk.TreeModel`` implementations.
+
+* There is no data duplication between your back-end and tree model,
+  as you can use the same objects in both places.
+
+* It is easier to swing rows around, because a row is one object, not
+  a bunch of loosely related fields.  This includes moving or copying
+  rows between different models.  Also, it is easier to relate user
+  selection with actual objects.
+
+* Practically no need to use ``gtk.TreeIter``\s,
+  ``gtk.TreeRowReference``\s, etc.  In general, interface is much
+  closer to being ‘natively Pythonic’.
+
+* Lazy loading (load-on-demand) of individual values and whole tree
+  structures.  That is not possible or very cumbersome to implement
+  with standard models.
+
+All in all, I consider these models easier to use than standard ones
+and easier to blend with your existing data structures.  The more
+complicated operations you perform on a data model, the more
+noticeable the difference is.
+
+Major disadvantage is, of course, speed.  Object-based models are
+implemented in Python and are therefore significantly slower than
+standard C-written ``gtk.ListStore`` and ``gtk.TreeStore``.  I didn’t
+measure actual difference, but it can easily be one or two orders of
+magnitude.  So, using object-based models is not recommended if you
+have many thousands of rows.  However, the speed of the models is
+probably comparable to one-column-as-Python-object workaround outlined
+in the previous section, although, again, I didn’t do any benchmarks.
+
+All implementations of ``gtk.TreeModel`` interface below are based on
+PyGTK helper called ``gtk.GenericTreeModel``.  It has that unfortunate
+property that it leaks *by default* [#]_, but all object-based models
+are carefully written to not leak.  Also note that your code *should
+not* depend on ``gtk.GenericTreeModel`` being a superclass: that can
+be changed later.
+
+
+.. [#] Due to technical reasons Python objects used for creating
+   ``gtk.TreeIter`` in the ``gtk.GenericTreeModel`` must have a
+   reference, else memory corruption can happen.  Therefore, by
+   default, all such objects are added a virtual reference that is
+   never removed, and so objects are leaked.  However, models below
+   all set ``leak_references`` to ``False`` to prevent this.
+   Py-gtktree models are written in such a way that objects used for
+   iterators are always referenced anyway.
+
+
+
+.. _Cookbook:
+
+--------------------------
+ Using Custom Tree Models
+--------------------------
+
+This section describes how to use object-based tree model
+implementations defined in module ``gtktree.model`` in your code.  See
+the reference_ section for details on specific methods and properties.
+
+
+Columns
+*******
+
+In object-based tree models columns mostly serve presentational
+purposes and do not enforce any particular structure on row objects.
+In particular, you can use the same objects in different models with
+different columns.  Columns are required by ``gtk.TreeModel``
+interface, but are not something models described here really depend
+on.
+
+A column for an object-based tree model is defined as a tuple of
+*type* and *attribute*.  The type can be either ``gobject.GType`` or
+certain Python types (see ``gtk.ListStore`` documentation for
+details).  Attribute can be either a string or any callable.  In the
+first case, column cell values will be retrieved as if with code
+``getattr (row_object, attribute)``.  Note that attributes can be
+anything Python supports, including properties.  In the second case,
+the callable will be invoked with one argument — the row object — and
+should return cell value.
+
+So, to summarize, you can create tree models like this::
+
+    def build_description (row_object):
+        ...  # Returns some string computed from 'row_object'.
+
+    store = RowObjectListStore ([(str, 'name')
+                                 (int, 'num_people'),
+                                 (str, build_description)])
+
+Tuple of column declarations on a model is available as read-only
+property ``columns``.  The tuple is a custom subclass with one extra
+operation: if you ‘call‘ it with an attribute, it will return column
+number for that attribute.  This is useful to create
+``gtk.TreeViewColumn`` objects and in general bind attributes for cell
+renderers.  E.g. with the model created above::
+
+    column = gtk.TreeViewColumn ('Name', gtk.CellRendererText (),
+                                 text = store.columns ('name'))
+
+Of course, nothing prevents you from hard-coding column numbers either
+(0 in this case).  Calling ``columns`` simply allows to avoid ‘magic
+numbers’.
+
+
+
+Modifying the Row Objects
+*************************
+
+Object-based tree models do not restrict contained objects in any way
+and do not interact with them except for all that ‘containing’ thing.
+One consequence is that it is impossible for models to automatically
+know when a contained object changes.  For instance, say you have some
+objects with attribute ``name`` in a model and the name of object
+``X`` changes.  Model, or more precisely, whatever displays it, needs
+to know that one row must be redrawn.  However, since model cannot
+detect the change itself you have to tell it yourself by calling
+``note_changes()`` method.
+
+In general, this is the only case when you need to explicitly emit any
+standard GTK+ signals on the model (``note_changes()`` is a more
+convenient variant of ``row_changed()``).  When you perform any
+*structural* modification of a model by adding, removing or reording
+rows or replacing one row object with another, such a change will be
+automatically detected and proper signal(s) will be emitted by the
+model itself.  But when you change the row object itself, you have to
+tell the model about that manually.
+
+This is not a flaw of object-based models.  While standard
+``gtk.ListStore`` and ``gtk.TreeStore`` don’t require you to call
+``row_changed()`` on them, they still force you to modify rows only by
+using model value setting methods.  Object-based models don’t restrict
+the way you change row objects in any way, but they need you to inform
+about such changes for proper operation.
+
+
+
+Using the List Store
+********************
+
+``gtktree.model.RowObjectListStore`` is a replacement for the standard
+``gtk.ListStore``.  It is a simple model for lists of data,
+i.e. structure without hierarchy.  It very closely mimics normal
+Python ``list`` interface (see reference for details).
+
+To construct a ``RowObjectListStore`` you pass a list (or any
+iterable) with column declarations and, optionally, initial model
+contents — another iterable.  Column declarations are explained in
+more details in the previous section.  The second argument works
+exactly as the only argument to the built-in ``list()`` function.
+
+As with normal Python lists, you can access individual rows and
+perform most modifications using ``[]`` operation.  Indices can be
+integers, ``gtk.TreeIter``\s or slices.  As built-in lists,
+``RowObjectListStore`` also supports negative indices with the same
+semantics and restriction, e.g. -1 means last row in a non-empty list
+store.
+
+``RowObjectListStore`` fully conforms to description of signal
+emission in the previous section.  You only need to manually emit
+signals with ``note_changes()`` method after changing any row objects.
+As with other methods, you can specify integral indices in place of
+``gtk.TreeIter``\s for this method.
+
+Note that despite the similarity of interfaces, the model is not a
+subclass of Python ``list`` class.  The easiest way to receive a true
+list of all row objects in a model is ``store[:]`` code (i.e. using
+‘include all‘ slice).
+
+Unfortunately, with current PyGTK versions it is impossible to
+implement ``gtk.TreeSortable`` interface in custom models.  Therefore,
+``RowObjectListStore`` cannot be sorted by itself.  However, you can
+wrap the model in the standard ``gtk.TreeModelSort``.  Resulting
+combination is fully functional, but is more difficult to use than
+``RowObjectListStore`` alone.  Refer to ``gtk.TreeModelSort``
+documentation for details.
+
+Py-gtktree comes with several examples of using
+``RowObjectListStore``.  Easiest one, ``examples/simple_list.py``,
+demonstrates the model created for pre-existing objects.  See
+``examples/README`` for a full list.
+
+
+
+Using the Tree Store
+********************
+
+In addition to the list store described in the previous section,
+Py-gtktree naturally comes with ``RowObjectTreeStore``.  Unlike the
+previous model, this one is not as simple, mostly because trees are
+more complicated than lists.
+
+A row object can be seen as *value*, but in addition to value, you
+usually want to know its structural position, i.e. its position
+corresponding to other values.  With lists it is simple — just numeric
+index is enough.  With trees, things become complicated.
+
+Here we need [#]_ another concept: a *node*.  Objects of type
+``TreeNode`` describe how row objects are positioned one against
+another and carry hierarchical information.
+
+Interface ``TreeNode`` is specifically tailored for GTK+ needs, so it
+is not very easy to use.  I recommend using ``DefaultTreeNode``, which
+gives access to a normal Pythonic list of its child nodes.  For
+instance, to add another node, insert it into the list of child nodes
+of its purported parent.  You can even insert a whole subtree of nodes
+at once.  Likewise, simply delete a node from its parent child nodes
+list to get rid of it.  In all cases, the implementation cares to emit
+correct signals in proper order for you.
+
+Constructing a ``RowObjectTreeStore`` is pretty much similar to
+creating a list store.  You need to specify a list (any iterable) of
+column declarations and, optionally, initial content nodes.
+
+
+.. [#] Strictly speaking, not really *need*.  There could be other
+   solutions, e.g. requiring that row objects themselves carry this
+   information.  However, this design was deemed the best available
+   choice.
+
+
+The Root
+~~~~~~~~
+
+FIXME
+
+
+Lazy Nodes
+~~~~~~~~~~
+
+An often needed feature that is very cumbersome to achieve with
+standard implementations, is lazy tree structure loading.  Luckily,
+with ``RowObjectTreeStore`` it is not difficult to code at all.
+
+``LazyDefaultTreeNode`` is meant to be subclassed.  It provides two
+methods which should be overriden — ``lazy_has_children()`` and
+``lazy_load()``.  The latter method is essential.  It should return a
+list (any iterable) of nodes that should become children of the
+current node.  Nodes in the returned list can in turn be lazy nodes,
+in which case they will be loaded on demand as well.
+
+Method ``lazy_has_children()`` is optional.  It should be overriden if
+it is possible to determine if there are children without first
+performing a full load.  It is also possible for overriden method to
+unconditionally return true.  In this case, all nodes will be shown
+with expander icon next to them, but when ``lazy_load()`` returns an
+empty list, the icon just disappears.  Resulting user experience is
+somewhat confusing, but on the upside, the tree becomes really fast.
+
+There is a simple program demonstrating such lazy loading in file
+``examples/lazy_tree_structure.py``.  It displays directory tree and
+reads directory contents on demand only.  Check stderr output of the
+program.  The example also demonstrates what happens when
+``lazy_has_children()`` unconditionally returns true.
+
+
+
+Drag’n’Drop Between Object-Based Models
+***************************************
+
+A common UI pattern is two lists, one containing all possible object,
+the other containing those objects user selected.  It is usually
+possible to move objects between the lists with buttons or with
+drag’n’drop.  In any case, enabling drag’n’drop between different tree
+views (and containing different models) is quite common.
+
+To enable drag’n’drop in GTK+ you need to perform at least two things:
+
+1. Make sure models implement ``gtk.TreeDragSource`` and
+   ``gtk.TreeDragDest`` and can accept drags from each another.
+
+2. Enable drag source and/or destination handling on the
+   ``gtk.TreeView``\s.
+
+Both items are very easy to achieve with Py-gtktree.
+
+Object-based tree models implement the required interfaces and have
+built-in support to drag rows between themselves.  Since rows are
+objects, that is actually pretty easy: row objects get transferred
+from one model to another.  You don’t even need to have the same
+columns in source and destination models.
+
+By default models accept drags from other ``RowObjectTreeModel`` with
+equal (and not ``None``) value of ``object_type`` property.  So, to
+enable drag’n’drop between models A and B you only need to set
+``A.object_type`` and ``B.object_type`` to equal values.
+
+Easiest way of achieving second point is using
+``TreeViewUtils.enable_standard_drags()`` function.  All you need is
+to call it once for every ``gtk.TreeView`` you want to support drags.
+
+Look at ``examples/drag_between_lists.py`` for a demonstration of
+drag’n’drop between two ``RowObjectListStore``.
+
+
+
+Lazy Value Determining
+**********************
+
+FIXME
+
+
+
+.. _Reference:
+
+----------------------------------------------------------
+ Details of Pythonic Implementations of ``gtk.TreeModel``
+----------------------------------------------------------
+
+This section serves as a reference, providing detailed description of
+methods and properties of object-based models and related classes.
+
+
+Package Contents
+****************
+
+Py-gtktree consists of the following public modules and classes:
+
+* Module ``gtktree.model``
+
+    - Abstract class ``RowObjectTreeModel``
+    - Class ``RowObjectListStore``
+    - Abstract class ``TreeNode``
+    - Class ``DefaultTreeNode``
+    - Class ``LazyDefaultTreeNode``
+    - Class ``RowObjectTreeStore``
+
+* Module ``gtktree.util``
+
+    - Class ``TreeViewUtils``
+
+
+
+``RowObjectTreeModel``
+**********************
+
+``gtktree.model.RowObjectTreeModel`` is the base class of all
+``gtk.TreeModel`` implementations in Py-gtktree.  Currently provides
+common handling of columns and a few drag’n’drop helper methods.
+
+
+Interface Reference
+~~~~~~~~~~~~~~~~~~~
+
+``RowObjectTreeModel (columns)``
+    Initializes the model to use given ``columns``.  The argument must
+    be any iterable with each element being a tuple of *type* and
+    *attribute* for a column.  Here, type is either ``gobject.GType``
+    or certain Python types (refer to ``gtk.ListStore`` documentation
+    for details) and attribute is a string or a callable.  Column
+    value will be retrieved as ``getattr (row_object, attribute)`` for
+    string attributes and as ``attribute (row_object)`` for callables.
+
+    This method must be used only from subclasses as
+    ``RowObjectTreeModel`` is an abstract class.
+
+    :Note:  Currently, it is not possible to modify columns after a
+            model is created.  This may be implemented later.
+
+
+Property ``columns`` (read-only)
+    Column declarations as specified for the constructors.  Useful to
+    create a model with the same columns, e.g. to drag objects from
+    ‘available’ to ‘selected’ list.  (Note that columns being the same
+    is not a requirement for drag’n’drop to work, though.)
+
+
+``note_changes (*rows)``
+    Notify the model about changes in row(s) at given ``rows`` (any
+    iterable).  Each row can be specified either as a ``gtk.TreeIter``
+    or something the model understands (e.g. plain integer indices for
+    ``RowObjectListStore``).  Changed rows can be listed in any order
+    and can contain duplicates — those are simply ignored.  Number of
+    actually changed rows (i.e. after discarding all duplicates) is
+    returned.
+
+    Remember that for proper display it is required to notify the
+    model (and thus all widgets displaying it) of any changes in row
+    objects.  Unlike with stock GTK+ tree models, you don’t set cell
+    values in the model, so changes in rows cannot be detected
+    automatically.
+
+
+Property ``object_type``
+    Optionally can be set to the (expected) type of row objects in the
+    tree model.
+
+    Currently used only by ``is_accepting_drags_from()`` method when
+    ``foreign_drags_policy`` is ``None`` (its default value).  See the
+    method documentation for details.
+
+
+``get_cell (row, attribute)``
+    FIXME
+
+
+``is_accepting_drags_from (source_model)``
+    Determine if this model should accept drag’n’drop from
+    ``source_model``.  Default implementation (used in all standard
+    subclasses) bases its decision on the value of
+    ``foreign_drags_policy`` property.
+
+    * ``None``: accept drags from other instances of
+      ``RowObjectTreeModel`` when they have equal (and not ``None``)
+      ``object_type`` value to value of said property of this model.
+      This is the default setting.
+
+    * ``True`` or ``False``: either accept all drags from other
+      instances of ``RowObjectTreeModel`` or accept none at all.
+
+    * Any callable, which will be invoked with two arguments: first
+      destination (this model), than the source.  This is the most
+      flexible setting.
+
+
+Property ``foreign_drags_policy``
+    Policy of accepting drag’n’drop from different models.  See
+    ``is_accepting_drags_from()`` method documentation for details.
+
+
+Internal Methods
+~~~~~~~~~~~~~~~~
+
+These methods are meant only for overriding or usage by derived
+classes.  They should be of no interest for users of standard models.
+
+``_do_get_row_object (row)``
+    Return the row object corresponding to the passed in
+    ``gtk.TreeIter`` user data.  I.e. the argument is the data you
+    return from methods like ``on_get_iter``.  This method is
+    ‘abstract’ and must be implemented in subclasses.
+
+
+``_do_get_iter (row)``
+    Get or create ``gtk.TreeIter``\s object for ``row``.  The argument
+    can be a ``gtk.TreeIter`` itself (in which case it should be
+    returned unaltered) or any subclass-specific native representation
+    of row position.  For instance, list models could accept integer
+    row indices.
+
+
+``_get_drag_data (selection_data)``
+    FIXME
+
+
+Subclassing Overview
+~~~~~~~~~~~~~~~~~~~~
+
+If for any reason you decide to subclass ``RowObjectTreeModel``
+directly, instead of one of its standard implementations, you need to
+define at least the following methods:
+
+* ``_do_get_row_object (row)``
+* ``_do_get_iter (row)``
+* ``on_get_flags ()``
+* ``on_get_iter (path)``
+* ``on_get_path (row)``
+* ``on_iter_parent (row)``
+* ``on_iter_next (row)``
+* ``on_iter_has_child (row)``
+* ``on_iter_children (row)``
+* ``on_iter_n_children (row)``
+* ``on_iter_nth_child (parent, n)``
+
+All of those methods except ``_do_get_row_object()`` and
+``_do_get_iter()`` come from ``gtk.GenericTreeModel``.
+``RowObjectTreeModel`` defines ``on_get_n_columns()``,
+``on_get_column_type()`` and ``on_get_value()`` itself.
+
+If you create a custom subclass, you should likely set
+``props.leak_references`` to ``False``.  However, to do this and not
+cause memory corruption, you must understand why
+``gtk.GenericTreeModel`` leaks by default and how to prevent this.
+Standard implementations all take special care to make setting the
+property to ``False`` safe.
+
+
+
+``RowObjectListStore``
+**********************
+
+``gtktree.model.RowObjectListStore`` is very similar to plain Python
+``list`` and additionally provides interface similar to
+``gtk.ListStore``.  It supports all list operations except for the
+following:
+
+* operator ``+``: you cannot concatenate two models together;
+
+* operator ``*``: you cannot create a model with several copies of
+  another model objects;
+
+Most methods of this class accept integers or ``gtk.TreeIter``\s as
+indices.  Like in normal Python list, integer indices can be negative,
+e.g. -1 stands for the last row.  However, indices generally must not
+be smaller than ``-len (model)``.  Methods that require you to specify
+something like insertion point (as opposed to specific row) silently
+clamp integer indices to valid range, similar to what
+``list.insert()`` does (e.g. you can insert at point 10 in a three-row
+model).  Finally, where Python ``list`` accepts slices so does this
+class.
+
+:Note:  ``RowObjectListStore`` does *not* implement
+        ``gtk.TreeSortable`` (that is actually not possible to do in
+        PyGTK currently).  That will probably change later if PyGTK
+        fixes this.  Meanwhile, you can make a model sortable by
+        wrapping it using ``gtk.TreeModelSort``.
+
+
+Interface Reference
+~~~~~~~~~~~~~~~~~~~
+
+``RowObjectListStore (columns, [values])``
+    Create a new ``RowObjectListStore`` with given columns (see
+    `RowObjectTreeModel`_ section).  Optionally, you can specify
+    ``values`` (any iterable) the store will initially contain.
+
+
+``len (model)``
+    Return number of rows in the model.
+
+
+``row_object in model``
+    Determine if there is at least one row equal to ``row_object`` in
+    the model.  Remember, such row must be equal, *not identical* to
+    ``row_object``.
+
+
+``iter (model)``
+    Iterate over all rows in the model, from first to last.  This
+    returns a normal Python iterator, which has nothing to do with
+    ``gtk.TreeIter``.  Returned iterator can be used, for instance, in
+    ``for ... in`` statement.
+
+    :Note:  Iterators don’t mix well with model modifications.  Later
+            an exception might be raised if you use the same Python
+            iterator both before and after a modification of the
+            corresponding model.
+
+
+``model[index]``
+    Return the row at given position.  ``index`` can be an integer, a
+    slice or a ``gtk.TreeIter``.  If ``index`` is actually a slice, a
+    ``list`` of specified rows is returned.  In particular,
+    ``model[:]`` returns a list of all object in the model.
+
+
+``model[index] = row_object``
+    Change the row at given position.  ``index`` can be either an
+    integer a ``gtk.TreeIter``.  See also assignment to slices below.
+
+
+``model[i:j] = iterable``
+    Replace row objects in the slice ``i:j`` with those taken from the
+    ``iterable``.  There are no restrictions on the numbers of old or
+    new rows, i.e. they are not required to be equal and either can or
+    can not be zero.  Similar to slice assignment in Python ``list``.
+
+
+``model[i:j:k] = iterable``
+    Replace row objects in the slice ``i:j:k`` with those taken from
+    the ``iterable``.  As with standard Python ``list``, it is
+    required that length of the ``iterable`` exactly matches number of
+    replaced rows.  Note that there is no such restriction for
+    non-extended slices (see above).
+
+
+``del model[index]``
+    Remove the row at given position.  ``index`` can be an integer, a
+    slice or a ``gtk.TreeIter``.
+
+
+``get_row_index (iter_or_path)``
+    Convert a ``gtk.TreeIter`` or any PyGTK representaton of a tree
+    path to numeric row index.  This method is can be used to convert
+    data provided by objects like ``gtk.TreeSelection`` into format
+    native to the model — simple row indices.
+
+
+``index (row_object, [i, [j]])``
+    Identical to Python ``list`` method.  Return the smallest index
+    ``k`` such that ``model[k] == row_object`` and ``i <= k < j`` (if
+    ``i`` and/or ``j`` is specified).  Note that you can pass negative
+    ``i`` or ``j``: they will mean exactly the same as for the Python
+    method.
+
+
+``count (row_object)``
+    Identical to Python ``list`` method.  Return number of indices
+    ``k`` for which ``model[k] == row_object``.  For tree models this
+    is hardly useful, but was implemented for completeness.
+
+
+``append (*row_objects)``
+    Append one or more objects to the end of the model.  With one
+    argument this is identical to Python ``list`` method.  Doesn’t
+    invalidate outstanding ``gtk.TreeIter``\s.
+
+    If you append one object, returns ``gtk.TreeIter`` pointing to it.
+    Else returns ``None``.
+
+
+``prepend (*row_objects)``
+    Same as ``model.insert (0, *row_objects)``.  Implemented for
+    consistency with other GTK+/PyGTK interfaces.
+
+
+``insert (index, *row_objects)``
+    Insert one or more objects at given position.  ``index`` can be
+    either an integer, a ``gtk.TreeIter`` or ``None``.  In first two
+    cases, row(s) are inserted *before* the row currently at that
+    position.  ``None`` means to insert at the end (same as ``len
+    (model)``).  With one row object ``insert()`` is identical to
+    Python ``list`` method.  Unless you insert at the very end of the
+    store, all outstanding ``gtk.TreeIter``\s will be invalidated.
+
+    If you insert one object, returns ``gtk.TreeIter`` pointing to it.
+    Else returns ``None``.
+
+    Note that as with Python ``list.insert()``, you can use
+    out-of-bounds indices.  Such indices will be silently clamped to
+    valid range.  E.g. you can insert at position 100 into a model
+    with 5 objects — insertion will be done as if at position 5.
+
+
+``insert_before (index, *row_objects)``
+    Exactly the same as just ``insert()``.  Provided for similarity
+    with ``gtk.ListStore``.
+
+
+``insert_after (index, *row_objects)``
+    Insert one or more objects after given position.  ``index`` can be
+    either an integer, a ``gtk.TreeIter`` or ``None``.  In first two
+    cases, row(s) are inserted *after* the row currently at that
+    position.  ``None`` means to insert at the beginnign (same as
+    ``len (model)``).  Unless you insert at the very end of the
+    store, all outstanding ``gtk.TreeIter``\s will be invalidated.
+
+    If you insert one object, returns ``gtk.TreeIter`` pointing to it.
+    Else returns ``None``.
+
+
+``extend (iterable)``
+    The same as ``append (*iterable)`` except that always returns
+    ``None``, regardless of ``iterable`` length.
+
+
+``remove (row_object)``
+    Remove first row that is equal to ``row_object``.  If there is no
+    such rows, raises ``ValueError``.
+
+    Note that this method removes *by value*.  To remove row at given
+    index or ``gtk.TreeIter``, use ``del model[...]`` code (also
+    accepts Python slices), or ``remove_at()`` method.
+
+
+``remove_at (*indices)``
+    Remove one or more rows at given indices.  Each index can be
+    either an integer or a ``gtk.TreeIter``.  Negative indices are
+    allowed, but must not underflow.  Indices can repeat — repetitions
+    are just ignored.  Note that all indices are checked prior to
+    actually removing anything, so if you have an error (e.g. an index
+    pointing out of the model), nothing will be removed and
+    ``IndexError`` raised.  Else number of actually removed rows is
+    returned.
+
+    This method is useful to remove several unrelated rows at once,
+    e.g. those selected in a ``gtk.TreeView`` with multiselection.
+    With this method you don’t need to worry about creating
+    ``gtk.TreeRowReference`` or removing in correct order.  For
+    removing one row or a set of rows that can be expressed in Python
+    slice syntax, ``del model[...]`` may be more straightforward.
+
+
+``pop ([index])``
+    Identical to Python ``list`` method except that ``index`` can also
+    be a ``gtk.TreeIter``.  The argument defaults to -1, so that by
+    default last row will be removed and returned.
+
+
+``clear ()``
+    Removes all rows in the model.  Same as ``del model[:]``.
+
+
+``reorder (new_order)``
+    Reorder the rows in the model.  ``new_order`` must be a list (or
+    any other iterable) of integers from 0 to ``len (model) - 1``,
+    which don’t repeat.  In other words, ``new_order`` must be a
+    permutation of valid row indices.  After reordering row at
+    position ``k`` the same as old row at position ``new_order[k]``.
+
+
+``reverse ()``
+    Reverse the rows in the model so that first becomes last, second
+    becomes next to last and so on.
+
+
+``sort (cmp = None, key = None, reverse = False)``
+    Sorts the row of the model using specified callbacks or else
+    natural Python object order.  For details on what arguments mean,
+    see documentation of ``list.sort()``.
+
+
+``swap (index1, index2)``
+    Swap two rows at given indices.  Each index can be an integer or a
+    ``gtk.TreeIter``.  Integers can be negative, but must not
+    underflow.  If either integer is out of bounds, ``IndexError`` is
+    raised.
+
+
+``move_to (from_index, to_index)``
+    Move a row from one position to another.  First index must be a
+    valid integer (as in ``list``) or a ``gtk.TreeIter``.  Second can
+    be any integer or a ``gtk.TreeIter`` — out-of-range integer
+    indices are silently clamped to valid range as in
+    ``list.insert()``.
+
+    After the move, row that was at ``from_index`` will be exactly at
+    ``to_index``.  Rows between the two positions (excluding the
+    first) will shift one step up or down.
+
+
+``move_before (from_index, before_index)``
+    Move a row so it immediately precedes another row.  Both indices
+    must be valid integers (as in ``list``) or ``gtk.TreeIter``\s.  If
+    both indices specify the same row, an ``IndexError`` is raised.
+
+    After the move, row that was at ``from_index`` will be exactly
+    before the row that was at ``to_index``.  If
+    ``from_index == to_index - 1``, nothing will be done.
+
+
+``move_after (from_index, after_index)``
+    Move a row so it immediately follows another row.  Both indices
+    must be valid integers (as in ``list``) or ``gtk.TreeIter``\s.  If
+    both indices specify the same row, an ``IndexError`` is raised.
+
+    After the move, row that was at ``from_index`` will be exactly
+    after the row that was at ``to_index``.  If
+    ``from_index == to_index + 1``, nothing will be done.
+
+
+Internal Methods
+~~~~~~~~~~~~~~~~
+
+These methods are meant only for overriding or usage by derived
+classes.  They should be of no interest for users of instances of this
+class.
+
+``_do_insert (index, row_objects, [after])``
+    FIXME
+
+
+``_do_remove_at (indices)``
+    FIXME
+
+
+``_do_move (from_index, to_index)``
+    FIXME
+
+
+``_get_existing_row_index (index)``
+    FIXME
+
+
+``_get_insertion_point (index, [after])``
+    FIXME
+
+
+``_create_index_error (index)``
+    FIXME
+
+
+Subclassing Overview
+~~~~~~~~~~~~~~~~~~~~
+
+``RowObjectListStore`` is not abstract, so you don’t need to subclass
+it for normal use.  If you do, however, it is strongly recommended to
+use model methods like ``insert()`` or subscription access when you
+need to modify the model.  Since the class may later implement
+``gtk.TreeSortable`` it is extremely non-safe to meddle with its
+internal attributes: your code may unexpectedly break with future
+versions of Py-gtktree.
+
+However, if you *absolutely* need it, you have access to ``_values``
+and ``_indices`` attributes.  If you feel like using them (and
+screwing up), look at the source code.  On the upside, knowing the
+names you can avoid using them in subclasses.
+
+
+
+``TreeNode``
+************
+
+FIXME
+
+
+
+``DefaultTreeNode``
+*******************
+
+FIXME
+
+
+
+``LazyDefaultTreeNode``
+***********************
+
+FIXME
+
+
+
+``RowObjectTreeStore``
+**********************
+
+FIXME
+
+
+
+``TreeViewUtils``
+*****************
+
+A collection of static utility functions aimed at simplifying common
+``gtk.TreeView``-related tasks.
+
+``enable_standard_drags (tree_view)``
+    Enable standard drag’n’drop targets on the ``tree_view``.  After
+    the call, ``tree_view`` will become a valid target for dragging
+    rows both from and to.  Refer to
+    ``RowObjectTreeModel.is_accepting_drags_from()`` method
+    documentation for how to enable model-level support for
+    drag’n’drop.
+
+
+``connect_viewport_handler (tree_view, handler, *args)``
+    Connect the ``handler`` to various signals on ``tree_view``
+    emitted when the widgets *viewport* changes.  Here viewport is
+    defined as the visible area.  When the visible area or rows
+    contained within it change, the ``handler`` will be invoked.
+    First argument to the ``handler`` will be the ``tree_view``
+    followed by optional ``args``.
+
+    Returned object can be later passed to
+    ``disconnect_viewport_handler()`` to disconnect from all the
+    different signals at once.  However, as with normal handlers, you
+    don’t need to bother with disconnection if it’s fine for the
+    ``handler`` to remain connected for the full lifetime of the
+    widget.
+
+
+``disconnect_viewport_handler (tree_view, composite_handler_id)``
+    Disconnect a viewport handler previously connected using
+    ``connect_viewport_handler()``.  The second argument must be the
+    return value of a call to that function.
+
+    This pair of function can be seen as similar to
+    ``gobject.GObject.connect()`` and
+    ``gobject.GObject.disconnect()``.  The difference is that the
+    handler is in fact connected to several signals at once.
+
+
+``get_viewport_rows (tree_view)``
+    Return the list of rows currently visible in ``tree_view``.  Each
+    row is returned as a tuple of two elements: ``gtk.TreeIter`` and
+    row object.  It is required that the ``tree_view`` has an
+    implementation of ``RowObjectTreeModel`` as its model.
+
+    :Note:  Currently only implemented for list models.
+
+
+
+------------------------------------------------
+ Documentation Copyright and Permissions Notice
+------------------------------------------------
+
+Copyright © 2008, 2009 Paul Pogonyshev.
+
+Permission is granted to make and distribute verbatim copies of this
+document provided the copyright notice and this permission notice are
+preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+document under the conditions for verbatim copying, provided that this
+copyright notice is included exactly as in the original, and that the
+entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this
+document into another language, under the above conditions for
+modified versions.
+
+There is no guarantee that this document lives up to its intended
+purpose.  This is simply provided as a free resource.  As such, the
+authors and maintainers of the information provided within can not
+make any guarantee that the information is even accurate.
+
+
+
+.. Local variables:
+.. coding: utf-8
+.. mode: rst
+.. indent-tabs-mode: nil
+.. End:

@@ -1,0 +1,231 @@
+# -*- coding: utf-8 -*-
+
+#--------------------------------------------------------------------------#
+# This file is part of Py-gtktree.                                         #
+#                                                                          #
+# Copyright (C) 2009 Paul Pogonyshev.                                      #
+#                                                                          #
+# This program is free software: you can redistribute it and/or modify it  #
+# under the terms of the GNU Lesser General Public License as published by #
+# the Free Software Foundation, either version 3 of the License, or (at    #
+# your option) any later version.                                          #
+#                                                                          #
+# This program is distributed in the hope that it will be useful, but      #
+# WITHOUT ANY WARRANTY; without even the implied warranty of               #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser #
+# General Public License for more details.                                 #
+#                                                                          #
+# You should have received a copy of the GNU Lesser General Public License #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.    #
+#--------------------------------------------------------------------------#
+
+
+if __name__ == '__main__':
+    import os, sys
+    sys.path.insert (0, os.path.join (sys.path[0], os.pardir))
+
+
+import unittest
+
+from test._common  import Foo, PopAllList
+from gtktree.model import RowObjectTreeStore, DefaultTreeNode
+
+
+
+# Some tests assume current order of row changing, insertion or removal.  Such tests will
+# fail if this order is changed for whatever reason and those failures won't necessary
+# indicate real bugs.  In that case, you will need to check and possibly alter these
+# tests.
+
+class RowObjectTreeStoreTestCase (unittest.TestCase):
+
+    def test_create (self):
+        # No shortcut here.
+        store = RowObjectTreeStore ([(int, 'foo')])
+        self.assert_(isinstance (store, RowObjectTreeStore))
+
+
+    def test_create_with_values (self):
+        store, emissions = _create_foo_tree_store ()
+        self.assertEqual (store.root.num_child_nodes, 2)
+
+
+
+class DefaultTreeNodeTestCase (unittest.TestCase):
+
+    def test_set_item_1 (self):
+        store, emissions = _create_foo_tree_store ()
+        node             = store.root
+
+        node.child_nodes[0] = DefaultTreeNode (Foo (50))
+        self.assertEqual (node.num_child_nodes, 2)
+        self.assertEqual (node.child_nodes[0].row_object, Foo (50))
+        self.assertEqual (emissions.pop_all (), [('deleted', (0,)),
+                                                 ('inserted', (0,))])
+
+    def test_set_slice_1 (self):
+        store, emissions = _create_foo_tree_store ()
+        node             = store.root
+
+        node.child_nodes[-2:2] = [DefaultTreeNode (Foo (30))]
+        self.assertEqual (node.num_child_nodes, 1)
+        self.assertEqual (node.child_nodes[0].row_object, Foo (30))
+        self.assertEqual (emissions.pop_all (), [('deleted', (1,)),
+                                                 ('deleted', (0,)),
+                                                 ('inserted', (0,))])
+
+
+    def test_delete_1 (self):
+        store, emissions = _create_foo_tree_store ()
+        node             = store.root
+
+        del node.child_nodes[0]
+        self.assertEqual (node.num_child_nodes, 1)
+        self.assertEqual (emissions.pop_all (), [('deleted', (0,))])
+
+    def test_delete_slice_1 (self):
+        store, emissions = _create_foo_tree_store ()
+        node             = store.root
+
+        del node.child_nodes[:]
+        self.assert_(not node.has_child_nodes)
+        self.assertEqual (emissions.pop_all (), [('deleted', (1,)),
+                                                 ('deleted', (0,))])
+
+
+    # Appending to root.
+    def test_append_1 (self):
+        store, emissions = _create_foo_tree_store (())
+        node             = store.root
+
+        node.child_nodes.append (DefaultTreeNode (Foo (10)))
+        self.assertEqual (node.num_child_nodes, 1)
+        self.assertEqual (node.child_nodes[0].row_object, Foo (10))
+        self.assertEqual (emissions.pop_all (), [('inserted', (0,))])
+
+        node.child_nodes.append (DefaultTreeNode (Foo (20)))
+        self.assertEqual (node.num_child_nodes, 2)
+        self.assertEqual (node.child_nodes[1].row_object, Foo (20))
+        self.assertEqual (emissions.pop_all (), [('inserted', (1,))])
+
+    # Appending to a pre-existing node.
+    def test_append_2 (self):
+        store, emissions = _create_foo_tree_store ()
+        node             = store.root.child_nodes[0]
+
+        node.child_nodes.append (DefaultTreeNode (Foo (10)))
+        self.assertEqual (node.num_child_nodes, 1)
+        self.assertEqual (node.child_nodes[0].row_object, Foo (10))
+        self.assertEqual (emissions.pop_all (), [('inserted', (0, 0))])
+
+        node.child_nodes.append (DefaultTreeNode (Foo (20)))
+        self.assertEqual (node.num_child_nodes, 2)
+        self.assertEqual (node.child_nodes[1].row_object, Foo (20))
+        self.assertEqual (emissions.pop_all (), [('inserted', (0, 1))])
+
+    # Appending to a pre-existing level 2 node.
+    def test_append_3 (self):
+        store, emissions = _create_foo_tree_store (
+            [DefaultTreeNode (Foo (0)),
+             DefaultTreeNode (Foo (10),
+                              [DefaultTreeNode (Foo (20))])])
+
+        node = store.root.child_nodes[1].child_nodes[0]
+
+        node.child_nodes.append (DefaultTreeNode (Foo (30)))
+        self.assertEqual (node.num_child_nodes, 1)
+        self.assertEqual (node.child_nodes[0].row_object, Foo (30))
+        self.assertEqual (emissions.pop_all (), [('inserted', (1, 0, 0))])
+
+        node.child_nodes.append (DefaultTreeNode (Foo (40)))
+        self.assertEqual (node.num_child_nodes, 2)
+        self.assertEqual (node.child_nodes[1].row_object, Foo (40))
+        self.assertEqual (emissions.pop_all (), [('inserted', (1, 0, 1))])
+
+
+    def test_append_subtree (self):
+        store, emissions = _create_foo_tree_store ()
+        node             = store.root.child_nodes[1]
+
+        node.child_nodes.append (DefaultTreeNode (Foo (10),
+                                                  [DefaultTreeNode (Foo (20))]))
+        self.assertEqual (node.num_child_nodes, 1)
+        self.assertEqual (node.child_nodes[0].row_object, Foo (10))
+        self.assertEqual (node.child_nodes[0].child_nodes[0].row_object, Foo (20))
+        self.assertEqual (emissions.pop_all (), [('inserted', (1, 0))])
+
+
+    def test_remove_1 (self):
+        store, emissions = _create_foo_tree_store ()
+        node             = store.root
+
+        node.child_nodes.remove (node.child_nodes[0])
+        self.assertEqual (node.num_child_nodes, 1)
+        self.assertEqual (emissions.pop_all (), [('deleted', (0,))])
+
+        node.child_nodes.remove (node.child_nodes[0])
+        self.assertEqual (node.num_child_nodes, 0)
+        self.assertEqual (emissions.pop_all (), [('deleted', (0,))])
+
+    def test_remove_2 (self):
+        store, emissions = _create_foo_tree_store (
+            [DefaultTreeNode (Foo (0)),
+             DefaultTreeNode (Foo (10),
+                              [DefaultTreeNode (Foo (20)),
+                               DefaultTreeNode (Foo (30))])])
+
+        node = store.root.child_nodes[1]
+
+        node.child_nodes.remove (node.child_nodes[1])
+        self.assertEqual (node.num_child_nodes, 1)
+        self.assertEqual (emissions.pop_all (), [('deleted', (1, 1))])
+
+        node.child_nodes.remove (node.child_nodes[0])
+        self.assertEqual (node.num_child_nodes, 0)
+        self.assertEqual (emissions.pop_all (), [('deleted', (1, 0))])
+        
+
+
+def _create_foo_tree_store (nodes = None):
+    if nodes is None:
+        nodes = [DefaultTreeNode (Foo (1)), DefaultTreeNode (Foo (2, 'abc'))]
+
+    store     = RowObjectTreeStore ([(int, 'foo'),
+                                     (str, 'bar')],
+                                    nodes)
+    emissions = PopAllList ()
+
+    store.connect ('row-changed',
+                   lambda model, path, iter:
+                       emissions.append (('changed', path)))
+    store.connect ('row-deleted',
+                   lambda model, path:
+                       emissions.append (('deleted', path)))
+    store.connect ('row-inserted',
+                   lambda model, path, iter:
+                       emissions.append (('inserted', path)))
+
+    def reordered (model, path, iter, new_order):
+        if not path and iter is None:
+            # 'new_order' is not readable in Python (it is gobject.GPointer)...
+            emissions.append (('reordered', '?'))
+        else:
+            emissions.append (('reordered', path, '?'))
+
+    store.connect ('rows-reordered', reordered)
+
+    return store, emissions
+
+
+
+if __name__ == '__main__':
+    unittest.main ()
+
+
+
+# Local variables:
+# mode: python
+# python-indent: 4
+# indent-tabs-mode: nil
+# fill-column: 90
+# End:
