@@ -1,0 +1,274 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+"""
+FS Pairtree-RDF storage
+==============
+
+Conventions used:
+
+Objects are stored as pairtree based on id, eg.
+
+id = "01020304"  and base dir = "storage"
+
+gives
+
+physical directory for id = "storage/01/02/03/04/05"
+
+FS convention for versionable items:
+
+{id_path}/ROOT/_XXXX => Object RDF for this ID
+{id_path}/MANIFEST/_XXXX => Manifest RDF for this ID
+{id_path}/_1/_XXXX => Object RDF for this ID, subpart 1
+{id_path}/_2/_XXXX => Object RDF for this ID, subpart 2
+{id_path}/_3/_XXXX => Object RDF for this ID, subpart 3
+
+XXXX is just an autoincrementing number - largest is the latest and the FS
+contains the ctime and the mtime of the file.
+
+# TODO - add a simple method to view version numbers, and delete them
+# deletion will retain the sequence of course.
+"""
+
+import os, sys, shutil
+
+import codecs
+
+import string
+
+from rdfobject import RDFobject
+
+from pairtree import PairtreeStorageClient
+
+from storage_exceptions import ObjectNotFoundException, ObjectAlreadyExistsException, \
+                               NotAPairtreeStoreException, VersionNotFoundException, \
+                               PartNotFoundException
+
+from rdfobject.constructs import Manifest, ItemAlreadyExistsException, ItemDoesntExistException
+
+from rdflib import Namespace
+
+
+from datetime import datetime
+
+import random
+
+URI_BASE = "info:local/"
+STORAGE_DIR = "./rdffilestore"
+SPECIAL_FILE_PREFIX = "_"
+
+class FileStorageFactory(object):
+    def get_store(self, uri_base=URI_BASE, store_dir=STORAGE_DIR, prefix=SPECIAL_FILE_PREFIX,
+    shorty_length=2):
+        return FileStorageClient(uri_base, store_dir, prefix, shorty_length)
+
+class FileStorageObject(object):
+    def __init__(self, id, fs_store_client):
+        self.fs = fs_store_client
+        self.id = id
+        self.uri = self.fs.uri_base[id]
+        self.root_uri = self.fs.uri_base["%s/%s" % (id, u"ROOT")]
+        self.manifest_uri = self.fs.uri_base["%s/%s" % (id, u"MANIFEST")]
+
+        #self.parts = self.fs.listParts(self.id)
+
+    def putRoot(self, rdf):
+        """Store the root for this object - rdf can either be
+        an RDFXML string or an RDFobject"""
+        if isinstance(rdf, RDFobject):
+            self.fs._store_rdfobject(self.id, u'ROOT', rdf)
+        else:
+            r = RDFobject(self.id).from_string(rdf)
+            self.fs._store_rdfobject(self.id, u'ROOT', rdf)
+
+    def getRoot(self):
+        """RDFObject for this object"""
+        return self.fs._get_rdfobject(self.id, u'ROOT')
+
+    def add_part(self, partid, bytestream):
+        return self.fs._put_part(self.id, partid, bytestream)
+
+    def get_part(self, partid, stream=False, version=None):
+        return self.fs._get_part(self.id, partid, stream, version)
+
+    def del_part(self, partid):
+        return self.fs._del_part(self.id, partid)
+
+    def list_parts(self):
+        return self.fs._list_parts(self.id)
+
+    def list_part_versions(self, partid):
+        return self.fs._list_part_versions(self.id, partid)
+
+    def del_part_versions(self, partid, versions, force=False):
+        response = {}
+        for version in versions:
+            try:
+                response[version] = self.del_part_version(partid, version)
+            except Exception, e:
+                if force:
+                    response[version] = False
+                else:
+                    raise e
+        return response
+
+    def del_part_version(self, partid, version):
+        return self.fs._del_part_version(self.id, partid, version)
+
+    def putManifest(self, rdf):
+        """Store the manifest for this object - rdf can either be
+        an RDFXML string or a Manifest"""
+        if isinstance(rdf, Manifest):
+            self.fs._store_manifest(self.id, u'MANIFEST', rdf)
+        else:
+            r = Manifest().from_string(rdf)
+            self.fs._store_manifest(self.id, u'MANIFEST', rdf)
+
+    def getManifest(self):
+        """Manifest for this object"""
+        return self.fs._get_manifest(self.id, u'MANIFEST', self.manifest_uri)
+
+
+class FileStorageClient(object):
+    def __init__(self, uri_base, store_dir, prefix, shorty_length):
+        self.store_dir = store_dir
+        self.uri_base = None
+        if uri_base:
+            self.uri_base = Namespace(uri_base)
+        self.ids = {}
+        self.id_parts = {}
+        self.prefix = prefix
+        self.shorty_length = shorty_length
+        self.storeclient = PairtreeStorageClient(uri_base, store_dir, shorty_length)
+        if self.storeclient.uri_base:
+            self.uri_base = Namespace(self.storeclient.uri_base)
+
+
+    def list_ids(self):
+        return self.storeclient.list_ids()
+
+    def _get_latest_part(self, id, part_id):
+        try:
+            versions = self._list_part_versions(id, part_id)
+            if versions:
+                return max(versions)
+            return 0
+        except PartNotFoundException:
+            return 0
+
+    def _list_parts(self, id):
+        return self.storeclient.list_parts(id)
+
+    def _list_part_versions(self, id, part_id):
+        if part_id in self.storeclient.list_parts(id):
+            versions = self.storeclient.list_parts(id, part_id)
+            numbered_versions = [int(x.split(self.prefix)[-1]) for x in versions]
+            if numbered_versions:
+                return numbered_versions
+            else:
+                return []
+        else:
+            raise PartNotFoundException
+
+    def _del_part_version(self, id, part_id, version):
+        if not self.storeclient.exists(id):
+            raise ObjectNotFoundException
+        if part_id in self.storeclient.list_parts(id):
+            if version in self._list_part_versions(id, part_id):
+                # delete version
+                return self.storeclient.del_stream(id, "%s%s%s" % (part_id, self.prefix, version), path=part_id)
+            else:
+                raise VersionNotFoundException(part_id=part_id, version=version)
+        else:
+            raise PartNotFoundException
+
+    def _put_part(self, id, part_id, bytestream, version=False, buffer_size = 1024 * 8):
+        if not self.storeclient.exists(id):
+            self.storeclient.create_object(id)
+        if not version:
+            version = self._get_latest_part(id, part_id) + 1
+        part_name = "%s%s%s" % (part_id, self.prefix, version)
+        self.storeclient.put_stream(id, part_id, part_name, bytestream, buffer_size)
+        return version
+
+    def _get_part(self, id, part_id, stream, version = False):
+        if not self.storeclient.exists(id):
+            raise ObjectNotFoundException
+        if not version:
+            version = self._get_latest_part(id, part_id)
+        if version == 0:
+            raise PartNotFoundException
+        part_name = "%s%s%s" % (part_id, self.prefix, version)
+        if not self.storeclient.exists(id, os.path.join(part_id, part_name)):
+            raise VersionNotFoundException(part_id=part_id, version=version)
+        else:
+            return self.storeclient.get_stream(id, part_id, part_name, stream)
+
+    def _del_part(self, id, part_id):
+        if not self.storeclient.exists(id):
+            raise ObjectNotFoundException
+        if not self.storeclient.exists(id, part_id):
+            raise PartNotFoundException(part_id=part_id)
+        self.storeclient.del_path(id, part_id, recursive=True)
+
+    def _store_manifest(self, id, part_id, manifest, version = False):
+        if not self.storeclient.exists(id):
+            raise ObjectNotFoundException
+        if not version:
+            version = self._get_latest_part(id, part_id) + 1
+        part_name = "%s%s%s" % (part_id, self.prefix, version)
+        bytestream = manifest.to_string()
+        if isinstance(bytestream, unicode):
+            bytestream = bytestream.encode('utf-8')
+        self.storeclient.put_stream(id, part_id, part_name, bytestream)
+        return version
+
+    def _store_rdfobject(self, id, part_id, rdfobject, version=False):
+        if not self.storeclient.exists(id):
+            raise ObjectNotFoundException
+        if not version:
+            version = self._get_latest_part(id, part_id) + 1
+        part_name = "%s%s%s" % (part_id, self.prefix, version)
+        bytestream = rdfobject.to_string()
+        if isinstance(bytestream, unicode):
+            bytestream = bytestream.encode('utf-8')
+        self.storeclient.put_stream(id, part_id, part_name, bytestream)
+        return version
+
+
+    def _get_rdfobject(self, id, part_id, version = False):
+        if not self.storeclient.exists(id):
+            raise ObjectNotFoundException
+        if not version:
+            version = self._get_latest_part(id, part_id)
+        part_name = "%s%s%s" % (part_id, self.prefix, version)
+        r = RDFobject()
+        r.set_uri(self.uri_base[id])
+        if version > 1:
+            f = self.storeclient.get_stream(id, part_id, part_name,streamable=False)
+            r.from_string(self.uri_base[id], f.decode('utf-8'))
+        return r
+
+    def _get_manifest(self, id, part_id, file_uri, version = False):
+        if not self.storeclient.exists(id):
+            raise ObjectNotFoundException
+        if not version:
+            version = self._get_latest_part(id, part_id)
+        part_name = "%s%s%s" % (part_id, self.prefix, version)
+        m = Manifest(file_uri)
+        if version > 1:
+            f = self.storeclient.get_stream(id, part_id, part_name,streamable=False)
+            m.from_string(f.decode('utf-8'))
+        return m
+
+    def exists(self, id):
+        return self.storeclient.exists(id)
+
+    def getObject(self, id=None, create_if_doesnt_exist=True):
+        self.storeclient.get_object(id, create_if_doesnt_exist)
+        return FileStorageObject(id, self)
+
+    def createObject(self, id):
+        self.storeclient.create_object(id)
+        return FileStorageObject(id, self)
+
