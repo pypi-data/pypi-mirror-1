@@ -1,0 +1,130 @@
+WSGIFilter
+++++++++++
+
+.. contents::
+
+Status
+------
+
+WSGIFilter is an extraction of a WSGI pattern that I've implemented in
+several other projects, though always with small differences and
+lacking features in some contexts.  This is an attempt to get it Just
+Right.
+
+See `to do <todo.html>`_ to see some of what needs to be done.
+Discussion and feedback can take place on the `Paste mailing list
+</community/mailing-list.html>`_.
+
+Description
+-----------
+
+So what is WSGIFilter?
+
+Implementing output filtering in WSGI is a bit tricky.  Output can
+come through the app_iter, or the start_response writer, and sometimes
+can be out of order.  Typically only some content is intended to be
+filtered (often text/html).  Lastly, filtering shares a lot of needs
+that `HTTPEncode <http://pythonpaste.org/httpencode/>`_ also handles
+through its format system -- allowing you to work on higher-level
+objects like parsed XML.  Using the format system in concert with a
+stack of similar WSGIFilter filters or HTTPEncode this can be used to
+avoid unnecessary encoding and decoding, by leaving the content as
+native Python objects.
+
+An example of an application that I've written that *could* have used
+WSGIFilter (if it had existed) is `Commentary
+<http://comment.pythonpaste.org/comment/commentary/>`_.  Another is
+`Deliverance <http://openplans.org/projects/deliverance>`_.  Some more
+modest examples that *could* use WSGIFilter are `paste.debug.profile
+<http://pythonpaste.org/module-paste.debug.profile.html>`_ and
+`paste.debug.prints
+<http://pythonpaste.org/module-paste.debug.prints.html>`_.  So if you
+are thinking "is WSGIFilter for me?" you might want to think about
+the similarity of what you are doing to some of these styles of work.
+
+The *specific* thing that got me thinking about WSGIFilter was the use
+of `server-side processing
+<http://blog.ianbicking.org/microformats-feeds-blogs.html>`_ of
+`microformats <http://microformats.org/>`_, potentially stacking up
+multiple transforms without introducing too much overhead (either code
+or performance).
+
+Using It
+--------
+
+You will subclass from ``wsgifilter.Filter``.  For example::
+
+    class UpperFilter(Filter):
+
+        def filter(self, environ, headers, data):
+            return data.upper()
+
+This upper-cases all the content going through the filter.  You use it
+like::
+
+    from therestofmyapp import MyApp
+    # MyApp is a WSGI app factory
+    app = UpperFilter(MyApp(...))
+    # now app is a WSGI app
+
+If you want to use it with `Paste Deploy
+<http://pythonpaste.org/deploy/>`_, you should put something like this
+in your ``setup.py``::
+
+    from setuptools import setup
+    setup(
+        name="MyPackage", ...
+        entry_points="""
+        [paste.filter_app_factory]
+        myfilter = mypackage.myfilter:MyFilter.paste_deploy_middleware
+        """,
+        ...)
+
+Now you can use it as ``egg:MyPackage#myfilter``
+
+The filter method
+~~~~~~~~~~~~~~~~~
+
+The key method is the filter method.  It gets the environment of the
+request, a list of headers, and some data.  The environment just the
+WSGI environment.
+
+The headers can be modified in place -- they won't be sent until you
+return from the function.
+
+The data will be some... data.  There are three basic options:
+
+1. It's a plain string (``str``).  You return the same.
+
+2. You want unicode, and set ``decode_unicode = True`` in your class.
+   You will get a unicode string and should return the same.
+
+3. You want something else, like parsed XML.  You should either set
+   ``format = format_object`` or ``format_output = 'object_type'``.
+   For instance, ``format_object = 'lxml.etree'`` will try to parse
+   whatever we get with `lxml <http://codespeak.net/lxml/>`_.  If you
+   give just ``format_output`` then the filter will try to find the
+   format that gives you that output given the mimetype we've
+   received.  If you give a ``format`` it'll use that exact format.
+
+   (To give an idea of how this differs, there's actually two formats
+   that produce ``lxml.etree`` -- one is the XML parser that accepts
+   ``application/xml`` and one is an HTML parser that accepts
+   ``text/html``)
+
+   As in all the other cases, you return what you get; the format will
+   handle serialization for you.
+
+Conditional filtering
+~~~~~~~~~~~~~~~~~~~~~
+
+If you are filtering HTML (which is the default), you probably don't
+want to look at Javascript or CSS.  You can select what content types
+you want with ``filter_content_types = (list of types)``.  The list is
+``('html/html', )`` by default.
+
+By default only ``200 OK`` responses are filtered; error responses are
+not.  If you want to filter everything use ``filter_all_status =
+True``.
+
+
