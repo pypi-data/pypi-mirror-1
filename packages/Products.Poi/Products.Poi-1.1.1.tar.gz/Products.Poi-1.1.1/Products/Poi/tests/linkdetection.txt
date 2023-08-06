@@ -1,0 +1,252 @@
+Link Detection
+==============
+
+Some fields of PoiIssues and PoiResponses can have text like #42 to
+point to an issue and r1000 to point to a revision or changeset.  This
+is governed by settings in the PoiTracker.
+
+In unit tests we need to provide an adapter to ISchema, otherwise we
+run into an error the moment we create a PoiTracker.  But this is only
+needed with Plone 3, so we use a try/except::
+
+    >>> try:
+    ...     from Products.Archetypes.Schema.factory import \
+    ...     instanceSchemaFactory
+    ...     from zope.component import provideAdapter
+    ...     provideAdapter(instanceSchemaFactory)
+    ... except ImportError:
+    ...     pass
+
+We need create some mock classes as we are unit testing::
+
+    >>> class Mock(object):
+    ...     def __init__(self, **kwargs):
+    ...         for k, v in kwargs.items(): setattr(self, k, v)
+    >>> class MockIssue(Mock):
+    ...     pass
+    >>> class MockCatalog(Mock):
+    ...     contents = []
+    ...     def add(self, issue):
+    ...         self.contents.append(issue)
+    ...     def searchResults(self, query):
+    ...         if not 'path' in query:
+    ...             return self.contents
+    ...         return [i for i in self.contents if i.path == query['path']]
+    >>> portal_catalog = MockCatalog()
+
+We add a helper function that adds an issue to a tracker and to the
+catalog::
+
+    >>> def add_issue(tracker, id):
+    ...     if isinstance(id, int):
+    ...         id = str(id)
+    ...     # Issues can simply have the path of their parent.
+    ...     issue = MockIssue(id=id, path=tracker.id)
+    ...     tracker._setOb(id, issue)
+    ...     portal_catalog.add(issue)
+
+Now we can create a tracker::
+
+    >>> from Products.Poi.content.PoiTracker import PoiTracker
+    >>> tracker = PoiTracker('tracker')
+    >>> tracker.portal_catalog = portal_catalog
+
+
+Links to issues
+---------------
+
+Text without anything special will simply be returned unchanged::
+
+    >>> tracker.linkDetection("We are the knights who say 'Ni'!")
+    "We are the knights who say 'Ni'!"
+
+Unicode should not give problems::
+
+    >>> tracker.linkDetection(u'\xfanicode')
+    u'\xfanicode'
+
+We can ask this tracker to detect issues.  But it does nothing with
+non existing issues::
+
+    >>> tracker.linkDetection("#1")
+    '#1'
+
+Now we add an issue.  The link detection code searches for issues in
+the portal catalog.  So we add issues there::
+
+    >>> add_issue(tracker, 1)
+    >>> add_issue(tracker, 2)
+
+Now we should get html back when we ask for an issue number::
+
+    >>> tracker.linkDetection("#1")
+    '<a href="../1">#1</a>'
+    >>> tracker.linkDetection("Links to #1 and #2.")
+    'Links to <a href="../1">#1</a> and <a href="../2">#2</a>.'
+
+We are not fooled by a non existing issue::
+
+    >>> tracker.linkDetection("Issue #1 and non-issue #3.")
+    'Issue <a href="../1">#1</a> and non-issue #3.'
+
+Issues that are added to a different tracker only show up for that
+tracker::
+
+    >>> tracker2 = PoiTracker('tracker2')
+    >>> tracker2.portal_catalog = portal_catalog
+    >>> add_issue(tracker2, 22)
+    >>> tracker.linkDetection("#22")
+    '#22'
+    >>> tracker2.linkDetection("#22")
+    '<a href="../22">#22</a>'
+
+A combination of unicode and a link number should be possible::
+
+    >>> tracker.linkDetection(u'\xfanicode text with a link to #1')
+    u'\xfanicode text with a link to <a href="../1">#1</a>'
+
+
+Links to revisions/changesets
+-----------------------------
+
+We can link to revisions or changesets.  By default nothing happens::
+
+    >>> tracker.linkDetection('r42')
+    'r42'
+
+We need to specify in the tracker where those links should point to.
+We could point to something silly::
+
+    >>> tracker.setSvnUrl("silly")
+    >>> tracker.linkDetection('r42')
+    '<a href="silly">r42</a>'
+
+This is not very useful, as this is not really a link (unless this is
+a relative link to some content with the id 'silly') and it does
+nothing with the revision number.  The *real* idea here is to specify
+a string with "%(rev)s" in it.  At that point the revision number will
+be filled in.
+
+You could point to revisions, for example the collective Trac for Poi::
+
+    >>> tracker.setSvnUrl("http://dev.plone.org/collective/browser/Poi?%(rev)s")
+    >>> tracker.linkDetection('r42')
+    '<a href="http://dev.plone.org/collective/browser/Poi?42">r42</a>'
+
+I myself like to point to the changesets::
+
+    >>> tracker.setSvnUrl("http://dev.plone.org/collective/changeset/%(rev)s")
+    >>> tracker.linkDetection('r42')
+    '<a href="http://dev.plone.org/collective/changeset/42">r42</a>'
+
+Of course it is fine to combine issues and revisions::
+
+    >>> tracker.linkDetection('Issue #1 is fixed in r42.')
+    'Issue <a href="../1">#1</a> is fixed in <a href="http://dev.plone.org/collective/changeset/42">r42</a>.'
+
+
+Helper methods
+--------------
+
+The linkDetection method was split up into several methods.  These
+should be tested as well.
+
+
+getNumberFromString
+~~~~~~~~~~~~~~~~~~~
+
+This gets a number from a string.  It always returns a string as well::
+
+    >>> tracker.getNumberFromString('#1')
+    '1'
+    >>> tracker.getNumberFromString('r12')
+    '12'
+    >>> tracker.getNumberFromString('rev42')
+    '42'
+    >>> tracker.getNumberFromString('[42]')
+    '42'
+    >>> tracker.getNumberFromString('ticket:399')
+    '399'
+    >>> tracker.getNumberFromString('changeset:12345.')
+    '12345'
+
+Look for problems::
+
+    >>> tracker.getNumberFromString('') is None
+    True
+    >>> tracker.getNumberFromString('foobar') is None
+    True
+    >>> tracker.getNumberFromString('2')
+    '2'
+    >>> tracker.getNumberFromString(u'3')
+    u'3'
+    >>> tracker.getNumberFromString('-7')
+    '7'
+    >>> tracker.getNumberFromString('0') is None
+    True
+    >>> tracker.getNumberFromString('#007')
+    '7'
+
+With more numbers, the first one is taken::
+
+    >>> tracker.getNumberFromString('its13past12')
+    '13'
+
+
+linkBugs
+~~~~~~~~
+
+This links to bugs.  First we give some ids of existing bugs and some
+text with possibly links::
+
+    >>> ids = [str(i) for i in range(12)]
+    >>> text = "issue:1 #2 r3 [4] ticket:5."
+
+Now we test this with patterns::
+
+    >>> patterns = ['test']
+    >>> tracker.linkBugs(text, ids, patterns)
+    'issue:1 #2 r3 [4] ticket:5.'
+    >>> patterns = ['#2']
+    >>> tracker.linkBugs(text, ids, patterns)
+    'issue:1 <a href="../2">#2</a> r3 [4] ticket:5.'
+    >>> patterns = ['#[1-9][0-9]*']
+    >>> tracker.linkBugs(text, ids, patterns)
+    'issue:1 <a href="../2">#2</a> r3 [4] ticket:5.'
+    >>> patterns = ['[[1-9][0-9]*]']
+    >>> tracker.linkBugs(text, ids, patterns)
+    'issue:1 #2 r3 <a href="../4">[4]</a> ticket:5.'
+    >>> patterns = ['#[1-9][0-9]*', 'issue:[1-9][0-9]*', 'ticket:[1-9][0-9]*', 'bug:[1-9][0-9]*']
+    >>> tracker.linkBugs(text, ids, patterns)
+    '<a href="../1">issue:1</a> <a href="../2">#2</a> r3 [4] <a href="../5">ticket:5</a>.'
+    >>> tracker.linkBugs(text, [], patterns)
+    'issue:1 #2 r3 [4] ticket:5.'
+    >>> tracker.linkBugs("#9#9#9", ['9'], ["#9"])
+    '<a href="../9">#9</a><a href="../9">#9</a><a href="../9">#9</a>'
+
+
+linkSvn
+~~~~~~~~
+
+Replace patterns with links to changesets in a repository.  It does
+not need to be subversion of course.  Specify something to test with::
+
+    >>> text = "r1 #22 changeset:333 [4444]"
+    >>> svnUrl = "someurl?rev=%(rev)s"
+
+And test it::
+
+    >>> patterns = []
+    >>> tracker.linkSvn(text, svnUrl, patterns)
+    'r1 #22 changeset:333 [4444]'
+    >>> patterns = ["r1"]
+    >>> tracker.linkSvn(text, svnUrl, patterns)
+    '<a href="someurl?rev=1">r1</a> #22 changeset:333 [4444]'
+    >>> patterns = ['r[0-9]+', 'changeset:[0-9]+', '\[[0-9]+\]']
+    >>> tracker.linkSvn(text, svnUrl, patterns)
+    '<a href="someurl?rev=1">r1</a> #22 <a href="someurl?rev=333">changeset:333</a> <a href="someurl?rev=4444">[4444]</a>'
+
+Of course if you want to be silly, you can::
+
+    >>> tracker.linkSvn(text, "here", patterns)
+    '<a href="here">r1</a> #22 <a href="here">changeset:333</a> <a href="here">[4444]</a>'
