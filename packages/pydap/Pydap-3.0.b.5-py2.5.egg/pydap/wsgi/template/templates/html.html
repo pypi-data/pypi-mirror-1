@@ -1,0 +1,101 @@
+<!-- !This file uses the Genshi template language: http://genshi.edgewall.org/wiki/Documentation/xml-templates.html -->
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:py="http://genshi.edgewall.org/">
+    <py:def function="attributes(attrs)">
+        <dl py:if="attrs" class="attributes">
+            <py:for each="k, v in attrs.items()">
+                <dt>${k}</dt>
+                <dd py:choose="">
+                    <py:when test="isinstance(v, dict)">${attributes(v)}</py:when>
+                    <py:otherwise>${v}</py:otherwise>
+                </dd>
+            </py:for>
+        </dl>
+    </py:def>
+
+    <div py:def="children(var)" class="children">
+        <fieldset py:for="child in var.walk()">
+            <legend>${child.name}</legend>
+
+            <?python
+                from pydap.model import *
+            ?>
+            <py:choose test="">
+                <p py:when="isinstance(child, SequenceType)" class="filter">
+                    <select class="var1" name="var1_${child.id}[0]" id="var1_${child.id}[0]">
+                        <option value="--" selected="selected">--</option>
+                        <option py:for="grandchild in child.walk()" value="${grandchild.id}">${grandchild.id}</option>
+                    </select>
+                    <select class="op" name="op_${child.id}[0]" id="op_${child.id}[0]">
+                        <option value="%3D" selected="selected">=</option>
+                        <option value="%21%3D">!=</option>
+                        <option value="%3C">&lt;</option>
+                        <option value="%3C%3D">&lt;=</option>
+                        <option value="%3E">&gt;</option>
+                        <option value="%3E%3D">&gt;=</option>
+                        <option value="%3D%7E">=~</option>
+                    </select>
+                    <input type="text" name="var2_${child.id}[0]" id="var2_${child.id}[0]" value="" class="var2" />
+                </p>
+                <div py:when="isinstance(child, (BaseType, GridType))">
+                    <p><input type="checkbox" name="${child.id}" id="${child.id}" /><label for="${child.id}">Retrieve this variable at indices:</label></p>
+                    <?python 
+                        dimensions = child.dimensions or ['dim_%id' % j for j in range(len(child.shape))]
+                    ?>
+                    <div py:for="i in range(len(child.shape))">
+                        <label for="${child.id}[${i}]">${dimensions[i]}</label>:<br />
+                        <input type="text" name="${child.id}[${i}]" id="${child.id}[${i}]" value="0:1:${child.shape[i]-1}" /><br />
+                    </div>
+                </div>
+            </py:choose>
+
+            ${attributes(child.attributes)}
+            ${children(child)}
+        </fieldset>
+    </div>
+
+    <head>
+        <title>Pydap server: ${dataset.name}</title>
+
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+
+        <link rel="stylesheet" type="text/css" media="screen" href="/.static/css/default.css" />
+        <script type="text/javascript" src="/.static/js/jquery.min.js">
+        </script>
+        <script type="text/javascript" src="/.static/js/html_form.js">
+        </script>
+    </head>
+
+    <body>
+        <div id="main">
+            <h1>Download data from <code>${dataset.name}</code></h1>
+
+            <!-- Global attributes -->
+            <hr />
+            <h2>Global attributes</h2>
+            ${attributes(dataset.attributes)}
+
+            <hr />
+            <form id="dods_form" method="post" action="${location}">
+                <!-- Dataset variables -->
+                ${children(dataset)}
+
+                <p><input type="submit" id="submit" value="Download data" /> as 
+                <select id="response" name="response">
+                    <option value="ascii" selected="selected">ASCII</option>
+                    <option py:for="response in responses" value="$response">$response</option>
+                </select>
+                <br /><input type="reset" value="Reset" /></p>
+            </form>
+
+            <!--<hr />
+            <pre><code>$dds</code></pre>-->
+
+            <hr />
+            <p><em><a href="http://pydap.org/">pydap/$version</a></em> &copy; Roberto De Almeida</p>
+        </div>
+    </body>
+</html>
+
+<!--! vim:ft=genshi
+-->
