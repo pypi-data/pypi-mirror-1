@@ -1,0 +1,201 @@
+# KForge Installation Instructions
+
+KForge is distributed as the Python package 'kforge'. 
+
+Please report any problems, or other feedback, here:
+
+    mailto:kforge-user@lists.okfn.org
+
+## Step-by-Step Install
+
+### 1. Install dependencies.
+
+Please ensure you have available on your system the following basic
+dependencies:
+
+  * python >= 2.3
+  * apache >= 2.0
+    * modpython (libapache2-mod-python on debian)
+    * ssl [optional] (libapache2-mod-ssl on debian)
+  * postgresql (is recommended, but you can also use mysql) + relevant python
+    bindings (e.g. python-psycopg)
+  * django 0.95: <http://www.djangoproject.com/download/0.95.1/tarball/> (if
+    django would only provide uploads to pypi this could be done automatically
+    via setuptools).
+  * setuptools (>= v0.6c)
+
+Additional dependencies will be automatically installed by
+setuptools/easy_install. If you wish to see details of what these packages are
+see the kforge setup.py file (and the domainmodel setup.py file).
+
+### 2. Setup a database management system for KForge to use
+
+Please consult the instructions for your database system on how to do this.
+
+
+### 3. Install KForge system
+
+1. Install the Python setuptools package. This package is required by KForge
+   installation so it must be installed in advance (all other python packages
+   required will be automatically installed by the installation script).
+
+2. EITHER:
+
+  1. Install kforge using easy_install (provided by setuptools):
+  
+     $ sudo easy_install kforge
+
+  2. OR Download the latest kforge source, extract it change into the
+     distribution root directory (directory containing this INSTALL file), and
+     run:
+   
+     $ python setup.py install
+
+
+### 4. Create a KForge instance/environment
+
+1. Create a KForge configuration file:
+
+  1. $ kforge-makeconfig kforge.conf
+  2. Edit the configuration file so that parameters reflect your setup
+
+     [optional]: You may wish to set the environment variables KFORGE_SETTINGS
+     to point to your newly created configuration file. This will save you
+     having to pass it as as an argument to kforge-admin. You can do this by:
+
+         $ export KFORGE_SETTINGS=<path-to-config-file>
+
+2. Initialise instance:
+  
+  1. Create data: $ kforge-admin --config <path-to-config> data create 
+  2. Initialise database: $ kforge-admin --config <path-to-config> db init
+
+3 . Build apache config and include it in your apache configuration
+
+  1. $ kforge-admin www build
+
+  2. Ensure the generated configuration (location is specified in the config
+     file) is then included into your main apache config -- for example
+     within the VirtualHost for the domain on which you plan to run kforge. We
+     suggest you do this by using the apache Include directive, e.g.:
+
+           # Virtual Host for domain on which KForge will run
+           <VirtualHost *:80>
+              ServerName mykforge.mydomain.com
+              ...
+              Include {{path-to-kforge-generated-apache-config}}
+
+           </VirtualHost>
+     
+     NB: it is important you include the file rather than copy and paste its
+     contents as it will be regulary regenerated.
+
+     NB: path-to-kforge-generated-config is specified in your KForge
+     configuration file.
+
+### 5. Final touches:
+
+(There is further information on these items in the Extra Notes section below).
+
+  1. Give the web-user (the user under which the web server runs) control of the project and log directories:
+           
+           $ chown -R {www-user}:{www-user} {directory-path}
+  
+  2. Auto-reloading of web server configuration (KForge modifies an apache
+     config file when new services are created)
+
+     1. EITHER set KForge to auto reload apache by unsetting the
+        `no_reload_apache` config variable. Note that for this to work you will
+        need to ensure appropriate permissions are granted to the user under
+        which the KForge system runs (more details below).
+     2. OR: automatically reload the apache configuration using some external
+        means. For example, create a cron-job that automatically reloads apache
+        configuration at regular intervals (example below) or a monitoring
+        service of some kind (such as monit) to reload apache each time the
+        apache config file is rebuilt (example below).
+
+### 6. Restart/reload the webserver
+
+### 7. That's it, you are done!
+
+
+## Additional Notes
+
+### 1. Setting File Permissions
+
+For web access to work for kforge you must allow the web server (apache) write
+access to kforge service files (project data and log files). To do this you
+have two options:
+
+  1. Have web user own all kforge files.  This may cause problems if you then
+     wish to run command line utilities to administer KForge since you may not
+     have permission to write to files and directories owned by the web-user.
+
+  2. Allow for dual access by the kforge user and the web-user.
+
+#### 1.2 Allowing for Dual Access
+
+A suitable umask value UMASK to allow group access is 002 or 007.
+
+  1. Set umask for <kforge-user> so that group also has write permissions. Add
+  the following line to the your environment setup (e.g. ~/.bashrc)
+
+          $ umask UMASK
+  
+  2. Giving web user access to kforge installation by adding <apache-user> to
+  <kforge-user> group:
+  
+          $ usermod -G<kforge-user-group> <apache-user>
+  
+  3. Set umask for apache to allow group access:
+    * add the following to apache startup script (usually /usr/sbin/apachectl
+    or /usr/sbin/apache2ctl -- you can find it referenced in
+    /etc/init.d/apache<version>):
+
+          $ umask UMASK
+      
+  4. Give group access to existing files and make sure new files and
+  directories remain in the <kforge-user-group> by setting sgid
+
+          $ chmod g+wX -R BASE
+
+### 2. Auto-Reloading of the Apache Configuration
+
+It is occasionally necessary for the KForge system to update the apache
+configuration file (for example when new services are added). For these changes
+to take effect it is then necessary for apache to reload the configuration.
+There are two options for how this is done:
+
+#### 2.1 Automatically
+
+In the [www] section of the KForge configuration file set the no_reload_apache
+to empty (False) and set the reload_apache variable to the command which will
+reload the apache configuration on your system.
+
+NB: In order for this to work the user which owns the apache process must be
+able to reload the configuration.  Specifically it must be able to run the
+'reload_apache' command specified in the [www] section of the configuration.
+You can normally achieve this by adding something to your /etc/sudoers file:
+
+    Cmnd_Alias APACHE = <insert-apache-reload-command>
+    [....]
+    <www-user-name> ALL =NOPASSWD: APACHE
+
+#### 2.2 Manually
+
+Reload the apache config on a regular basis using some external tool. For
+example the following uses cron to reload apache config every half an hour:
+
+    # reload apache config every half an hour 
+    # The apache reload command is for apache2 on debian
+    # and might need to be modified for other systems
+    30 * * * *   /etc/init.d/apache2 reload
+
+Alternatively you could use some form of monitoring service to only reload when
+KForge rebuils its apache configuration file. For example, the following uses
+monit:
+
+    check file ${file-name} with path ${path-to-kforge-generated-apache-config}
+      if changed timestamp
+        then exec "/etc/init.d/apache2 reload"
+
