@@ -1,0 +1,202 @@
+
+= Configuring a Tahoe node =
+
+A Tahoe node is configured by writing files to its base directory. These
+files are read by the node when it starts, so each time you change them, you
+need to restart the node.
+
+The node also writes state to its base directory, so it will create files on
+its own.
+
+This document contains a complete list of the config files that are examined
+by the client node, as well as the state files that you'll observe in its
+base directory.
+
+== Client Configuration ==
+
+introducer.furl (mandatory): This FURL tells the client how to connect to the
+introducer. Each Tahoe grid is defined by an introducer. The introducer's
+furl is created by the introducer node and written into its base directory
+when it starts, whereupon it should be published to everyone who wishes to
+attach a client to that grid
+
+nickname (optional): The contents of this file will be displayed in
+management tools as this node's "nickname". If the file doesn't exist, the
+nickname will be set to "<unspecified>".
+
+webport (optional): This controls where the client's webserver should listen,
+providing filesystem access as defined in webapi.txt . This file contains a
+Twisted "strports" specification (as defined in
+http://twistedmatrix.com/documents/current/api/twisted.application.strports.html
+) such as "8123" or "tcp:8123:interface=127.0.0.1".  The 'tahoe create-client'
+command sets the webport to "tcp:8123:interface=127.0.0.1" by default, and is
+overridable by the "--webport" option.  You can make it use SSL by writing
+"ssl:8123:privateKey=mykey.pem:certKey=cert.pem" instead.
+
+helper.furl (optional): If present, the node will attempt to connect to and
+use the given helper for uploads. See docs/helper.txt for details.
+
+client.port (optional): This controls which port the node listens on. If not
+provided, the node will ask the kernel for any available port, and write it
+to this file so that subsequent runs will re-use the same port.
+
+advertised_ip_addresses (optional): The node normally uses tools like
+'ifconfig' to determine the set of IP addresses on which it can be reached
+from nodes both near and far. The node introduces itself to the rest of the
+grid with a FURL that contains a series of (ipaddr, port) pairs which other
+nodes will use to contact this one. By providing this file, you can add to
+this list. This can be useful if your node is running behind a firewall, but
+you have created a port-forwarding to allow the outside world to access it.
+Each line must have a dotted-quad IP address and an optional :portnum
+specification, like:
+
+ 123.45.67.89
+ 44.55.66.77:8098
+
+Lines that do not provide a port number will use the same client.port as the
+automatically-discovered addresses.
+
+authorized_keys.SSHPORT (optional): This enables an SSH-based interactive
+Python shell, which can be used to inspect the internal state of the node,
+for debugging.  To cause the node to accept SSH connections on port 8022,
+symlink "authorized_keys.8022" to your ~/.ssh/authorized_keys file, and it
+will accept the same keys as the rest of your account.
+
+no_storage (optional): If this file is present (the contents do not matter),
+the node will not run a storage server, meaning that no shares will be stored
+on this node. Use this for clients who do not wish to provide storage
+service.
+
+readonly_storage (optional): If this file is present (the contents do not
+matter), the node will run a storage server but will not accept any shares,
+making it effectively read-only. Use this for storage servers which are being
+decommissioned: the storage/ directory could be mounted read-only, while
+shares are moved to other servers. Note that this currently only affects
+immutable shares. Mutable shares (used for directories) will be written and
+modified anyway. See ticket #390 for the current status of this bug.
+
+sizelimit (optional): If present, this file establishes an upper bound (in
+bytes) on the amount of storage consumed by share data (data that your node
+holds on behalf of clients that are uploading files to the grid). To avoid
+providing more than 100MB of data to other clients, write "100000000" into
+this file. Note that this is a fairly loose bound, and the node may
+occasionally use slightly more storage than this. To enforce a stronger (and
+possibly more reliable) limit, use a symlink to place the 'storage/'
+directory on a separate size-limited filesystem, and/or use per-user
+OS/filesystem quotas.  If a size limit is specified then Tahoe will do a "du"
+at startup (traversing all the storage and summing the sizes of the files),
+which can take a long time if there are a lot of shares stored.
+
+private/root_dir.cap (optional): The command-line tools will read a directory
+cap out of this file and use it, if you don't specify a '--dir-cap' option or
+if you specify '--dir-cap=root'.
+
+private/convergence (automatically generated): An added secret for encrypting
+immutable files. Everyone who has this same string in their private/convergence
+file encrypts their immutable files in the same way when uploading them.  This
+causes identical files to "converge" -- to share the same storage space since
+they have identical ciphertext -- which conserves space and optimizes upload
+time, but it also exposes files to the possibility of a brute-force attack by
+people who know that string.  In this attack, if the attacker can guess most of
+the contents of a file, then they can use brute-force to learn the remaining
+contents.
+
+So the set of people who know your private/convergence string is the set of
+people who converge their storage space with you when you and they upload
+identical immutable files, and it is also the set of people who could mount such
+an attack.
+
+The content of the private/convergence file is a base-32 encoded string.  If the
+file doesn't exist, then when the Tahoe client starts up it will generate a
+random 256-bit string and write the base-32 encoding of this string into the
+file.  If you want to converge your immutable files with as many people as
+possible, put the empty string (so that private/convergence is a zero-length
+file).
+
+log_gatherer.furl : if present, this file is used to contact a 'log
+gatherer', which will be granted access to the logport. This can be used by
+centralized storage meshes to gather operational logs in a single place.
+
+run_helper : if present and not empty, the node will run a helper (see
+docs/helper.txt for details). The helper's contact FURL will be placed in
+private/helper.furl, from which it can be copied to any clients which wish to
+use it. Clearly nodes should not both run a helper and attempt to use one: do
+not create both helper.furl and run_helper in the same node.
+
+== Node State ==
+
+private/node.pem : This contains an SSL private-key certificate. The node
+generates this the first time it is started, and re-uses it on subsequent
+runs. This certificate allows the node to have a cryptographically-strong
+identifier (the Foolscap "TubID"), and to establish secure connections to
+other nodes.
+
+storage/ : Nodes which host StorageServers will create this directory to hold
+shares of files on behalf of other clients. There will be a directory
+underneath it for each StorageIndex for which this node is holding shares.
+There is also an "incoming" directory where partially-completed shares are
+held while they are being received.
+
+client.tac : this file defines the client, by constructing the actual Client
+instance each time the node is started. It is used by the 'twistd'
+daemonization program (in the "-y" mode), which is run internally by the
+"tahoe start" command. This file is created by the "tahoe create-client"
+command.
+
+private/control.furl : this file contains a FURL that provides access to a
+control port on the client node, from which files can be uploaded and
+downloaded. This file is created with permissions that prevent anyone else
+from reading it (on operating systems that support such a concept), to insure
+that only the owner of the client node can use this feature. This port is
+intended for debugging and testing use.
+
+private/logport.furl : this file contains a FURL that provides access to a
+'log port' on the client node, from which operational logs can be retrieved.
+Do not grant logport access to strangers, because occasionally secret
+information may be placed in the logs.
+
+private/helper.furl : if the node is running a helper (for use by other
+clients), its contact FURL will be placed here. See docs/helper.txt for more
+details.
+
+== Introducer configuration ==
+
+Introducer nodes use the same 'advertised_ip_addresses' file as client
+nodes. They also use 'authorized_keys.SSHPORT'.
+
+There are no additional configuration parameters for the introducer.
+
+
+== Introducer state ==
+
+The Introducer node maintains some different state than regular client
+nodes.
+
+introducer.furl : This is generated the first time the introducer node is
+started, and used again on subsequent runs, to give the introduction service
+a persistent long-term identity. This file should be published and copied
+into new client nodes before they are started for the first time.
+
+introducer.port : this serves exactly the same purpose as 'client.port', but
+has a different name to make it clear what kind of node is being run.
+
+introducer.tac : this file is like client.tac but defines an
+introducer node instead of a client node.
+
+== Other files ==
+
+logs/ : Each Tahoe node creates a directory to hold the log messages produced
+as the node runs. These logfiles are created and rotated by the "twistd"
+daemonization program, so logs/twistd.log will contain the most recent
+messages, logs/twistd.log.1 will contain the previous ones, logs/twistd.log.2
+will be older still, and so on. twistd rotates logfiles after they grow
+beyond 1MB in size. If the space consumed by logfiles becomes troublesome,
+they should be pruned: a cron job to delete all files that were created more
+than a month ago in this logs/ directory should be sufficient.
+
+my_nodeid : this is written by all nodes after startup, and contains a
+base32-encoded (i.e. human-readable) NodeID that identifies this specific
+node. This NodeID is the same string that gets displayed on the web page (in
+the "which peers am I connected to" list), and the shortened form (the first
+characters) is recorded in various log messages.
+
