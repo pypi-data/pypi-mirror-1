@@ -1,0 +1,289 @@
+------------------------------------
+Usage Examples (via the interpreter)
+------------------------------------
+
+Setup the client connection using ``xmlrpclib`` with basic authorization.
+::
+
+    >>> from xmlrpclib import ServerProxy
+    >>> client = ServerProxy('http://user:password@localhost:8888/plone')
+
+.. _wsapi4plone.client: http://pypi.python.org/pypi/wsapi4plone.client
+
+.. note:: Please take a look at the `wsapi4plone.client`_ package if you are interested in cookie based authentication.
+
+Finding what you're looking for
+===============================
+
+We can use the ``query`` call to search for content in the site.  This will also allow us to get a full index of all the content objects in the site if we do not provide any parameters.  Example:
+::
+
+    >>> q = client.query()
+    >>> len(q)
+    7
+    >>> q
+    {'/plone/front-page': {'CreationDate': '2007-04-02 15:28:30',
+                           'Creator': 'admin',
+                           'Date': '2009-08-19 09:56:50',
+                           'Description': 'Congratulations! You have successfully installed Plone.',
+                           'EffectiveDate': 'None',
+                           'ExpirationDate': 'None',
+                           'ModificationDate': '2009-08-19 09:56:50',
+                           'Subject': [],
+                           'Title': 'Welcome to Plone',
+                           'Type': 'Page',
+                           'UID': '07f20e423b6ca478eb8691ff816b83a3',
+                           'container': False,
+                           'created': <DateTime '2007-04-02T14:28:30-05:00' at 6a9440>,
+                           'effective': <DateTime '1000-01-01T00:00:00-04:00' at 71d558>,
+                           'expires': <DateTime '2499-12-31T00:00:00-04:00' at 6a95a8>,
+                           'id': 'front-page',
+                           'listCreators': ['admin'],
+                           'modified': <DateTime '2009-08-19T09:56:50-04:00' at 6a9620>,
+                           'review_state': 'published',
+                           'size': '4.9 kB'}, ... }
+
+We can also pass criteria to the query call in the form of a dictionary.  The ``query`` call is simply an abstraction of the Plone portal_catalog's search method.  Therefore, you can look at <<<google search: plone portal_catalog>>> for more information on the possible calls to the portal_catalog.  A basic example would look like:
+::
+
+    >>> q = client.query({'Title': "Users"})
+    >>> q.keys()
+    ['/plone/Members']
+
+Get a content object
+====================
+
+To get information about the site (or the current calling location based on the url used above) use the ``get_object`` call without any parameters.
+::
+
+    >>> site_object = client.get_object()
+    >>> site_object
+    {'/plone': [{'description': '', 'id': 'plone', 'title': 'Site'},
+                'Plone Site',
+                {'contents': {'/plone/Members': {'CreationDate': '2009-08-19 09:56:50',
+                                                 'Creator': 'admin',
+                                                 'Date': '2009-08-19 09:56:51',
+                                                 'Description': "Container for users' home directories",
+                                                 'EffectiveDate': 'None',
+                                                 'ExpirationDate': 'None',
+                                                 'ModificationDate': '2009-08-19 09:56:51',
+                                                 'Subject': [],
+                                                 'Title': 'Users',
+                                                 'Type': 'Large Folder',
+                                                 'UID': '6e22e44bbe5581e10e3ff4913cebf83a',
+                                                 'container': True,
+                                                 'created': <DateTime '2009-08-19T09:56:50-04:00' at 71abc0>,
+                                                 'effective': <DateTime '1000-01-01T00:00:00-04:00' at 71a8f0>,
+                                                 'expires': <DateTime '2499-12-31T00:00:00-04:00' at 71ac10>,
+                                                 'id': 'Members',
+                                                 'listCreators': ['admin'],
+                                                 'modified': <DateTime '2009-08-19T09:56:51-04:00' at 71ac88>,
+                                                 'review_state': 'published',
+                                                 'size': '1 kB'}, ... }]}
+
+Analyzing the results
+---------------------
+
+The ``get_object`` call will return data in a dictionary that is keyed by absolute path within the site.  The value of each key is a list of three items.  The items are loosely referred to as schema, type and miscellaneous, in that specific order.
+
+:Schema:  The schema isn't exactly a schema, but for lack of a better word has been called such.  The data is a dictionary of the content object's attribute name to value.  Further information about the schema can be determined by using the ``get_schema`` call and the content's type name.
+
+:Type: The type is a string that represents the content-type of the object.  The type name is derived from the name in the Plone portal_types tool.  
+
+:Miscellaneous: The miscellaneous value is dependent on the content-type of the object and/or any extensions provided to the WSAPI by third party packages.  This value will always be available, but may return an empty dictionary when there are no extensions for the content-type.  An example of the default extension of container objects is the 'contents' key in the miscellaneous dictionary, which provides information about the contents of the container.  The value shares the same data structure as the query call.  
+
+Get specific content objects by path
+------------------------------------
+
+To be more specific about which objects you want returned, you can provide a list of paths to the ``get_object`` call.  The path can be relative to the xmlrpclib initialization location or absolute.  However, everything will always be returned with the absolute path, no matter if you use relative paths or not.
+
+An example would be something like:
+::
+
+    >>> objs = client.get_object(['Members', '/plone/front-page'])
+    >>> len(objs)
+    2
+    >>> objs.keys()
+    ['/plone/front-page', '/plone/Members']
+
+Put or update information on a content object
+=============================================
+
+To put or update information in an existing content object we pass the ``put_object`` call a dictionary of keyed paths that are valued with a list of schema and type.  The short of this is that you can do a ``get_object`` call and change/update the results, then simply pass those results through the ``put_object`` call.  Let's take a look at an example that changes the text body of the *front-page* object using the ``get_object`` call shortcut.
+::
+
+    >>> frontpage = client.get_object(['/plone/front-page'])
+    >>> schema = frontpage['/plone/front-page'][0]
+    >>> # Drop everything except the feel we want, even though sending back the whole thing wouldn't hurt anything.
+    ... 
+    >>> schema = dict([ (x,schema[x]) for x in schema if x == 'text' ])
+    >>> schema['text'] = "Once a new technology starts rolling, \
+    ... if you're not part of the steamroller, you're part of the road. --Stewart Brand"
+    >>> frontpage['/plone/front-page'][0] = schema
+    >>> # get the results and send them back into the get_object call
+    ... 
+    >>> updated_frontpage = client.get_object(client.put_object(frontpage))
+    >>> updated_frontpage['/plone/front-page'][0]['text']
+    "Once a new technology starts rolling, if you're not part of the steamroller, you're part of the road. --Stewart Brand"
+
+Post a new content object
+=========================
+
+To create or post a piece of content to a Plone site you would use the ``post_object`` call, which is almost the same as the ``put_object`` call.  The only difference between the two calls is that the type (aka content-type) is optional with ``put_object``, but not with ``post_object``.  Also, it should be noted that it is your responsibility to provide any required attributes, as the ``post_object`` call does not verify you have providing values for required attributes.
+
+Knowing what content-types are available
+----------------------------------------
+
+Since you are required to use a content-type in the creation of an object, where do you find out what content-types are available.  The ``get_types`` call is for this very purpose.  Look at `Get the available content-types`_ for more information about the ``get_types`` call.  Quick example:
+::
+
+    >>> types = client.get_types()
+    >>> types
+    ['Document', 'Event', 'Favorite', 'File', 'Folder', 'Image', 'Link', 'News Item', 'Topic']
+
+Getting the required attributes of a content-type
+-------------------------------------------------
+
+Before you create new content it is helpful to know what attributes the content-type has.  To do that we can use the ``get_schema`` call, which will return the attributes of a particular type and meta-data about the attributes.  Look at `Get a content object's structure`_ for more information about the ``get_schema`` call.  Quick example:
+::
+
+    >>> link_schema = client.get_schema('Link')
+    >>> [ x for x in link_schema if link_schema[x]['required'] ]
+    ['remoteUrl', 'title']
+
+Creating the content
+--------------------
+
+To create object we need to give the ``post_object`` the same data structure you give to ``put_object`` and receive from ``get_object``.  What is the keyed value we give it?  The key of the dictionary will be the to-be-created object id.  Everything else is relatively straight forward, since it is so similar to the ``put_object`` call.  Let's take a look at an example where we create a *Link* to the PSU WebLion website in a Plone site.
+::
+
+    >>> weblion = {'/plone/weblion': [{'title': 'PSU WebLion', 'remoteUrl': 'http://weblion.psu.edu/'},'Link']}
+    >>> # Note: I could have used the relative path 'weblion' as the key rather than the absolute path.
+    ... 
+    >>> weblion = client.get_object(client.post_object(weblion))
+    >>> weblion
+    {'/plone/weblion': [{'allowDiscussion': False,
+                         'contributors': [],
+                         'creation_date': <DateTime '2009-08-19T15:05:48-04:00' at 6a9648>,
+                         'creators': ['admin'],
+                         'description': '',
+                         'effectiveDate': None,
+                         'excludeFromNav': False,
+                         'expirationDate': None,
+                         'id': 'weblion',
+                         'language': '',
+                         'location': '',
+                         'modification_date': <DateTime '2009-08-19T15:05:48-04:00' at 6a95f8>,
+                         'relatedItems': [],
+                         'remoteUrl': 'http://weblion.psu.edu/',
+                         'rights': '',
+                         'subject': [],
+                         'title': 'PSU WebLion'},
+                        'Link',
+                        None]}
+
+Delete a content object
+=======================
+
+The ``delete_object`` call does exactly what it says, deletes objects.  To use ``delete_object`` you pass it a list of paths.  Like the other calls the paths can be absolute or relative to the client call location.  Let's delete the *Members* folder and the *events* collection.
+::
+
+    >>> client.delete_object(['Members','/plone/events'])
+
+Get the available content-types
+===============================
+
+Plone comes with a nice variety of content-types and this is one of the reasons it is such a powerful system.  We can use the ``get_types`` call to get the available types.  In addition, you can provide the call with a path to the container to discover the available types for that container.  Let's take a look at the types that can be added to the current call location (the plone site) and the *news* object, which is a *Large Plone Folder*.
+::
+
+    >>> client.get_types()
+    [['Document', 'Page'],
+     ['Event', 'Event'],
+     ['Favorite', 'Favorite'],
+     ['File', 'File'],
+     ['Folder', 'Folder'],
+     ['Image', 'Image'],
+     ['Link', 'Link'],
+     ['News Item', 'News Item'],
+     ['Topic', 'Collection'],
+     ['MyFolder', 'MyFolder']]
+    >>> client.get_types('/plone/news')
+    [['News Item', 'News Item']]
+
+Get a content object's structure
+================================
+
+You usually want a blue print or schematic before trying to start an engineering project.  The same usually holds true for content objects, because not all content has the same shape or function.  The ``get_schema`` call helps to determine the schema of a content-type, which is basically a blue print for the object.  The call returns a dictionary of schema attributes for the given content-type.  The dictionary is keyed by the attribute's name and its value is a dictionary of meta-data.
+
+.. note:: The current implementation provides a dictionary of two key value pairs (required and type) as the attribute meta-data.  Future wsapi4plone.core versions may also provide default values and permission information.
+
+Let's take a look at the schema for an *Image* content-type.
+::
+
+    >>> image_schema = client.get_schema('Image')
+    >>> image_schema
+    {'allowDiscussion': {'required': False, 'type': 'boolean'},
+     'contributors': {'required': False, 'type': 'lines'},
+     'creation_date': {'required': False, 'type': 'datetime'},
+     'creators': {'required': False, 'type': 'lines'},
+     'description': {'required': False, 'type': 'text'},
+     'effectiveDate': {'required': False, 'type': 'datetime'},
+     'excludeFromNav': {'required': False, 'type': 'boolean'},
+     'expirationDate': {'required': False, 'type': 'datetime'},
+     'id': {'required': 0, 'type': 'string'},
+     'image': {'required': True, 'type': 'image'},
+     'language': {'required': False, 'type': 'string'},
+     'location': {'required': False, 'type': 'string'},
+     'modification_date': {'required': False, 'type': 'datetime'},
+     'relatedItems': {'required': False, 'type': 'reference'},
+     'rights': {'required': False, 'type': 'text'},
+     'subject': {'required': False, 'type': 'lines'},
+     'title': {'required': False, 'type': 'string'}}
+
+.. note:: The ``get_schema`` call takes a path parameter in addition to the content-type name, because sometimes there are type constraints on content and content containers.
+
+Get a content object's workflow state
+=====================================
+
+You can only go so far with creating and updating content before, for instance, you need to transition the content from a private state to a public state.  The ``get_workflow`` call returns a dictionary of two bit of information.  One the current workflow *state* of the content. Two the available *transition(s)* the authenticated user can perform.  Let's take a look at the *weblion* object we created in the `Post a new content object`_ section.
+::
+
+    >>> client.get_workflow('weblion')
+    {'state': 'private', 'transitions': ['submit', 'publish']}
+
+Transition a content object's workflow state
+============================================
+
+Using the ``get_workflow`` call has provided you with available transitions you can perform on the given content object.  We can now use the ``set_workflow`` call to transition the workflow state of the content.  Let's *publish* the *weblion* object that was create in the `Post a new content object`_ section.  In this example the second parameter, path, is optional and based on the current call location.
+::
+
+    >>> client.set_workflow('publish', 'weblion')
+    >>> client.get_workflow('weblion')
+    {'state': 'published', 'transitions': ['retract', 'reject']}
+
+Get a content object's discussion container
+============================================
+
+Use the ``get_discussion`` call to get the discussion container (a.k.a. comments container) of a content object with the full or relative path to the object.
+::
+
+    >>> client.get_discussion('weblion')
+    {'1257246779': {'in_reply_to': '1257246760',
+                    'cooked_text': 'a comment on comment 1',
+                    'title': 'comment 1.1',
+                    'created': '2009-11-03 12:12:59',
+                    'text': 'a comment on comment 1',
+                    'creators': ('admin',)},
+     '1257246760': {'in_reply_to': '',
+                    'cooked_text': 'the first comment!',
+                    'title': 'comment 1',
+                    'created': '2009-11-03 12:12:40',
+                    'text': 'the first comment!',
+                    'creators': ('admin',)},
+     '1257246799': {'in_reply_to': '',
+                    'cooked_text': 'another comment',
+                    'title': 'comment 2',
+                    'created': '2009-11-03 12:13:19',
+                    'text': 'another comment',
+                    'creators': ('admin',)}
+     }
