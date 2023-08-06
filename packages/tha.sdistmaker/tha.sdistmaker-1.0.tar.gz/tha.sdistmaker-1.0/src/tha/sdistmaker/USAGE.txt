@@ -1,0 +1,145 @@
+Usage of tha.sdistmaker
+=======================
+
+.. :doctest:
+.. :setup: tha.sdistmaker.tests.test_setup.setup
+.. :teardown: tha.sdistmaker.tests.test_setup.teardown
+
+tha.sdistmaker has two main uses:
+
+- Make and store an sdist tarball of a single tag.
+
+- Go through all tags and ensure they all have an sdist tarball.
+
+
+Test setup
+----------
+
+"Pypi" directory for placing tarballs:
+
+    >>> print pypidir
+    PYPI
+
+Monkeypatching to prevent real action from taking place:
+
+    >>> import commands
+    >>> orig_getstatusoutput = commands.getstatusoutput
+    >>> output_results = ['']
+    >>> def mock_getstatusoutput(cmd):
+    ...     print "Command:", cmd
+    ...     return 0, output_results.pop(0)
+    >>> commands.getstatusoutput = mock_getstatusoutput
+    >>> commands.getstatusoutput('make tea')
+    Command: make tea
+    (0, '')
+
+    >>> import shutil
+    >>> orig_copy = shutil.copy
+    >>> def mock_copy(src, dest):
+    ...     print "Mock copy %s -> %s" % (src, dest)
+    ...     open(dest, 'w').write('mock')
+    >>> shutil.copy = mock_copy
+
+
+Making sdist tarball of a single tag
+------------------------------------
+
+    >>> from tha.sdistmaker import maker
+    >>> tag = 'http://example.org/repo/project/tags/0.1'
+
+The script makes an svn checkout of the tag and uses setuptools to grab the
+name and version and to make an sdist.  This is then copied to the pypi dir in
+a subdirectory named after the project.
+
+    >>> output_results = ['',
+    ...                   'project',
+    ...                   '0.1',
+    ...                   '',
+    ...                   ]
+    >>> maker.main(tag=tag, destination=pypidir)
+    Doing checkout of http://example.org/repo/project/tags/0.1
+    Command: svn co http://example.org/repo/project/tags/0.1 ...
+    Detecting name and version
+    Command: python setup.py --name
+    Name: project
+    Command: python setup.py --version
+    Version: 0.1
+    Making sdist tarball
+    Command: python setup.py sdist
+    <BLANKLINE>
+    Creating directory PYPI/project
+    Copying tarball project-0.1.tar.gz
+    Mock copy dist/project-0.1.tar.gz -> PYPI/project/project-0.1.tar.gz
+
+A new directory for the project is created:
+
+    >>> import os
+    >>> os.listdir(pypidir)
+    ['project']
+
+And the tarball is in there:
+
+    >>> sorted(os.listdir(os.path.join(pypidir, 'project')))
+    ['project-0.1.tar.gz']
+
+A new release is placed alongside just fine:
+
+    >>> tag = 'http://example.org/repo/project/tags/0.2'
+    >>> output_results = ['',
+    ...                   'project',
+    ...                   '0.2',
+    ...                   '',
+    ...                   ]
+    >>> maker.main(tag=tag, destination=pypidir)
+    Doing checkout of http://example.org/repo/project/tags/0.2
+    Command: svn co http://example.org/repo/project/tags/0.2 ...
+    Detecting name and version
+    Command: python setup.py --name
+    Name: project
+    Command: python setup.py --version
+    Version: 0.2
+    Making sdist tarball
+    Command: python setup.py sdist
+    <BLANKLINE>
+    Copying tarball project-0.2.tar.gz
+    Mock copy dist/project-0.2.tar.gz -> PYPI/project/project-0.2.tar.gz
+    >>> os.listdir(pypidir)
+    ['project']
+    >>> sorted(os.listdir(os.path.join(pypidir, 'project')))
+    ['project-0.1.tar.gz', 'project-0.2.tar.gz']
+
+And a second project:
+
+    >>> tag = 'http://example.org/repo/another/tags/0.2'
+    >>> output_results = ['',
+    ...                   'another',
+    ...                   '0.2',
+    ...                   '',
+    ...                   ]
+    >>> maker.main(tag=tag, destination=pypidir)
+    Doing checkout of http://example.org/repo/another/tags/0.2
+    Command: svn co http://example.org/repo/another/tags/0.2 ...
+    Detecting name and version
+    Command: python setup.py --name
+    Name: another
+    Command: python setup.py --version
+    Version: 0.2
+    Making sdist tarball
+    Command: python setup.py sdist
+    <BLANKLINE>
+    Creating directory PYPI/another
+    Copying tarball another-0.2.tar.gz
+    Mock copy dist/another-0.2.tar.gz -> PYPI/another/another-0.2.tar.gz
+    >>> sorted(os.listdir(pypidir))
+    ['another', 'project']
+    >>> sorted(os.listdir(os.path.join(pypidir, 'project')))
+    ['project-0.1.tar.gz', 'project-0.2.tar.gz']
+    >>> sorted(os.listdir(os.path.join(pypidir, 'another')))
+    ['another-0.2.tar.gz']
+
+
+
+Restore originals:
+
+    >>> commands.getstatusoutput = orig_getstatusoutput
+    >>> shutil.copy = orig_copy
