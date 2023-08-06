@@ -1,0 +1,149 @@
+#!/usr/bin/env python
+# _*_ coding: UTF-8 _*_
+
+"""Slice a PDF file (reordering its pages) into a new PDF file.
+
+This is a module for reading a PDF file, slicing it into single 
+pages and reassembling selected single pages or page ranges into 
+a new PDF document stored into a new file.
+
+This module can be considered a sample tool for the excellent
+package pyPdf by Mathieu Fenniak, see http://pybrary.net/pyPdf.
+
+For further information please look into the file README.txt!
+"""
+
+import re
+import sys
+import getopt
+import os.path
+
+from pdfsplit import *
+from pdfsplit import __version__, __date__, __license__, __author__
+
+
+# command-line usage stuff
+
+def _showVersion():
+    "Print version message and terminate."
+
+    prog = os.path.basename(sys.argv[0])
+    print "%s %s" % (prog, __version__)
+    sys.exit()
+
+
+def _showUsage():
+    "Print usage message and terminate."
+
+    prog = os.path.basename(sys.argv[0])
+    copyrightYear = __date__[:__date__.find("-")]
+    args = (prog, __version__, __author__, copyrightYear, __license__)
+    print "%s v. %s, Copyleft by %s, %s (%s)" % args 
+    print "Split a PDF file or rearrange its pages into a new PDF file."
+    print "USAGE: %s [options] slice1 [slice2...] file1 [file2...]" % prog
+    print """\
+OPTIONS:
+  -h --help          Prints this usage message and exits.
+  -v --version       Prints version number and exits.
+  -p --pages         Slices using page numbers (starting at 1, not 0).
+  -o --output FILE   Set output path (incl. some patterns).
+
+EXAMPLES:
+Extract pages with real page numbers (resulting in file-split.pdf)
+  %(prog)s file.pdf           # copy all pages
+  %(prog)s -p 1 file.pdf      # page 1
+  %(prog)s -p 1 3 5 file.pdf  # pages 1, 3 and 5
+  %(prog)s -p 1-3 file.pdf    # pages 1 to 3
+  %(prog)s -p 2 6-8 file.pdf  # pages 2 and 6 to 8
+  
+Similar, but using Python slices (more powerful)
+  %(prog)s 0 file.pdf         # page 1
+  %(prog)s 1 3 5 file.pdf     # pages 2, 4 and 6
+  %(prog)s -1 file.pdf        # last page
+  %(prog)s 1:4 file.pdf       # pages 2, 3 and 4
+  %(prog)s -3:-1 file.pdf     # 3rd and 2nd last page
+  %(prog)s 0::2 file.pdf      # all even pages
+  %(prog)s 1::2 file.pdf      # all odd pages
+  %(prog)s 0::2 1::2 file.pdf # all even then all odd pages
+  %(prog)s ::-1 file.pdf      # all pages in reversed order
+  %(prog)s 5 f1.pdf f2.pdf    # page 6 of f1.pdf and f2.pdf
+  %(prog)s f1.pdf f2.pdf 5    # page 6 of f1.pdf and f2.pdf
+  %(prog)s f1.pdf 5 f2.pdf    # page 6 of f1.pdf and f2.pdf
+  %(prog)s 0::2 *.pdf         # revert all PDF files
+
+Manipulating resulting filename
+  %(prog)s -o "onlyeven%%(ext)s" [::2] mydir/file.pdf
+  # extracts all even pages into file onlyeven.pdf in working dir.
+
+  %(prog)s -o "%%(dirname)s/%%(base)s-even%%(ext)s" [::2] mydir/file.pdf
+  # same, but keeps original dir., base & ext -> mydir/file-even.pdf
+
+  %(prog)s -p -o "%%(dirname)s/%%(base)s-p%%(indices)s%%(ext)s" 1-5 mydir/file.pdf
+  # similar, but now indicates used indices -> mydir/file-p1-5.pdf
+
+  %(prog)s -p -o "%%(base)s-p%%(indices)s%%(ext)s" 1-5 mydir/file*.pdf
+  # similar, but now all in same folder -> file1-p1-5.pdf, file2-p1-5.pdf'
+
+COPYLEFT:
+  see http://www.gnu.org/copyleft/gpl.html
+""" % {"prog": prog}
+
+    sys.exit()
+
+
+def _main():
+    "Main for command-line usage."
+
+    try:
+        longOpts = "help version pages output=".split()
+        opts, args = getopt.getopt(sys.argv[1:], "hvpo:", longOpts)
+    except getopt.GetoptError:
+        print "ERROR"
+        _showUsage()
+    
+    stopOptions = "-v --version -h --help"
+    stopOptions = [key for (key, val) in opts if key in stopOptions]
+    if len(args) == 0 and len(stopOptions) == 0:
+        _showUsage()
+
+    usePageNums = False
+    outputPat = None
+    for key, val in opts:
+        if key in ("-h", "--help"):
+            _showUsage()
+        elif key in ("-v", "--version"):
+            _showVersion()
+        elif key in ("-p", "--pages"):
+            usePageNums = True
+        elif key in ("-o", "--output"):
+            outputPat = val
+
+    # determine paths of input files
+    paths = [a for a in args if os.path.exists(a)]
+
+    # determine indices or pagenums
+    rangePat = re.compile("(\d+-?\d*)")
+    slicePat = re.compile("(-?\d*:-?\d*:-?\d*|-?\d*:-?\d*|-?\d+)")
+    if usePageNums:
+        rangeStrs = [a for a in args if re.match(rangePat, a)]
+        rangeStrs = [s for s in rangeStrs if not os.path.exists(s)]
+        slices = [rangeStr2sliceObj(s) for s in rangeStrs]    
+        indexPats = rangeStrs    
+    else:
+        sliceStrs = [a for a in args if re.match(slicePat, a)]
+        sliceStrs = [s for s in sliceStrs if not os.path.exists(s)]
+        slices = [sliceStr2sliceObj(ip) for ip in sliceStrs]
+        indexPats = sliceStrs    
+
+    # if no slices specified print warning
+    if not slices:
+        prog = os.path.basename(sys.argv[0])
+        print "No slices/ranges given. Please use %s -h for help." % prog
+        sys.exit(1)
+
+    for path in paths:
+        splitPages(path, slices, outputPat, indexPats)
+    
+    
+if __name__ == '__main__':    
+    _main()
