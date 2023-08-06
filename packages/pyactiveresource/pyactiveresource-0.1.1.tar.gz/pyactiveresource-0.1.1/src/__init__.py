@@ -1,0 +1,167 @@
+from urlparse import urlparse
+import httplib
+import urllib
+import base64
+from sys import version_info
+
+if version_info >= (2, 5):
+    from xml.etree import cElementTree as ElementTree
+else:
+    try:
+        import cElementTree as ElementTree
+    except ImportError:
+        try:
+            from elementtree import ElementTree
+        except ImportError:
+            raise Exception('ElementTree must be installed')
+
+class ActiveResourceException(Exception):
+    pass
+
+class ActiveResourceMeta(type):
+    
+    def __new__(cls, name, bases, attrs):
+        if name == 'ActiveResource':
+            return super(ActiveResourceMeta, cls).__new__(cls, name, bases, attrs)
+        
+        klass = type.__new__(cls, name, bases, attrs)
+        
+        if not klass.Meta.site:
+            raise ActiveResourceException('Site attribute must be set for %s' % name)
+        
+        klass.Meta.parsed_site = urlparse(klass.Meta.site)
+        
+        if klass.Meta.parsed_site[0] not in ('http', 'https'):
+            raise ActiveResourceException('Only http and https protocols are allowed')
+            
+        klass.Meta.host = klass.Meta.parsed_site[1]
+        
+        if '@' in klass.Meta.parsed_site[1]:
+            auth, path = klass.Meta.parsed_site[1].split('@')
+            klass.Meta.auth = base64.b64encode(auth)
+            # httplib doesn't like the auth string inside the host
+            klass.Meta.host = path
+        
+        klass.Meta.name = name.lower()
+        if not getattr(klass.Meta, 'name_plural', None):
+            klass.Meta.name_plural = '%ss' % klass.Meta.name
+        klass.Meta.path_root = '%s%s' % (klass.Meta.parsed_site[2], klass.Meta.name_plural)
+        klass.Meta.base_path = '%s.xml' % klass.Meta.path_root
+        
+        return klass
+
+class ActiveResource(object):
+    __metaclass__ = ActiveResourceMeta
+    
+    class Meta:
+        site = None
+        auth = None
+    
+    def __init__(self, **kwargs):
+        self.Meta.changed = []
+        
+        [setattr(self, k, v) for k, v in kwargs.iteritems()]
+        if kwargs.get('_record_exists'):
+            # Clearing the changed state of attrs set above
+            self.Meta.changed = []
+        
+        if getattr(self, 'id', None):
+            self.Meta.path = self._get_obj_path()
+        else:
+            self.Meta.path = self.Meta.base_path
+            
+    def __setattr__(self, name, value):
+        self.Meta.changed.append(name)
+        self.__dict__[name] = value
+        
+    def destroy(self):
+        status, xml = self.__class__._make_request(obj=self, method='DELETE')
+        return str(status[0]).startswith('2')
+            
+    def find(cls, **kwargs):
+        status, xml = cls._make_request(params=kwargs)
+        # Allow any 2xx code
+        if not str(status[0]).startswith('2'):
+            raise ActiveResourceException('%s: %s' % (status, xml))
+        return cls._parse_xml(xml)
+    find = classmethod(find)
+    
+    def save(self):
+        if getattr(self, 'id', None):
+            method = 'PUT'
+        else:
+            method = 'POST'
+            
+        params = {}
+        for k in self.Meta.changed:
+            params[k] = getattr(self, k)
+        status, xml = self.__class__._make_request(obj=self, method=method, params=params)
+        
+        if not str(status[0]).startswith('2'):
+            return False
+        
+        # Not a blank HEAD response
+        if '<' in xml:
+            e = ElementTree.fromstring(xml)
+            attrs = self.__class__._extract_attrs(e)
+            self._update(**attrs)
+            self.Meta.path = self._get_obj_path()
+        
+        return True
+        
+    def _get_obj_path(self):
+        return '%s/%s.xml' % (self.Meta.path_root, self.id)
+                
+    def _extract_attrs(cls, el):
+        attrs = {'_record_exists':True}
+        for attr in el.getchildren():
+            value = attr.text
+            t = dict(attr.items()).get('type')
+            if t and t == 'integer':
+                value = int(value)
+            attrs[attr.tag.replace('-', '_')] = value
+        return attrs
+    _extract_attrs = classmethod(_extract_attrs)
+        
+    def _parse_xml(cls, xml):
+        e = ElementTree.fromstring(xml)
+        return [cls(**cls._extract_attrs(el)) for el in e.findall(cls.Meta.name)]
+    _parse_xml = classmethod(_parse_xml)
+        
+    def _make_request(cls, obj=None, method='GET', params={}, headers={}):        
+        if cls.Meta.auth and not headers.has_key('Authorization'):
+            headers['Authorization'] = cls.Meta.auth
+            
+        headers["Content-type"] = "application/x-www-form-urlencoded"
+        
+        if method != 'GET':
+            np = {}
+            for key, val in params.iteritems():
+                k = '%s[%s]' % (cls.Meta.name, key)
+                np[k] = val
+            params = np
+        params = urllib.urlencode(params)
+        
+        if obj:
+            path = obj.Meta.path
+        else:
+            path = cls.Meta.base_path
+            
+        if method == 'GET':
+            path += '?%s' % params
+        
+        if cls.Meta.parsed_site[0] == 'https':
+            conntype = httplib.HTTPSConnection
+        else:
+            conntype = httplib.HTTPConnection
+            
+        conn = conntype(cls.Meta.host)
+        conn.request(method, path, params, headers)
+        r = conn.getresponse()
+        
+        return (r.status, r.reason), r.read()
+    _make_request = classmethod(_make_request)
+    
+    def _update(self, **kwargs):
+        [setattr(self, k, v) for k, v in kwargs.iteritems()]
+        [self.Meta.changed.remove(k) for k in kwargs.keys()]
