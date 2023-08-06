@@ -1,0 +1,209 @@
+Metadata-Version: 1.0
+Name: curry
+Version: 0.1
+Summary: Partial application of Python methods.
+Home-page: UNKNOWN
+Author: Malthe Borch
+Author-email: mborch@gmail.com
+License: BSD
+Description: Overview
+        ========
+        
+        This library provides a mechanism to use partial application on bound
+        methods using AST (abstract syntax tree) transformation. You can use
+        partial application as an optimization method, an alternative to code
+        generation (either indirectly or through the AST abstraction).
+        
+        The concrete approach lies somewhere between "currying" and
+        cooking. We interpret the Python-code manually by walking the AST,
+        following standard Python logic (literally interpreting every
+        node). Computations that can be carried out while walking are saved
+        for later reference (and discarded when possible). When possible,
+        computations are carried out using the running interpreter.
+        
+        Example
+        -------
+        
+        The starting point is an instance of some class::
+        
+        >>> class Example(object):
+        ...     def __init__(self, value):
+        ...         self.value = value
+        ...
+        ...     def __call__(self, other):
+        ...         return self.value + other
+        
+        We can then use partial application on the bound call-method of some
+        instance::
+        
+        >>> from curry import cook
+        >>> example = Example(1)
+        >>> cooked = cook(example.__call__)
+        >>> cooked(1)
+        2
+        
+        Additional examples are included as part of a functional test suite;
+        they also serve as documentation and are a good starting point to
+        learn when and how to use partial application.
+        
+        Author
+        ------
+        
+        This library is developed and maintained by Malthe Borch
+        <mborch@gmail.com>. The AST utility library was adapted from the
+        Genshi codebase and is copyright (c) by 2008 Edgewall Software.
+        
+        This software is released and maintained under the BSD license.
+        
+        Liner notes
+        ===========
+        
+        Partial application is an entirely logical proposition; in theory, it
+        should work on any method. To actually benefit from it, classes must
+        be written in a suitable way. This section details the technical
+        considerations that will guide the developer to a correct
+        implementation.
+        
+        Object state
+        ------------
+        
+        An abstract syntax tree consists of nodes corresponding to the Python
+        grammar. The expression nodes represent a computation which will
+        eventually be carried out. Expression nodes that may be evaluated
+        during partial application are termed `resolved`. In terms of
+        the tree structure, it's only possible to resolve nodes that contain
+        subnodes that are resolved.
+        
+        When an expression node is resolved, it's replaced by a custom node
+        class ``Resolved``, which holds the computed value (may be any Python
+        object). As a technical detail, resolved nodes are not assigned a
+        symbol name until they are visited by the code generator transform;
+        internally, they are referenced using their object identity.
+        
+        As a result of evaluation during partial application, we will often
+        have to instantiate new (stateful) objects. Initially, the state of
+        these objects is known. The AST may also contain names that correspond
+        to variable input. Such varibles are undefined at the time of partial
+        application. When an undefined variable touches a known object, the
+        state of that object becomes undefined, too::
+        
+        >>> out = []
+        >>> out.append("Hello")
+        >>> out.append(string)
+        >>> "".join(out)
+        
+        If ``string`` is undefined, this code reduces logically to the
+        following, after partial application::
+        
+        >>> out = ["Hello"]
+        >>> out.append(string)
+        >>> "".join(out)
+        
+        The state of the list is recorded at the time where it's state is
+        first undefined.  This will be described in more detail later.
+        
+        State invalidation
+        ------------------
+        
+        The known state of an object is invalidated if it touches an undefined
+        object. It can only happen on the invokation of a method, but to this
+        extent we must be careful to note the way Python implements its
+        grammar. All operations are passed on to special methods and this
+        obviously qualifies as method invokation::
+        
+        >>> out = ["Hello"]
+        >>> out += string
+        
+        This invokes the ``__radd__`` method on the list object. Since
+        ``string`` is undefined, it invalidates the known state of the list.
+        
+        As an optimization, the transformer knows about a number of built-in
+        methods that are static (the state of the object never changes on
+        invokation)::
+        
+        >>> out = ["Hello"]
+        >>> out.count(string)
+        
+        The static ``count`` method merely counts the occurrances of a given
+        string. We do not have to invalidate the list.
+        
+        It's important to note that any object that (transitively) references
+        an undefined object must itself by undefined.
+        
+        Restoring object state
+        ----------------------
+        
+        In the examples above, the mutable list object is seen as to be
+        restored by using the list constructor, providing the elements that
+        are known. This is essentially an optimization. In the general case,
+        we could use pickles the save and restore state, but this turns out to
+        be very inefficient.
+        
+        Rather, since the complete state of a resolved object is known, we can
+        restore the state using the ``__new__`` constructor and by setting the
+        instance dictionary.
+        
+        Instances of builtin primitives like ``list`` and ``set`` do not have
+        an instance dictionary. Their state is their value. We handle these as
+        special cases for optimal performance. The other cases are as
+        follows:
+        
+        - Classes derived from mutable builtins. We instantiate the instance
+        by calling the ``__new__`` constructor of the builtin (passing the
+        class), then set the state using the builtin ``__init__`` method and
+        finally restore the instance dictionary.
+        
+        - Classes derived from ``object``. We may instantiate the instance by
+        calling the ``__new__`` constructor of ``object`` (passing the
+        class), then restore the instance dictionary.
+        
+        - Either of the above that define the ``__slots__`` property. Instead of
+        restoring the instance dictionary, we set each attribute.
+        
+        Dynamic evaluation
+        ------------------
+        
+        The ``exec`` statement and the ``eval`` function behave
+        differently. The string argument are parsed as respectively a
+        statement and an expression and inserted as-is into the AST.
+        
+        Applications include dynamic (local) variable assignment and
+        expression evaluation, both integral to template processing.
+        
+        Function calls
+        --------------
+        
+        There are four different scenarios. Either the function is known, or
+        the arguments are known, or both, or neither.
+        
+        - If both the function and its arguments are known, we compute the
+        result immediately.
+        
+        - If the function is known, but not the arguments, we include the
+        function as a closure and process partial application on it.
+        
+        To-Do
+        -----
+        
+        - Star arguments and double-star keyword arguments.
+        
+        - Ability to mark a method as "static", e.g. using a decorator.
+        
+        
+        
+        Changelog
+        =========
+        
+        0.1 (released 2009/06/02)
+        ~~~~~~~~~~~~~~~~~~~~~~~~~
+        
+        - Initial public release.
+        
+Keywords: cooking partial curry optimization ast
+Platform: UNKNOWN
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Topic :: Internet :: WWW/HTTP :: Dynamic Content
+Classifier: Topic :: Internet :: WWW/HTTP :: WSGI
