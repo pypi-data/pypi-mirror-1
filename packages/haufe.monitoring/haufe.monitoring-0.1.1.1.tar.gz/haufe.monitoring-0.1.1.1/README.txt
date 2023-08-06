@@ -1,0 +1,41 @@
+Introduction
+============
+
+A suite of views for monitoring a set of ZEO clients.
+
+Features
+========
+
+* aggregated view of error_logs
+* aggregated view of instances, #threads, load and VM data size
+
+Installation
+============
+
+* add ``haufe.monitoring`` to the ``eggs`` and ``zcml`` options of your buildout.cfg
+
+* set the environment variables ``HAUFE_MONITORING_USERNAME`` and ``HAUFE_MONITORING_PASSWORD`` 
+  with the credentials of a Manager account within Zope (this approach might be changed later)
+
+* visit the @@monitor view (http://your-site:port/@@monitor)
+  
+
+Warning
+=======
+
+* There might be open security issues with this module. Please use it for testing or on internal
+  servers only. Use it at your own risk.
+
+Todo
+====
+
+* tighten security
+* deal with ZEO client zombies
+* add restart/shutdown code
+* support haufe.ztop
+
+
+Author
+======
+Andreas Jung & others, Haufe Mediengruppe
+
