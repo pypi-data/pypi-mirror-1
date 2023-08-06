@@ -1,0 +1,245 @@
+Varnish recipe for buildout
+===========================
+
+plone.recipe.varnish is a `zc.buildout`_ recipe to install `Varnish`_. Even
+though the name contains the name Plone, there is nothing Plone specific about
+this recipe: it works for non-Zope sites just as well.
+
+Configuring it is very simple. For example::
+
+    [varnish-build]
+    recipe = zc.recipe.cmmi
+    url = http://downloads.sourceforge.net/varnish/varnish-2.0.4.tar.gz
+
+    [varnish-instance]
+    recipe = plone.recipe.varnish
+    daemon = ${varnish-build:location}/sbin/varnishd
+    bind = 127.0.0.1:8000
+    backends = 127.0.0.1:8080
+    cache-size = 1G
+
+This configures two buildout parts: ``varnish-build`` which will download,
+compile and install varnish, and varnish-instance which runs Varnish, configured to
+listen on 127.0.0.1:8000 for requests, using a 1 gigabyte cache and sending
+requests to a backend at 127.0.0.1:8080.
+
+Wrappers for all the varnish commands are created in the bin directory
+of your buildout.
+
+
+Virtual hosting
+---------------
+
+Varnish supports virtual hosting by selecting a different backend server
+based on headers on the incoming request. You can configure the backends
+through the backends option::
+
+  [varnish-instance]
+  backends =
+     plone.org:127.0.0.1:8000
+     plone.net:127.0.0.1:9000
+
+This will generate a configuration which sends all traffic for the plone.org
+host to a backend server running on port 8000 while all traffic for the
+plone.net host is send to port 9000.
+
+
+Zope 2 hosting (with Virtual Host Monster)
+------------------------------------------
+
+If you are using Zope 2 as backend server you will need to rewrite the URL
+so the Zope Virtual Host Monster (VHM) can generate correct links for links in
+your pages. This can be done either by a web server such as Apache or nginx
+(placed either in front or behind Varnish) but can also be done by Varnish itself.
+
+The three options are described below.
+
+Option 1 (rewrites after Varnish)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If generating these VHM-style URLs in a proxy *behind* Varnish (or if using
+VHM's 'mapping' feature), no extra Varnish configuration is needed.  
+Just make sure the "backends" option directs the traffic to the proxy.
+
+Option 2 (rewrites before Varnish)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If generating these VHM-style URLs in a proxy *in-front* of Varnish, no extra
+Varnish configuration is needed as long as the original hostname is still retained
+in the URL. If the hostname is not retained, you can tell Varnish to direct requests
+based on the "path" instead of the hostname.  For example::
+
+  [varnish-instance]
+  backends =
+    /VirtualHostBase/http/plone.org:80/Plone:127.0.0.1:8000
+    /VirtualHostBase/http/plone.net:80/Plone:127.0.0.1:9000
+
+This will generate a configuration which sends all traffic for any request whose
+path starts with "/VirtualHostBase/http/plone.org:80/Plone" to a backend server
+running at 127.0.0.1 on port 8000, while request paths starting with 
+"/VirtualHostBase/http/plone.net:80/Plone" are sent to port 9000.
+
+Option 3 (rewrites within Varnish)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To have Varnish generate these VHM-style URLs, you can use the **zope2_vhm_map** option. 
+Here is an example::
+
+  [varnish-instance]
+  zope2_vhm_map =
+      plone.org:/plone
+      plone.net:/plone
+
+This tells us that the domain plone.org should be mapped to the location
+/plone in the backend. By combining this with the information from the
+**backends** option a varnish configuration will be generated that
+maps URLs correctly.
+
+Load Balancing
+---------------
+
+Varnish supports load balancing by configuring a director for a pool of backends.
+This director sends the incoming requests that cannot be fulfulled by varnish to 
+backends in the pool in either random or round robin fashion. You can configure
+the director via the balancer option::
+
+  [varnish-instance]
+  balancer = random
+
+This will generate a configuration which sends all traffic to the director,
+which will choose a 'random' backend server to fulfil the request if the content 
+requested is not cached by varnish itself.
+
+plone.recipe.varnish:build reference
+------------------------------------
+
+*This recipe is obsolete and will be removed, please use zc.recipe.cmmi instead*
+
+The plone.recipe.varnish:build recipe takes care of downloading Varnish,
+compiling it on your system and installing it in your buildout.
+
+You may need some packages that are not yet installed on your system.
+On Debian-like systems you at least need to install
+``libncurses-dev``.
+
+If you are running on an OS/X system a patch to fix a linking error
+will be automatically applied. More information on the bug and patch
+can be found at http://varnish.projects.linpro.no/ticket/118 .
+
+It can be configured with any of these options:
+
+url
+    URL for an archive containing the Varnish sources. Either **url** or
+    **svn** has to be specified.
+
+svn
+    URL for a subversion repository containing Varnish sources. Either **url**
+    or **svn** has to be specified.
+
+varnish-directory
+    The location of a shared Varnish installation directory.  Useful when
+    building multiple Varnish instances.  A shared Varnish build can be stored
+    separate from the buildout instance.  This directive must be defined in
+    ~/.buildout/default.cfg similar to the "zope-directory" and "eggs-directory"
+    directives.  The default is to build Varnish in a subfolder of the buildout
+    'parts' directory.
+
+Please note that the configuration generated by this recipe requires Varnish
+2.0.3 or later.
+
+
+plone.recipe.varnish reference
+------------------------------
+
+The plone.recipe.varnish recipe create a Varnish configuration file and creates
+a wrapper script inside your buildout that will start Varnish with the correct
+configuration.
+
+Please note that the configuration generated by this recipe requires Varnish
+2.0.3 or later.
+
+It can be configured with any of these options:
+
+daemon
+    The path of the varnish daemon to use. Defaults to bin/varnishd inside
+    your buildout, which is the executable created by the
+    plone.recipe.varnish:build recipe.
+
+mode
+    Specify whether the varnish daemon should run in 'daemon' or
+    'foreground' mode.  The latter is useful when varnish is run by service
+    supervision tools like daemontools or runit. Defaults to 'daemon'.
+
+cache-size
+    The size of the cache (limited to 2G on 32bit systems).
+
+bind
+    Hostname and port on which Varnish will listen for requests. Defaults
+    to 127.0.0.1:8000.
+
+config
+    Path for a Varnish VCL configuration to use. If you use this option
+    you can not use the backends, zope2_vhm_map or verbose-headers options .
+
+backends
+    Specifies the backend or backends which will process the (uncached)
+    requests. The syntax for backends:
+    
+    [<hostname>][/<path>]:<ip address>:<port>
+    
+    The optional 'hostname' and 'path' allows you to do virtual hosting.
+    If multiple backends are specified then each backend must include
+    either a hostname or path (or both) so that Varnish can direct the
+    matching request to the appropriate backend. Defaults to 127.0.0.1:8080.
+
+zope2_vhm_map
+    Defines a virtual host mapping for Zope servers. This is a list of
+    **hostname:ZODB location** entries which specify the location inside
+    Zope where the website for a virtual host lives.
+
+verbose-headers
+    Varnish VCL configuration: a http-response header line  **X-Varnish-Action** 
+    is set for debugging purposes. It shows a hit, why it bypass/fetch from 
+    backend and if if the object was inserted into cache. 
+    Possible values: **on** or **off** (default).
+
+telnet
+    If specified sets the hostname and port on which Varnish will listen
+    for commands using its telnet interface.
+
+user
+    The name of the user varnish should switch to before accepting any
+    requests. Defaults to nobody.
+
+group
+    The name of the group varnish should switch to before accepting any
+    request. This defaults to the main group for the specified user.
+
+balancer
+    If included and set to either 'random' or 'round-robin', this option configures
+    varnish to load balance the servers specified by the 'backends' directive.
+    Possible values: **none** (default),  **round-robin** or **random**.
+
+connect-timeout
+    If specifed, this option configures the connection timeout (in seconds) for 
+    Varnish connecting to a backend server.  Varnish will only try to 
+    connect to a given backend for this many seconds before giving up.  Defaults 
+    to 0.4 seconds, as per Varnish's default settings.
+
+first-byte-timeout
+    If specifed, this option configures the timeout (in seconds) for 
+    Varnish receiving the first byte from a backend.  Varnish will only wait 
+    for this many seconds before giving up.  A value of 0 means Varnish will
+    never time out.  Defaults to 300 seconds, see 
+    http://vincentfretin.ecreall.com/articles/varnish-guru-meditation-on-timeout
+
+between-bytes-timeout
+    If specifed, this option configures the timeout (in seconds) for 
+    Varnish waiting between bytes when receiving data from a backend.  
+    Varnish will only wait this many seconds between bytes before giving up. A 
+    value of 0 means this will never time out.  Defaults to 60 seconds, as 
+    per Varnish's default settings.
+    
+.. _Varnish: http://varnish.projects.linpro.no/
+.. _zc.buildout: http://cheeseshop.python.org/pypi/zc.buildout
+
