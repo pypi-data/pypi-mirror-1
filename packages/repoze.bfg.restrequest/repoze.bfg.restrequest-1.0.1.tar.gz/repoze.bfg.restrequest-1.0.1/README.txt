@@ -1,0 +1,68 @@
+Introduction
+============
+
+``repoze.bfg.restrequest`` implements 4 additional Request types for use with
+RESTful applications.
+
+Imagine you want to create separate views for one resource (identified by an URL) and different HTTP methods. In a default repoze.bfg project you can e.g. write::
+
+
+  from repoze.bfg.restrequest import IGETRequest, IPOSTRequest
+  from webob import Response
+  
+  def my_view_get(context, request):
+      return Response("GET\n")
+
+  def my_view_post(context, request):
+      return Response("POST "+request.body+"\n")
+      
+This defines one method ``my_view_get`` in case a ``GET`` request is performed on this resource and ``my_view_post`` in case a ``POST`` request is performed. You can do similar things with ``PUT`` or ``DELETE``.
+
+In order to enable these views you need to wire them in ``configure.zcml`` like this::
+
+  <!-- include to activate the event handler for marking REST requests -->
+  <include package="repoze.bfg.restrequest" />
+  
+  <bfg:view for=".models.IMyModel"
+        request_type="repoze.bfg.restrequest.interfaces.IGETRequest"
+        view=".views.my_view_get"
+        />
+
+  <bfg:view for=".models.IMyModel"
+        request_type="repoze.bfg.restrequest.interfaces.IPOSTRequest"
+        view=".views.my_view_post"
+        />
+
+You can do the same using ``repoze.bfg.convention`` in which case your views would look like this::
+
+  from repoze.bfg.restrequest import IGETRequest, IPOSTRequest
+  from webob import Response
+
+  @bfg_view(request_type=IGETRequest, for_=models.IMyModel)
+  def my_view_get(context, request):
+      return Response("GET\n")
+
+  @bfg_view(request_type=IPOSTRequest, for_=models.IMyModel)
+  def my_view_post(context, request):
+      return Response("POST "+request.body+"\n")
+
+Make sure you nevertheless include ``repoze.bfg.restrequest`` in your ``configure.zcml``.
+
+
+Testing your application
+------------------------
+
+A simple test for the above would be to start your application and use ``curl`` to see what the result is for different methods::
+
+    $ curl http://127.0.0.1:6543/
+    GET
+    
+    $ curl http://127.0.0.1:6543/ -d "posttest"
+    POST posttest
+    
+
+    
+    
+
+
+
