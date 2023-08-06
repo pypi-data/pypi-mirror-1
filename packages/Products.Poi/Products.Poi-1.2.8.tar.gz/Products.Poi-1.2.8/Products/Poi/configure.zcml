@@ -1,0 +1,122 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
+    xmlns:gs="http://namespaces.zope.org/genericsetup"
+    xmlns:five="http://namespaces.zope.org/five"
+    i18n_domain="poi">
+
+  <include package=".browser" />
+
+  <browser:page
+      name="migrate-poi.html"
+      for="Products.CMFPlone.interfaces.IPloneSiteRoot"
+      permission="cmf.ManagePortal"
+      class=".migration.Migration"
+      />
+
+  <subscriber
+      for="Products.Poi.adapters.IResponse
+           zope.lifecycleevent.interfaces.IObjectModifiedEvent"
+      handler=".events.modifiedNewStyleResponse"
+      />
+
+  <subscriber
+      for="Products.Poi.adapters.IResponse
+           zope.app.container.interfaces.IObjectAddedEvent"
+      handler=".events.addedNewStyleResponse"
+      />
+
+  <subscriber
+      for="Products.Poi.adapters.IResponse
+           zope.app.container.interfaces.IObjectRemovedEvent"
+      handler=".events.removedResponse"
+      />
+
+  <adapter
+      provides=".adapters.IResponseContainer"
+      factory=".adapters.ResponseContainer"
+      />
+
+  <!-- Register a basically empty content exporter for issues, as they
+       can give unicode errors when making a snapshot in portal_setup.
+       See http://plone.org/products/poi/issues/217 -->
+  <adapter
+      factory=".adapters.EmptyExporter"
+      provides="Products.GenericSetup.interfaces.IFilesystemExporter"
+      for="Products.Poi.interfaces.IIssue"
+      />
+
+  <!-- Register the GenericSetup extension profile so that we can
+       install the product
+  -->
+  <gs:registerProfile
+      name="default"
+      title="Poi"
+      directory="profiles/default"
+      description="A friendly issue tracker"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <!-- Avoid deprecation warnings for manage_afterAdd and friends. -->
+  <five:deprecatedManageAddDelete
+      class=".content.PoiTracker.PoiTracker" />
+  <five:deprecatedManageAddDelete
+      class=".content.PoiIssue.PoiIssue" />
+  <five:deprecatedManageAddDelete
+      class=".content.PoiResponse.PoiResponse" />
+
+  <gs:upgradeStep
+      title="Issue descriptions"
+      description="Fix description of issues."
+      source="1.1.9"
+      destination="1.2"
+      handler="Products.Poi.migration.fix_descriptions"
+      sortkey="1"
+      profile="Products.Poi:default" />
+
+  <gs:upgradeStep
+      title="Poi responses"
+      description="Migrate old style to new style Poi responses."
+      source="1.1.9"
+      destination="1.2"
+      handler="Products.Poi.migration.migrate_responses"
+      sortkey="2"
+      profile="Products.Poi:default" />
+
+  <gs:upgradeStep
+      title="Workflow titles in responses"
+      description="Migrate workflow changes from ids to titles."
+      source="1.1.9"
+      destination="1.2"
+      handler="Products.Poi.migration.migrate_workflow_changes"
+      sortkey="3"
+      profile="Products.Poi:default" />
+
+  <gs:upgradeStep
+      title="Poi responses second try"
+      description="Alternative migration from old style to new style Poi responses."
+      source="1.1.9"
+      destination="1.2"
+      checker="Products.Poi.migration.has_old_responses"
+      handler="Products.Poi.migration.migrate_responses_alternative"
+      sortkey="4"
+      profile="Products.Poi:default" />
+
+  <gs:upgradeStep
+      title="Give all tracker managers the local Manager role"
+      description="Make sure all the tracker manager actually have the
+                   Manager role."
+      source="1203"
+      destination="1204"
+      handler="Products.Poi.migration.update_tracker_managers"
+      profile="Products.Poi:default" />
+
+  <gs:upgradeStep
+      title="Run workflow import step"
+      description="Apply our own workflow.xml file."
+      source="1204"
+      destination="1205"
+      handler="Products.Poi.migration.run_workflow_step"
+      profile="Products.Poi:default" />
+
+</configure>
