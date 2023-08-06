@@ -1,0 +1,1 @@
+plone.app.gloworm has been deprecated. Please use Products.Gloworm instead.
