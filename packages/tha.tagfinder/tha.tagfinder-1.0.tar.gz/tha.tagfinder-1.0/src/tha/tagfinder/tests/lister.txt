@@ -1,0 +1,176 @@
+"""
+.. :doctest:
+
+Listing contents
+================
+
+The lister module provides classes that list the contents of directories or
+svn repositories.  The result is a dict with file/directoryname as key and the
+full path as value.
+
+    >>> from tha.tagfinder import lister
+    >>> from pprint import pprint
+
+
+Listing filesystem directories
+------------------------------
+
+DirLister is basically just a small wrapper around ``listdir()`` and
+``join()`` from the ``os`` module.  You initialise it with a starting point
+(we use a directory prepared by the test setup):
+
+    >>> fixture_dir
+    '...tha/tagfinder/tests/fixture'
+    >>> directory = lister.DirLister(fixture_dir, ignore=['.svn'])
+
+``contents`` is the basic list of directory contents (we passed in an ignore
+for .svn to prevent test output differences between an svn checkout and an
+egg):
+
+    >>> pprint(directory.contents)
+    ['customer', 'just', 'project1', 'project2', 'sandbox']
+
+Such a ``just/something`` directory is not interesting.  We add that to our
+(optional!) list of to-be-ignored items:
+
+    >>> directory = lister.DirLister(fixture_dir, ignore=['.svn', 'just'])
+    >>> pprint(directory.contents)
+    ['customer', 'project1', 'project2', 'sandbox']
+
+``fullpath`` gives the full path of an item:
+
+    >>> directory.fullpath('sandbox')
+    '...tha/tagfinder/tests/fixture/sandbox'
+
+And if you want the current working directory:
+
+    >>> directory.location
+    '...tha/tagfinder/tests/fixture'
+
+Traversal into a subdirectory returns another DirLister instance.  Handy for
+recursive operation:
+
+    >>> subdir = directory.traverse('sandbox')
+    >>> type(subdir)
+    <class 'tha.tagfinder.lister.DirLister'>
+    >>> pprint(subdir.contents)
+    ['reinout']
+
+Note that the subdir's contents did not include the ``.svn`` entry.  This
+means that the ignore list gets passed along when traversing!
+
+A main question that needs answering is whether it is a "project directory".
+A project directory is a directory with a trunk and possibly tags and
+branches.  As the definition of "trunk" and "tags" is different in for
+instance mercurial, the answering of this question is left to the Lister
+implementation:
+
+    >>> subdir.is_project
+    False
+    >>> subdir = subdir.traverse('reinout')
+    >>> project = subdir.traverse('reinout_project')
+    >>> project.is_project
+    True
+    >>> 'trunk' in project.contents
+    True
+
+Outputting the contents of a file (like a ``setup.py``) differs per access
+method (filesystem, subversion, mercurial), so that's separated out into a
+method, too:
+
+    >>> trunk = project.traverse('trunk')
+    >>> type(trunk.cat('setup.py'))
+    <type 'list'>
+    >>> pprint(trunk.cat('setup.py'))
+    ['from setuptools import setup, find_packages',
+    ...
+
+When traversing through a tree structure, you want to know whether something
+is actually a directory:
+
+    >>> directory.is_dir('sandbox')
+    True
+    >>> trunk.is_dir('setup.py')
+    False
+    
+
+Listing svn directories
+-----------------------
+
+The test setup prepared the fixture dir seen above also as a local svn
+repository:
+
+    >>> repo_url
+    'file://.../repo'
+
+SvnLister works the same way as DirLister.  Initialise it with a starting
+point:
+
+    >>> directory = lister.SvnLister(repo_url)
+    >>> directory.contents
+    ['customer', 'just', 'project1', 'project2', 'sandbox']
+
+Location and fullpath and traverse also work the same way:
+
+    >>> directory.location
+    'file://.../repo'
+    >>> directory.fullpath('sandbox')
+    'file://.../repo/sandbox'
+    >>> subdir = directory.traverse('sandbox')
+    >>> subdir.contents
+    ['reinout']
+
+The head of development, with subversion, is in the trunk directory:
+
+    >>> project1 = directory.traverse('project1')
+    >>> project1.is_project
+    True
+    >>> head = project1.head
+    >>> head
+    <tha.tagfinder.lister.SvnLister object at ...>
+    >>> head.location
+    'file://.../repo/project1/trunk'
+
+Getting file contents also works with subversion:
+
+    >>> project2 = directory.traverse('project2')
+    >>> type(project2.cat('README.txt'))
+    <type 'list'>
+    >>> pprint(project2.cat('README.txt'))
+    ['Some readme.',
+     '',
+     'The directory traversal used to break on non-directories...']
+
+Finding out whether something is a directory also works with subversion:
+
+    >>> directory.is_dir('project2')
+    True
+    >>> project2.is_dir('README.txt')
+    False
+
+
+Implementation detail: not implemented errors
+---------------------------------------------
+
+For the code coverage:
+
+    >>> base = lister.BaseLister(fixture_dir)
+    Traceback (most recent call last):
+    ...
+    NotImplementedError: Implement in subclass
+    >>> class NotCompletelyBase(lister.BaseLister):
+    ...     def _calculate_contents(self):
+    ...         return []
+    >>> base2 = NotCompletelyBase(fixture_dir)
+    >>> base2.fullpath('bla')
+    Traceback (most recent call last):
+    ...
+    NotImplementedError: Implement in subclass
+    >>> base2.is_dir('bla')
+    Traceback (most recent call last):
+    ...
+    NotImplementedError: Implement in subclass
+    >>> base2.cat('bla')
+    Traceback (most recent call last):
+    ...
+    NotImplementedError: Implement in subclass
