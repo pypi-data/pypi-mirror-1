@@ -1,0 +1,70 @@
+from Acquisition import aq_parent
+
+from plonehrm.absence import AbsenceMessageFactory as _
+from plonehrm.absence.utils import localize
+
+
+def save_note(object, event):
+    """ This event is fired when an absence note is created
+    or updated. If a nextContactDate has been specified in the
+    note, then a new item is created in the checklist.
+    """
+
+    # If no date for the next contact has been set, then the event
+    # does not add anything in the checklist.
+    if not object.next_contact_date:
+        return
+
+    # The employee is the grandfather of the note (father is absence).
+    employee = aq_parent(aq_parent(object))
+
+    # We get the employee checklist.
+    content_filter = {'portal_type': 'Checklist'}
+    contents = list(employee.getFolderContents(contentFilter=content_filter))
+
+    # This shall not append as every employee has his own checklist.
+    if len(contents) == 0:
+        return
+
+    checklist = contents[0].getObject()
+
+    # We will be looking for a possibly translated string.
+    title = _('msg_next_call_back_on', default=u'Call to query about absence:')
+    title = localize(object, title)
+
+    # We create a link to add a new note in the current absence.
+
+    # First we get the current absence.
+    content_filter = {'portal_type': 'Absence'}
+    absences = list(employee.getFolderContents(contentFilter=content_filter))
+
+    # Normally, the current absence is the first in the list, so
+    # the loop should be stopped at first iteration.
+    currentAbsence = None
+    for ab in absences:
+        ab = ab.getObject()
+        if ab.is_current_absence:
+            currentAbsence = ab
+            break
+
+    link_href = currentAbsence.absolute_url() + '/createObject?type_name=Note'
+    link_title = _('msg_new_note_in_absence',
+                   default=u'Create a new note in the current absence')
+    link_title = localize(object, link_title)
+
+    title = '<a href="' + link_href + '" title="' + link_title + \
+            '">' + title + '</a>'
+
+    # First, we check if there exists a previous item in the checklist
+    # which tells to call the employee back.
+    items = checklist.findItems(title, startswith = True)
+
+    # If such an item exists, we delete it.
+    for item in items:
+        checklist.deleteItem(item)
+
+    # We add the new item to the checklist.
+    toLocalizedTime = object.restrictedTraverse('@@plone').toLocalizedTime
+    date = toLocalizedTime(object.next_contact_date.isoformat(),
+                           long_format=True)
+    checklist.addItem(title + " " + str(date))
