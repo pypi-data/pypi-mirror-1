@@ -1,0 +1,57 @@
+#!/usr/bin/python
+#
+# Apply changes defined in a configuration file
+
+import sys
+import traceback
+
+from modipy.options import ChangeOptions
+from modipy.confloader import ConfigLoader, ChangeController
+from twisted.internet import reactor
+from twisted.python import log as tlog
+
+import logging
+log = logging.getLogger('modipy')
+
+usage = "modipy [options] [ <device> ... ]"
+
+optparser = ChangeOptions(usage=usage)
+optparser.parseOptions()
+
+def mystop(ignored):
+    log.debug("finished!")
+    reactor.stop()
+    pass
+
+def errstop(failure):
+    log.error("Changes not implemented ok!")
+    tlog.err(failure)
+    reactor.stop()
+
+def go():
+
+    cfgldr = ConfigLoader()
+
+    d = cfgldr.load_config(optparser.options, optparser.args)
+    def config_loaded(ignored, cfgldr):
+        log.debug("changes to apply: %s", cfgldr.changes)
+        log.debug("total devices: %s", cfgldr.devices)
+
+    d.addCallback(config_loaded, cfgldr)
+    
+    controller = ChangeController(cfgldr)
+
+    if getattr(optparser.options, 'loadonly', False):
+        log.info("Load only specified")
+        reactor.callLater(0, mystop, None)
+        return
+    
+    d.addCallback(controller.do_changes)
+    d.addCallbacks(mystop, errstop)
+
+# Use callLater(0) syntax to trigger running of changes once
+# the reactor has actually started, so it can be stopped cleanly.
+reactor.callLater(0, go)
+reactor.run()
+
+
