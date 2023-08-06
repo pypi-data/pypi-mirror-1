@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<!-- FIXME: THIS FILE NEEDS TO BE LESS DOMAIN-DEPENDENT. -->
+<title>ComSat Comet Satellite</title>
+<script src="/.comsat/static/Orbited.js"></script>
+<script>TCPSocket = Orbited.TCPSocket;</script>
+<script src="/.comsat/static/protocols/stomp/stomp.js"></script>
+
+<script type="text/javascript" src="http://yui.yahooapis.com/2.6.0/build/yahoo/yahoo-min.js" ></script>                         
+<script type="text/javascript" src="http://yui.yahooapis.com/2.6.0/build/event/event-min.js" ></script>                         
+<script type="text/javascript" src="http://yui.yahooapis.com/2.6.0/build/json/json-min.js"></script> 
+
+<script>
+
+// Create the ComSat object
+ComSat = new function() {
+
+// Import YUI components
+var JSON = YAHOO.lang.JSON;
+
+// Declare hidden variables
+var _this = this;
+var stomp = null;
+var client = null;
+var connected = false;
+
+// Declare helper routines
+function create_stomp() {
+        // Create the STOMP client
+        stomp = new STOMPClient();
+
+        // Configure the STOMP client
+        stomp.onconnectedframe = function(frame) {
+                connected = true;
+                subscribe_all();
+                client.event_connect.fire();
+        };
+
+        stomp.onclose = function(code) {
+                client.event_disconnect.fire(code);
+                connected = false;
+                if( _this.auto_reconnect ) _this.connect();
+        };
+
+        stomp.onmessageframe = function(frame) {
+                _this.last_headers = frame.headers;
+                _this.last_body = frame.body;
+                var msg = JSON.parse(frame.body);
+                _this.last_msg = msg;
+                client.event_data.fire(frame.headers, msg);
+        };
+
+        _this.connect();
+}
+
+function subscribe_all() {
+        var sub;
+        var subscriptions = client.get_subscriptions();
+        for( sub in subscriptions )
+                stomp.subscribe( subscriptions[sub] );
+}
+
+function unsubscribe_all() {
+        var sub;
+        var subscriptions = client.get_subscriptions();
+        for( sub in subscriptions )
+                stomp.unsubscribe( subscriptions[sub] );
+}
+
+
+// Declare methods
+this._downlink = function(new_client) {
+        // Save the client
+        client = new_client;
+
+        // Initialize STOMP connection
+        create_stomp();
+
+        // Signal that the satellite is launched
+        client._register_comsat(this);
+        client.event_launch.fire();
+};
+
+this.connect = function() {
+        // Connect to the STOMP server
+        stomp.connect('localhost', 61613);
+};
+
+this.send = function(msg, dst, hdr) {
+        // Send data to the STOMP server
+        if( !hdr ) hdr = {};
+        stomp.send(msg, dst, hdr);
+};
+
+this.subscribe_all = subscribe_all;
+this.unsubscribe_all = unsubscribe_all;
+
+this.is_connected = function() { return connected; };
+
+// Declare public members
+this.auto_reconnect = true;
+
+};
+
+// Reset the javascript security model
+document.domain = 'manicsages.org';
+
+// Wait for the link to the main page
+function onDownlinkTimer() {
+        if( window.comsat_client ) {
+                // Stop the timer
+                clearInterval( timer );
+
+                // Establish downlink
+                ComSat._downlink( window.comsat_client );
+        }
+}
+var timer = setInterval(onDownlinkTimer, 100);
+</script>
