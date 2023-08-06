@@ -1,0 +1,188 @@
+Detailed documentation
+======================
+
+Test Setup
+----------
+
+Most API methods will only return True or False,
+to get a more verbose output and prohibit
+making requests to Silverpop
+We monkeypatch urllib to print
+(url, headers, data) instead of doing any requests.
+
+We create a Fake class to be returned by urlib2.urlopen, 
+which will always return a successful silverpop response::
+
+    >>> class Fake(object):
+    ...     def read(self): return "<success>true</success>"
+
+In our test method, we print request's url, headers, data (we decode
+the urlencoded data for the test) and
+return a Fake object::
+
+    >>> import cgi
+    >>> def test_urlopen(req):
+    ...     print '-'*30 + 'request details' + '-'*30
+    ...     print req.get_full_url()
+    ...     print req.headers
+    ...     xml = dict(cgi.parse_qsl(req.data))['xml']
+    ...     print xml
+    ...     print '-'*75
+    ...     return Fake()
+    >>> import urllib2
+
+Finally we patch urllib2.urlopen::
+
+    >>> urllib2.urlopen = test_urlopen
+
+We also define a FakeRequest class to define our request
+containing just a form::
+
+    >>> class FakeRequest(dict):
+    ...   def __init__(self, **kwargs):
+    ...     self.form = kwargs
+
+API Methods
+-----------
+
+All api methods can be accessed by importing the module::
+
+ >>> import silverpop
+
+
+First, we define data needed for the various api_methods.
+
+The URL of the Silverpop Server::
+
+     >>> api_url = 'http://api1.silverpop.com/XMLAPI '
+
+A List Id::
+
+     >>> list_id = 999
+
+An Email Address (we only support email key lists, so this is
+our key identifying a newsletter subscriber)::
+
+     >>> email = 'my@email.com'
+
+add_recipient
++++++++++++++
+
+
+Let's call the add_recipient api with the required attributes::
+
+     >>> silverpop.add_recipient(api_url, list_id, email)
+        ------------------------------request details------------------------------
+        http://api1.silverpop.com/XMLAPI
+        {'Content-type': 'application/x-www-form-urlencoded;charset=UTF-8'}
+        <Envelope>
+          <Body>
+            <AddRecipient>
+              <LIST_ID>999</LIST_ID>
+              <CREATED_FROM>2</CREATED_FROM>
+              <UPDATE_IF_FOUND>true</UPDATE_IF_FOUND>
+              <COLUMN>
+                <NAME>EMAIL</NAME>
+                <VALUE>my@email.com</VALUE>
+              </COLUMN>
+            </AddRecipient>
+          </Body>
+        </Envelope>
+        ---------------------------------------------------------------------------
+        True
+
+If we provide a list of columns, these will be used in the request, leading to columns in silverpop.
+
+For example, we want to use a custom column **gender**::
+
+    >>> columns = [{'column_name': 'gender', 'column_value': 'male'}, ]
+
+    >>> silverpop.add_recipient(api_url, list_id, email, columns)
+        ------------------------------request details------------------------------
+        http://api1.silverpop.com/XMLAPI
+        {'Content-type': 'application/x-www-form-urlencoded;charset=UTF-8'}
+        <Envelope>
+          <Body>
+            <AddRecipient>
+              <LIST_ID>999</LIST_ID>
+              <CREATED_FROM>2</CREATED_FROM>
+              <UPDATE_IF_FOUND>true</UPDATE_IF_FOUND>
+              <COLUMN>
+                <NAME>EMAIL</NAME>
+                <VALUE>my@email.com</VALUE>
+              </COLUMN>
+              <COLUMN>
+                <NAME>gender</NAME>
+                <VALUE>male</VALUE>
+              </COLUMN>
+            </AddRecipient>
+          </Body>
+        </Envelope>
+        ---------------------------------------------------------------------------
+        True
+
+
+opt_out_recipient
++++++++++++++++++
+
+Let's call the opt_out_recipient api with the required attributes::
+
+    >>> silverpop.opt_out_recipient(api_url, list_id, email)
+    ------------------------------request details------------------------------
+    http://api1.silverpop.com/XMLAPI
+    {'Content-type': 'application/x-www-form-urlencoded;charset=UTF-8'}
+    <Envelope>
+      <Body>
+        <OptOutRecipient>
+          <LIST_ID>999</LIST_ID>
+          <EMAIL>my@email.com</EMAIL>
+        </OptOutRecipient>
+      </Body>
+    </Envelope>
+    ---------------------------------------------------------------------------
+    True
+
+xml_request
++++++++++++
+
+The Silverpop XML API offers a quite large variaty of commands,
+of which we only implement a subset.
+If you need to make different requests you can use this method to
+submit custom xml to Silverpop. As result, you will get the Silverpop
+Response, which is also xml.
+
+Imagine, we want to use the **ForwardToFrient** xml command. 
+
+Let's define the custom xml::
+
+    >>> xml = """<Envelope>
+    ...   <Body>
+    ...     <ForwardToFriend>
+    ...       <SENDER_EMAIL>bob@bob.com</SENDER_EMAIL>
+    ...       <r>5</r>
+    ...       <m>10</m>
+    ...       <RECIPIENTS>jane@jane.com</RECIPIENTS>
+    ...       <MESSAGE>Forwarded: Check this out, I just got that</MESSAGE>
+    ...     </ForwardToFriend>
+    ...   </Body>
+    ...  </Envelope>"""
+
+The xml is sent to Silverpop and we get the response back, for further processing::
+
+    >>> silverpop.xml_request(api_url, xml)
+    ------------------------------request details------------------------------
+    http://api1.silverpop.com/XMLAPI
+    {'Content-type': 'application/x-www-form-urlencoded;charset=UTF-8'}
+    <Envelope>
+      <Body>
+        <ForwardToFriend>
+          <SENDER_EMAIL>bob@bob.com</SENDER_EMAIL>
+          <r>5</r>
+          <m>10</m>
+          <RECIPIENTS>jane@jane.com</RECIPIENTS>
+          <MESSAGE>Forwarded: Check this out, I just got that</MESSAGE>
+        </ForwardToFriend>
+      </Body>
+     </Envelope>
+    ---------------------------------------------------------------------------
+    '<success>true</success>'
