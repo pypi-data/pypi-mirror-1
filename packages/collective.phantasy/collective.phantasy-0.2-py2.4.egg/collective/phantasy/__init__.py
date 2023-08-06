@@ -1,0 +1,8 @@
+
+import atphantasy
+
+def initialize(context):
+    """Initializer called to use Collective Phantasy as a Zope 2 product."""
+
+    atphantasy.initializeContents(context)
+
