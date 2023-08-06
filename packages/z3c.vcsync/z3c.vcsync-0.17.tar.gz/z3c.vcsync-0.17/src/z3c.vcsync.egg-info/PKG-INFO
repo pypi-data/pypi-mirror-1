@@ -1,0 +1,577 @@
+Metadata-Version: 1.0
+Name: z3c.vcsync
+Version: 0.17
+Summary: Synchronize object data with a version control system
+Home-page: UNKNOWN
+Author: Martijn Faassen
+Author-email: faassen@startifact.com
+License: ZPL 2.1
+Description: Version Control Synchronization
+        ===============================
+        
+        This package contains code that helps with handling synchronization of
+        persistent content with a version control system.
+        
+        This can be useful in software that needs to be able to work
+        offline. The web application runs on a user's laptop that may be away
+        from an internet connection. When connected again, the user syncs with
+        a version control server, receiving updates that may have been made by
+        others, and committing their own changes.
+        
+        Another advantage is that the version control system always contains a
+        history of how content developed over time. The version-control based
+        content can also be used for other purposes independent of the
+        application.
+        
+        While this package has been written with other version control systems
+        in mind, it has only been developed to work with SVN so far. Examples
+        below are all given with SVN.
+        
+        The synchronization sequence is as follows:
+        
+        1) save persistent state (IState) to svn checkout (ICheckout) on the
+        same machine as the Zope application.
+        
+        2) ``svn up``. Subversion merges in changed made by others users that
+        were checked into the svn server.
+        
+        3) Any svn conflicts are automatically resolved.
+        
+        4) reload changes in svn checkout into persistent Python objects
+        
+        5) ``svn commit``.
+        
+        This is all happening in a single step. It can happen over and over
+        again in a reasonably safe manner, as after the synchronization has
+        concluded, the state of the persistent objects and that of the local
+        SVN checkout will always be in sync.
+        
+        During synchronisation, the system tries to take care only to
+        synchronize those objects and files that have changed. That is, in
+        step 1) only applies those objects that have been modified, added or
+        removed will have an effect on the checkout. In step 4) only those
+        files that have been changed, added or removed on the filesystem due
+        to the ``up`` action will change the persistent object state.
+        
+        State
+        -----
+        
+        Content to synchronize is represented by an object that provides
+        ``IState``. A state represents a container object, which should
+        contain a ``data`` object (a container that contains the actual data
+        to be synchronized) and a ``found`` object (a container that contains
+        objects that would otherwise be lost during conflict resolution).
+        
+        The following methods need to be implemented:
+        
+        * ``get_revision_nr()``: return the last revision number that the
+        application was synchronized with. The state typically stores this
+        the application object.
+        
+        * ``set_revision_nr(nr)``: store the last revision number that the
+        application was synchronized with.
+        
+        * ``objects(revision_nr)``: any object that has been modified (or
+        added) since the synchronization for ``revision_nr``. Returning 'too
+        many' objects (objects that weren't modified) is safe, though less
+        efficient as they will then be re-exported.
+        
+        Typically in your application this would be implemented by doing
+        a catalog search, so that they can be looked up quickly.
+        
+        * ``removed(revision_nr)``: any path that has had an object removed
+        from it since revision_nr.  It is safe to return paths that have
+        been removed and have since been replaced by a different object with
+        the same name. It is also safe to return 'too many' paths, though
+        less efficient as the objects in these paths may be re-exported
+        unnecessarily.
+        
+        Typically in your application you would maintain a list of removed
+        objects by hooking into ``IObjectMovedEvent`` and
+        ``IObjectRemovedEvent`` and recording the paths of all objects that
+        were moved or removed. After an export it is safe to purge this
+        list.
+        
+        In this example, we will use a simpler, less efficient, implementation
+        that goes through a content to find changes. It tracks the
+        revision number as a special attribute of the root object::
+        
+        >>> from z3c.vcsync.tests import TestState
+        
+        The content
+        -----------
+        
+        Now that we have something that can synchronize a tree of content in
+        containers, let's actually build ourselves a tree of content.
+        
+        An item contains some payload data, and maintains the SVN revision
+        after which it was changed. In a real application you would typically
+        maintain the revision number of objects by using an annotation and
+        listening to ``IObjectModifiedEvent``, but we will use a property
+        here::
+        
+        >>> from z3c.vcsync.tests import Item
+        
+        This code needs a ``get_revision_nr`` method available to get access
+        to the revision number of last synchronization. For now we'll just define
+        this to return 0, but we will change this later::
+        
+        >>> def get_revision_nr(self):
+        ...    return 0
+        >>> Item.get_revision_nr = get_revision_nr
+        
+        Besides the ``Item`` class, we also have a ``Container`` class::
+        
+        >>> from z3c.vcsync.tests import Container
+        
+        It is a class that implements enough of the dictionary API and
+        implements the ``IContainer`` interface. A normal Zope 3 folder or
+        Grok container will also work.
+        
+        Let's create a container now::
+        
+        >>> root = Container()
+        >>> root.__name__ = 'root'
+        
+        The container has two subcontainers (``data`` and ``found``).
+        
+        >>> root['data'] = data = Container()
+        >>> root['found'] = Container()
+        >>> data['foo'] = Item(payload=1)
+        >>> data['bar'] = Item(payload=2)
+        >>> data['sub'] = Container()
+        >>> data['sub']['qux'] = Item(payload=3)
+        
+        As part of the synchronization procedure we need the ability to export
+        persistent python objects to the version control checkout directory in
+        the form of files and directories.
+        
+        Now that we have an implementation of ``IState`` that works for our
+        state, let's create our ``state`` object::
+        
+        >>> state = TestState(root)
+        
+        Reading from and writing to the filesystem
+        ------------------------------------------
+        
+        To integrate with the synchronization machinery, we need a way to dump
+        a Python object to the filesystem (to an SVN working copy), and to
+        parse it back to an object again.
+        
+        Let's grok this package first, as it provides some of the required
+        infrastructure::
+        
+        >>> import grokcore.component as grok
+        >>> grok.testing.grok('z3c.vcsync')
+        
+        We need to provide a serializer for the Item class that takes an item
+        and writes it to the filesystem to a file with a particular extension
+        (``.test``)::
+        
+        >>> from z3c.vcsync.tests import ItemSerializer
+        
+        We also need to provide a parser to load an object from the filesystem
+        back into Python, overwriting the previously existing object::
+        
+        >>> from z3c.vcsync.tests import ItemParser
+        
+        Sometimes there is no previously existing object in the Python tree,
+        and we need to add it. To do this we implement a factory (where we use
+        the parser for the real work)::
+        
+        >>> from z3c.vcsync.tests import ItemFactory
+        
+        Both parser and factory are registered per extension, in this case
+        ``.test``. This is the name of the utility.
+        
+        We register these components::
+        
+        >>> grok.testing.grok_component('ItemSerializer', ItemSerializer)
+        True
+        >>> grok.testing.grok_component('ItemParser', ItemParser)
+        True
+        >>> grok.testing.grok_component('ItemFactory', ItemFactory)
+        True
+        
+        We also need a parser and factory for containers, registered for the
+        empty extension (thus no special utility name). These can be very
+        simple::
+        
+        >>> from z3c.vcsync.tests import ContainerParser, ContainerFactory
+        >>> grok.testing.grok_component('ContainerParser', ContainerParser)
+        True
+        >>> grok.testing.grok_component('ContainerFactory', ContainerFactory)
+        True
+        
+        Setting up the SVN repository
+        -----------------------------
+        
+        Now we need an SVN repository to synchronize with. We create a test
+        SVN repository now and create a svn path to a checkout::
+        
+        >>> from z3c.vcsync.tests import svn_repo_wc
+        >>> repo, wc = svn_repo_wc()
+        
+        We can now initialize the ``SvnCheckout`` object with the SVN path to
+        the checkout we just created::
+        
+        >>> from z3c.vcsync.svn import SvnCheckout
+        >>> checkout = SvnCheckout(wc)
+        
+        The root directory of the working copy will be synchronized with the
+        root container of the state. The checkout will therefore contain
+        ``data`` and a ``found`` sub-directories.
+        
+        Constructing the synchronizer
+        -----------------------------
+        
+        Now that we have the checkout and the state, we can set up a synchronizer::
+        
+        >>> from z3c.vcsync import Synchronizer
+        >>> s = Synchronizer(checkout, state)
+        
+        Let's make ``s`` the current synchronizer as well. We need this in
+        this example to get back to the last revision number::
+        
+        >>> current_synchronizer = s
+        
+        It's now time to set up our ``get_revision_nr`` method a bit better,
+        making use of the information in the current synchronizer. In actual
+        applications we'd probably get the revision number directly from the
+        content, and there would be no need to get back to the synchronizer
+        (it doesn't need to be persistent but can be constructed on demand)::
+        
+        >>> def get_revision_nr(self):
+        ...    return current_synchronizer.state.get_revision_nr()
+        >>> Item.get_revision_nr = get_revision_nr
+        
+        Synchronization
+        ---------------
+        
+        We'll synchronize for the first time now::
+        
+        >>> info = s.sync("synchronize")
+        
+        We will now examine the SVN checkout to see whether the
+        synchronization was successful.
+        
+        To do this we'll introduce some helper functions that help us present
+        the paths in a more readable form, relative to the base of the
+        checkout::
+        
+        >>> def pretty_path(path):
+        ...     return path.relto(wc)
+        >>> def pretty_paths(paths):
+        ...     return sorted([pretty_path(path) for path in paths])
+        
+        We see that the Python object structure of containers and items has
+        been translated to the same structure of directories and ``.test``
+        files on the filesystem::
+        
+        >>> pretty_paths(wc.listdir())
+        ['data']
+        >>> pretty_paths(wc.join('data').listdir())
+        ['data/bar.test', 'data/foo.test', 'data/sub']
+        >>> pretty_paths(wc.join('data').join('sub').listdir())
+        ['data/sub/qux.test']
+        
+        The ``.test`` files have the payload data we expect::
+        
+        >>> print wc.join('data').join('foo.test').read()
+        1
+        >>> print wc.join('data').join('bar.test').read()
+        2
+        >>> print wc.join('data').join('sub').join('qux.test').read()
+        3
+        
+        Synchronization back into objects
+        ---------------------------------
+        
+        Let's now try the reverse: we will change the SVN content from another
+        checkout, and synchronize the changes back into the object tree.
+        
+        We have a second, empty tree that we will load objects into::
+        
+        >>> root2 = Container()
+        >>> root2.__name__ = 'root'
+        >>> state2 = TestState(root2)
+        
+        We make another checkout of the repository::
+        
+        >>> import py
+        >>> wc2 = py.test.ensuretemp('wc2')
+        >>> wc2 = py.path.svnwc(wc2)
+        >>> wc2.checkout(repo)
+        >>> checkout2 = SvnCheckout(wc2)
+        
+        Let's make a synchronizer for this new checkout and state::
+        
+        >>> s2 = Synchronizer(checkout2, state2)
+        
+        This is now the current synchronizer (so that our ``get_revision_nr``
+        works properly)::
+        
+        >>> current_synchronizer = s2
+        
+        Now we'll synchronize::
+        
+        >>> info = s2.sync("synchronize")
+        
+        The state of objects in the tree must now mirror that of the original state::
+        
+        >>> sorted(root2.keys())
+        ['data']
+        
+        >>> sorted(root2['data'].keys())
+        ['bar', 'foo', 'sub']
+        
+        Now we will change some of these objects, and synchronize again::
+        
+        >>> root2['data']['bar'].payload = 20
+        >>> root2['data']['sub']['qux'].payload = 30
+        >>> info2 = s2.sync("synchronize")
+        
+        We can now synchronize the original tree again::
+        
+        >>> current_synchronizer = s
+        >>> info = s.sync("synchronize")
+        
+        We should see the changes reflected into the original tree::
+        
+        >>> root2['data']['bar'].payload
+        20
+        >>> root2['data']['sub']['qux'].payload
+        30
+        
+        More information
+        ----------------
+        
+        To learn more about the APIs you can use and need to implement, see
+        ``interfaces.py``.
+        
+        To learn about using ``z3c.vcsync`` to import and export content, see
+        ``importexport.txt``.
+        
+        More low-level information may be gleaned from ``conflicts.txt`` and
+        ``internal.txt``.
+        
+        
+        z3c.vcsync changes
+        ==================
+        
+        0.17 (2009-06-05)
+        -----------------
+        
+        * Depend only on ``grokcore.component`` and ``zope.app.container``
+        directly, not on ``grok`` itself. We want instead to depend only
+        on ``zope.container``, but we cannot do this yet as we need
+        compatibility with Grok 0.14.
+        
+        * Use a somewhat less verbose way to set up the tests.
+        
+        * An issue existed when a common filesystem representation was used
+        that could be translated (by a single factory) into a number of
+        different classes. If an object was added, synchronized, then
+        removed and an object of the name but different class was added, an
+        error would occur when synchronizing this. This bug has been fixed
+        at the (small) cost of a few-reparses here and there.
+        
+        0.16 (2009-06-02)
+        -----------------
+        
+        * Change the method by which zip files are created for export to a
+        less filesystem-intensive method; files are directly added to the
+        zip file. This hopefully brings performance benefits on platforms
+        where accessing many small files is slow.
+        
+        0.15 (2008-08-19)
+        -----------------
+        
+        * Fix a bug where the SVN "R" status was not recognized by the py lib.
+        Monkey-patch py for now, though a fix should be released with py
+        0.9.2 eventually. Strictly depend on py 0.9.1 for now to make sure
+        monkey-patch applies cleanly.
+        
+        * A bit of refactoring of duplicated code in retrieving the objects
+        modified and objects removed lists. Still not happy that this gets
+        called twice per synchronization, but it was already doing this so
+        doesn't get worse either.
+        
+        0.14 (2008-07-04)
+        -----------------
+        
+        * Fixed a bug where too many path fragments were returned in case of
+        conflicts. Now only paths that have in fact changed should be
+        returned. Added some tests for this.
+        
+        * There was a case where two users would add a file with the same name
+        to their own states independently. This used to result in an SVN
+        error, but now also generates a conflict.  This conflict is a bit
+        different in its behavior unfortunately, as it prefers the version
+        already in SVN as opposed to the one last added.
+        
+        0.13 (2008-06-02)
+        -----------------
+        
+        * The root directory of the checkout is now truly equivalent to the
+        root object of the state. This means that if the SVN checkout
+        content is to remain the same, the state root to synchronize should
+        be one level higher (the parent of the current state root).
+        
+        * Conflict resolution has been cleaned up. When a conflict occurs, the
+        other half of the conflict (the one not resolved) is moved into the
+        ``found`` directory, which is created in the checkout root. This is
+        also represented in the state container object and is synchronized
+        like any other content.
+        
+        0.12 (2008-05-16)
+        -----------------
+        
+        Features added
+        ~~~~~~~~~~~~~~
+        
+        * The API has been cleaned up and revised. This will break code that
+        uses this library, but so far I don't think that is many people
+        yet. :)
+        
+        * A major refactoring of the tests, including real SVN tests. This
+        requires SVN to be installed on the system where the tests are being
+        run, including the ``svn-admin`` command.
+        
+        * ``IState`` objects now need to implement methods to access and
+        maintain the revision number of the last revision.
+        
+        * The developer must now also implement ``IParser`` utilities for
+        files that can be synchronized (besides ``IFactory``, which used to
+        be called ``IVcFactory``. The ``IParser`` utility overwrites the
+        existing object instead of creating a new one. This allows
+        synchronization to be a bit nicer and not remove and recreate
+        objects unnecessarily, which makes it harder to implement things
+        like references between objects.
+        
+        * Add a facility to pass a special function along that is called for
+        all objects created or modified during the synchronization (or
+        during import). This function is called at the end when all objects
+        that are going to exist already exist, so can be used in situations
+        where the state of an object relies on the existence of another one.
+        
+        0.11 (2008-03-10)
+        -----------------
+        
+        Bugs fixed
+        ~~~~~~~~~~
+        
+        * Do not try to remove non-existent files during synchronization. A
+        file might have been removed in SVN and there is no more need to
+        re-remove it if it was also removed locally.
+        
+        * There was an off-by one error during the "up" phase of
+        synchronization with SVN, and as a result a log entry that was
+        already processed could be re-processed during this next
+        synchronisation. This could in some cases revive folders as unknown
+        directories on the filesystem, leading to errors and
+        inconsistencies.
+        
+        0.10 (2008-01-08)
+        -----------------
+        
+        Features added
+        ~~~~~~~~~~~~~~
+        
+        * The ``.sync()`` method now does not return the revision number, but
+        an ``ISynchronizationInfo`` object. This has a ``revision_nr``
+        attribute and also contains some information on what happened during
+        the synchronization process.
+        
+        Bugs fixed
+        ~~~~~~~~~~
+        
+        * revision number after synchronization was not always updated
+        properly to the latest number of the repository. Now retrieve this
+        number from ``commit()`` where possible.
+        
+        0.9.1 (2007-11-29)
+        ------------------
+        
+        Bugs fixed
+        ~~~~~~~~~~
+        
+        * When resolving objects in the ZODB, a path was generated that has
+        separators that are actually dependent on the operating system in
+        use (``/`` for Unices, but ``\`` for windows). This caused
+        synchronization to fail on Windows, completely flattening
+        hierarchies. Now use os.path.sep to be platform-independent.
+        
+        0.9 (2007-11-25)
+        ----------------
+        
+        Features added
+        ~~~~~~~~~~~~~~
+        
+        * The importing logic now allows the user to import new content over
+        existing content. In this case any existing content is left alone,
+        but new objects are added. Any attempt to overwrite existing content
+        is ignored.
+        
+        Bugs fixed
+        ~~~~~~~~~~
+        
+        * In some cases a containing directory is referenced which does not
+        exist anymore when removing files. In this case we do not need to
+        remove the file anymore, as the directory itself is gone.
+        
+        * SVN doesn't actually remove directories, just mark them for
+        removal. This could confuse the system during synchronization:
+        removed directories might reappear again as they were still on the
+        filesystem during loading. Make sure now that any directories marked
+        for removal are also properly removed in the filesystem before load
+        starts, but after up (as rm-ing a directory marked for removal
+        before svn up will actually re-add this directory!).
+        
+        Restructuring
+        ~~~~~~~~~~~~~
+        
+        * Previously the datetime of last synchronization was used to
+        determine what to synchronize both in the ZODB as well as in the
+        checkout. This has a significant drawback if the datetime setting of
+        the computer the synchronization code is running on is ahead of the
+        datetime setting of the version control server: updates could be
+        lost.
+        
+        Changed the code to use a revision_nr instead. This is a number that
+        increments with each synchronization, and the number can be used to
+        determine both what changes have been made since last
+        synchronization in the ZODB as well as in the version control
+        system. This is a more robust approach.
+        
+        0.8.1 (2007-11-07)
+        ------------------
+        
+        Bugs fixed
+        ~~~~~~~~~~
+        
+        * Fix a bug in conversion of SVN timestamps to datetimes. Previous
+        code worked in DST, but not during winter time. The new code might
+        of course break under DST - the mysterious of datetime conversion
+        are legion.
+        
+        * A cleaner way to cache the files listing from SVN.
+        
+        * Work around a bug in the Py library. The Py library doesn't support
+        the R status code from SVN and raises a NotImplementedError when it
+        encounters it. Evilly catch these NotImplementedErrors for now. The
+        bug has been reported upstream and should be fixed in the next
+        release of Py.
+        
+        
+Keywords: zope3 grok web svn synchronization
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Framework :: Zope3
