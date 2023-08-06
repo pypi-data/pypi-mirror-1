@@ -1,0 +1,100 @@
+This recipe use plone.recipe.zope2instance and plone.recipe.zope2zeoserver to
+generate config files and instances for Zope2 instances / zeo server using
+repoze.zope2
+
+This mean that you intances are wsgi applications served by PasteDeploy.
+
+WSGI Instance
+=============
+
+Recipe options are the same than `plone.recipe.zope2instance
+<http://pypi.python.org/pypi/plone.recipe.zope2instance>`_.
+
+The default logging config is override to log to `STDERR` instead of standard
+log files.  You can change this by setting `event-log-custom` and
+`access-log-custom` options.
+
+
+We'll start by creating a buildout that uses the recipe::
+
+    >>> write('buildout.cfg',
+    ... """
+    ... [buildout]
+    ... parts = instance
+    ... extends = 
+    ...     http://dist.plone.org/release/3.3/versions.cfg
+    ...     http://download.zope.org/zope3.4/3.4.0/versions.cfg
+    ... find-links =
+    ...     http://dist.repoze.org/zope2/2.10/
+    ... versions = versions
+    ...
+    ... [instance]
+    ... recipe = collective.recipe.zope2wsgi
+    ... user = admin:admin
+    ... """)
+
+Running the buildout gives us::
+
+    >>> print 'start', system(buildout) 
+    start Installing instance.
+    Generated config file '/sample-buildout/instance.ini'
+    Generated script '/sample-buildout/bin/instance'.
+    Generated script '/sample-buildout/bin/instance.wsgi'.
+
+Then you just need to run::
+
+    $ bin/instance serve
+
+This will launch the application with Paste with the generated `instance.ini`
+file.
+
+You can also use mod_wsgi with the `instance.wsgi` script (this is not tested
+but should work).
+
+Using ZEO
+=========
+
+Recipe options are the same than `plone.recipe.zope2zeoserver
+<http://pypi.python.org/pypi/plone.recipe.zope2zeoserver>`_.
+
+We'll start by creating a buildout that uses the recipe::
+
+    >>> write('buildout.cfg',
+    ... """
+    ... [buildout]
+    ... parts = zeo instance
+    ... extends = 
+    ...     http://dist.plone.org/release/3.3/versions.cfg
+    ...     http://download.zope.org/zope3.4/3.4.0/versions.cfg
+    ... find-links =
+    ...     http://dist.repoze.org/zope2/2.10/
+    ... versions = versions
+    ...
+    ... [zeo]
+    ... recipe = collective.recipe.zope2wsgi:zeo
+    ... 
+    ... [instance]
+    ... recipe = collective.recipe.zope2wsgi
+    ... user = admin:admin
+    ... zeo-client = on
+    ... """)
+
+Running the buildout gives us::
+
+    >>> print 'start', system(buildout) 
+    start ...
+    Installing zeo.
+    Created directory /sample-buildout/parts/zeo
+    ...
+    Generated script '/sample-buildout/bin/zeo'.
+    Generated script '/sample-buildout/bin/zeopack'.
+    Installing instance.
+    Generated script '/sample-buildout/bin/instance'.
+    Generated script '/sample-buildout/bin/instance.wsgi'.
+    
+Then you just need to run::
+
+    $ bin/zeo start
+    $ bin/instance serve --daemon
+
+
