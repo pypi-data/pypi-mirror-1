@@ -1,0 +1,115 @@
+========================================
+Tests for the workflow migration utility
+========================================
+
+Ed Crewe, ILRT (University of Bristol) 
+January 2009
+
+Unit tests for the workflow tool
+--------------------------------
+
+    >>> from Products.CMFCore.utils import getToolByName
+
+(Depends on default plone portal_workflow being set up)
+
+Lets get the workflow migration tool
+
+    >>> request = getattr(self,'REQUEST',{}) 
+    >>> from ilrt.migrationtool.browser.workflowtool import WorkflowMigrationView
+    >>> wfmt = WorkflowMigrationView(portal,request)
+
+Lets check the tool is there and listing workflows ...
+
+    >>> wfs = wfmt.listWorkflows()
+    >>> wf_item = {'id':'plone_workflow','title':'Community Workflow'}
+    >>> wf_item in wfs
+    True
+
+Now we will set up a workflow migration
+
+    >>> wfmt.setWorkflowMigration('simple_publication_workflow','intranet_workflow')
+    
+Check that this has been set
+
+    >>> wfs = wfmt.getWorkflowMigration()
+    >>> for wf in wfs:
+    ...     wf.title
+    'Simple Publication Workflow'
+    'Intranet/Extranet Workflow'
+
+Confirm that the state map method works
+
+    >>> transdict = wfmt.getTransitionStateMap('intranet_workflow')
+    >>> transdict['internal>internally_published']
+    ['publish_internally']    
+
+Check the most complex state change in the standard plone workflows ie. 
+the three transitions required to move from private to external
+
+    >>> transdict['private>external'][0]
+    'show_internally'
+    >>> transdict['private>external'][1] in ('submit','publish_internally')
+    True
+    >>> transdict['private>external'][2]
+    'publish_externally'
+
+Test the transfer on the portal
+-------------------------------
+
+Ok now we need to set the mapping of states for this transfer
+We will use intranet workflow and map published to externally_published
+since this is a two-step transition ... ie. to get from the default 
+internal state requires two transitions 
+
+   >>> wfmt._mapping = {'private':'private','pending':'pending',
+   ...                  'published':'external'}
+
+Set up the portal with simple publication workflow
+
+   >>> wftool = getToolByName(portal,'portal_workflow')
+   >>> wf_from = 'simple_publication_workflow'
+   >>> wftool.manage_changeWorkflows(default_chain=wf_from)
+
+Make ourselves a manager so we can do some doc creation
+
+   >>> self.setRoles(['Manager'])
+
+Add a document
+
+   >>> id = portal.invokeFactory(id='document', type_name='Document')
+   >>> document = portal[id]
+   >>> document.setTitle('Test document')
+
+Check the state
+
+   >>> wftool.getInfoFor(document,'review_state',wf_id=wf_from)
+   'private'
+
+Publish it and test the _tryTransition method as we do so 
+
+   >>> workflow = wftool.getWorkflowById(wf_from)
+   >>> wfmt._tryTransition(workflow,document,'publish','Publish it')
+   True
+   >>> wftool.getInfoFor(document,'review_state',wf_id=wf_from)
+   'published'
+
+Now change to intranet workflow
+
+   >>> wf_to = 'intranet_workflow' 
+   >>> wftool.manage_changeWorkflows(default_chain=wf_to)
+
+Check to see that the documents state has become the default for 
+an intranet ie internal rather than stayed published
+
+   >>> wftool.getInfoFor(document,'review_state',wf_id=wf_to)
+   'internal'
+
+Run the transfer
+
+   >>> wfmt.transferObjectsState(wf_from,wf_to,portal)
+
+Confirm we have moved the objects state to what we wanted in our mapping
+ie. published content should become internally published.
+
+   >>> wftool.getInfoFor(document,'review_state',wf_id=wf_to)
+   'external'
