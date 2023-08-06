@@ -1,0 +1,239 @@
+==============================================================================
+Doctest generated Fri Sep 05 2008 11:41:42 GMT-0300 (ART)
+created by walteralini
+==============================================================================
+
+We create the browser to make all tests
+
+    >>> portal_url = portal.absolute_url()
+    >>> browser = self.browser
+
+Let's login first as the portal admin
+
+    >>> from Products.PloneTestCase.setup import portal_owner, default_password
+    >>> browser.open(portal_url)
+
+We have the login portlet, so let's use that.
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+
+Add a warehouse to keep pages:
+
+    >>> browser.getLink('Site Setup').click()
+    >>> browser.getLink('GetPaid').click()
+    >>> browser.getLink('Warehouses').click()
+    >>> browser.getControl('Add').click()
+
+    >>> browser.getControl('Warehouse Name').value = 'warehouse1'
+    >>> browser.getControl('Address 1').value = 'Street 244'
+    >>> browser.getControl(name='form.city').value = 'Chicago'
+    >>> browser.getControl(name='form.state').value = ('US-IL',)
+    >>> browser.getControl('Zip/Postal Code').value = '60601'
+    >>> browser.getControl('Add Warehouse').click()
+
+Set up a Site Profile:
+
+    >>> browser.open(portal_url)
+    >>> browser.getLink('Site Setup').click()
+    >>> browser.getLink('GetPaid').click()
+    >>> browser.getLink('Site Profile').click()
+    >>> browser.getControl('Store/Organization Name').value = 'TestSite'
+    >>> browser.getControl('Contact Address').value = 'Street2 43'
+    >>> browser.getControl('Contact City').value = 'Chicago'
+    >>> browser.getControl('Contact State/Province').value = ('US-IL',)
+    >>> browser.getControl('Contact Zip/Postal Code').value = '60601'
+    >>> browser.getControl('Apply').click()
+
+Check for saved data:
+
+    >>> browser.getControl('Store/Organization Name').value
+    'TestSite'
+    >>> browser.getControl('Contact Address').value
+    'Street2 43'
+    >>> browser.getControl('Contact City').value
+    'Chicago'
+    >>> browser.getControl('Contact Zip/Postal Code').value
+    '60601'
+    >>> browser.getControl('Contact Country').value
+    ['US']
+    >>> browser.getControl('Contact State/Province').value
+    ['US-IL']
+
+Specify Payment Processor:
+
+    >>> from Products.PloneGetPaid.interfaces import IGetPaidManagementOptions
+    >>> options = IGetPaidManagementOptions(self.portal)
+    >>> options.accepted_credit_cards = ['Visa']
+    >>> options.payment_processor = "Testing Processor"
+
+Set Ship Rate service data:
+WARNING: this data is get via environment variables.
+Set this variables to correct username, password, and
+access key to make this tests pass. Otherwise, they wont.
+As the only rate service data available is UPS,
+we just get those environment variables:
+
+    >>> import os
+    >>> UPS_PASSWORD = os.environ.get('UPS_PASSWORD')
+    >>> UPS_USERNAME = os.environ.get('UPS_USERNAME')
+    >>> UPS_ACCESS_KEY = os.environ.get('UPS_ACCESS_KEY')
+
+So, if this fails, try setting those environment variables for
+an existant ups user:
+
+    >>> UPS_PASSWORD is not None and UPS_USERNAME is not None and UPS_ACCESS_KEY is not None
+    True
+
+With this info, we can now set upd data:
+
+    >>> options.shipping_services = ['ups']
+
+    >>> browser.getLink('Settings').click()
+    >>> browser.getLink('Shipping Methods').click()
+    >>> 'UPS Settings' in browser.contents
+    True
+
+Check for a sandbox Shipment Processor, just to test (and not to charge anything):
+
+    >>> browser.getControl('UPS Shipment Processor URL').value
+    ['sandbox']
+    >>> browser.getControl('UPS User Name').value = UPS_USERNAME
+    >>> browser.getControl('UPS Password').value = UPS_PASSWORD
+    >>> browser.getControl('UPS Access Key').value = UPS_ACCESS_KEY
+    >>> browser.getControl(name='ups.actions.apply').click()
+    >>> 'Updated' in browser.contents
+    True
+
+We need to set some things using the backend (instead the browsable
+front end) because there are some javascript dependent widgets.
+
+    >>> sm = portal.getSiteManager()
+    >>> from getpaid.ups.interfaces import IShippingRateService, UPS_SERVICES
+    >>> ups = sm.queryUtility( IShippingRateService, name="ups")
+    >>> serv_codes = dict([(tt.token,tt.value) for tt in UPS_SERVICES._terms])
+    >>> ups.services = [serv_codes[token] for token in ['next-day-air', '2nd-day-air', 'ground']]
+
+Now let's make shippable the front-page document
+
+    >>> browser.open(portal_url + '/front-page/@@activate-shippable')
+    >>> browser.getControl('Product Code').value = 'home0809'
+    >>> input_price = '130.00'
+    >>> browser.getControl('Price').value = input_price
+    >>> browser.getControl('Dimensions').value = '1024x768'
+    >>> browser.getControl('Product SKU').value = 'a1014'
+    >>> browser.getControl('Shipping Weight').value = '0.5'
+    >>> browser.getControl('Weight Unit').value = ('kgs',)
+    >>> browser.getControl('Activate').click()
+    >>> 'Product Details' in browser.contents
+    True
+    >>> input_price in browser.contents
+    True
+
+Access to the inventory, to set some of these pages in stock.
+TODO: The following open can be replaced for a click on the inventory tab, when
+this tab get present (#211)
+
+    >>> browser.open(portal_url + '/front-page/@@inventory')
+    >>> browser.getControl('Pick Bin').value = '134'
+    >>> browser.getControl('Pallet').value = 'B'
+    >>> qstock = 10
+    >>> browser.getControl('Quantity in Stock').value = str(qstock)
+    >>> browser.getControl('Warehouse').value = ('warehouse1',)
+    >>> browser.getControl('Apply').click()
+    >>> 'Updated' in browser.contents
+    True
+    >>> browser.getControl('Quantity in Stock').value == str(qstock)
+    True
+    >>> str(qstock) in browser.contents
+    True
+
+Now, we are shipping a front-page and see how warehouse is modified:
+First, we add one to the cart, and check is added:
+
+    >>> browser.open(portal_url)
+    >>> browser.getLink('Add to Cart').click()
+    >>> import re
+    >>> pattern = re.compile('name="edit[^"]*quantity"')
+    >>> all_inputs = re.findall(pattern, browser.contents)
+
+Now, I suppose quantity value is the first of all_inputs:
+
+    >>> w2_name = all_inputs[0].split('"')[1]
+    >>> browser.getControl(name=w2_name).value
+    '1'
+    >>> 'Welcome to Plone' in browser.contents
+    True
+
+Let's checkout:
+
+    >>> browser.getControl('Checkout').click()
+    >>> browser.getControl('Your Name').value = 'Tester Guy'
+    >>> browser.getControl('Phone Number').value = '3334445555'
+    >>> browser.getControl(name='form.email').value = 'tester@abb.com'
+    >>> browser.getControl(name='form.email_html_format').value = ('No',)
+    >>> browser.getControl(name='form.bill_name').value = 'Tester Guy'
+    >>> browser.getControl(name='form.bill_first_line').value = 'Street 187'
+    >>> browser.getControl(name='form.bill_city').value = 'Chicago'
+    >>> browser.getControl(name='form.bill_state').value = ('US-IL',)
+    >>> browser.getControl(name='form.bill_postal_code').value = '60601'
+    >>> browser.getControl(name='form.ship_same_billing').value = ('on',)
+    >>> browser.getControl('Continue').click()
+
+    >>> f = file('/home/waldo/public_html/abb.html','w')
+    >>> f.write (browser.contents)
+    >>> f.close()
+    >>> 'Checkout' in browser.contents
+    True
+    >>> browser.getControl(name='shipping_method_code').getControl(value='ups.03').selected = True
+    >>> browser.getControl('Continue').click()
+    >>> browser.getControl('Phone Number').value = '1111111111'
+    >>> browser.getControl('Card Holder Name').value = 'tester holder card name'
+    >>> browser.getControl(name='form.cc_expiration_month').value = ['01']
+    >>> browser.getControl(name='form.cc_expiration_year').value = ['2010']
+    >>> browser.getControl('Credit Card Verfication Number').value = '666'
+    >>> browser.getControl('Credit Card Number').value = '109'
+    >>> browser.getControl('Make Payment').click()
+    >>> 'Thank you for your order' in browser.contents
+    True
+
+And we can retain the order id from where the browser is now, by looking at
+the url
+
+    >>> import urllib
+    >>> import cgi
+    >>> raw_params = urllib.splitquery(browser.url)[1]
+    >>> params = cgi.parse_qs(raw_params)
+    >>> order_id = params['order_id'][0]
+
+Lets now see that in the inventory for the front-page document, and check that
+the quantity available for sale decreased, but the quantity in stock remains.
+TODO: The following open can be replaced for a click on the inventory tab, when
+this tab get present (#211)
+
+    >>> browser.open(portal_url + '/front-page/@@inventory')
+    >>> browser.getControl('Quantity in Stock').value == str(qstock)
+    True
+    >>> pat = re.compile('Warehouse stock minus pending orders</div>[^<]*<div class="widget">([^<]*)</div>')
+    >>> re.findall(pat,browser.contents)[0] == str(qstock - 1)
+    True
+
+Let's go now and approve the order, and check later that the stock decreased.
+We can reach the recent created order going to the getpaid order page like this:
+
+    >>> browser.open(portal_url+'/@@admin-manage-order/%s/@@admin' % order_id)
+    >>> browser.getControl('process-order').click()
+    >>> 'PROCESSING' in browser.contents
+    True
+    >>> browser.getControl('deliver-processing-order').click()
+    >>> 'SHIPPED' in browser.contents
+    True
+
+And so, in the inventory page, we see the stock:
+
+    >>> browser.open(portal_url + '/front-page/@@inventory')
+    >>> browser.getControl('Quantity in Stock').value == str(qstock - 1)
+    True
+
+
