@@ -1,0 +1,105 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import sys
+import optparse
+
+import logging
+
+import checkm
+
+from StringIO import StringIO
+
+# quieten the Checkm logger
+logger = checkm.logger
+logger.setLevel(logging.ERROR)
+
+def _option_parser():
+    parser = optparse.OptionParser(usage = """%prog [options] command filenames
+
+Commands:
+
+%prog write [bagit manifest filename (default:manifest-md5.txt) [filepath (default='.')]]
+    - writes a bagit manifest file to disc for the files in the given filepath. 
+      Use -r to include all files under a given path in a single manifest.
+      
+%prog print [filepath (default='.')]
+    - As for 'write', but will print the manifest to the screen.
+      
+%prog check [bagit manifest filename (default:manifest-md5.txt)]
+    - checks the given bagit manifest against the files on disc.
+""")
+    parser.add_option("-a", "--algorithm", dest="alg",
+                  help="Algorithm to use to hash files",
+                  default="md5")
+    parser.add_option("-v", "--verbose", dest="verbose",
+                  action="store_true",
+                  help="Log information to stdin as it goes",
+                  default=False)
+    parser.add_option("-r", "--recursive", dest="recursive",
+                  action="store_true",
+                  help="Recursively scan through child directories",
+                  default=False)
+    parser.add_option("-d", "--delimiter", dest="delimiter",
+                  help="State the delimiter to use to separate checksum from filepath",
+                  default="  ")
+    return parser
+
+if __name__ == '__main__':
+    o = _option_parser()
+    values, args = o.parse_args()
+    if len(args)>0:
+        cmd = args[0]
+    else:
+        cmd = ""
+    filename,filepath = "manifest-md5.txt", "."
+    alg = values.alg
+    recursive = values.recursive
+    delimiter = values.delimiter
+    if values.verbose:
+        logger.setLevel(logging.DEBUG)
+    try:
+        filename = args[1]
+        filepath = args[2]
+    except IndexError:
+        pass
+
+    if cmd == 'write':
+        try:
+            filepath = args[1]
+        except IndexError:
+            filepath = "."
+        r = checkm.CheckmReporter()
+        manifest_name = r.create_bagit_manifest(filepath, alg, 
+                                                recursive=recursive, 
+                                                delimiter=delimiter)
+        print "%s created" % manifest_name
+    elif cmd == 'check':
+        r = checkm.CheckmReporter()
+        results = r.check_bagit_hashes(filename)
+        if results['fail']:
+            print "BagIT Manifest check failed for the following:"
+            for filepath in results['fail']:
+                record = results['fail'][filepath]
+                print "Manifest record: %s" % (", ".join(record[0]))
+                if isinstance(record[1], list):
+                    print "doesn't match scan result: %s" % (", ".join(record[1]))
+                else:
+                    print "Scan result is '%s'" % (record[1])
+                sys.exit("Failed")
+    elif cmd == 'print':
+        try:
+            filepath = args[1]
+        except IndexError:
+            filepath = "."
+        r = checkm.CheckmReporter()
+        s = StringIO()
+        manifest_name = r.create_bagit_manifest(filepath, alg, 
+                                                recursive=recursive, 
+                                                delimiter=delimiter, 
+                                                filename = s)
+        s.seek(0)
+        print s.read()
+        s.close()
+    else:
+        print "unknown command: %s" % cmd
