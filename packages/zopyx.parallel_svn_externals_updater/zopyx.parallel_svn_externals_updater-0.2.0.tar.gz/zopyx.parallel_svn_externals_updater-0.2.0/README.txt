@@ -1,0 +1,50 @@
+zopyx.parallel_svn_externals_updater
+------------------------------------
+
+
+Requirements
+============
+
+- Python 2.4+, Subversion
+
+Installation
+============
+
+Using ``easy_install``::
+ 
+     easy_install zopyx.parallel_svn_externals_updater
+
+Usage
+=====
+
+To update all svn:externals for a given SVN checkout, use::
+  
+    svn-externals-updater --pool-size 10 --recursive /path/to/svn/checkout
+
+
+Author
+======
+
+``zopyx.parallels_svn_externals_updater`` was written by 
+Andreas Jung for ZOPYX Ltd. & Co.  KG, Tuebingen, Germany 
+
+
+License
+=======
+
+``zopyx.parallels_svn_externals_updater`` is published under the Zope Public License (ZPL 2.1)
+
+Known issues
+============
+
+- no support for Windows
+
+Contact
+=======
+
+| ZOPYX Ltd. & Co. KG
+| c/o Andreas Jung, 
+| Charlottenstr. 37/1
+| D-72070 Tuebingen, Germany
+| E-mail: info at zopyx dot com
+| Web: http://www.zopyx.com
