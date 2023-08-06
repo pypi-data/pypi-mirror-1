@@ -1,0 +1,552 @@
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"
+    lang="en"
+    metal:use-macro="here/main_template/macros/master"
+    i18n:domain="collective.blogging">
+    <body>
+
+        <div metal:fill-slot="main">
+            <metal:body define-macro="body_macro"
+                tal:define="kssClassesView context/@@kss_field_decorator_view;
+                            getKssClasses nocall:kssClassesView/getKssClassesInlineEditable;
+                            templateId template/getId;
+                            contents view/contents;
+                            hiddableStyle python:contents and 'visibility:hidden;;height:1px;;padding:0;;' or None;
+                            url_quote nocall:modules/Products.PythonScripts.standard/url_quote;
+                            portal_discussion nocall:context/portal_discussion;
+                            isDiscussionAllowedFor nocall:portal_discussion/isDiscussionAllowedFor;
+                            getDiscussionFor nocall:portal_discussion/getDiscussionFor;
+                            checkPermission nocall:context/portal_membership/checkPermission;
+                            toLocalizedTime nocall:toLocalizedTime|nocall:context/@@plone/toLocalizedTime;
+                            normalizeString nocall:normalizeString|nocall:context/@@plone/normalizeString;
+                            isAnon isAnon|context/@@plone_portal_state/anonymous;
+                            wtool wtool|context/portal_workflow;">
+
+                <div tal:replace="structure provider:plone.abovecontenttitle" />
+                
+                <h1 class="documentFirstHeading"
+                    tal:attributes="style hiddableStyle"> 
+                    <metal:field use-macro="python:context.widget('title', mode='view')">
+                        Title
+                    </metal:field>
+                </h1>
+
+                <tal:block condition="not:contents">
+                    <div tal:replace="structure provider:plone.belowcontenttitle" />
+                </tal:block>
+                
+                <p class="documentDescription" tal:condition="context/Description"
+                    tal:attributes="style hiddableStyle">
+                    <metal:field use-macro="python:context.widget('description', mode='view')">
+                        Description
+                    </metal:field>
+                </p>
+                
+                <tal:toolbar condition="view/show_toolbar">
+                    <dl id="blog-filter" class="collapsible inline collapsedOnLoad"
+                        tal:define="filter_info view/filter_info">
+                    
+                        <dt class="collapsibleHeader" i18n:translate="label_filter_posts">Filter posts</dt>
+                        <dd class="collapsibleContent">
+                            <form id="filter-blog-form" name="filterBlogForm"
+                                method="POST" action=""
+                                tal:attributes="action context/absolute_url">
+
+                                <tal:options repeat="criteria filter_info">
+                                    <select id="" name=""
+                                        tal:attributes="id string:filter-blog-${criteria/id};
+                                                        name criteria/id">
+                                        <option value="" tal:content="criteria/title">Title</option>
+                                        <tal:block tal:repeat="item criteria/options">
+                                            <option
+                                                tal:content="python:str(item)[:30]"
+                                                tal:attributes="value item;
+                                                                selected python:item == criteria['selected'] or None">
+                                                Option
+                                            </option>
+                                        </tal:block>
+                                    </select>
+                                    <tal:separator condition="not:repeat/criteria/end"> | </tal:separator>
+                                </tal:options>
+
+                                <input type="submit" name="collective.blog.filter"
+                                    value="Filter" class="standalone"
+                                    i18n:attributes="value label_filter"/>
+                            </form>
+                        </dd>
+                    </dl>
+                </tal:toolbar>
+                
+                <tal:block condition="not:contents">
+                    <div tal:replace="structure provider:plone.abovecontentbody" />
+                </tal:block>
+                
+                <div metal:define-macro="text-field-view"
+                    id="parent-fieldname-text" class="stx"
+                    tal:define="kss_class python:getKssClasses('text',
+                                templateId=templateId, macro='text-field-view');
+                                text context/getText|nothing"
+                    tal:condition="python:text and not contents"
+                    tal:attributes="class python:context.Format() in ('text/structured',
+                                    'text/x-rst', ) and 'stx' + kss_class or 'plain' + kss_class">
+                    <div metal:define-slot="inside" tal:replace="structure text">The body</div>
+                </div>
+                
+                <tal:contents define="batch contents">
+
+                    <tal:listing condition="contents">
+                        <tal:foldercontents define="show_about view/show_about;">
+                            <tal:entries tal:repeat="item contents">
+                                <tal:block tal:define="item_id          item/getId;
+                                                       item_url         item/getURL;
+                                                       item_title_or_id item/pretty_title_or_id;
+                                                       item_description item/Description;
+                                                       item_type        item/portal_type;
+                                                       item_type_title  item/Type;
+                                                       item_date        python:toLocalizedTime(item.Date,long_format=1);
+                                                       item_type_class  python:'contenttype-' + normalizeString(item_type);
+                                                       item_wf_state    item/review_state;
+                                                       item_wf_state_class python:'state-' + normalizeString(item_wf_state);
+                                                       item_creator     item/Creator;
+                                                       item_subject     item/Subject|nothing;
+                                                       item_object      item/getObject;
+                                                       talkback         python:isDiscussionAllowedFor(item_object) and getDiscussionFor(item_object);
+                                                       reply_count      python:talkback is not False and talkback.replyCount(item_object);
+                                                       item_text        item_object/getText|nothing;
+                                                       item_is_link     python:view.is_link(item_object);
+                                                       item_is_file     python:view.is_file(item_object);
+                                                       item_is_image    python:view.is_image(item_object);
+                                                       item_is_newsitem python:view.is_newsitem(item_object);
+                                                       item_is_event    python:view.is_event(item_object);
+                                                       item_can_edit    python:checkPermission('Modify portal content', item_object)">
+
+                                    <div class="blogListingEntry">
+                                        <a name="" tal:attributes="name item_id"></a>
+                                        <h2>
+                                            <a href="#" class="summary url"
+                                               tal:attributes="href item_url"
+                                               tal:content="item_title_or_id">
+                                               Item Title
+                                            </a>
+                                        </h2>
+                                        
+                                        <div class="documentByLine" tal:condition="python: site_properties.allowAnonymousViewAbout or not isAnon">
+                                            <tal:name tal:condition="item_creator"
+                                                tal:define="author python:view.tools.membership().getMemberInfo(item_creator)">
+                                                <span i18n:translate="label_posted_by">
+                                                    Posted by
+                                                    <a href="#"
+                                                        tal:attributes="href string:${view/portal_state/navigation_root_url}/author/${item_creator}"
+                                                        tal:content="python:author and author['fullname'] or item_creator"
+                                                        tal:omit-tag="not:author"
+                                                        i18n:name="author">
+                                                        Bob Dobalina
+                                                    </a>
+                                                </span>
+                                            </tal:name>
+
+                                            <tal:block condition="item_subject">
+                                                |
+                                                <tal:filedunder i18n:translate="label_filed_under">filed under:</tal:filedunder>
+                                                <span tal:repeat="category item_subject">
+                                                    <a href=""
+                                                        class="link-category"
+                                                        rel="tag"
+                                                        tal:content="category"
+                                                        tal:define="quotedCat python:url_quote(category)"
+                                                        tal:attributes="href string:${context/absolute_url}?Subject%3Alist=${quotedCat}">
+                                                        Category
+                                                    </a><tal:separator condition="not: repeat/category/end">,</tal:separator>
+                                                </span>
+                                            </tal:block>
+                                        </div>
+                                        
+                                        <div class="tileDesc" tal:condition="item_description">
+                                            <p class="description" tal:content="item_description">
+                                                description
+                                            </p>
+                                        </div>
+                                        
+                                        <tal:event condition="item_is_event">
+                                            <div class="eventDetails vcard"
+                                                tal:define="item_start       item/start;
+                                                            item_end         item/end;
+                                                            item_location    item_object/location;
+                                                            contact_email    item_object/contact_email;
+                                                            contact_name     python:item_object.contact_name() or None;
+                                                            contact_phone    item_object/contact_phone;
+                                                            item_attendees   item_object/getAttendees|nothing;
+                                                            item_showmap     item_object/show_map|nothing;">
+
+                                                <table class="vertical listing" i18n:domain="plone"
+                                                    summary="Event details" i18n:attributes="summary summary_event_details;">
+                                                    <tbody>
+                                                        <tr tal:condition="item_subject">
+                                                            <th i18n:translate="event_what">What</th>
+                                                            <td>
+                                                                <span tal:repeat="category item_subject">
+                                                                    <a href=""
+                                                                        class="link-category"
+                                                                        rel="tag"
+                                                                        tal:content="category"
+                                                                        tal:define="quotedCat python:url_quote(category)"
+                                                                        tal:attributes="href string:${portal_url}/search?Subject%3Alist=${quotedCat}">
+                                                                        Category
+                                                                    </a><tal:separator condition="not: repeat/category/end">,</tal:separator>
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+
+                                                        <tr>
+                                                            <th i18n:translate="event_when">When</th>
+                                                            <td>
+                                                                <tal:differentday tal:condition="python:not item_start.Date() == item_end.Date()">
+                                                                    <abbr metal:define-macro="startdate-field-view"
+                                                                          tal:define="kss_class python:getKssClasses('startDate',
+                                                                                      templateId=templateId, macro='startdate-field-view');"
+                                                                          id="parent-fieldname-startDate"
+                                                                          tal:attributes="class string:$kss_class dtstart;
+                                                                                          title python:item_start.ISO8601()">
+                                                                          <span metal:define-slot="inside" 
+                                                                                class="explain"
+                                                                                tal:content="python:toLocalizedTime(item_start,
+                                                                                long_format=1)">Start Date Time</span>
+                                                                    </abbr>
+                                                                    <span i18n:translate="event_to">to</span> <br />
+                                                                    <abbr metal:define-macro="enddate-field-view"
+                                                                          tal:define="kss_class python:getKssClasses('endDate',
+                                                                                      templateId=templateId, macro='enddate-field-view');"
+                                                                          id="parent-fieldname-endDate"
+                                                                          tal:attributes="class string:$kss_class dtend;
+                                                                                          title python:item_end.ISO8601()">
+                                                                          <span metal:define-slot="inside" 
+                                                                                  class="explain"
+                                                                                  tal:content="python:toLocalizedTime(item_end,
+                                                                                  long_format=1)">End Date Time</span>
+                                                                    </abbr>
+                                                                </tal:differentday>
+
+                                                                <tal:sameday tal:condition="python:item_start.Date() == item_end.Date()"
+                                                                             tal:define="ampm python:site_properties.getProperty('localLongTimeFormat').find('%p') >= 0">
+                                                                    <span tal:replace="python:toLocalizedTime(item_start)">
+                                                                        Start Date Time</span> <br />
+                                                                    <span i18n:translate="event_from">from</span>  
+                                                                    <abbr metal:define-macro="startdatesame-field-view"
+                                                                          tal:define="kss_class python:getKssClasses('startDate',
+                                                                                      templateId=templateId, macro='startdatesame-field-view');"
+                                                                          id="parent-fieldname-startDate"
+                                                                          tal:attributes="class string:$kss_class dtstart;
+                                                                                          title python:item_start.ISO8601()">
+                                                                          <span metal:define-slot="inside" 
+                                                                                class="explain"
+                                                                                tal:content="python:toLocalizedTime(item_start, time_only=1)">Start Time</span>
+                                                                    </abbr>
+                                                                    <span i18n:translate="event_to">to</span>
+                                                                    <abbr metal:define-macro="enddatesame-field-view"
+                                                                          tal:define="kss_class python:getKssClasses('endDate',
+                                                                                      templateId=templateId, macro='enddatesame-field-view');"
+                                                                          id="parent-fieldname-endDate"
+                                                                          tal:attributes="class string:$kss_class dtend;
+                                                                                          title python:item_end.ISO8601()">
+                                                                          <span metal:define-slot="inside" 
+                                                                                class="explain"
+                                                                                tal:content="python:toLocalizedTime(item_end, time_only=1)">End Time</span>
+                                                                    </abbr>
+                                                                </tal:sameday>
+                                                            </td>
+                                                        </tr>
+
+                                                        <tr tal:condition="item_location">
+                                                            <th i18n:translate="event_where">Where</th>
+                                                            <td class="location" tal:content="item_location">
+                                                                Location
+                                                            </td>
+                                                        </tr>
+
+                                                        <tr tal:condition="python:contact_name or contact_email">
+                                                            <th i18n:translate="contact_name">Contact Name</th>
+                                                            <td>
+                                                                <a id="parent-fieldname-contactEmail"
+                                                                   tal:condition="contact_email"
+                                                                   tal:replace="structure python: context.spamProtect(mailaddress=contact_email, mailname=contact_name, cssclass='email fn')"
+                                                                   />
+                                                                <span class="fn"
+                                                                      tal:condition="not: contact_email"
+                                                                      tal:content="contact_name" />
+                                                            </td>
+                                                        </tr>
+
+                                                        <tr tal:condition="contact_phone">
+                                                            <th i18n:translate="contact_phone">Contact Phone</th>
+                                                            <td class="tel" tal:content="contact_phone">
+                                                                Phone number
+                                                            </td>
+                                                        </tr>
+
+                                                        <tr tal:condition="item_attendees">
+                                                            <th i18n:translate="contact_attendees">Attendees</th>
+                                                            <td class="attendees">
+                                                                <div tal:repeat="attendee item_attendees"
+                                                                    tal:content="attendee">
+                                                                    Attendees
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+
+                                                        <tr>
+                                                            <th i18n:translate="heading_add_to_calendar">Add event to calendar</th>
+                                                            <td>
+                                                                <a href="#"
+                                                                   tal:attributes="href string:$item_url/vcs_view"
+                                                                   title="Download this event in vCal format"
+                                                                   i18n:attributes="title title_add_to_vcal;">
+                                                                    <img tal:replace="structure context/icon_export_vcal.png" src="" alt="" />
+                                                                    <span i18n:translate="label_add_to_vcal">vCal</span></a><br />
+                                                                <a href="#"
+                                                                   tal:attributes="href string:$item_url/ics_view"
+                                                                   title="Download this event in iCal format"
+                                                                   i18n:attributes="title title_add_to_ical;">
+                                                                    <img tal:replace="structure context/icon_export_ical.png" src="" alt="" />
+                                                                    <span i18n:translate="label_add_to_ical">iCal</span></a>
+                                                            </td>
+                                                        </tr>
+                                                        
+                                                        <tr tal:condition="item_showmap">
+                                                            <td colspan="2" class="entryMap">
+                                                                <div class="googleMapView googleMapLocation"
+                                                                    tal:define="view item_object/@@maps_googlemaps_view">
+
+                                                                    <dl>
+                                                                        <tal:markers tal:repeat="marker view/getMarkers">
+                                                                            <dt class="title">
+                                                                                <img src="" tal:replace="structure python:view.iconTagForMarker(marker)" />
+                                                                                <a href=""
+                                                                                    tal:attributes="href marker/url"
+                                                                                    tal:content="marker/title"> Title </a>
+                                                                            </dt>
+
+                                                                            <dd class="geo">
+                                                                                <span class="latitude" tal:content="marker/latitude" />
+                                                                                <span class="longitude" tal:content="marker/longitude" />
+                                                                            </dd>
+                                                                        </tal:markers>
+                                                                    </dl>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </tal:event>
+                                        
+                                        <div class="newsImageContainer" tal:condition="item_is_newsitem">
+                                            <tal:block condition="item_object/image_mini|nothing">
+                                                
+                                                <p>
+                                                    <img src="" rel="" width=""
+                                                        tal:attributes="src string:${item_url}/image_mini;
+                                                                        rel string:#fancy_${item_object/UID}" />
+                                                    <br/>
+                                                    <span class="discreet" tal:content="item_object/imageCaption">
+                                                        Caption
+                                                    </span>
+                                                </p>
+                                                                                                
+                                                <div class="fancybox visualNoPrint" tal:attributes="id string:fancy_${item_object/UID}"> 
+                                                    <div class="close">&nbsp;</div>
+
+                                                    <!-- large image --> 
+                                                    <img src=""
+                                                        tal:attributes="src string:${item_url}/image_large" /> 
+
+                                                    <!-- image details --> 
+                                                    <div class="fancydetails"> 
+                                                        <h3 tal:content="item_object/imageCaption">Caption</h3>
+
+                                                        <p tal:content="item_description">Description</p> 
+
+                                                    </div> 
+                                                </div>
+                                                
+                                            </tal:block>
+                                        </div>
+                                        
+                                        <div class="tileBody">
+                                            <tal:body tal:condition="item_text" replace="structure item_text">
+                                                Text
+                                            </tal:body>
+                                        
+                                            <tal:link condition="item_is_link" i18n:domain="plone">
+                                                <p tal:define="remote_url item_object/remote_url"
+                                                    tal:condition="python:remote_url and remote_url != 'http://'">
+                                                    <span i18n:translate="link_address">The link address is:</span>
+                                                    <a href="#" tal:attributes="href remote_url"
+                                                                tal:content="remote_url">remote url</a>
+                                                </p>
+
+                                                <p tal:define="embed_code python:view.embed_code(item_object)"
+                                                    tal:condition="embed_code">
+                                                    <tal:block replace="structure embed_code"/>
+                                                </p>
+                                            </tal:link>
+                                        
+                                            <tal:file condition="item_is_file" i18n:domain="plone">
+                                                <p>
+                                                    <span tal:define="finfo python:view.file_info(item_object)">
+                                                        <a href=""
+                                                            tal:attributes="href string:${item_url}/at_download/file">
+                                                            <img src=""
+                                                                tal:condition="finfo/icon"
+                                                                tal:attributes="src string:${item_url}/${finfo/icon}"/>
+                                                            <tal:filename replace="finfo/filename|string:file"/>
+                                                        </a>
+                                                        <span class="discreet">
+                                                            &mdash;
+                                                            <span tal:replace="finfo/content_type"/>
+                                                            <tal:size content="finfo/size"/>
+                                                        </span>
+                                                    </span>
+                                                </p>
+
+                                                <div tal:define="content_type item_object/get_content_type|item_object/Format;"
+                                                    tal:condition="python: content_type.startswith('text')">
+                                                    <h2 i18n:translate="heading_file_contents">File contents</h2>
+                                                    <pre tal:content="item_object/get_data|item_object/data|nothing">
+                                                    </pre>
+                                                </div>
+                                            </tal:file>
+                                        
+                                            <tal:image condition="item_is_image">
+                                                <tal:block define="image_size python:view.image_size(item_object)"
+                                                    tal:condition="image_size">
+                                                    
+                                                    <p>
+                                                        <img src="" rel="" width=""
+                                                            tal:attributes="src string:${item_url}/image_preview;
+                                                                            rel string:#fancy_${item_object/UID}" />
+                                                    </p>
+
+                                                    <div class="fancybox visualNoPrint" tal:attributes="id string:fancy_${item_object/UID}"> 
+                                                        <div class="close"/>
+
+                                                        <!-- large image --> 
+                                                        <img src=""
+                                                            tal:attributes="src string:${item_url}/image_large" /> 
+
+                                                        <!-- image details --> 
+                                                        <div class="fancydetails"> 
+                                                            <h3 tal:content="item_title_or_id">Title</h3>
+
+                                                            <p tal:content="item_description">Description</p> 
+
+                                                        </div> 
+                                                    </div>
+                                                </tal:block>
+                                            </tal:image>
+                                            
+                                            <div class="relatedItems" i18n:domain="plone"
+                                                tal:define="getInfoFor python:wtool.getInfoFor;">
+                                                <tal:relatedItems tal:define="related python:item_object.computeRelatedItems();">
+                                                    <tal:block tal:condition="python:related">
+                                                        <div class="visualClear"><!-- --></div>
+                                                        <fieldset class="entryRelatedItemsBox">
+                                                            <legend i18n:translate="label_related_items">Related content</legend>
+                                                            <ul class="visualNoMarker">
+                                                            <tal:related tal:repeat="item related"
+                                                                         tal:define="use_view_action site_properties/typesUseViewActionInListings|python:();">
+                                                                <li tal:define="
+                                                                        desc                item/Description;
+                                                                        item_type           item/portal_type;
+                                                                        item_icon           python:plone_view.getIcon(item);
+                                                                        item_type           item/portal_type;
+                                                                        item_type_class     python:'contenttype-' + normalizeString(item_type);
+                                                                        item_wf_state       item/review_state|python: getInfoFor(item, 'review_state', '');
+                                                                        item_wf_state_class python: 'state-' + normalizeString(item_wf_state);
+                                                                        item_url            item/absolute_url;
+                                                                        item_url            python:(item_type in use_view_action) and item_url+'/view' or item_url">
+                                                                    <span tal:attributes="class item_type_class">
+                                                                        <img tal:replace="structure item_icon/html_tag" />
+                                                                        <a href="" class=""
+                                                                           tal:attributes="href  item_url;
+                                                                                           title item/Description;
+                                                                                           class string:$item_wf_state_class"
+                                                                           tal:content="item/pretty_title_or_id">
+                                                                            Related Item
+                                                                        </a>
+                                                                    </span>
+                                                                </li>
+                                                            </tal:related>
+                                                            </ul>
+                                                        </fieldset>
+                                                    </tal:block>
+                                                </tal:relatedItems>
+                                            </div>
+                                            
+                                        </div>
+                                        <div class="visualClear"><!-- --></div>
+                                        
+                                        <p class="tileFooter">
+                                            <a href="" title="Permalink"
+                                                class="actionPermalink"
+                                                tal:attributes="href item_url"
+                                                i18n:attributes="title label_permalink"
+                                                i18n:translate="label_permalink">
+                                                Permalink
+                                            </a>
+                                            <tal:block tal:condition="talkback">
+                                                |
+                                                <a title="Read comments on this entry."
+                                                    class="actionComments"
+                                                    tal:attributes="href string:${item_url}#comments"
+                                                    i18n:translate="label_comments_with_count"
+                                                    i18n:attributes="title label_read_comments_title"
+                                                    >Comments
+                                                    (<tal:count i18n:name="comments"
+                                                        tal:content="python:reply_count or 0">
+                                                        99
+                                                    </tal:count>)
+                                                </a>
+                                            </tal:block>
+                                            <tal:block tal:condition="item_can_edit">
+                                                |
+                                                <a title="Click to edit this entry."
+                                                    class="actionEdit"
+                                                    tal:attributes="href string:${item_url}/edit"
+                                                    i18n:translate="label_edit"
+                                                    i18n:attributes="title label_edit_title">
+                                                    Edit
+                                                </a>
+                                            </tal:block>
+                                            <tal:block tal:condition="python:item_date and item_date != None">
+                                                |
+                                                <span class="actionDate" tal:content="item_date">
+                                                    August 16, 2001 at 23:35:59
+                                                </span>
+                                            </tal:block>
+                                        </p>
+                                        
+                                    </div>
+                                </tal:block>
+                            </tal:entries>
+
+                            <!-- Navigation -->
+                            <tal:navigation define="batch_base_url context/absolute_url">
+                                <div metal:use-macro="context/batch_macros/macros/navigation" />
+                            </tal:navigation>
+
+                        </tal:foldercontents>
+                    </tal:listing>
+                    
+                    <p class="discreet"
+                        tal:condition="not:contents"
+                        i18n:translate="description_no_items_in_blog">
+                        There are currently no contents in this blog.
+                    </p>
+
+                </tal:contents>
+            </metal:body>
+            
+            <div tal:replace="structure provider:plone.belowcontentbody" />
+        
+        </div>
+    </body>
+</html>
