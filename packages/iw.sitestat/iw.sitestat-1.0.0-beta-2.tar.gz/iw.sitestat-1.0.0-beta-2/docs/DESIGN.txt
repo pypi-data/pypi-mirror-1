@@ -1,0 +1,116 @@
+Design
+======
+
+In order to fully understand the design described below as well as the
+code, you must first read the technical documentation from sitestat.
+
+Control panel
+-------------
+
+The control panel provides the global site wide options for
+`iw.sitestat`. These options are stored in
+ZMI:portal_properties/iwsitestat_properties property sheet.
+
+This enables other GenericSetup profiles to override the default
+settings with a simple suited "properties.xml".
+
+The control panel has been built following plone.app.form schemes
+because Plone provides nice bases for control panels.
+
+Content specific options
+------------------------
+
+Content specific options may override global sitestat related options
+or add specific options. These options are stored in annotations of
+the content object.
+
+Events handling
+---------------
+
+Some global options in the property sheet must be changed when a
+ckickin target is deleted or moved.
+
+Link extraction
+---------------
+
+In order to guess what links to files we have in a view, we made
+adapters that implement iw.sitestat.interfaces.IFileLinksFinder. At the
+time of writing, we just support:
+
+* AT based types that use default AT file widget
+* ATCT File
+* SimpleAlias
+* PloneArticle
+* Collage
+
+Developers of 3rd party components that provide links to files
+could register their own adapter as in the iw.sitestat.linksfinders
+module::
+
+  from iw.sitestat.interfaces import IFileLinksFinder
+  from mypackage.interfaces import IMyType
+
+  class MyTypeFileLinksFinder(object):
+
+      implements(IFileLinksFinder)
+      adapts(IMyType)
+
+      def fileURLs(self):
+          # Your stuff here
+          ...
+      def pdfFileURLs(self):
+          # Your stuff here
+          ...
+
+And this bunch of ZCML in your configure.zcml::
+
+    <adapter
+     for="mypackage.interfaces.IMyType"
+     provides="iw.sitestat.interfaces.IFileLinksFinder"
+     factory="mypackage.linksfinders.MyTypeFileLinksFinder"
+     zcml:condition="installed iw.sitestat" />
+
+Note that you don't need to add your adapter if your content type has
+a regular AT schema with a FileField and you use the regular
+FileWidget to publish the link to the file download.
+
+What do we do with these URLs? Well, a JS functions scans the page
+looking for <a href="<one of your urls"> (...) pattern, then
+transforms those URLs such they notify the sitestat service on
+click. So, don't worry if you provide too many URLs, the ones not
+found in the current page are silently ignored.
+
+We provide as examples link extractors for the following 3rd party
+components:
+
+* Products.PloneArticle 4.1.x
+* Products.Collage 1.2.x
+* Products.SimpleAlias 2.0.x
+
+We do not forecast to maintain the support for further versions of
+these components unless sponsorship or contribution. Note that the
+best place for these adapters are in these products themselves.
+
+Javascript
+----------
+
+The two sitestat javascripts are pushed respectively in <head> end and
+<body> end of **relevant pages** with a viewlet thats registers in the
+plone standard viewlets manager.
+
+Relevant pages are any content view page. This excludes content edit
+pages as well as various templates of a Plone site (control panel,
+preferences, personal dashboard, ...).
+
+This javascript is built dynamicaly using the global and content
+`iw.sitestat` related settings, as well as the relevant links found in
+the page. See `Link extraction`_.
+
+Note we use a DTML template for that viewlet. DTML is better suited
+than ZPT for publishing javascript.
+
+Our javascript requires jQuery, the jQuery version (1.2.x) that ships
+with Plone 3.1 fits but we didn't test with other versions. Be
+warned...
+
+.. $Id: DESIGN.txt 36 2008-09-07 09:08:55Z glenfant $
