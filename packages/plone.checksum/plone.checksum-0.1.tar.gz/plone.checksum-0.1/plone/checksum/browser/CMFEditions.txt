@@ -1,0 +1,91 @@
+CMFEditions support
+-------------------
+
+plone.checksum has CMFEditions support insofar as the query, update
+and print operations will take into account versions of items when
+they wouldn't show with an ordinary catalog search.
+
+Let's do some general setup:
+
+  >>> self.loginAsPortalOwner()
+  >>> from plone.checksum import IChecksumManager
+  >>> request = self.folder.REQUEST
+  >>> repository = self.portal.portal_repository
+
+Let's create a document and create a version of it:
+
+  >>> self.folder.invokeFactory('Document', 'mydocument')
+  'mydocument'
+  >>> doc = self.folder.mydocument
+  >>> doc.setTitle('First version')
+  >>> repository.applyVersionControl(doc)
+
+Now we'll modify the document and save the current version.
+Afterwards, we should have two versions:
+
+  >>> doc.setTitle('Second version')
+  >>> repository.save(doc)
+  >>> history = repository.getHistory(doc)
+  >>> print history[0].object.Title()
+  Second version
+  >>> print history[1].object.Title()
+  First version
+  >>> len(history)
+  2
+
+Let's update all checksums using the `update_all` view method:
+
+  >>> update_all = self.portal.unrestrictedTraverse('checksum__update_all')
+  >>> print update_all()
+  Calculated and stored checksums of ... items.
+
+However, `print_all` returns an incorrect checksum for the first version:
+
+  >>> print_all = self.portal.unrestrictedTraverse('checksum__print_all')
+  >>> request.form['checksum_fields'] = ['title']
+  >>> request.form['path'] = '/'.join(doc.getPhysicalPath())
+  >>> print print_all()
+  cd9dc5fb4185366e3f551f325c572288 http://nohost/plone/Members/test_user_1_/mydocument :title
+  d41d8cd98f00b204e9800998ecf8427e http://nohost/plone/Members/test_user_1_/mydocument :title
+
+Why is that so?  It's because we didn't initially give our document a
+title, so the generated checksum is for an empty string.  `update_all`
+doesn't touch older versions.  If it would, it would have to also store
+older versions again.  Updating the checksum of older versions is
+therefore not something we are worried about usually.
+
+Let's create another version now.  After running `update_all` when the
+third version is in place, we'll see that the last two versions have a
+checksum when we do `print_all`.  That's because we ran `update_all`
+when the second version was the active version.  Normally, through the
+web, every change triggers the modified event, and therefore you don't
+have to worry about this, it'll just work.
+
+  >>> doc.setTitle('Third version')
+  >>> repository.save(doc)
+
+Before we move on, let's make sure that we can retrieve the second
+version and get its checksum:
+
+  >>> second_version = repository.retrieve(doc, 1).object
+  >>> print second_version.Title()
+  Second version
+  >>> print str(IChecksumManager(second_version)['title'])
+  cd9dc5fb4185366e3f551f325c572288
+
+Now we update all checksums and print them:
+
+  >>> print update_all()
+  Calculated and stored checksums of ... items.  
+  >>> print print_all()
+  26b9d2c5bb8820c1c6de354c9015b2a1 http://nohost/plone/Members/test_user_1_/mydocument :title
+  cd9dc5fb4185366e3f551f325c572288 http://nohost/plone/Members/test_user_1_/mydocument :title
+  n/a http://nohost/plone/Members/test_user_1_/mydocument :title
+
+Is this what we expect?  Yes it is:
+
+  >>> import md5
+  >>> print md5.new('Third version').hexdigest()
+  26b9d2c5bb8820c1c6de354c9015b2a1
+  >>> print md5.new('Second version').hexdigest()
+  cd9dc5fb4185366e3f551f325c572288

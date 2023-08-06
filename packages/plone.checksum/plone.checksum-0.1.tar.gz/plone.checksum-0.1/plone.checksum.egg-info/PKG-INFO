@@ -1,0 +1,378 @@
+Metadata-Version: 1.0
+Name: plone.checksum
+Version: 0.1
+Summary: Checksums for ZODB
+Home-page: http://svn.plone.org/svn/collective/plone.checksum
+Author: Jazkarta
+Author-email: team@jazkarta.com
+License: GPL
+Description: plone.checksum
+        ==============
+        
+        Overview
+        --------
+        
+        Checksums for ZODB data
+        
+        General
+        -------
+        
+        This package defines a `ChecksumManager` that's used to calculate,
+        access, and write checksums to individual fields of an object.  Let's
+        create an Archetypes `Document` content object:
+        
+        >>> folder = self.folder
+        >>> folder.invokeFactory('Document', 'mydocument', title='My Document')
+        'mydocument'
+        >>> doc = folder.mydocument
+        
+        We can now request a ChecksumManager for an object like so:
+        
+        >>> from plone.checksum import IChecksumManager
+        >>> manager = IChecksumManager(doc)
+        
+        The manager maps field names to `IChecksum` objects:
+        
+        >>> sorted(manager.keys())
+        ['allowDiscussion', 'contributors', 'creation_date', 'creators', 'description', 'effectiveDate', 'excludeFromNav', 'expirationDate', 'id', 'language', ..., 'text', 'title']
+        
+        We keep the checksum for our object's title around as `original` for
+        the following tests:
+        
+        >>> original = str(manager['title'])
+        >>> print original
+        f796979e29808c04f422574ac403baeb
+        
+        We can manually invoke the checksum calculation using the `calculate`
+        method of checksum objects.  The stored and the calculated checksum
+        should certainly be the same at this point:
+        
+        >>> print manager['title'].calculate()
+        f796979e29808c04f422574ac403baeb
+        
+        Checksums are written (and attached to the object that has the field)
+        using the `update` method:
+        
+        >>> manager['title'].update('something else')
+        >>> print manager['title']
+        something else
+        
+        Let's revert back to the correct checksum by using the
+        `update_checksums` method on the checksum manager:
+        
+        >>> manager.update_checksums()
+        >>> print manager['title']
+        f796979e29808c04f422574ac403baeb
+        
+        Finally, we'll change the title and verify that the checksum has
+        changed:
+        
+        >>> doc.setTitle('something else')
+        >>> print manager['title'].calculate()
+        6c7ba9c5a141421e1c03cb9807c97c74
+        
+        However, the stored checksum is still the old value.  We need to fix
+        this by firing the modified event again.  This time, we won't fire the
+        event ourselves, we'll call `processForm`, which fires the event for
+        us:
+        
+        >>> print manager['title']
+        f796979e29808c04f422574ac403baeb
+        >>> doc.processForm()
+        >>> print manager['title']
+        6c7ba9c5a141421e1c03cb9807c97c74
+        
+        By the way, this is equal to:
+        
+        >>> import md5
+        >>> print md5.new('something else').hexdigest()
+        6c7ba9c5a141421e1c03cb9807c97c74
+        
+        Files
+        -----
+        
+        Let's create a File content object: After that, we look at the
+        checksum for the `file` field:
+        
+        >>> from StringIO import StringIO
+        >>> folder.invokeFactory('File', 'myfile')
+        'myfile'
+        >>> file = folder.myfile
+        >>> manager = IChecksumManager(file)
+        >>> print manager['file']
+        d41d8cd98f00b204e9800998ecf8427e
+        
+        Let's fill the content's `file` field with some contents:
+        
+        >>> contents = StringIO('some contents')
+        >>> file.setFile(contents)
+        >>> print manager['file'].calculate()
+        220c7810f41695d9a87d70b68ccf2aeb
+        
+        If we set the file's contents to something else, the checksum changes:
+        
+        >>> contents = StringIO('something else')
+        >>> file.setFile(contents)
+        >>> print manager['file'].calculate()
+        6c7ba9c5a141421e1c03cb9807c97c74
+        
+        The same should also work for larger files.  Note that the contents
+        here are stored in a different structure internally:
+        
+        >>> contents = StringIO('some contents, ' * 10000)
+        >>> file.setFile(contents)
+        >>> print manager['file'].calculate()
+        8d43d3687f3684666900db3945712e90
+        
+        Let's make sure once again that the checksum changes when we set
+        another large file.  This time around we'll upload the file using the
+        `PUT` method and we'll make sure that the checksum calculation has
+        been triggered:
+        
+        >>> from Products.Archetypes.tests.utils import aputrequest
+        >>> contents = StringIO('something else, ' * 10000)
+        >>> request = aputrequest(contents, 'text/plain')
+        >>> request.processInputs()
+        >>> ignore = file.PUT(request, request.RESPONSE)
+        >>> str(file.getFile()) == contents.getvalue()
+        True
+        >>> print manager['file']
+        4003a21edc0b8d93bda0ce0c4fa71cfa
+        
+        This is again the same as:
+        
+        >>> print md5.new(contents.getvalue()).hexdigest()
+        4003a21edc0b8d93bda0ce0c4fa71cfa
+        
+        BlobFile support
+        ----------------
+        
+        Some setup:
+        
+        >>> import md5
+        >>> from StringIO import StringIO
+        >>> from plone.checksum import IChecksumManager
+        
+        >>> from Products.BlobFile.Extensions.install import install
+        >>> dontcare = install(self.portal)
+        
+        Actual tests:
+        
+        >>> folder.invokeFactory('BlobFile', 'myblob')
+        'myblob'
+        >>> blob = folder.myblob
+        >>> manager = IChecksumManager(blob)
+        >>> print manager['file']
+        n/a
+        >>> print manager['file'].calculate()
+        d41d8cd98f00b204e9800998ecf8427e
+        
+        Let's fill the content's `file` field with some contents:
+        
+        >>> contents = StringIO('some contents, ' * 10000)
+        >>> blob.setFile(contents)
+        >>> print manager['file'].calculate()
+        8d43d3687f3684666900db3945712e90
+        
+        If we set the file's contents to something else, the checksum changes:
+        
+        >>> contents = StringIO('something else, ' * 10000)
+        >>> blob.setFile(contents)
+        >>> print manager['file'].calculate()
+        4003a21edc0b8d93bda0ce0c4fa71cfa
+        >>> print md5.new(contents.getvalue()).hexdigest()
+        4003a21edc0b8d93bda0ce0c4fa71cfa
+        
+        User interface
+        --------------
+        
+        The `check_all` lists items where the checksum stored in the ZODB
+        differs with the checksum that's calculated on the fly:
+        
+        >>> self.loginAsPortalOwner()
+        >>> check_all = self.portal.unrestrictedTraverse('checksum__check_all')
+        >>> print check_all() # doctest: +ELLIPSIS
+        The following items failed the checksum test:
+        ...
+        
+        For quite a bunch of objects in our newly created portal, the modified
+        event was not fired.  Let's use the other view, `update_all` to set
+        the checksum for all objects to the calculated one:
+        
+        >>> update_all = self.portal.unrestrictedTraverse('checksum__update_all')
+        >>> print update_all()
+        Calculated and stored checksums of ... items.
+        
+        Now, `check_all` should give us green light:
+        
+        >>> print check_all()
+        All ... objects verified and OK!
+        
+        We can generate small reports using the `print_all` view.  Let's say
+        we're interested in the checksums of the `title` fields of all the
+        objects in the portal:
+        
+        >>> request = self.portal.REQUEST
+        >>> print_all = self.portal.unrestrictedTraverse('checksum__print_all')
+        >>> request.form['checksum_fields'] = ['title']
+        >>> print; print print_all()
+        <BLANKLINE>
+        ...
+        a47176ba668e5ddee74e58c2872659c7 http://nohost/plone/front-page :title
+        ...
+        
+        We can also format the output like we want it.  Available keys are:
+        
+        >>> output_form = ('%(checksum)s %(url)s %(fieldname)s '
+        ...                '%(content_type)s %(filename)s')
+        >>> request.form['checksum_output'] = output_form
+        
+        Note that `content_type` is only available for files.  And that
+        `filename` is currently only available for `OFSBlobFile` values, from
+        the blob_ Product.
+        
+        This time we'll create a report with all title fields of all our
+        `File` content objects:
+        
+        >>> request.form['checksum_fields'] = ['title']
+        >>> request.form['portal_type'] = 'File'
+        >>> print print_all()
+        
+        Oh well, there are no files.  Let's fix this.  We'll create a fake GIF
+        file:
+        
+        >>> contents = 'GIF89a xxx'
+        >>> self.folder.invokeFactory('File', 'myfile', file=contents)
+        'myfile'
+        >>> print print_all()
+        d41d8cd98f00b204e9800998ecf8427e http://nohost/plone/Members/test_user_1_/myfile title n/a n/a
+        
+        When we request a report for the 'file' field, we'll get that extra
+        `content_type` field in the output:
+        
+        >>> request.form['checksum_fields'] = ['file']
+        >>> print print_all()
+        e429b46baca83aa4a713965f5146f31a http://nohost/plone/Members/test_user_1_/myfile file image/gif n/a
+        
+        Is this what we expect?  Yes it is:
+        
+        >>> import md5
+        >>> print md5.new('GIF89a xxx').hexdigest()
+        e429b46baca83aa4a713965f5146f31a
+        
+        If you wanted a md5sum- compatible report of all `BlobFiles` in your
+        portal, you would visit::
+        
+        http://myportal/checksum__print_all?portal_type=BlobFile&checksum_fields:list=file&checksum_output=%(checksum)s%20%20%(filename)s
+        
+        
+        
+        .. _blob: http://www.plope.com/software/blob
+        
+        CMFEditions support
+        -------------------
+        
+        plone.checksum has CMFEditions support insofar as the query, update
+        and print operations will take into account versions of items when
+        they wouldn't show with an ordinary catalog search.
+        
+        Let's do some general setup:
+        
+        >>> self.loginAsPortalOwner()
+        >>> from plone.checksum import IChecksumManager
+        >>> request = self.folder.REQUEST
+        >>> repository = self.portal.portal_repository
+        
+        Let's create a document and create a version of it:
+        
+        >>> self.folder.invokeFactory('Document', 'mydocument')
+        'mydocument'
+        >>> doc = self.folder.mydocument
+        >>> doc.setTitle('First version')
+        >>> repository.applyVersionControl(doc)
+        
+        Now we'll modify the document and save the current version.
+        Afterwards, we should have two versions:
+        
+        >>> doc.setTitle('Second version')
+        >>> repository.save(doc)
+        >>> history = repository.getHistory(doc)
+        >>> print history[0].object.Title()
+        Second version
+        >>> print history[1].object.Title()
+        First version
+        >>> len(history)
+        2
+        
+        Let's update all checksums using the `update_all` view method:
+        
+        >>> update_all = self.portal.unrestrictedTraverse('checksum__update_all')
+        >>> print update_all()
+        Calculated and stored checksums of ... items.
+        
+        However, `print_all` returns an incorrect checksum for the first version:
+        
+        >>> print_all = self.portal.unrestrictedTraverse('checksum__print_all')
+        >>> request.form['checksum_fields'] = ['title']
+        >>> request.form['path'] = '/'.join(doc.getPhysicalPath())
+        >>> print print_all()
+        cd9dc5fb4185366e3f551f325c572288 http://nohost/plone/Members/test_user_1_/mydocument :title
+        d41d8cd98f00b204e9800998ecf8427e http://nohost/plone/Members/test_user_1_/mydocument :title
+        
+        Why is that so?  It's because we didn't initially give our document a
+        title, so the generated checksum is for an empty string.  `update_all`
+        doesn't touch older versions.  If it would, it would have to also store
+        older versions again.  Updating the checksum of older versions is
+        therefore not something we are worried about usually.
+        
+        Let's create another version now.  After running `update_all` when the
+        third version is in place, we'll see that the last two versions have a
+        checksum when we do `print_all`.  That's because we ran `update_all`
+        when the second version was the active version.  Normally, through the
+        web, every change triggers the modified event, and therefore you don't
+        have to worry about this, it'll just work.
+        
+        >>> doc.setTitle('Third version')
+        >>> repository.save(doc)
+        
+        Before we move on, let's make sure that we can retrieve the second
+        version and get its checksum:
+        
+        >>> second_version = repository.retrieve(doc, 1).object
+        >>> print second_version.Title()
+        Second version
+        >>> print str(IChecksumManager(second_version)['title'])
+        cd9dc5fb4185366e3f551f325c572288
+        
+        Now we update all checksums and print them:
+        
+        >>> print update_all()
+        Calculated and stored checksums of ... items.
+        >>> print print_all()
+        26b9d2c5bb8820c1c6de354c9015b2a1 http://nohost/plone/Members/test_user_1_/mydocument :title
+        cd9dc5fb4185366e3f551f325c572288 http://nohost/plone/Members/test_user_1_/mydocument :title
+        n/a http://nohost/plone/Members/test_user_1_/mydocument :title
+        
+        Is this what we expect?  Yes it is:
+        
+        >>> import md5
+        >>> print md5.new('Third version').hexdigest()
+        26b9d2c5bb8820c1c6de354c9015b2a1
+        >>> print md5.new('Second version').hexdigest()
+        cd9dc5fb4185366e3f551f325c572288
+        
+        Changelog
+        =========
+        
+        0.1
+        ---
+        
+        Initial public release
+        
+Keywords: zodb zope integrity
+Platform: UNKNOWN
+Classifier: Intended Audience :: Developers
+Classifier: Framework :: Plone
+Classifier: Framework :: Zope2
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
