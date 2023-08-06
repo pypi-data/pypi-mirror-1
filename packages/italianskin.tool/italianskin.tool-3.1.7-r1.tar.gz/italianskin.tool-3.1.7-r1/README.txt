@@ -1,0 +1,24 @@
+italianskin.tool
+================
+
+Overview
+--------
+
+italianskin.tool provides a tool for italianskin; you can also use the tool without italianskin.templates. 
+You're now free to choose between three given styles or even use your own customised style just adding a css file from the ZMI interface and setting its name and class id on the italianskin.tool graphic interface. No javascript needed.
+   
+    A few info on the styles you'll find as default:
+
+    Plone Default (contrast improved) - some light changes for a better contrast on plone default style
+
+    High Contrast (background black)  - changes on background, font, link for dark colors, a better contrast in a plone default style.
+
+    High Contrast (background black - Padding/fonts modified) - following High Contrast changes on colors, it emphasizes dimensions (fonts, paddings, margins; no borders or images), a high-visibility layout thought expressly for partially-sighted people.
+
+
+
+Answering the free software issue about an open source code, ItalianSkin is released under the same licence as Plone.
+        Further Informations:
+        - Frequently Asked Question about Italianskin on http://redomino.com/it/labs/progetti/ItalianSkin/documentazione/domande-frequenti
+        - Credits: information on authors, co-workers and Licence on http://redomino.com/it/labs/progetti/ItalianSkin/credits
+
