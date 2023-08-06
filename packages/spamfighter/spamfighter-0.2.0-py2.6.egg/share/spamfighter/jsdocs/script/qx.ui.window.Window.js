@@ -1,0 +1,1 @@
+{type:"class",attributes:{"isStatic":"true","name":"Window","packageName":"qx.ui.window","childClasses":"spamfighter.ui.NewServer,spamfighter.ui.ServerWindow","fullName":"qx.ui.window.Window"}}
