@@ -1,0 +1,75 @@
+===============
+Textfile Recipe
+===============
+
+
+This is a very simple recipe which generates a textfile
+from a template.
+
+The template can be everything, and may contain python-style
+string formatters. The values will be replaced with the
+options you set inside the buildout.cfg section.
+
+Parameters
+==========
+
+template-directory -- the directory to fetch templates from 
+
+template -- the template file
+            default: $(name)s.in
+
+location -- the output file
+
+**${buildout:template-directory}** is set to
+**${buildout:directory}/templates** if not set in the buildout section.
+
+If **location** is not set, no file is created. You can always access the
+generated content using the **content** key, though.
+
+Example
+=======
+
+An example buildout.cfg::
+
+  [buildout]
+  parts=test.txt
+  template-directory=${buildout:directory}/templates
+
+  [test.txt]
+  recipe=inquant.recipe.textfile
+  template-directory=${buildout:template-directory}
+  template=test.txt.in
+  location=${buildout:directory}/test.txt
+
+  avalue=foo
+  anothervalue=bar
+
+Note that due to the default settings (see above), the **template-directory** and
+**template** settings are redundant.
+
+An example text template::
+
+  This is just a test
+
+  template=%(template)s
+  location=%(location)s
+
+  This is just text %(avalue)s and %(anothervalue)s got
+  replaced. See?
+
+The recipe will read the template and replace the strings
+yielding something like::
+
+  This is just a test
+
+  template=/Users/seletz/develop/plone/buildout/templates/test.txt.in
+  location=/Users/seletz/develop/plone/buildout/test.txt
+
+  This is just text foo and bar got
+  replaced. See?
+
+EOF
+
+::
+
+ vim: set ft=rst ts=2 sw=2 tw=75 expandtab:
