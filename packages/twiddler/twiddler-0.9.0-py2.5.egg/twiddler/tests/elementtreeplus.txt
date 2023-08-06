@@ -1,0 +1,513 @@
+ElementTreePlus is a slight twist on ElementTree in that each element
+is an ElementPlus rather than an _ElementInterface.
+
+These keep track of their parents and co-operate with their containing
+ElementTreePlus instance to enable quick retrieval of elements by indexed
+attributes.
+
+The attributes to be indexed are specified when instantiating the
+ElementTreePlus. 
+
+NB: This implementation is not complete. It merely suffices to meet
+Twiddler's needs. While it would be nice if all aspects of ElementTree
+were duplicated, and all revelent operations updated the indexes and
+correctly reset the parent attribute, only those directly used by
+Twiddler have been implemented and tested.
+
+To create an ElementTreePlus hierarchy from a piece of source, there
+is currently only the XML builder:
+
+>>> from twiddler.elementtreeplus import XML
+>>> t = XML('''<html>
+...   <body>
+...   <div id="one">1</div>
+...   <div id="two">2</div>
+...   <div name="three">3 - 1</div>
+...   <div name="three">3 - 2</div>
+...   </body>
+... </html>''',indexes=('id','name'))
+
+Unlike the XML method of the original ElementTree module, the 'plus'
+version returns an ElementTreePlus instance:
+
+>>> print t.__class__
+twiddler.elementtreeplus.ElementTreePlus
+
+The nodes contained in this instance are ElementPlus instances:
+>>> r = t.getroot()
+>>> print r.__class__
+twiddler.elementtreeplus.ElementPlus
+
+ElementPlus instances can have their tag attribute set to False to
+indicate that only the body of the tag should be output when
+rendering. The is most commonly used for the root element of the
+ElementTreePlus which is actually an empty node used to contain any
+declaration or document type elements followed by the root tag
+element:
+
+>>> r.tag
+False
+>>> r.text is None
+True
+>>> r.tail is None
+True
+
+Furthermore, ElementTreePlus instances and their subobjects keep as
+much as possible in unicode, rather than strings:
+
+>>> r[0].tag
+u'html'
+>>> r[0].text
+u'\n  '
+>>> r[0].tail
+
+Throughout the following examples, we'll use Twiddler's default
+renderer to render our example trees:
+
+>>> from twiddler.output.default import Default as render
+>>> print render(t)
+<html>
+  <body>
+  <div id="one">1</div>
+  <div id="two">2</div>
+  <div name="three">3 - 1</div>
+  <div name="three">3 - 2</div>
+  </body>
+</html>
+
+Now, we can quickly get hold of elements by id, or any other
+attribute:
+
+>>> e = t.findByAttribute('id','one')
+>>> print e.text
+1
+
+We can also get hold of the parent of the current element:
+
+>>> p = e.parent
+>>> print p.tag
+body
+
+We could quickly get elements by name:
+
+>>> e = t.findByAttribute('name','three')
+>>> print e.text
+3 - 2
+
+As you can see, if there are multiple elements with the same attribute
+value, findByAttribute returns the last one. This means that if we then add an
+element of the same name but 'later' in the tree structure, it will be
+the one that is returned:
+
+>>> from twiddler.elementtreeplus import ElementPlus,ElementTreePlus
+>>> n = ElementPlus('span',{'name':'three'})
+>>> n.tail=u'\n  '
+>>> body = t.getroot()[0][0]
+>>> body.insert(4,n)
+>>> body[-1].text='new'
+>>> print render(t)
+<html>
+  <body>
+  <div id="one">1</div>
+  <div id="two">2</div>
+  <div name="three">3 - 1</div>
+  <div name="three">3 - 2</div>
+  <span name="three">new</span>
+  </body>
+</html>
+
+>>> e = t.findByAttribute('name','three')
+>>> print e.text
+new
+
+ElementPlus's also all have a findByAttribute method. These only look
+within the element and its sub elements: 
+
+>>> t = XML('''
+... <level1 name="a">
+...   <level2 id="one" name="aa">
+...     <level3 name="a">first value</level3>
+...     <level3 name="a">second value</level3>
+...   </level2>
+...   <level2 id="two" name="aa">
+...     <level3 name="a">third value</level3>
+...   </level2>
+... </level1>
+... ''',indexes=('id','name'))
+>>> e = t.getroot()[0]
+>>> print e.tag
+level1
+>>> e2 = e.findByAttribute('id','one')
+>>> print e2.get('id')
+one
+>>> e3 = e.findByAttribute('name','aa')
+>>> print e3.get('id')
+two
+>>> print e2.findByAttribute('name','a').text
+second value
+>>> print e3.findByAttribute('name','a').text
+third value
+
+If findByAttribute is called on either an ElementTreePlus or an
+ElementPlus where the attribute specified is not indexed, you will get
+a KeyError:
+
+>>> t.findByAttribute('class','normal')
+Traceback (most recent call last):
+...
+KeyError:...
+>>> e3.findByAttribute('class','normal')
+Traceback (most recent call last):
+...
+KeyError:...
+
+Searching within an ElementPlus also works even if the nesting is
+deeper and the tree is created by hand:
+
+>>> tree = ElementTreePlus(('id',))
+>>> root = ElementPlus('root',{})
+>>> root._tree = tree
+>>> tree._root = root
+>>> root.append(ElementPlus('x',{}))
+>>> root[0].append(ElementPlus('y',{}))
+>>> root[0][0].append(ElementPlus('z',{'id':'z'}))
+>>> root[0][0][0].tag
+'z'
+>>> root[0].search('z') is root[0][0][0]
+True
+
+Now, we need to check that when a node is removed, it's parent is set
+back to None, and it's _tree, and the _tree's of all the node's
+children, are set back to None too, although that's actually an
+implementation detail. The element and all its children should also no
+longer be in the indexes:
+
+>>> t = XML('''
+... <parent>
+...   <child id="child_id">
+...     <subchild id="subchild_id"/>
+...   </child>
+... </parent>
+... ''',indexes=('id',))
+>>> parent = t.getroot()[0]
+>>> child = parent[0]
+>>> subchild = child[0]
+>>> child.parent is parent
+True
+>>> child._tree is t
+True
+>>> subchild.parent is child
+True
+>>> subchild._tree is t
+True
+>>> t.findByAttribute('id','child_id') is child
+True
+>>> t.findByAttribute('id','subchild_id') is subchild
+True
+
+Now we actually remove the child from the parent:
+
+>>> parent.remove(child)
+
+So, child should no longer exist as the parent is concerned, and child
+should keep no references to the parent:
+
+>>> child.parent is None
+True
+>>> child._tree is None
+True
+
+The elements containing within the child should no longer have a
+_tree, but they should keep their parental structure:
+
+>>> subchild.parent is child
+True
+>>> subchild._tree is None
+True
+
+This is also a good time to explain that a KeyError is raised by calls
+to findByAttribute when no matching element can be found:
+
+>>> t.findByAttribute('id','child_id')
+Traceback (most recent call last):
+...
+KeyError:...
+
+So we can see that the child is no longer indexed, and we can also see
+that any elements contained within the child are no longer indexed: 
+
+>>> t.findByAttribute('id','subchild_id')
+Traceback (most recent call last):
+...
+KeyError:...
+
+ElementTreePlus's need to be aware of the addition of new
+ElementPlus's, and in particular, addition of hierarchies of nodes.
+
+A raw ElementPlus has no context:
+
+>>> e = ElementPlus('child',{'id':'child1'})
+>>> e.parent is None
+True
+>>> e._tree is None
+True
+
+Children can be added to it, and 'parent' will be set correctly, but
+no indexing will be done, and _tree will remain unset.
+
+>>> e2 = ElementPlus('child',{'id':'child2'})
+>>> e.insert(0,e2)
+>>> e2.parent is e
+True
+>>> e2._tree is None
+True
+
+You can also set and delete attributes, but no indexing will take
+place: 
+
+>>> e2.set('id','test')
+>>> e2.delete('id')
+>>> e2.set('id','child2')
+
+You can also remove children, but again, no indexing will take place:
+
+>>> e3 = ElementPlus('child',{'id':'child3'})
+>>> e.insert(0,e3)
+>>> e.remove(e3)
+
+Now, when an ElementPlus is inserted into an ElementPlus that is
+associated with a tree, it and all its children are indexed and have
+their '_tree' attribute set:
+
+>>> t = XML('''
+... <parent></parent>
+... ''',indexes=('id',))
+>>> t.getroot()[0].insert(0,e)
+>>> e._tree is t
+True
+>>> e2._tree is t
+True
+>>> t.findByAttribute('id','child1') is e
+True
+>>> t.findByAttribute('id','child2') is e2
+True
+
+Also, the append method works as expected:
+>>> e.append(e3)
+>>> e[-1] is e3
+True
+>>> t.findByAttribute('id','child3') is e3
+True
+
+NB: Currently, only the 'insert' and 'append' methods correctly handle
+    this! 
+
+ElementPlus's are aware of what happens when their indexed
+attributes are changed:
+
+>>> t = XML('''
+... <node id="myid"/>
+... ''',indexes=('id',))
+>>> n = t.getroot()[0]
+>>> t.findByAttribute('id','myid') is n
+True
+
+>>> n.set('id','newid')
+>>> 
+>>> t.findByAttribute('id','myid') is n
+Traceback (most recent call last):
+...
+KeyError:...
+>>> t.findByAttribute('id','newid') is n
+True
+
+We also implement a 'delete' method to remove an attribute:
+
+>>> n.delete('id')
+>>> t.findByAttribute('id','newid') is n
+Traceback (most recent call last):
+...
+KeyError:...
+
+This method does not raise a KeyError is the attribute is not present:
+
+>>> n.delete('id')
+
+ElementTreePlus's treats namespaced attributes as normal
+attributes. This improves performances and keeps things simpler from a
+user understanding and expectation point of view:
+
+>>> t = XML('''
+... <node xmlns:myns="http://www.example.com/myns" myns:tag="a"/>
+... ''')
+>>> render(t)
+u'\n<node myns:tag="a" xmlns:myns="http://www.example.com/myns" />\n'
+
+ElementTreePlus' XML function generates comment elements:
+
+>>> t = XML('''
+... <!-- A comment -->
+... <root>
+...  X<!-- another comment -->Y
+... </root>''')
+>>> print render(t)
+<BLANKLINE>
+<!-- A comment -->
+<root>
+ X<!-- another comment -->Y
+</root>
+
+ElementTreePlus's XML function keeps both the DOCTYPE and XML declaration:
+
+>>> t = XML('''<?xml version='1.0' encoding='utf-8'?>
+... <!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Strict//EN' 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd'>
+... <html>
+...   <head />
+...   <body />
+... </html>''',indexes=('id',))
+
+They are both available as special elements that can be found by the
+usual methods under rather esoteric ids that hopefully won't clash
+with anything: 
+
+>>> n = t.findByAttribute('id','_etp_xmldecl')
+>>> from twiddler.elementtreeplus import XMLDeclaration
+>>> n.tag is XMLDeclaration
+True
+>>> print n.text
+<?xml version='1.0' encoding='utf-8'?>
+
+Since it's needed often when generating output, XMLDeclaration
+elements has have their encoding as a string attribute:
+
+>>> n.encoding
+'utf-8'
+
+The doctype doesn't have this attribute:
+
+>>> n = t.findByAttribute('id','_etp_doctype')
+>>> from twiddler.elementtreeplus import DocType
+>>> n.tag is DocType
+True
+>>> print n.text
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Strict//EN' 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd'>
+
+However, both the declaration and doctype do have a tail, which will
+include any whitespace  between the end of the element and the start
+of the next:
+
+>>> t.findByAttribute('id','_etp_xmldecl').tail
+u'\n'
+>>> t.findByAttribute('id','_etp_doctype').tail
+u'\n'
+
+These special elements have a parents reference and can be removed
+from their children in the same way as any other element:
+
+>>> t2 = XML('''<?xml version='1.0' encoding='utf-8'?>
+... <!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Strict//EN' 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd'>
+... <html>
+...   <head />
+...   <body />
+... </html>''',indexes=('id',))
+>>> n = t2.findByAttribute('id','_etp_xmldecl')
+>>> n.parent is t2.getroot()
+True
+>>> n.parent.remove(n)
+>>> n = t2.findByAttribute('id','_etp_doctype')
+>>> n.parent is t2.getroot()
+True
+>>> n.parent.remove(n)
+>>> print render(t2)
+<html>
+  <head />
+  <body />
+</html>
+
+If they aren't specified in the source, then the respective elements will not be present:
+
+>>> t2 = XML('''
+... <node/>
+... ''')
+>>> t2.findByAttribute('id','_etp_xmldecl')
+Traceback (most recent call last):
+...
+KeyError:...
+>>> t2.findByAttribute('id','_etp_doctype')
+Traceback (most recent call last):
+...
+KeyError:...
+
+So, to construct the original document, we can do something like:
+
+>>> print render(t)
+<?xml version='1.0' encoding='utf-8'?>
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Strict//EN' 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd'>
+<html>
+  <head />
+  <body />
+</html>
+
+The ElementTreePlus parser is also pretty good at preserving ignorable
+whitespace as can be seen from the following two examples:
+
+>>> t2 = XML('''
+... <node/>
+... ''')
+>>> render(t2)
+u'\n<node />\n'
+>>> t2 = XML('''<node/>''')
+>>> render(t2)
+u'<node />'
+
+NB: ElementTreePlus does not support the ElementTree write method: 
+
+>>> from cStringIO import StringIO
+>>> f = StringIO()
+>>> t.write(f)
+Traceback (most recent call last):
+...
+TypeError:...
+
+One final detail of ElementTreePlus's XML parser is that it handles
+text between the end of an element and the start of the next slightly
+differently. If that text is comprised of whitespace followed by
+non-whitespace, the whitespace is put into the preceding element's
+tail while the other stuff is put into its own tag-less element:
+
+>>> t = XML("<root><a></a>  \nxyz  <b></b></root>")
+>>> root = t.getroot()[0]
+>>> root[0].tag
+u'a'
+>>> root[0].tail
+u'  \n'
+>>> root[1].tag
+False
+>>> root[1].text
+u'xyz  '
+>>> root[2].tag
+u'b'
+
+Another small detail is that re-escaping the predefined xml entities
+happens at a different place in the chain.
+
+ElementTree re-escapes xml entities during the serialisation stage:
+
+>>> from elementtree.ElementTree import XML,dump
+>>> e = XML('<xml>&lt;tag&gt;</xml>')
+>>> e.text
+'<tag>'
+>>> dump(e)
+<xml>&lt;tag&gt;</xml>
+
+However, Twiddler wants the end user to decide if inserted text is
+escaped or not, so it can't do a blanket re-escape at the rendering
+stage. As a result, ElementTreePlus needs to behave slightly
+differently:
+
+>>> from twiddler.elementtreeplus import XML
+>>> t = XML('<xml>&lt;tag&gt;</xml>')
+>>> t.getroot()[0].text
+u'&lt;tag&gt;'
+>>> render(t)
+u'<xml>&lt;tag&gt;</xml>'

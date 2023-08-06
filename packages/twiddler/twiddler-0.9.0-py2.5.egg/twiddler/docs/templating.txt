@@ -1,0 +1,139 @@
+Templating
+
+  This narrative covers various aspects of Twiddler behavior that
+  help with using multiple Twiddlers to render a complete piece of
+  output. This commonly occurs when rendering pages using a common
+  site look and feel.
+
+  Clone Method
+
+    When you call the replace or repeat methods on a Twiddler, it
+    alters the object on which you call the method. This is often
+    undesirable. For example, when rendering a template in a web
+    application, you don't want to modify the template itself!
+
+    For this reason, each twiddler has a clone method. This method
+    creates a full and independent copy of the object it's called on.
+
+    For example, we can clone this Twiddler:
+
+    >>> from twiddler import Twiddler
+    >>> t1 = Twiddler('''<html>
+    ...   <body>
+    ...   <div id="content">This is our page content!</div>
+    ...   </body>
+    ... </html>''')
+    >>> t2 = t1.clone()
+
+    Now we can modify the clone:
+
+    >>> t2['content'].replace('A Rendered Page')
+    >>> print t2.render()
+    <html>
+      <body>
+      <div id="content">A Rendered Page</div>
+      </body>
+    </html>
+
+    The original remains pristine:
+
+    >>> print t1.render()
+    <html>
+      <body>
+      <div id="content">This is our page content!</div>
+      </body>
+    </html>
+
+    Of course, if we now modify t1, it has no effect on t2:
+
+    >>> t1['content'].replace('We changed the template!')
+    >>> print t1.render()
+    <html>
+      <body>
+      <div id="content">We changed the template!</div>
+      </body>
+    </html>
+    >>> print t2.render()
+    <html>
+      <body>
+      <div id="content">A Rendered Page</div>
+      </body>
+    </html>
+
+    Be careful you don't confuse the clone method of a Twiddler with
+    the clone method of a Twiddler element. It's the clone method of
+    the Twiddler we are talking about here, the clone method of
+    Twiddler elements is used in generating recursive output and is
+    described in repeat.txt.
+
+  Combining Templates with Pages
+
+    You may be wondering why the execute method exists. To explain
+    this, we will expand on the templating example from readme.txt.
+
+    Here's our site template, this time with a code block:
+
+    >>> from twiddler.input.default import DefaultWithCodeBlock
+    >>> site_template = Twiddler('''<html>
+    ... <!--twiddler
+    ... def template_manipulation(t,title):
+    ...   t['title'].replace(title)
+    ... -->
+    ...   <body>
+    ...   <h1 id="title">The Site Header</h1>
+    ...   <div id="content">Content goes here</div>
+    ...   </body>
+    ... </html>''',input=DefaultWithCodeBlock)
+    
+    Now we want a template to display page objects. This template
+    should use the site template above, but we want to have as little
+    code as possible outside these two templates. The problem is that
+    this means we need to do the cloning of the site template in the
+    code block of our page template. We also need to render the code
+    block in the site template, but we already know that only the
+    first code block in a Twiddler will get rendered. The solution is
+    to clone the site template and then call its execute method with
+    the right parameters, all inside the code block of the page
+    template: 
+
+    >>> page_template = Twiddler("""<html>
+    ... <!--twiddler
+    ... def render_page(t,template,page):
+    ...   st = template.clone()
+    ...   st.execute(page['title'])
+    ...   st['content'].replace(t['content'])
+    ...   st['author'].replace(page['author'])
+    ...   st['body'].replace(page['body'])
+    ...   # This next step is how we indicate that we want the cloned
+    ...   # and manipulated site template to be what is rendered by
+    ...   # the render method:
+    ...   return st
+    ... -->
+    ...   <body>
+    ...   <div id="content">
+    ...    <div id="author">Mr Smithers</div>
+    ...    <div id="body">
+    ...    This is the page body!
+    ...    </div>
+    ...   </div>
+    ...   </body>
+    ... </html>""",input=DefaultWithCodeBlock)
+    
+    Finally, this is how we render the page template so that it has
+    access to both the page data and the site template:
+
+    >>> page = {
+    ...     'title':'The Test Page',
+    ...     'author':'Monty Burns',
+    ...     'body':'\nTesting bodies are fine bodies.\n',
+    ... }
+    >>> print page_template.render(site_template,page)
+    <html>
+      <body>
+      <h1 id="title">The Test Page</h1>
+      <div id="content">
+       <div id="author">Monty Burns</div>
+       <div id="body">&#10;Testing bodies are fine bodies.&#10;</div>
+      </div>
+      </body>
+    </html>
