@@ -1,0 +1,26 @@
+#!/usr/bin/env python
+"""
+Module SocketClientMixin
+Sub-Package STDLIB.IO.ASYNC of Package PLIB
+Copyright (C) 2008-2010 by Peter A. Donis
+
+Released under the GNU General Public License, Version 2
+See the LICENSE and README files for more information
+
+This module contains the asynchronous SocketClientMixin class;
+this class is factored out from SocketClient so that alternate
+read/write handling can be mixed in.
+"""
+
+from plib.stdlib.io.socket import BaseClient
+from plib.stdlib.io.async import AsyncConnectMixin, ClientMixin
+
+class SocketClientMixin(AsyncConnectMixin, BaseClient, ClientMixin):
+    """
+    Asynchronous socket client mixin class. Call the
+    ``client_communicate`` method to connect to a server
+    and send data; override the ``process_data`` method to
+    do something with the reply.
+    """
+    
+    pass
