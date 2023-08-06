@@ -1,0 +1,184 @@
+diff -r 2fc4b6cff795 djangosanetesting/cases.py
+--- a/djangosanetesting/cases.py	Tue Dec 16 11:43:29 2008 +0100
++++ b/djangosanetesting/cases.py	Mon Jan 05 02:49:41 2009 +0100
+@@ -1,24 +1,85 @@
+ from django.test import TestCase as DjangoTestCase
++from django.db import transaction
++
++from nose.tools import (
++                assert_equals,
++                assert_raises,
++)
++
++from selenium.driver import selenium as SeleniumClient
+ 
+ class SaneTestCase(object):
++    """ Common ancestor we're using our own hierarchy """
+     start_live_server = False
+-    """ Common ancestor we're using our own hierarchy """
++    test_types = ["unit"]
++    
++    def setUp(self):
++        pass
++    
++    def assert_equals(self, *args, **kwargs):
++        assert_equals(*args, **kwargs)
++    
++    assertEquals = assert_equals
++    
++    def assert_raises(self, *args, **kwargs):
++        assert_raises(*args, **kwargs)
++    
++    assertRaises = assert_raises
++    
++    def tearDown(self):
++        pass
+ 
++class DatabaseTestCase(SaneTestCase):
++    """ Tests using database for models: Rollback on teardown"""
++    
++    def setUp(self):
++        transaction.enter_transaction_management()
++        transaction.managed(True)
++        SaneTestCase.setUp(self)
++    
++    def tearDown(self):
++        transaction.rollback()
++        transaction.leave_transaction_management()
++        SaneTestCase.tearDown(self)
++    
+ class HttpTestCase(SaneTestCase, DjangoTestCase):
+-    start_live_server = True
+     """
+     If it is not running, our plugin should start HTTP server
+     so we can use it with urllib2 or some webtester.
+     """
++    start_live_server = True
++    test_types = ["http"]
++
++class SeleniumTestCase(HttpTestCase):
++    """
++    Webtests using Selenium.
++    """
++    test_types = ["web"]
++
++    def setUp(self):
++        HttpTestCase.setUp(self)
++        try:
++            self.selenium = self.selenium_get()
++        except Exception:
++            raise SkipTest("Selenium not available")
++
++
++    def selenium_get():
++        if not hasattr(settings.SELENIUM_HOST) or not settings.SELENIUM_HOST:
++            host = 'localhost'
++        
++        if not hasattr(settings.SELENIUM_PORT) or not settings.SELENIUM_PORT:
++            port = 'localhost'
++
++        if not hasattr(settings.SELENIUM_BROWSER_COMMAND) or not settings.SELENIUM_BROWSER_COMMAND:
++            command = '*opera'
++
++        if not hasattr(settings.URL_ROOT) or not settings.URL_ROOT:
++            url_root = '/'
++        
++        
++        sel = SeleniumClient(host, port, command, url_root)
++        sel.start()
++        return sel
+     
+-    def __init__(self):
+-        DjangoTestCase.__init__(self)
+-        SaneTestCase.__init__(self)
+     
+-    def setUp(self):
+-        DjangoTestCase.setUp(self)
+-        SaneTestCase.setUp(self)
+-
+-    def tearDown(self):
+-        DjangoTestCase.tearDown(self)
+-        SaneTestCase.tearDown(self)
+\ No newline at end of file
+diff -r 2fc4b6cff795 djangosanetesting/noseplugins.py
+--- a/djangosanetesting/noseplugins.py	Tue Dec 16 11:43:29 2008 +0100
++++ b/djangosanetesting/noseplugins.py	Mon Jan 05 02:49:41 2009 +0100
+@@ -58,16 +58,16 @@
+             return
+ 
+         # Must do database stuff in this new thread if database in memory.
+-        from django.conf import settings
+-        if settings.DATABASE_ENGINE == 'sqlite3' \
+-            and (not settings.TEST_DATABASE_NAME or settings.TEST_DATABASE_NAME == ':memory:'):
+-            from django.db import connection
+-            db_name = connection.creation.create_test_db(0)
+-            # Import the fixture data into the test database.
+-            if hasattr(self, 'fixtures'):
+-                # We have to use this slightly awkward syntax due to the fact
+-                # that we're using *args and **kwargs together.
+-                call_command('loaddata', *self.fixtures, **{'verbosity': 0})
++#        from django.conf import settings
++#        if settings.DATABASE_ENGINE == 'sqlite3' \
++#            and (not settings.TEST_DATABASE_NAME or settings.TEST_DATABASE_NAME == ':memory:'):
++#            from django.db import connection
++#            db_name = connection.creation.create_test_db(0)
++#            # Import the fixture data into the test database.
++#            if hasattr(self, 'fixtures'):
++#                # We have to use this slightly awkward syntax due to the fact
++#                # that we're using *args and **kwargs together.
++#                call_command('loaddata', *self.fixtures, **{'verbosity': 0})
+ 
+         # Loop until we get a stop event.
+         while not self._stopevent.isSet():
+@@ -108,7 +108,25 @@
+         if not self.server_started and (issubclass(cls, HttpTestCase) or (hasattr(cls, "start_live_server") and cls.start_live_server)):
+             self.start_server()
+             self.server_started = True
+-
++        
++        if self.server_started:
++            # Must do database stuff in this new thread if database in memory.
++            from django.conf import settings
++            if settings.DATABASE_ENGINE == 'sqlite3' \
++                and (not settings.TEST_DATABASE_NAME or settings.TEST_DATABASE_NAME == ':memory:'):
++                from django.db import connection
++                db_name = connection.creation.create_test_db(0)
++                # Import the fixture data into the test database.
++                if hasattr(self, 'fixtures'):
++                    # We have to use this slightly awkward syntax due to the fact
++                    # that we're using *args and **kwargs together.
++                    call_command('loaddata', *self.fixtures, **{'verbosity': 0})
++    
++#    def finalize(self, test):
++#        if self.server_started:
++#            self.stop_test_server()
++#            self.server_started = False
++    
+     def start_server(self, address='0.0.0.0', port=8000):
+         self.server_thread = TestServerThread(address, port)
+         self.server_thread.start()
+diff -r 2fc4b6cff795 djangosanetesting/testrunner.py
+--- a/djangosanetesting/testrunner.py	Tue Dec 16 11:43:29 2008 +0100
++++ b/djangosanetesting/testrunner.py	Mon Jan 05 02:49:41 2009 +0100
+@@ -12,8 +12,8 @@
+ 
+ def run_tests(test_labels, verbosity=1, interactive=True, extra_tests=[]):
+     """ Run tests with nose instead of defualt test runner """
+-    setup_environ(settings)
+     setup_test_environment()
++#    setup_environ(settings)
+ 
+     from django.db import connection
+     old_name = settings.DATABASE_NAME
+diff -r 2fc4b6cff795 setup.py
+--- a/setup.py	Tue Dec 16 11:43:29 2008 +0100
++++ b/setup.py	Mon Jan 05 02:49:41 2009 +0100
+@@ -17,7 +17,7 @@
+     author = 'Lukas Linhart',
+     author_email = 'bugs@almad.net',
+     description = 'Support for various testing tools for Django web framework',
+-    packages = ['djangosanetesting'],
++    packages = ['djangosanetesting', 'djangosanetesting.selenium'],
+     scripts = [],
+     classifiers=[
+         "Development Status :: 4 - Beta",

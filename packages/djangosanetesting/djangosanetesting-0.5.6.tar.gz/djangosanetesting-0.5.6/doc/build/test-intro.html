@@ -1,0 +1,180 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Test introduction &mdash; Django: Sane Testing v0.4.0 documentation</title>
+    <link rel="stylesheet" href="_static/default.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '',
+        VERSION:     '0.4.0',
+        COLLAPSE_MODINDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="top" title="Django: Sane Testing v0.4.0 documentation" href="index.html" />
+    <link rel="next" title="Usage" href="usage.html" />
+    <link rel="prev" title="Introduction" href="intro.html" /> 
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="usage.html" title="Usage"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="intro.html" title="Introduction"
+             accesskey="P">previous</a> |</li>
+        <li><a href="index.html">Django: Sane Testing v0.4.0 documentation</a> &raquo;</li> 
+      </ul>
+    </div>  
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  
+  <div class="section" id="test-introduction">
+<span id="test-intro"></span><h1>Test introduction<a class="headerlink" href="#test-introduction" title="Permalink to this headline">¶</a></h1>
+<p>In this chapter, I&#8217;d like to present my view on testing, especially on web application testing. Through it will probably bring nothing new for most of the readers, I feel my view is very different from one that prevail in Django cmmunity and it&#8217;s fundamental for library design, usage and further development.</p>
+<p>When speaking about tests, I mean only tests written by developers themselves. QA has it&#8217;s own tools and procedures that are out of scope of this document (and library).</p>
+<div class="section" id="developer-tests-and-xunit">
+<span id="developer-tests"></span><h2>Developer tests and xUnit<a class="headerlink" href="#developer-tests-and-xunit" title="Permalink to this headline">¶</a></h2>
+<p>For past few years, unit-testing and test-driven development became nice buzzwords and together with agile and extreme programming created new style of programming. To take full advantage of testing, however, your precious test-suite must be handled properly, otherwise you will fail into futile world of slow, long test suites (speaking of which, don&#8217;t Django &#8220;unittest&#8221; suite take hour to run?) and constant need for suite refactor, which questions value of tests.</p>
+<p>First of all, test suite must be deterministic. Under all supported configurations, tests suite must pass green; when some tests could not pass because of configured environment (like using some soft of application backend that do not support some features), tests must mark themselves as skipped.</p>
+<p>This lead us to holy grail of agile methods, unit tests. Unit tests are fast and deterministic, because they do NOT:</p>
+<ul class="simple">
+<li>Talk to database</li>
+<li>Communicate over network</li>
+<li>Talk to 3rd party software</li>
+</ul>
+<p>Instead, they use some sort of &#8220;dummy stub&#8221; (called mock) to replace real thing with dummy, predictable object that directly returns expected results and allows us to test proper response of our system. If you&#8217;re doing this, inherit your cases from <tt class="docutils literal"><span class="pre">UnitTestCase</span></tt> and gain huge speedup provided.</p>
+<p>For most Django-based apps, however, this is not practical; replacing database with dummy stubs would mean a lot of reimplementation (might be worh it sometimes, however). Still; one should bear in mind what unit test is and try to write them, because they lead to decoupled design and one might consider to create proper classes and functions (and test them separately) instead of binding it all to <tt class="docutils literal"><span class="pre">Model()</span></tt> instance methods.</p>
+<p>Before digging into some of those challenges, let us take a brief look on tests we&#8217;re talking about.</p>
+</div>
+<div class="section" id="test-phases-and-database">
+<span id="test-phases"></span><h2>Test phases (and database)<a class="headerlink" href="#test-phases-and-database" title="Permalink to this headline">¶</a></h2>
+<p>Developer tests have, generally, four phases:</p>
+<ol class="arabic simple">
+<li>Prepare environment</li>
+<li>Execute system interaction</li>
+<li>Verify expected results <a class="footnote-reference" href="#fonetest" id="id1" name="id1">[1]</a></li>
+<li>Bring environment back to expected state</li>
+</ol>
+<p>For true unittests, environment preparation (represented by <tt class="docutils literal"><span class="pre">setUp</span></tt> method in xUnit de-facto standard) consist mostly of mocking system components with those dummy thingies and replacing them back on <tt class="docutils literal"><span class="pre">tearDown</span></tt>.</p>
+<p>Databases are, however, strange beasts. Most of tests using them need <em>generators</em> for unique, autogenerated fields (mostly id&#8217;s) and tests are relying on them to be in expected states. Thus, suite must reinitialize database before doing such a test and that is a <strong>very</strong> costly operation that slow down your suite from running few hundred tests per second to few ones per second.</p>
+<p>There is, however, compromise solution: transactions. Rolling back a transaction is not as costly as flushing whole database and thus can be used for testing with database object, where mocking is not a good time/profit solution. If it&#8217;s your case, inherit from <tt class="docutils literal"><span class="pre">DatabaseTestCase</span></tt> and go. Beware, however, that you can&#8217;t use it in multithreaded tests or when you have to commit during tests; then, you&#8217;re stuck with <tt class="docutils literal"><span class="pre">DestructiveDatabaseTestCase</span></tt> that requests full cleanup. Otherwise, another tests will be strangely failing and interacting tests are really thing you don&#8217;t want to have.</p>
+<p>###FIXME: What follows is merely an extended feature intro, rewrite to follow in consistent way</p>
+</div>
+<div class="section" id="http-tests">
+<h2>HTTP Tests<a class="headerlink" href="#http-tests" title="Permalink to this headline">¶</a></h2>
+<p>While Django&#8217;s <a class="reference" href="http://docs.djangoproject.com/en/dev/topics/testing/#default-test-client">TestClient</a> is cool, it&#8217;s not usable for all cases (like, when you want to test your HTTP Basic/Digest view protection). If you want to test it, use HttpTestCase (which is sadly also <tt class="docutils literal"><span class="pre">DestructiveDatabaseTestCase)</span></tt>) and framework will fire up multithreaded Django live server for you.</p>
+<p>If this is not enough (and might not be, Django server is still kinda incomplete), you can have your Django served with CherryPy&#8217;s production-ready, multi-threaded server. Just set <tt class="docutils literal"><span class="pre">CHERRYPY_TEST_SERVER=True</span></tt> in your settings and enjoy server you can repeatably connect to.</p>
+</div>
+<div class="section" id="web-tests">
+<h2>Web tests<a class="headerlink" href="#web-tests" title="Permalink to this headline">¶</a></h2>
+<p>Web tests are futile attempt to automatize acceptance tests, and also to test javascript between various browsers. <a class="reference" href="http://seleniumhq.org/">Selenium</a> is a great tool for that and we&#8217;re providing support for it. Grab <tt class="docutils literal"><span class="pre">SeleniumTestCase</span></tt>, export Selenium tests in PyUnit format and enjoy <tt class="docutils literal"><span class="pre">self.selenium</span></tt>.</p>
+</div>
+<div class="section" id="developer-s-workflow">
+<span id="developers-workflow"></span><h2>Developer&#8217;s workflow<a class="headerlink" href="#developer-s-workflow" title="Permalink to this headline">¶</a></h2>
+<p>Common scenario when fixing a bug:</p>
+<ol class="arabic simple">
+<li>Write a failing regression tests</li>
+<li>Debug to find wher test actually is</li>
+<li>Write a failing unittest</li>
+<li>Fix broken code</li>
+<li>Run tests again to confirm we fixed the right thing</li>
+<li>Run the whole suite to be sure we haven&#8217;t broken anything</li>
+</ol>
+<p>Single tests can be run with <tt class="docutils literal"><span class="pre">./manage.py</span> <span class="pre">test</span> <span class="pre">package.package.module:TestCase.singleTest</span></tt>. Using plugins, you can pipeline test runner to run only unittest and corresponding tests on developer machine and let your CI server to run full (and probably longer) suite to check your back.</p>
+</div>
+<div class="section" id="few-words-against-doctests">
+<span id="against-doctests"></span><h2>Few words against Doctests<a class="headerlink" href="#few-words-against-doctests" title="Permalink to this headline">¶</a></h2>
+<p>This library nor my thoughts dont cover doctests. It&#8217;s for simple reason: they are lousy for testing. Doctest is excellent tool to verify your documentation and acceptable for making acceptance tests (thus write &#8220;system user stories&#8221;).</p>
+<p>However, for usual developers tests (and mainly unit tests), they are very bad idea. Few reasons:</p>
+<ol class="arabic simple">
+<li>You must flush database between them as there is no teardown to clear inconsistencies when test fail</li>
+<li>Attempt for recovery when condition fails: One stares at hundred lines of traceback and must look for first condition that caused all the fails</li>
+<li>Fixture support is lacking and must be done manually</li>
+<li>They&#8217;re hard to write: no support from editor, lot of &gt;&gt;&gt;&#8217;s and ...&#8217;s</li>
+</ol>
+<p>...but wait, isn&#8217;t their so easy to write, because you just cut&amp;paste your console output? If this is your case, then I&#8217;d say your development model is broken, and that is probably because your testing suite is broken. You are manually setting up your environment and friends and still feeling more productive then when using your suite, your suite is to blame (perhaps because you can&#8217;t select only this one tes you are writing now? Well, you can do it with us). Fix it, because you&#8217;re still doing all <a class="reference" href="#test-phases"><em>four phases</em></a>, just wasting time doing it by hand instead of having it automatized.</p>
+<p class="rubric">Footnotes</p>
+<table class="docutils footnote" frame="void" id="fonetest" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id1" name="fonetest">[1]</a></td><td>To help defect localization, there should be only one condition tested. Rule of thumb is &#8220;one assert per test&#8221;</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar">
+        <div class="sphinxsidebarwrapper">
+            <h3><a href="index.html">Table Of Contents</a></h3>
+            <ul>
+<li><a class="reference" href="">Test introduction</a><ul>
+<li><a class="reference" href="#developer-tests-and-xunit">Developer tests and xUnit</a></li>
+<li><a class="reference" href="#test-phases-and-database">Test phases (and database)</a></li>
+<li><a class="reference" href="#http-tests">HTTP Tests</a></li>
+<li><a class="reference" href="#web-tests">Web tests</a></li>
+<li><a class="reference" href="#developer-s-workflow">Developer&#8217;s workflow</a></li>
+<li><a class="reference" href="#few-words-against-doctests">Few words against Doctests</a></li>
+</ul>
+</li>
+</ul>
+
+            <h4>Previous topic</h4>
+            <p class="topless"><a href="intro.html" title="previous chapter">Introduction</a></p>
+            <h4>Next topic</h4>
+            <p class="topless"><a href="usage.html" title="next chapter">Usage</a></p>
+            <h3>This Page</h3>
+            <ul class="this-page-menu">
+              <li><a href="_sources/test-intro.txt">Show Source</a></li>
+            </ul>
+          <h3>Quick search</h3>
+            <form class="search" action="search.html" method="get">
+              <input type="text" name="q" size="18" /> <input type="submit" value="Go" />
+              <input type="hidden" name="check_keywords" value="yes" />
+              <input type="hidden" name="area" value="default" />
+            </form>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="usage.html" title="Usage"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="intro.html" title="Introduction"
+             accesskey="P">previous</a> |</li>
+        <li><a href="index.html">Django: Sane Testing v0.4.0 documentation</a> &raquo;</li> 
+      </ul>
+    </div>
+    <div class="footer">
+      &copy; Copyright 2009, Almad.
+      Created using <a href="http://sphinx.pocoo.org/">Sphinx</a> 0.5.1.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,205 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Usage &mdash; Django: Sane Testing v0.4.0 documentation</title>
+    <link rel="stylesheet" href="_static/default.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '',
+        VERSION:     '0.4.0',
+        COLLAPSE_MODINDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="top" title="Django: Sane Testing v0.4.0 documentation" href="index.html" />
+    <link rel="prev" title="Test introduction" href="test-intro.html" /> 
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="test-intro.html" title="Test introduction"
+             accesskey="P">previous</a> |</li>
+        <li><a href="index.html">Django: Sane Testing v0.4.0 documentation</a> &raquo;</li> 
+      </ul>
+    </div>  
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  
+  <div class="section" id="id1">
+<span id="usage"></span><h1>Usage<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<p>This part explains how to use <a class="reference" href="http://devel.almad.net/trac/django-sane-testing/">django-sane-testing</a> to create a workable test suite. For test writers, most important part is <a class="reference" href="#writing-tests"><em>about creating tests</em></a>, testers and CI admins may be more interested in <a class="reference" href="#running-tests"><em>executing them</em></a>.</p>
+<div class="section" id="id2">
+<span id="writing-tests"></span><h2>Writing tests<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>Various test types were identified when taking look at <a class="reference" href="test-intro.html#developer-tests"><em>developer tests</em></a>. Every test type has it&#8217;s corresponding class in <tt class="xref docutils literal"><span class="pre">djangosanetesting.cases</span></tt>, namely:</p>
+<ul class="simple" id="list-of-test-cases">
+<li><tt class="xref docutils literal"><span class="pre">UnitTestCase</span></tt></li>
+<li><tt class="xref docutils literal"><span class="pre">DatabaseTestCase</span></tt></li>
+<li><tt class="xref docutils literal"><span class="pre">DestructiveDatabaseTestCase</span></tt></li>
+<li><tt class="xref docutils literal"><span class="pre">HttpTestCase</span></tt></li>
+<li><tt class="xref docutils literal"><span class="pre">SeleniumTestCase</span></tt></li>
+</ul>
+<p>However, you are not <em>required</em> to inherit from those, althrough it&#8217;s much advised to keep test cases intent-revealing. Job of the library is to:</p>
+<ul class="simple">
+<li>Start manual transaction handling and roll it back after test</li>
+<li>Flush database</li>
+<li>Start live server frontend</li>
+<li>Setup selenium proxy</li>
+</ul>
+<p>Those are done by <a class="reference" href="#list-of-plugins"><em>plugins</em></a>, and they dermine their jobs by looking at class attributes, namely:</p>
+<ul class="simple">
+<li><tt class="xref docutils literal"><span class="pre">database_single_transaction</span></tt></li>
+<li><tt class="xref docutils literal"><span class="pre">database_flush</span></tt></li>
+<li><tt class="xref docutils literal"><span class="pre">start_live_server</span></tt></li>
+<li><tt class="xref docutils literal"><span class="pre">selenium_start</span></tt></li>
+</ul>
+<p>All of those are booleans. Because class attributes are currently used to determine behaviour, nor doctest nor function tests are supported (they will not break things, but you&#8217;ll get no goodies from library).</p>
+<p>To support proper test selection and error-handling, tests also has class atribute <tt class="xref docutils literal"><span class="pre">required_sane_plugins</span></tt>, which specifies list of plugins (from <a class="reference" href="#list-of-plugins"><em>those available</em></a>) that are required for this type of test; if it&#8217;s not, test automatically skip itself.</p>
+<p>Proper defaults are selected when using <a class="reference" href="#list-of-test-cases"><em>library test cases</em></a>; however, if you have your own and complicated test inheritance model, you can integrate it on your own.</p>
+<p>When writing tests, keep in mind limitations of the individual test cases to prevent interacting tests:</p>
+<ul class="simple">
+<li><tt class="xref docutils literal"><span class="pre">UnitTestCase</span></tt> should not interact with database or server frontend</li>
+<li><tt class="xref docutils literal"><span class="pre">DatabaseTestCase</span></tt> must run in one transaction and thus cannot be multithreaded and must not call commit</li>
+<li><tt class="xref docutils literal"><span class="pre">DestructiveDatabaseTestCase</span></tt> is slow and do not have live server available (cannot test using urllib2 and friends)</li>
+</ul>
+</div>
+<div class="section" id="id3">
+<span id="running-tests"></span><h2>Running tests<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>Easiest way to run tests is to put <em>TEST_RUNNER=&#8217;djangosanetesting.testrunner.run_tests&#8217;</em> into your <tt class="docutils literal"><span class="pre">settings.py</span></tt>. This still allows you to select individual tests by running <tt class="docutils literal"><span class="pre">./manage.py</span> <span class="pre">test</span> <span class="pre">testpackage.module.module:Class.method</span></tt>, however there is no way to disable some tests (by not using some plugin) or to use additional nose plugins.</p>
+<p>More flexible and granular way is using standard <tt class="docutils literal"><span class="pre">nosetests</span></tt> command. However, keep in mind:</p>
+<ul class="simple">
+<li>There is no path handling done for you</li>
+<li>DJANGO_SETTINGS_VARIABLE is also not set by default</li>
+</ul>
+<p>Most likely, you&#8217;ll end up with something like <tt class="docutils literal"><span class="pre">DJANGO_SETTINGS_MODULE=&quot;settings&quot;</span> <span class="pre">PYTHONPATH=&quot;.:..&quot;</span> <span class="pre">nosetests</span> <span class="pre">--with-django</span></tt>; you can, however, flexibly add another nose modules (like <tt class="docutils literal"><span class="pre">--with-coverage</span></tt>).</p>
+<p>#TODO: Test type selection is not supported yet (= run all selenium tests but do not run unittests et al). This is considered a bug and will be fixed in next releases.</p>
+</div>
+<div class="section" id="id4">
+<span id="plugins"></span><h2>Plugins<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>Provided plugins:</p>
+<ul class="simple" id="list-of-plugins">
+<li><a class="reference" href="#django-plugin"><em>DjangoPlugin</em></a></li>
+<li><a class="reference" href="#django-live-server-plugin"><em>DjangoLiveServerPlugin</em></a></li>
+<li><a class="reference" href="#cherrypy-live-server-plugin"><em>CherryPyLiveServerPlugin</em></a></li>
+<li><a class="reference" href="#selenium-plugin"><em>SeleniumPlugin</em></a></li>
+</ul>
+<div class="section" id="djangoplugin">
+<span id="django-plugin"></span><h3><tt class="xref docutils literal"><span class="pre">DjangoPlugin</span></tt><a class="headerlink" href="#djangoplugin" title="Permalink to this headline">¶</a></h3>
+<p><tt class="xref docutils literal"><span class="pre">DjangoPlugin</span></tt> takes care about basic Django environment setup. It <strong>must</strong> be loaded in order to use other plugins with Django (obviously). This plugin takes care about <tt class="xref docutils literal"><span class="pre">DatabaseTestCase</span></tt> and <tt class="xref docutils literal"><span class="pre">DestructiveDatabaseTestCase</span></tt>:</p>
+<ul class="simple">
+<li>If <tt class="xref docutils literal"><span class="pre">no_database_interaction</span></tt> attribute is True, then whole database handling is skipped (this is to speed thing up for <tt class="xref docutils literal"><span class="pre">UnitTestCase</span></tt>)</li>
+<li>If <tt class="xref docutils literal"><span class="pre">database_single_transaction</span></tt> is True (<tt class="xref docutils literal"><span class="pre">DatabaseTestCase</span></tt>), manual transaction handling is enabled and things are rolled back after every case.</li>
+<li>If <tt class="xref docutils literal"><span class="pre">database_flush</span></tt> is True, then database if flushed before every case (and on the beginning of next one, if needed)</li>
+</ul>
+</div>
+<div class="section" id="djangoliveserverplugin">
+<span id="django-live-server-plugin"></span><h3><tt class="xref docutils literal"><span class="pre">DjangoLiveServerPlugin</span></tt><a class="headerlink" href="#djangoliveserverplugin" title="Permalink to this headline">¶</a></h3>
+<p>Responsible for starting HTTP server, sort of same as <tt class="docutils literal"><span class="pre">./manage.py</span> <span class="pre">runserver</span></tt>, however testing server is multithreaded (as if with patch from <a class="reference" href="http://code.djangoproject.com/ticket/3357">#3357</a>, but always enabled: if you&#8217;ll any problems with it, write me).</p>
+<p>Server is first started when <tt class="xref docutils literal"><span class="pre">start_live_server</span></tt> attribute is first encountered, and is stopped after whole testsuite.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p>Because application logic is always executed in another thread (even when server would be single-threaded), it&#8217;s not possible to use <tt class="xref docutils literal"><span class="pre">HttpTestCase</span></tt>&#8216;s with in-memory databases (well, theoretically, we could do database setup in each thread and have separate databases, but that will be really nasty).</p>
+<p class="last">Thus, if encountered with in-memory database, server is not started and <tt class="xref docutils literal"><span class="pre">SkipTest</span></tt> is raised instead.</p>
+</div>
+</div>
+<div class="section" id="cherrypyliveserverplugin">
+<span id="cherrypy-live-server-plugin"></span><h3><tt class="xref docutils literal"><span class="pre">CherryPyLiveServerPlugin</span></tt><a class="headerlink" href="#cherrypyliveserverplugin" title="Permalink to this headline">¶</a></h3>
+<p>Responsible for starting HTTP server, in similar way to <tt class="xref docutils literal"><span class="pre">DjangoLiveServerPlugin</span></tt>. However, <a class="reference" href="http://www.cherrypy.org/">CherryPy</a> WSGI is used instead, as it&#8217;s much more mature and considered to be production-ready, unlike Django&#8217;s development server.</p>
+<p>Use when in need of massive parallel requests, or when encountering a bug (like <a class="reference" href="http://code.djangoproject.com/ticket/10117">#10117</a>).</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">When using <tt class="docutils literal"><span class="pre">./manage.py</span> <span class="pre">test</span></tt>, Django server is used by default. You can use <a class="reference" href="http://www.cherrypy.org/">CherryPy</a>&#8216;s by setting <tt class="docutils literal"><span class="pre">CHERRYPY_TEST_SERVER</span> <span class="pre">=</span> <span class="pre">True</span></tt> in settings.py.</p>
+</div>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last"><tt class="xref docutils literal"><span class="pre">DjangoLiveServerPlugin</span></tt> (<tt class="docutils literal"><span class="pre">--with-djangoliveserver</span></tt>) and <tt class="xref docutils literal"><span class="pre">CherryPyLiveServerPlugin</span></tt> (<tt class="docutils literal"><span class="pre">--with-cherrypyliveserver</span></tt>) are mutually exclusive. Using both will cause errors, and You&#8217;re responsible for choosing one when running tests with <tt class="docutils literal"><span class="pre">nosetests</span></tt> (see <a class="reference" href="#running-tests"><em>Running tests</em></a> for details).</p>
+</div>
+</div>
+<div class="section" id="seleniumplugin">
+<span id="selenium-plugin"></span><h3><tt class="xref docutils literal"><span class="pre">SeleniumPlugin</span></tt><a class="headerlink" href="#seleniumplugin" title="Permalink to this headline">¶</a></h3>
+<p><a class="reference" href="http://seleniumhq.org/">Selenium</a> is excellent tool for regression (web application) testing. <tt class="xref docutils literal"><span class="pre">SeleniumPlugin</span></tt> easily allows you to use xUnit infrastructure together with <a class="reference" href="http://seleniumhq.org/projects/remote-control/">Selenium RC</a> and enjoy unified, integrated infrastructure.</p>
+<p>Selenium proxy server must be set up and running, there is no support for auto-launching (yet).</p>
+<p><tt class="xref docutils literal"><span class="pre">SeleniumPlugin</span></tt> recognizes following configuration variables in settings.py:</p>
+<ul class="simple">
+<li><tt class="docutils literal"><span class="pre">SELENIUM_BROWSER_COMMAND</span></tt> - which browser command should be send to proxy server to launch. Default to &#8220;<a href="#id7" name="id8"><span class="problematic" id="id8">*</span></a>opera&#8221; and may require some more complicated adjusting on some configurations, take a look at <a class="reference" href="http://seleniumhq.org/projects/remote-control/experimental.html">experimental launchers</a>.</li>
+<li><tt class="docutils literal"><span class="pre">SELENIUM_HOST</span></tt> - where Selenium proxy server is running. Default to &#8220;localhost&#8221;</li>
+<li><tt class="docutils literal"><span class="pre">SELENIUM_PORT</span></tt> - to which port Selenium server is bound to. Default to 4444.</li>
+<li><tt class="docutils literal"><span class="pre">SELENIUM_URL_ROOT</span></tt> - where is (from proxy server&#8217;s point of view) application running. Default to &#8220;<a class="reference" href="http://localhost:8000/">http://localhost:8000/</a>&#8220;.</li>
+<li><tt class="docutils literal"><span class="pre">FORCE_SELENIUM_TESTS</span></tt> changes running behavior, see below.</li>
+</ul>
+<p>When plugin encounters <tt class="docutils literal"><span class="pre">selenium_start</span></tt> attribute (set to True), it tries to start browser on selenium proxy. If exception occurs (well, I&#8217;d catch socket errors, but this seems to be impossible on Windows), it assumes that proxy is not running, thus environment conditions are not met and <tt class="xref docutils literal"><span class="pre">SkipTest</span></tt> is raised. If <tt class="docutils literal"><span class="pre">FORCE_SELENIUM_TESTS</span></tt> is set to True, then original exceptin is raised instead, causing test to fail (usable on web testing CI server to ensure tests are runnig properly and are not mistakenly skipped).</p>
+</div>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar">
+        <div class="sphinxsidebarwrapper">
+            <h3><a href="index.html">Table Of Contents</a></h3>
+            <ul>
+<li><a class="reference" href="">Usage</a><ul>
+<li><a class="reference" href="#id2">Writing tests</a></li>
+<li><a class="reference" href="#id3">Running tests</a></li>
+<li><a class="reference" href="#id4">Plugins</a><ul>
+<li><a class="reference" href="#djangoplugin"><tt class="docutils literal"><span class="pre">DjangoPlugin</span></tt></a></li>
+<li><a class="reference" href="#djangoliveserverplugin"><tt class="docutils literal"><span class="pre">DjangoLiveServerPlugin</span></tt></a></li>
+<li><a class="reference" href="#cherrypyliveserverplugin"><tt class="docutils literal"><span class="pre">CherryPyLiveServerPlugin</span></tt></a></li>
+<li><a class="reference" href="#seleniumplugin"><tt class="docutils literal"><span class="pre">SeleniumPlugin</span></tt></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            <h4>Previous topic</h4>
+            <p class="topless"><a href="test-intro.html" title="previous chapter">Test introduction</a></p>
+            <h3>This Page</h3>
+            <ul class="this-page-menu">
+              <li><a href="_sources/usage.txt">Show Source</a></li>
+            </ul>
+          <h3>Quick search</h3>
+            <form class="search" action="search.html" method="get">
+              <input type="text" name="q" size="18" /> <input type="submit" value="Go" />
+              <input type="hidden" name="check_keywords" value="yes" />
+              <input type="hidden" name="area" value="default" />
+            </form>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="test-intro.html" title="Test introduction"
+             accesskey="P">previous</a> |</li>
+        <li><a href="index.html">Django: Sane Testing v0.4.0 documentation</a> &raquo;</li> 
+      </ul>
+    </div>
+    <div class="footer">
+      &copy; Copyright 2009, Almad.
+      Created using <a href="http://sphinx.pocoo.org/">Sphinx</a> 0.5.1.
+    </div>
+  </body>
+</html>
