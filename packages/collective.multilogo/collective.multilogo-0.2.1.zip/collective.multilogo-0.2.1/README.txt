@@ -1,0 +1,1 @@
+See ./collective/multilogo/README.txt
