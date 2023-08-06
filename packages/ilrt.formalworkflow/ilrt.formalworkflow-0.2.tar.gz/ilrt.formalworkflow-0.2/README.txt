@@ -1,0 +1,88 @@
+ILRT Formal Workflow
+====================
+
+Overview
+--------
+
+Ed Crewe, `ILRT
+<http://www.ilrt.bris.ac.uk/>`_ at University of Bristol, January 2009
+
+Formal workflow is designed for sites where there may be many editors
+for whom unmoderated access to change live published content on the 
+web site is not desired. A typical scenario may be an organistaions 
+public website which has to comply with certain legal restrictions or
+editorial style for example. To ensure this compliance only a limited
+subset of editors are trusted to review and publish content.
+
+This package applies a workflow definition based on simple publication 
+workflow ... but it ensures that editors cannot modify public content.
+Instead it enables `plone.app.iterate`_  with which users can check out a 
+working copy of a published item to work on and resubmit for review.
+
+.. _`plone.app.iterate`: http://pypi.python.org/pypi/plone.app.iterate
+
+Editors and owners are also restricted from deleting items or reverting 
+them to past versions ... essentially anything that could change published 
+content ... without review.
+
+Hence only new items can be published, instead working copies are checked in 
+by users with the reviewer or manager role.
+
+The package installs a skin layer in order to allow for modifying the iterate 
+interfaces security declaration. If used in conjunction with a theme egg just 
+copy the contents of browser/configuration.xml to the one in your theme.
+
+Workflow
+--------
+
+A diagram of the workflow is available in /docs folder   
+
+.. image:: http://mail.ilrt.bris.ac.uk/~cmetc/images/formalworkflow.png
+
+The following walks through a user story::
+
+  Editor
+  - An editor creates a document
+  - They edit and then submit it for review
+  - It is now in the pending state
+
+  Reviewer
+  - The document appears for review in their review list so they click on it
+  - They make a few minor ammendments and publish it
+
+  Editor
+  - A week later some more information needs to be added to the document
+  - The editor goes to it, but it there is no workflow menu just 
+    State:Published so they cannot retract it. The edit and history tabs
+    are also gone. So instead they must click on 'Check out' from the actions menu.
+  - This locks the item and marks it as being edited in a working copy.
+  - The editor does their edits then clicks on submit to bring their changes to the
+    attention of the reviewer
+
+  Reviewer
+  - The reviewer sees the page pop up in their review list
+  - They click on it and look at the changes the editor has made. 
+    They like the changes but decide they want some modifications made to them
+    by the editor. They dont want to 'Cancel check-out' since the editor has done a
+    lot of changes, so they just add a note of the further changes needed and make
+    the working copy private again.
+
+  Editor
+  - The editor reads the comment and re-edits the working copy, once these final changes
+    are complete is it resubmitted to the pending state. 
+
+  Reviewer
+  - The reviewer notices the item is back again in their review list, so realises 
+    it has been re-edited.
+    They click on it ... see that it is ready and so do the 'Check in' to replace 
+    the current published version, at which point the working copy is removed.
+
+This package hardly deserves to be in pypi since it is really all just
+xml config data, however since it is a commonly required workflow which
+does require some time consuming configuration tweaks, It seemed worthwhile to
+submit it ... at least it has some python in the functional tests. 
+
+NB: If this workflow is applied to an existing site ... then you may require the 
+ilrt.migrationtool to use its utility for mapping  existing content states from 
+the old workflow to formalworkflow
+
