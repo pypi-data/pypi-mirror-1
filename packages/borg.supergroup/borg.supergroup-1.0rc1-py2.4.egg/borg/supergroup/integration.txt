@@ -1,0 +1,85 @@
+==========================
+ Super Groups PAS plug-in
+==========================
+
+This PAS plug-in can be used to assign groups to a user. It can be installed
+via GenericSetup.
+
+The plug-in should be installed when this doc-test is run.
+
+    >>> from Products.CMFCore.utils import getToolByName
+    >>> acl_users = getToolByName(self.portal, 'acl_users')
+
+    >>> 'borg_supergroup' in acl_users.objectIds()
+    True
+    
+Let's also verify that we can invent groups for standard Plone users. First,
+we will register a subscription adapter for the standard user type and an 
+enumeration utility. Both of these will look up a group implied by a user
+property.
+
+    >>> portal_memberdata = getToolByName(self.portal, 'portal_memberdata')
+    >>> portal_membership = getToolByName(self.portal, 'portal_membership')
+
+    >>> portal_memberdata.manage_addProperty('implied_group', 'Alpha', 'string')
+
+    >>> member = portal_membership.getAuthenticatedMember()
+    >>> user = acl_users.getUserById(member.getId())
+
+    >>> user.getProperty('implied_group')
+    'Alpha'
+    
+Just to show that we don't have any tricks up our sleeve, notice that the user
+does not currently have the implied group, and it is not returned by a search.
+    
+    >>> 'Alpha' in member.getGroups()
+    False
+    
+    >>> len(list(acl_users.searchGroups(id='Alpha')))
+    0
+    
+Now, let's provide an adapter to imply the group and a utility to make this 
+generally searchable.
+
+    >>> from zope.interface import implements
+    >>> from zope.component import adapts
+
+    >>> from borg.supergroup.interfaces import ISuperGroups
+    >>> from borg.supergroup.interfaces import ISuperGroupsEnumeration
+
+    >>> from Products.PluggableAuthService.interfaces.authservice import IBasicUser
+
+    >>> class ImpliedGroups(object):
+    ...     implements(ISuperGroups)
+    ...     adapts(IBasicUser)
+    ...     
+    ...     def __init__(self, context):
+    ...         self.principal = context
+    ...     
+    ...     def __call__(self):
+    ...         implied = self.principal.getProperty('implied_group', '')
+    ...         if implied:
+    ...             yield implied
+
+    >>> class ImpliedGroupsEnumeration(object):
+    ...     implements(ISuperGroupsEnumeration)
+    ...     
+    ...     def enumerate_groups(self, id=None, exact_match=False, **kw):
+    ...         if (exact_match and id == 'Alpha') or (not exact_match and id in 'Alpha'):
+    ...             yield dict(id='Alpha', title='Alpha Group')
+
+    >>> from zope.component import provideSubscriptionAdapter
+    >>> from zope.component import provideUtility
+
+    >>> provideSubscriptionAdapter(ImpliedGroups)
+    >>> provideUtility(ImpliedGroupsEnumeration(), name='alpha')
+
+The effects should be shown immediately:
+
+    >>> user = acl_users.getUserById(member.getId())
+    >>> 'Alpha' in list(user.getGroups())
+    True
+    
+    >>> len(list(acl_users.searchGroups(id='Alpha')))
+    1
+    
