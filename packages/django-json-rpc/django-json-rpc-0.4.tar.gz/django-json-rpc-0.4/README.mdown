@@ -1,0 +1,84 @@
+Django JSON-RPC
+===============
+
+A basic JSON-RPC Implementation for your Django-powered sites. See [this blog entry](http://samuraiblog.com/wordpress/2009/11/03/django-and-json-rpc/) for more information.
+
+Features:
+<ul>
+  <li>Simple, pythonic API</li>
+  <li>Support for Django authentication</li>
+  <li>Mostly supports JSON-RPC 1.1 and 2.0 Spec</li>
+  <li>Proxy to test your JSON Service</li>
+  <li>Graphical JSON-RPC browser and web console</li>
+  <li>Provides <code>system.describe</code></li>
+</ul>
+
+The basic API:
+
+**myproj/myapp/views.py**
+    
+    from jsonrpc import jsonrpc_method
+    
+    @jsonrpc_method('myapp.sayHello')
+    def whats_the_time(request, name='Lester'):
+      return "Hello %s" % name
+    
+    @jsonrpc_method('myapp.gimmeThat', authenticated=True)
+    def something_special(request, secret_data):
+      return {'sauce': ['authenticated', 'sauce']}
+    
+    
+**myproj/urls.py**
+
+    from django.conf.urls.defaults import *
+    from jsonrpc import jsonrpc_site
+    import myproj.myapp.views # you must import the views that need connected
+    
+    urlpatterns += patterns('', 
+      url(r'^json/', jsonrpc_site.dispatch, name="jsonrpc_mountpoint"),
+      url(r'^json/browse/', 'jsonrpc.views.browse', name="jsonrpc_browse"), # for the graphical browser/web console only, omissible
+      (r'^json/(?P<method>[a-zA-Z0-9.]+)$', jsonrpc_site.dispatch) # for HTTP GET only, also omissible
+    )
+
+
+**To test your service:**
+You can test your service using the provided graphical browser and console,
+available at http://YOUR_URL/json/browse/ (if using the url patterns from above) or with the included ServiceProxy:
+
+    >>> from jsonrpc.proxy import ServiceProxy
+    
+    >>> s = ServiceProxy('http://localhost:8080/json/')
+    
+    >>> s.myapp.sayHello('Sam')
+    {u'error': None, u'id': u'jsonrpc', u'result': u'Hello Sam'}
+    
+    >>> s.myapp.gimmeThat('username', 'password', 'test data')
+    {u'error': None, u'id': u'jsonrpc', u'result': {u'sauce': [u'authenticated', u'sauce']}}
+
+Method Browser:
+
+[![](http://samuraiblog.com/wordpress/wp-content/uploads/2009/11/jsonrpcbrowserscreen.png)](http://samuraiblog.com/wordpress/wp-content/uploads/2009/11/jsonrpcbrowserscreen.png)
+
+We add the `jsonrpc_version` variable to the request object. It be either '1.0', '1.1' or '2.0'. Arg.
+
+### The `jsonrpc.jsonrpc_method` decorator
+`jsonrpc.jsonrpc_method(name, authenticated=False, safe=False)`
+<ul>
+<li>
+`name`
+
+The name of your method. IE: `namespace.methodName`
+</li>
+<li>
+`authenticated=False`
+  
+Adds `username` and `password` arguments to the beginning of your method if the user hasn't already been authenticated. These will be used to authenticate the user against `django.contrib.authenticate` If you use HTTP auth or other authentication middleware, `username` and `password` will not be added, and this method will only check against `request.user.is_authenticated`.
+  
+You may pass a callablle to replace `django.contrib.auth.authenticate` as the authentication method. It must return either a User or `None` and take the keyword arguments `username` and `password`.
+</li>
+<li>
+`safe=False`
+
+Designates whether or not your method may be accessed by HTTP GET. By default this is turned off.
+</li>
+</ul>
