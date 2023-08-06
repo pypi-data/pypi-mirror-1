@@ -1,0 +1,47 @@
+#! /usr/bin/env python2.5
+
+def main():
+    from optparse import OptionParser
+
+    description = "An AJAXy information/note manager"
+    parser = OptionParser(description=description,
+            usage="%prog [options] dbfile")
+    parser.add_option(
+            "-p", "--port", default=7331, type="int",
+            help="Listen port", metavar="PORT")
+    parser.add_option(
+            "-b", "--bind-address", default=None,
+            help="Allow remote connection")
+
+    options, args = parser.parse_args()
+
+    from synoptic import Application
+    app = Application()
+
+    if len(args) != 1:
+        parser.print_usage()
+        import sys
+        sys.exit(1)
+
+    dbname = args[0]
+
+    from os import access, F_OK
+    exists = access(dbname, F_OK)
+
+    from synoptic import DBSessionInjector
+    app = dbinj = DBSessionInjector(app, "sqlite:///%s" % args[0])
+
+    from paste.exceptions.errormiddleware import ErrorMiddleware
+    app = ErrorMiddleware(app, debug=True)
+
+    if not exists:
+        from synoptic import import_file, get_static_file
+        import_file(dbinj.sessionmaker(), 
+                get_static_file("initial-content.txt")[0])
+
+    from paste.httpserver import serve
+    serve(app, port=options.port, host=options.bind_address)
+
+if __name__ == "__main__":
+    main()
+
