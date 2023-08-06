@@ -1,0 +1,3 @@
+class DeleteReservationException(Exception):
+    pass
+
