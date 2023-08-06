@@ -1,0 +1,2 @@
+"""Package containing superpy scripts.
+"""
