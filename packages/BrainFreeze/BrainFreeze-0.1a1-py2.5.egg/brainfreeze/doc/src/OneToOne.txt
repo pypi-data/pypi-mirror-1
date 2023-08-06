@@ -1,0 +1,215 @@
+OneToOneProxy
+=============
+
+BrainFreeze provides a `OneToOne Python Property Proxy`_ that
+will take all the foreign columns in an SQLAlchemy one-to-one
+relation and make them accessible on the mapped class.  Kind of like
+SQLAlchemy's `AssociationProxy`_ but for one-to-one relations.  So
+instead of ``Book.Publisher.publisher_name``, you can just access
+``Book.publisher_name``.  No joke! And if that particular Book doesn't have
+a Publisher record yet, accessing ``Book.publisher_name`` will automatically
+create the Publisher record for you.
+
+But wait! There's More! Also included is a `OneToOne MapperProperty`_ that
+lets these proxied columns be query-able just as if they were normal columns
+on the mapped class.  What the hell does that mean?  Glad you asked!  It means
+that instead of always having to join on related classes::
+
+    q = session.query(Book).join(Publisher)
+    q.filter(Publisher.publisher_city == "Cleveland").all()
+    
+you can do the much-more-elegant basic query::
+
+   session.query(Book).filter(Book.publisher_city == "Cleveland").all()
+   
+All the fanciest query filter operations such as
+``Book.publisher_name.contains('Independent')`` are totally supported!
+
+Act now and you'll receive two special gifts, a `OneToOne PropertyLoader`_ and
+a `OneToOne MapperExtension`_ that sets this all up for you automatically!
+Call Now!
+
+.. _AssociationProxy: http://www.sqlalchemy.org/docs/05/plugins.html#plugins_associationproxy
+
+
+OneToOne Python Property Proxy
+------------------------------
+
+Let's get right to an example.  Let's say we're dealing with Books and
+Publishers.  In our example, a Book has exactly one Publisher, so that's a
+one-to-one relation.  First we create our tables using SQLAlchemy:
+
+>>> from sqlalchemy import *
+>>> from sqlalchemy.orm import *
+
+>>> engine = create_engine('sqlite:///:memory:')
+>>> metadata = MetaData(bind=engine)
+>>> Session = sessionmaker(bind=engine)
+>>> session = Session()
+
+>>> book_table = Table('books', metadata,
+...     Column('id', Integer, primary_key=True),
+...     Column('title', String(255)),
+...     Column('publisher_id', None, ForeignKey('publishers.publisher_id'))
+... )
+>>> publisher_table = Table('publishers', metadata,
+...     Column('publisher_id', Integer, primary_key=True),
+...     Column('publisher_name', String(255)),
+...     Column('publisher_city', String(255))
+... )
+>>> metadata.create_all()
+
+Next we'll map those tables to some classes and utilize our Proxy Property.
+To help us out, let's make a simple base class to make it easy to create our
+instances:
+
+>>> class Base(object):
+...     def __init__(self, **kwargs):
+...         for key, value in kwargs.iteritems():
+...             setattr(self, key, value)
+
+Ok now we map our tables to some classes and use the BrainFreeze Proxy
+Property:
+
+>>> from brainfreeze import OneToOneProxy
+
+>>> class Publisher(Base):
+...     pass
+
+>>> class Book(Base):
+...     publisher_name = OneToOneProxy('publisher', Publisher, 'publisher_name')
+...     publisher_city = OneToOneProxy('publisher', Publisher, 'publisher_city')
+
+>>> publisher_mapper = mapper(Publisher, publisher_table)
+>>> book_mapper = mapper(Book, book_table,
+...     properties={
+...         'publisher': relation(Publisher, backref='books')
+...     }
+... )
+
+And now we can create some books and publishers and see how the Proxy works:
+
+>>> b1 = Book(title="The Jungle", publisher_name="Doubleday")
+>>> b2 = Book(title="Days of War, Nights of Love")
+
+>>> session.add_all([b1, b2])
+>>> session.flush()
+
+>>> b1.publisher_name
+'Doubleday'
+
+>>> b2.publisher_name is None
+True
+
+>>> b2.publisher_name = "Crimethinc"
+>>> session.flush()
+>>> b2.publisher_name
+'Crimethinc'
+
+However, the Proxy alone does not provide the ability to query on these
+properties:
+
+>>> session.query(Book).filter(Book.publisher_name == 'Doubleday')
+Traceback (most recent call last):
+    ...
+ArgumentError: filter() argument must be of type sqlalchemy.sql.ClauseElement or string
+
+In order to get this query to work, you're going to need.... the BrainFreeze
+`OneToOne MapperProperty`_!
+
+
+OneToOne MapperProperty
+-----------------------
+
+In order to query on proxied attributes, something must be done at the mapper
+level to add query-able properties that are understood by the mapper.  Don't
+worry, we've got this under control.
+
+First we find the primary mapper for our ``Book`` class (this is the same
+thing that's returned by the ``mapper()`` method):
+
+>>> m = class_mapper(Book) 
+
+Now we just add our MapperProperties to it!
+
+>>> from brainfreeze import OneToOneMapperProperty
+
+>>> python_property = Book.publisher_name
+>>> relation_property = m.get_property('publisher')
+>>> m.add_properties({
+...     'publisher_name': OneToOneMapperProperty(python_property, relation_property)
+... })
+
+And then we can query like a champ:
+
+>>> books = session.query(Book).filter(Book.publisher_name == 'Doubleday').all()
+>>> len(books)
+1
+
+So this sounds like a lot of work, right?  It's a pain having to type all
+this code for each and every property.  Well, say no more!  You can use the
+BrainFreeze `OneToOne PropertyLoader`_ to create all these ProxyProperties and
+MapperProperties automatically!
+
+
+OneToOne PropertyLoader
+------------------------
+
+Want something a little easier than typing up all those ProxyProperties
+and MapperProperties?  I mean, it's not like us programmers get paid by
+the line, right?  So How about a special kind of ``relation`` that sets
+up all these things automatically?  No Problem:
+
+>>> clear_mappers()
+
+>>> from brainfreeze import one_to_one
+
+>>> publisher_mapper = mapper(Publisher, publisher_table)
+>>> book_mapper = mapper(Book, book_table,
+...     properties={
+...         'publisher': one_to_one(Publisher)
+...     }
+... )
+
+>>> books = session.query(Book).filter(Book.publisher_name == 'Doubleday').all()
+>>> len(books)
+1
+
+>> books[0].publisher_name
+'Doubleday'
+
+
+OneToOne MapperExtension
+------------------------
+
+But what if you have a whole bunch of OneToOne relations?  Wouldn't it be
+easier if there was a MapperExtension that added those automatically?  You
+bet!  And just look how easy this is:
+
+>>> clear_mappers()
+
+>>> from brainfreeze import OneToOneMapperExtension
+
+>>> publisher_mapper = mapper(Publisher, publisher_table)
+>>> book_mapper = mapper(Book, book_table, 
+...     extension=[OneToOneMapperExtension(Publisher)]
+... )
+
+>>> books = session.query(Book).filter(Book.publisher_name == 'Doubleday').all()
+>>> len(books)
+1
+
+>> books[0].publisher_name
+'Doubleday'
+
+Another cool thing about this is that the OneToOneMapperExtension constructor
+takes any number of classes as arguments, so for example if each Book also had
+exactly one Author, you would just use:: 
+
+    OneToOneMapperExtension([Publisher, Author])
+
+
+The End
+-------
+
+That's all, folks!
