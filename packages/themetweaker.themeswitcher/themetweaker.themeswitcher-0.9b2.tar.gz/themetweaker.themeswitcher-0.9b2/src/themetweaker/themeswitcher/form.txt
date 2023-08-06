@@ -1,0 +1,135 @@
+Integration test for the 'switcherform'
+=======================================
+
+Making a user
+-------------
+
+Create a Managing User name theme_user and check to see s/he
+has the appropriate roles
+
+    >>> self.portal.portal_membership.addMember('theme_user', 'secret', ['Manager'], [])
+    >>> self.portal.acl_users.getUserById('theme_user').getRoles()
+    ['Manager', 'Authenticated']
+
+Login as theme_user
+
+    >>> self.login('theme_user')
+
+Making some folders
+-------------------
+
+Let's create two folders in which we can apply two different themes.
+
+    >>> _ = self.portal.invokeFactory('Folder', 'folder1', title=u'Folder 1')
+    >>> _ = self.portal.invokeFactory('Folder', 'folder2', title=u'Folder 2')
+    >>> self.folder1_url = self.portal.folder1.absolute_url()
+    >>> self.folder2_url = self.portal.folder2.absolute_url()
+
+Let's surf!
+-----------
+
+Import and create the testbrowser
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> self.browser = Browser()
+
+Login to the plone site via the testbrowser
+
+    >>> self.browser.open('http://nohost/plone/')
+    >>> self.browser.getLink('Log in').click()
+    >>> self.browser.getControl('Login Name').value = 'theme_user'
+    >>> self.browser.getControl('Password').value = 'secret'
+    >>> self.browser.getControl('Log in').click()
+
+Let's surf over to folder1 and see if we get what is expected
+
+    >>> self.browser.open(self.folder1_url)
+
+Click on the 'ThemeSwitcher' tab
+
+    >>> self.browser.getLink('ThemeSwitcher').click()
+
+Check the default form options
+
+    >>> self.browser.getControl(name='form.themeswitcher_enable').value
+    False
+    >>> self.browser.getControl(name='form.themeswitcher_skin').options
+    ['Plone Default', 'skin_one theme', 'skin_two theme']
+    >>> self.browser.getControl(name='form.actions.cancel').click()
+    >>> self.browser.url
+    'http://nohost/plone/folder1'
+
+At this point we shouldn't see the text from the viewlets in our themes
+
+    >>> 'This exact text only shows up' in self.browser.contents
+    False
+
+Let's set the switch
+--------------------
+
+Let's go into folder one and set it to use the 'skin_one theme'
+
+    >>> self.browser.open('%s/@@switcherform' % self.folder1_url)
+    >>> self.browser.getControl(name='form.themeswitcher_enable').value = True
+    >>> self.browser.getControl(name='form.themeswitcher_skin').value = ['skin_one theme']
+    >>> self.browser.getControl(name='form.actions.save').click()
+
+Now that the theme is applied, we should see the text in our 'skin_one.banner' viewlet.  (testing a browser view here as well with the sharing tab)
+
+    >>> self.browser.open(self.folder1_url)
+    >>> 'This exact text only shows up in skin_one' in self.browser.contents
+    True
+    >>> self.browser.getLink('Sharing').click()
+    >>> 'This exact text only shows up in skin_one' in self.browser.contents
+    True
+
+Go to folder2 and set it to use the 'skin_two theme'
+
+    >>> self.browser.open('%s/@@switcherform' % self.folder2_url)
+    >>> self.browser.getControl(name='form.themeswitcher_enable').value = True
+    >>> self.browser.getControl(name='form.themeswitcher_skin').value = ['skin_two theme']
+    >>> self.browser.getControl(name='form.actions.save').click()
+
+Now that the theme is applied, we should see the text in our 'skin_two.banner' viewlet.
+
+    >>> self.browser.open(self.folder2_url)
+    >>> 'This exact text only shows up in skin_two' in self.browser.contents
+    True
+    >>> self.browser.getLink('Sharing').click()
+    >>> 'This exact text only shows up in skin_two' in self.browser.contents
+    True
+
+Let's create yet another folder inside folder2 and set it to use 'Plone Default'
+
+    >>> _ = self.portal.folder2.invokeFactory('Folder', 'child_folder', title=u'Folder 2 Child')
+    >>> self.browser.open('%s/@@switcherform' % self.portal.folder2.child_folder.absolute_url())
+    >>> self.browser.getControl(name='form.themeswitcher_enable').value = True
+    >>> self.browser.getControl(name='form.themeswitcher_skin').value = ['Plone Default']
+    >>> self.browser.getControl(name='form.actions.save').click()
+
+Now the viewlet should be gone once again
+
+    >>> self.browser.open(self.portal.folder2.child_folder.absolute_url())
+    >>> 'This exact text only shows up in skin_two' in self.browser.contents
+    False
+
+Turn the switch off
+-------------------
+
+Turn off the switcher
+
+    >>> self.browser.open('%s/@@switcherform' % self.folder1_url)
+    >>> self.browser.getControl(name='form.themeswitcher_enable').value = False
+    >>> self.browser.getControl(name='form.actions.save').click()
+
+Now neither viewlet should be available on folder1
+
+    >>> self.browser.open(self.folder1_url)
+    >>> 'This exact text only shows up' in self.browser.contents
+    False
+
+But folder2 will still have it applied
+
+    >>> self.browser.open(self.folder2_url)
+    >>> 'This exact text only shows up in skin_two' in self.browser.contents
+    True
