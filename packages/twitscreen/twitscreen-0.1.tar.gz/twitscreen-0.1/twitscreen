@@ -1,0 +1,183 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# Copyright (c) 2009, Thomas Jost <thomas.jost@gmail.com>
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+import pygtk
+pygtk.require('2.0')
+import gtk, gtkimageview, twitpic, os, tempfile, webbrowser
+
+class Twitscreen:
+    def __init__(self):
+        # Take the screenshot (thanks to http://ubuntuforums.org/showthread.php?t=448160)
+        root_window = gtk.gdk.get_default_root_window()
+        rw_x, rw_y = root_window.get_size()
+        pb = gtk.gdk.Pixbuf(gtk.gdk.COLORSPACE_RGB, False, 8, rw_x, rw_y)
+        pb = pb.get_from_drawable(root_window, root_window.get_colormap(), 0, 0, 0, 0, rw_x, rw_y)
+        if pb is None:
+            raise ValueError
+
+        # Now init the window :)
+        win = gtk.Window(gtk.WINDOW_TOPLEVEL)
+        win.set_type_hint(gtk.gdk.WINDOW_TYPE_HINT_DIALOG)
+        win.set_title("Twitscreen")
+        win.set_default_size(800, 600)
+        win.set_position(gtk.WIN_POS_CENTER)
+        win.connect("delete-event", gtk.main_quit)
+
+        # Image view
+        self.view = gtkimageview.ImageView()
+        self.view.set_pixbuf(pb)
+
+        # Selector
+        self.selector = gtkimageview.ImageToolSelector(self.view)
+        self.default_tool = self.view.get_tool()
+
+        # Buttons
+        button_save = gtk.Button(stock="gtk-save")
+        button_save.connect("clicked", self.save_cb, win)
+        button_crop = gtk.ToggleButton(label="_Crop")
+        button_crop.connect("toggled", self.crop_cb)
+        button_twitpic = gtk.Button(label="Upload to _Twitpic")
+        button_twitpic.connect("clicked", self.twitpic_cb, win)
+
+        # Window layout
+        hbox = gtk.HBox()
+        hbox.pack_start(button_save, False, False)
+        hbox.pack_start(button_crop, False, False)
+        hbox.pack_start(button_twitpic, False, False)
+
+        scrollview = gtkimageview.ImageScrollWin(self.view)
+
+        vbox = gtk.VBox()
+        vbox.pack_start(scrollview)
+        vbox.pack_start(hbox, False, False)
+
+        win.add(vbox)
+        win.show_all()
+
+    def save(self, filename):
+        self.view.get_pixbuf().save(filename,"png")
+
+    def save_cb(self, widget, win):
+        # Ask for file name
+        dialog = gtk.FileChooserDialog("Save as...", win, gtk.FILE_CHOOSER_ACTION_SAVE, (gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_SAVE, gtk.RESPONSE_OK))
+
+        filter = gtk.FileFilter()
+        filter.set_name("PNG images")
+        filter.add_mime_type("image/png")
+        filter.add_pattern("*.png")
+        dialog.add_filter(filter)
+
+        response = dialog.run()
+        filename = dialog.get_filename()
+
+        if response == gtk.RESPONSE_OK and filename:
+            self.save(filename)
+
+        dialog.destroy()
+
+    def crop_cb(self, widget):
+        # Activated?
+        if widget.get_active():
+            self.view.set_tool(self.selector)
+        else:
+            # Get selection
+            rect = self.selector.get_selection()
+
+            # Cancel selector
+            self.view.set_tool(self.default_tool)
+
+            # Crop the pixbuf
+            if rect.width > 0 and rect.height > 0:
+                pb = self.view.get_pixbuf()
+                new_pb = pb.subpixbuf(rect.x, rect.y, rect.width, rect.height)
+                self.view.set_pixbuf(new_pb)
+
+    def twitpic_cb(self, widget, win):
+        dialog = gtk.Dialog("Upload to Twitpic...", win, gtk.DIALOG_MODAL | gtk.DIALOG_DESTROY_WITH_PARENT, (gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_OK, gtk.RESPONSE_OK))
+
+        table = gtk.Table(rows=4, columns=2)
+        dialog.vbox.pack_start(table)
+
+        # Username
+        label_user = gtk.Label("Username")
+        entry_user = gtk.Entry()
+        table.attach(label_user, 0, 1, 0, 1)
+        table.attach(entry_user, 1, 2, 0, 1)
+
+        # Password
+        label_pass = gtk.Label("Password")
+        entry_pass = gtk.Entry()
+        entry_pass.set_visibility(False)
+        table.attach(label_pass, 0, 1, 1, 2)
+        table.attach(entry_pass, 1, 2, 1, 2)
+
+        # Message
+        label_msg = gtk.Label("Message")
+        entry_msg = gtk.Entry()
+        table.attach(label_msg, 0, 1, 2, 3)
+        table.attach(entry_msg, 1, 2, 2, 3)
+
+        # Post to Twitter
+        check_twitter = gtk.CheckButton("Post to _Twitter")
+        table.attach(check_twitter, 1, 2, 3, 4)
+
+        dialog.show_all()
+        response = dialog.run()
+
+        # Read results
+        username = entry_user.get_text()
+        password = entry_pass.get_text()
+        message = entry_msg.get_text()
+        if message == "": message = None
+        twitter = check_twitter.get_active()
+        dialog.destroy()
+
+        if response != gtk.RESPONSE_OK or username == "" or password == "":
+            return
+
+        # Save image to a temporary file
+        handle, filename = tempfile.mkstemp()
+        self.save(filename)
+
+        # Upload file
+        twit = twitpic.TwitPicAPI(username, password)
+        url = twit.upload(filename, message=message, post_to_twitter=twitter)
+
+        # Remove temporary file
+        os.remove(filename)
+
+        # How did it go?
+        if type(url) is int:
+            # Error
+            dialog = gtk.MessageDialog(win, gtk.DIALOG_MODAL | gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR, gtk.BUTTONS_OK, "Error while uploading image (%d)" % url)
+            dialog.run()
+            dialog.destroy()
+        else:
+            # Success! :)
+            dialog = gtk.MessageDialog(win, gtk.DIALOG_MODAL | gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_INFO, gtk.BUTTONS_YES_NO, "Image uploaded successfully: %s. Do you want to open it in your browser?" % url)
+            response = dialog.run()
+            dialog.destroy()
+            if response == gtk.RESPONSE_YES:
+                # Open URL in browser
+                try:
+                    webbrowser.open_new_tab(url)
+                except AttributeError:
+                    webbrowser.open(url)
+
+if __name__=='__main__':
+    ts = Twitscreen()
+    gtk.main()
