@@ -1,0 +1,321 @@
+Metadata-Version: 1.0
+Name: bitarray
+Version: 0.2.0
+Summary: bitarray: module for efficiently storing bits in a list-like object
+Home-page: http://pypi.python.org/pypi/bitarray/
+Author: Ilan Schnell
+Author-email: ilanschnell@gmail.com
+License: PSF
+Description: ===============
+        Bitarray module
+        ===============
+        
+        This module provides an object type which can efficiently
+        represent a bitarray.  Bitarrays are sequence types and behave very much
+        like usual lists.  Each bit is represented as an actual bit in memory.
+        For example, this allows the storage of 8Gbits in 1GB of memory.
+        Most of the functionallity is implemented in C, for speed.
+        
+        Requires Python 2.5 or greater, see PEP 353.
+        
+        
+        Installation
+        ------------
+        
+        bitarray can be installed from source::
+        
+        $ tar xzf bitarray-0.2.0.tar.gz
+        $ cd bitarray-0.2.0
+        $ python setup.py install
+        
+        On Unix systems, the latter command may be executed with root privileges.
+        
+        If you have setuptools_ installed on your system, you can
+        easy_install bitarray.
+        
+        Once you have installed the package, you may want to test it::
+        
+        $ python -c 'from bitarray import test; test()'
+        bitarray is insalled in: /usr/local/lib/python2.5/site-packages/bitarray
+        bitarray version: 0.2.0
+        2.5.2 (r252:60911, Jul 17 2008, 10:38:24)
+        [GCC 4.2.1 (SUSE Linux)]
+        ....................................
+        ----------------------------------------------------------------------
+        Ran 36 tests in 0.294s
+        
+        OK
+        
+        In fact, one can always import the function test which in addition to
+        printing the test, also returns an instance of `unittest._TextTestResult`;
+        for example `test().wasSuccessful()` will return True when the test went OK.
+        
+        
+        .. _setuptools : http://pypi.python.org/pypi/setuptools
+        
+        Using the module
+        ----------------
+        
+        Here are a few usage example, pointing out some differences to lists.
+        
+        >>> from bitarray import bitarray
+        >>> a = bitarray()            # create empty bitarray
+        >>> a.append(True)
+        >>> a.extend([False, True])
+        >>> a
+        bitarray('101')
+        >>> a[-1]
+        True
+        >>> del a[1]
+        >>> len(a)
+        2
+        
+        Creating objects:
+        
+        >>> a = bitarray(1024)        # bitarray of length 1024 (uninitialized)
+        >>> bitarray('1001011')       # from string
+        bitarray('1001011')
+        >>> lst = [True, False, False, True, False, True, True]
+        >>> bitarray(lst)             # from list, tuple, sequence, iterable
+        bitarray('1001011')
+        
+        Bits can be assigned from any Python object.
+        Whenever bits are assigned, the built-in `bool()` function is used to
+        determine the value of the bit.  (Actually the C equivalent of `bool()`
+        is used.)
+        
+        >>> a = bitarray([42, '', True, {}, 'foo', None])
+        >>> a
+        bitarray('101010')
+        >>> a.append(a)      # note that bool(a) is True
+        >>> a
+        bitarray('1010101')
+        >>> a.count(42)      # counts occurrences of True
+        4L
+        >>> a.remove('')     # removes first occurence of False
+        >>> a
+        bitarray('110101')
+        
+        Like lists, bitarray objects support slice assignment and deletion:
+        
+        >>> a = bitarray(50)
+        >>> a.setall(False)
+        >>> a[11:37:3] = 9*bitarray([True])
+        >>> a
+        bitarray('00000000000100100100100100100100100100000000000000')
+        >>> del a[12::3]
+        >>> a
+        bitarray('0000000000010101010101010101000000000')
+        >>> a[-6:] = bitarray('10011')
+        >>> a
+        bitarray('000000000001010101010101010100010011')
+        >>> a += bitarray('000111')
+        >>> a
+        bitarray('000000000001010101010101010100010011000111')
+        
+        
+        Bit endianness
+        --------------
+        
+        Since a bitarray allows addressing of individual bits, where the machine
+        represents 8 bits in one byte, there two obvious choices for this mapping;
+        little- and big-endian.
+        When creating a new bitarray object, the endianness can always be
+        specified explicitly:
+        
+        >>> a = bitarray(endian='little')
+        >>> a.fromstring('A')
+        >>> a
+        bitarray('10000010')
+        >>> b = bitarray('11000010', endian='little')
+        >>> b.tostring()
+        'C'
+        
+        Here the low-bit comes first because little-endian means that increasing
+        numeric significance corresponds to an increasing address (or index).
+        So a[0] is the lowest and least significant bit, and a[7] is the highest
+        and most significant bit.
+        
+        >>> a = bitarray(endian='big')
+        >>> a.fromstring('A')
+        >>> a
+        bitarray('01000001')
+        >>> a[6] = 1
+        >>> a.tostring()
+        'C'
+        
+        Here the high-bit comes first because big-endian
+        means "most-significant first".
+        So a[0] is now the lowest and most significant bit, and a[7] is the highest
+        and least significant bit.
+        
+        The bit endianness is a property attachet to each bitarray object.
+        When comparing bitarray objects, the endianness (and hence the machine
+        representation) is irrelevant; what matters is the mapping from indicies
+        to bits:
+        
+        >>> bitarray('11001', endian='big') == bitarray('11001', endian='little')
+        True
+        
+        When converting to and from machine representation, using
+        the `tostring`, `fromstring`, `tofile` and `fromfile` methods,
+        the endianness matters:
+        
+        >>> a = bitarray(endian='little')
+        >>> a.fromstring('\x01')
+        >>> a
+        bitarray('10000000')
+        >>> b = bitarray(endian='big')
+        >>> b.fromstring('\x80')
+        >>> a == b
+        True
+        >>> a.tostring() == b.tostring()
+        False
+        
+        The endianness can not be changed once an object is created.
+        However, since creating a bitarray from another bitarray just copies the
+        memory representing the data, you can create a new bitarray with different
+        endianness:
+        
+        >>> a = bitarray('11100000', endian='little')
+        >>> b = bitarray(a, endian='big')
+        >>> b
+        bitarray('00000111')
+        >>> a == b
+        False
+        >>> a.tostring() == b.tostring()
+        True
+        
+        The default bit endianness is currently big-endian, however this may change
+        in the future, and when dealing with the machine represention of bitarray
+        objects, it is recommanded to always explicitly specifiy the endianness.
+        
+        Unless, excplicity converting to machine representation, using
+        the `tostring`, `fromstring`, `tofile` and `fromfile` methods,
+        the bit endianness will have no effect on any computation, and you
+        don't have to worry about setting the endianness, and other (possibly
+        confusing) details of this section.
+        
+        
+        Reference
+        ---------
+        
+        A bitarray object has the following methods:
+        
+        append(x)
+        Append new value bool(x) to the end of the bitarray.
+        
+        
+        buffer_info()
+        Return a tuple (address, length, endianness) giving the current memory
+        address, and the length in bytes used to hold the bitarray's contents, and
+        the bit endianness as a string (either 'little' or 'big').
+        The length in bytes multiplied by 8 is slightly larger than the number of
+        bits the bitarray holds.
+        
+        
+        bytereverse()
+        For all bytes representing the bitarray, reverse the bit order.
+        
+        
+        count(x)
+        Return number of occurences of x in the bitarray.
+        
+        
+        endian()
+        return the bit endianness as a string (either 'little' or 'big').
+        
+        
+        extend(bitarray or iterable)
+        Append bits to the end of the bitarray.
+        When you want to extend from a list, it's faster to use fromlist.
+        
+        
+        fill()
+        When the length of the bitarray is not a mutiple of 8, increase the length
+        slightly such that the new length is a mutiple of 8, and set the few new
+        bits to zero.
+        
+        
+        from01(string)
+        Appends items from the string (containing '0's and '1's) to the bitarray.
+        
+        
+        fromfile(f [, n])
+        Read n bytes from the file object f and append them to the bitarray
+        interpreted as machine values.  When n is omitted, as many bytes are
+        read until EOF is reached.
+        
+        
+        fromlist(list)
+        Append bits to bitarray from list.
+        
+        
+        fromstring(string)
+        Append from a string, interpreting the string as machine values.
+        
+        
+        index(x)
+        Return index of first occurence of x in the bitarray.  It is an error when x
+        does not occur in the bitarray
+        
+        
+        insert(i, x)
+        Insert a new item x into the bitarray before position i.
+        
+        
+        invert(x)
+        Invert all bits in the bitarray, i.e. convert each 1-bit into a 0-bit
+        and vice versa.
+        
+        
+        length()
+        Return the length (number of bits) of the bitarray.
+        
+        
+        pop([i])
+        Return the i-th element and delete it from the bitarray. i defaults to -1.
+        
+        
+        remove(x)
+        Remove the first occurence of x in the bitarray.
+        
+        
+        reverse()
+        reverse the order of bits in the bitarray.
+        
+        
+        setall(x)
+        Set all bits in the bitarray to x.
+        
+        
+        to01(string)
+        Return a string containing '0's and '1's, representing the bits in the
+        bitarray object.
+        
+        
+        tofile(f)
+        Write all bits (as machine values) to the file object f.
+        When the length of the bitarray is not a mutiple of 8,
+        the few remaining bits are filled with zeros.
+        
+        
+        tolist()
+        Return an ordinary list with the items in the bitarray.
+        
+        
+        tostring()
+        Return the string representing (machine values) of the bitarray.
+        When the length of the bitarray is not a mutiple of 8, the few remaining
+        bits are filled with zeros.
+        
+        
+        
+Platform: UNKNOWN
+Classifier: License :: OSI Approved :: Python Software Foundation License
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: C
+Classifier: Programming Language :: Python
+Classifier: Topic :: Utilities
