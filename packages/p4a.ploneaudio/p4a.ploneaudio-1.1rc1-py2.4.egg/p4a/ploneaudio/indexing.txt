@@ -1,0 +1,103 @@
+Indexing
+========
+
+``p4a.ploneaudio`` provides various extensible indexes so that catalog searches
+are more fine tuned.
+
+SearchableText
+--------------
+
+We need to provide our own SearchableText index for getting in the audio
+enhanced content for searching.
+
+Begin by checking on a regular ATFile instance which cannot be adapted
+to IAudio.  In this case the standard ``SearchableText`` behaviour should be
+returned.
+
+    >>> from p4a.ploneaudio import atct, indexing
+    >>> from Products.ATContentTypes.content import file
+    >>> from Products.Archetypes import interfaces as atifaces
+    >>> from zope import component
+    >>> from Products.MimetypesRegistry.MimeTypesRegistry \
+    ...     import MimeTypesRegistry
+
+    >>> basicfile = file.ATFile('basicfile')
+    >>> basicfile.mimetypes_registry = MimeTypesRegistry()
+
+    >>> def schema(context):
+    ...     return file.ATFile.schema
+    >>> component.provideAdapter(schema,
+    ...                          provides=atifaces.ISchema,
+    ...                          adapts=(file.ATFile,))
+
+    >>> indexing.SearchableText(basicfile, None)
+    'basicfile '
+
+First try a file that has had no genre set.  The resulting value will
+be a unicode string that only contains the regular ``SearchableText`` content.
+
+    >>> from zope import interface
+    >>> from p4a.audio import interfaces
+
+    >>> audiofile = file.ATFile('audiofile')
+    >>> interface.alsoProvides(audiofile, interfaces.IAudio)
+    >>> audiofile.obj = audiofile
+    >>> audiofile.genre = None
+    >>> audiofile.artist = u''
+    >>> audiofile.SearchableText = lambda: 'hello world'
+    >>> indexing.SearchableText(audiofile, None)
+    'hello world'
+
+When a genre is set to it's numeric code, the indexed content will contain
+the english-looking title of that genre.
+
+    >>> audiofile.genre = 4
+    >>> indexing.SearchableText(audiofile, None)
+    'hello world Disco'
+
+Audio-specific Indexes
+----------------------
+
+There are various indexes for directly querying audio information.
+
+The ``audio_genre_id`` function returns the numeric genre code.
+
+    >>> indexing.audio_genre_id(audiofile, None)
+    4
+
+Of course that function will yield an AttributeError when used on an object
+with no ``IAudio`` adapter.
+
+    >>> indexing.audio_genre_id(basicfile, None)
+    Traceback (most recent call last):
+      ...
+    AttributeError
+
+The ``audio_artist`` function is used for retrieving artist info.
+
+    >>> audiofile.artist = u'Rocky Burt'
+    >>> indexing.audio_artist(audiofile, None)
+    u'Rocky Burt'
+
+Again, the ``audio_artist`` function will yield an AttributeError when used on
+an object with no ``IAudio`` adapter.
+
+    >>> indexing.audio_artist(basicfile, None)
+    Traceback (most recent call last):
+      ...
+    AttributeError
+
+And same thing for the track number:
+
+    >>> audiofile.idtrack = 7
+    >>> indexing.audio_track(audiofile, None)
+    7
+
+Again, the ``audio_track`` function will yield an AttributeError when used on
+an object with no ``IAudio`` adapter.
+
+    >>> indexing.audio_track(basicfile, None)
+    Traceback (most recent call last):
+      ...
+    AttributeError
+ 

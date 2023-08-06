@@ -1,0 +1,356 @@
+.. -*-doctest-*-
+
+ATContentTypes Support
+======================
+
+Ensure that the adapters for various ATCT based content types are in working
+order.
+
+Setup
+-----
+
+First we create some mock classes for testing content.
+
+    >>> from Products.ATContentTypes.content import folder, file, topic
+    >>> from p4a.audio import interfaces
+    >>> from zope import interface
+    >>> from zope import component
+    >>> from Products.Archetypes import interfaces as atifaces
+
+    >>> class MockPortalTypes:
+    ...     def listContentTypes(self): return []
+    ...     def getTypeInfo(self, portal_type): return None
+
+    >>> class MockCatalog:
+    ...     def registerObject(self, ob): pass
+    ...     def catalog_object(self, *args, **kwargs): pass
+
+    >>> class MockPortal:
+    ...     def getPhysicalPath(self): return ['/']
+
+    >>> class MockPortalTool:
+    ...     portal = MockPortal()
+    ...     def getPortalObject(self): return self.portal
+
+    >>> class MockFolder(folder.ATFolder):
+    ...     portal_types = MockPortalTypes()
+    ...     reference_catalog = MockCatalog()
+    ...     uid_catalog = MockCatalog()
+    ...     uid_catalog.reference_catalog = reference_catalog
+    ...     portal_url = MockPortalTool()
+    ...     def getFolderContents(self, *args, **kwargs):
+    ...         return self.objectValues()
+    >>> def schema(context):
+    ...     return file.ATFile.schema
+    >>> component.provideAdapter(schema,
+    ...                          provides=atifaces.ISchema,
+    ...                          adapts=(MockFolder,))
+
+    >>> class MockTopic(topic.ATTopic, MockFolder):
+    ...     def queryCatalog(self, **kwargs):
+    ...         return self.objectValues()
+
+Many of our classes use adapters to handle their logic so we need to setup
+a few of the adapters as well.
+
+    >>> from p4a.ploneaudio import atct
+    >>> from Products.ATContentTypes import interface as atctifaces
+    >>> component.provideAdapter(atct.ATCTFileAudio)
+
+    >>> try:
+    ...     from zope.app.annotation.interfaces import IAttributeAnnotatable
+    ...     from zope.app.annotation.attribute import AttributeAnnotations
+    ... except ImportError, err:
+    ...     from zope.annotation.interfaces import IAttributeAnnotatable
+    ...     from zope.annotation.attribute import AttributeAnnotations
+    >>> component.provideAdapter(AttributeAnnotations)
+
+Next we setup some mock folder content that we can test with.
+
+    >>> testfolder = MockFolder('testfolder')
+    >>> file1 = file.ATFile('file1')
+    >>> class MockFile(file.ATFile):
+    ...     interface.implements(atctifaces.IATFile,
+    ...                          IAttributeAnnotatable,
+    ...                          interfaces.IMediaActivator)
+    ...     media_activated = False
+    >>> def schema(context):
+    ...     return file.ATFile.schema
+    >>> component.provideAdapter(schema,
+    ...                         provides=atifaces.ISchema,
+    ...                         adapts=(MockFile,))
+
+    >>> file1 = MockFile('foo')
+
+Since our file instance still doesn't provide IAudioEnhanced the
+adapter lookup will return None.
+
+    >>> atct.ATCTFileAudio(file1) is None
+    True
+
+Now we audio enhance it and do a query of the audio items.
+
+    >>> interface.alsoProvides(file1, interfaces.IAudioEnhanced)
+    >>> testfolder.aq_explicit = testfolder
+
+    >>> newid = testfolder._setObject(file1.getId(), file1)
+    >>> provider = atct.ATCTFolderAudioProvider(testfolder)
+    >>> provider.audio_items
+    [<p4a.audio ATCTFileAudio title=>]
+
+We can also lookup audio information on this folder.  But since the folder
+hasn't been marked as ``IAudioContainerEnhanced`` lookup will return None.
+
+    >>> containeraudio = atct.ATCTFolderAudioContainer(testfolder)
+    >>> containeraudio is None
+    True
+
+So now we have to mark the interface.
+
+    >>> interface.alsoProvides(testfolder,
+    ...                        interfaces.IAudioContainerEnhanced,
+    ...                        IAttributeAnnotatable)
+    >>> containeraudio = atct.ATCTFolderAudioContainer(testfolder)
+    >>> containeraudio
+    <p4a.audio ATCTFolderishAudio title=>
+
+And now we setup some mock smart folder (topic) content that we can test
+with.
+
+    >>> testtopic = MockTopic('testtopic')
+    >>> newid = testtopic._setObject(file1.getId(), file1)
+
+    >>> provider = atct.ATCTTopicAudioProvider(testtopic)
+    >>> provider.audio_items
+    [<p4a.audio ATCTFileAudio title=>]
+
+We can also lookup audio information on this smart folder.  But since the
+smart folder hasn't been marked as ``IAudioContainerEnhanced`` lookup will
+return None.
+
+    >>> containeraudio = atct.ATCTTopicAudioContainer(testtopic)
+    >>> containeraudio is None
+    True
+
+So now we have to mark the interface.
+
+    >>> interface.alsoProvides(testtopic,
+    ...                        interfaces.IAudioContainerEnhanced,
+    ...                        IAttributeAnnotatable)
+    >>> containeraudio = atct.ATCTTopicAudioContainer(testtopic)
+    >>> containeraudio
+    <p4a.audio ATCTFolderishAudio title=>
+
+One last content type we provide the audio container functionality for is
+the (disabled by default) ATCT btree folder.
+
+    >>> atct.ATCTBTreeFolderAudioContainer(None) is None
+    True
+
+    >>> containeraudio = atct.ATCTBTreeFolderAudioContainer(testfolder)
+    >>> containeraudio
+    <p4a.audio ATCTFolderishAudio title=>
+
+Loading and Storing Metadata
+----------------------------
+
+First we need to make sure a mock data accessor adapter is available.
+
+    >>> files_loaded = []
+    >>> files_stored = []
+    >>> class MockDataAccessor(object):
+    ...     def __init__(self, context): self.context = context
+    ...     def load(self, filename): files_loaded.append(filename)
+    ...     def store(self, filename): files_stored.append(filename)
+    ...     audio_type = 'mock_type'
+
+    >>> component.provideAdapter(MockDataAccessor,
+    ...                          provides=interfaces.IAudioDataAccessor,
+    ...                          adapts=(interface.Interface,),
+    ...                          name=u'text/plain')
+
+Next we instruct the audio item to load it's audio metdata.
+
+    >>> audio = atct.ATCTFileAudio(file1)
+    >>> audio._load_audio_metadata()
+    >>> len(files_loaded)
+    1
+
+And then we need the audio item to save it's audio metadata back.
+
+    >>> component.provideAdapter(MockDataAccessor,
+    ...                          provides=interfaces.IAudioDataAccessor,
+    ...                          adapts=(interface.Interface,),
+    ...                          name=u'application/octet-stream')
+    >>> audio._save_audio_metadata()
+    >>> len(files_stored)
+    1
+
+There is also an event handler for automatically kicking the loading of
+metadata.
+
+    >>> atct.load_metadata(audio, None)
+
+And when a file object changes there is a synchronization event handler
+that tries to make sure the content is sane.
+
+    >>> from zope.app.event import objectevent
+    >>> class MockEvent(object):
+    ...     descriptions = [objectevent.Attributes(interfaces.IAudio,
+    ...                                            'title', 'file')]
+    >>> atct.sync_audio_metadata(audio, MockEvent())
+
+Attempting Media Activation
+---------------------------
+
+There is an event handler which tries to automatically activate media
+on modified objects.
+
+But first we need to setup a test request and register our view component.
+
+    >>> from zope.publisher.browser import TestRequest
+    >>> file1.REQUEST = TestRequest()
+
+    >>> from p4a.audio.browser import media
+    >>> component.provideAdapter(media.ToggleEnhancementsView,
+    ...                          adapts=(interface.Interface,
+    ...                                  TestRequest),
+    ...                          provides=interface.Interface,
+    ...                          name=u'media-config.html')
+    >>> from p4a.audio.media import MediaActivator
+    >>> component.provideAdapter(MediaActivator)
+
+    >>> view = media.ToggleEnhancementsView(file1, file1.REQUEST)
+    >>> view.media_activated
+    False
+
+Since it's false, lets go ahead and try doing activation.
+
+    >>> atct.attempt_media_activation(file1, None)
+
+At this point we've never made our file1 object provide IPossibleAudio
+so even though it's marked as IAudioEnhanced, the feature property checks
+for both.
+
+    >>> interface.alsoProvides(file1, interfaces.IPossibleAudio)
+    >>> view.media_activated
+    True
+
+Now we can try activation again.
+
+    >>> atct.attempt_media_activation(file1, None)
+
+And now we try to produce some error being raised within the adapter lookup
+call.
+
+    >>> file2 = file.ATFile('file2')
+    >>> file2.get_content_type = lambda: 'nadda'
+    >>> file2.REQUEST = file1.REQUEST
+    >>> interface.alsoProvides(file2, interfaces.IPossibleAudio)
+    >>> atct.attempt_media_activation(file2, None)
+
+DataAccessor I18N Convenience Functionality
+-------------------------------------------
+
+Ensure the default charset can be retrieved on the previous adapter.  First
+we'll make sure it gets whatever the DEFAULT_CHARSET constant is set at.
+
+    >>> audio._default_charset == atct.DEFAULT_CHARSET
+    True
+
+Now we setup the charset as it gets retrieved via Plone.
+
+    >>> class MockProperties: pass
+    >>> propstool = MockProperties()
+    >>> propstool.site_properties = MockProperties()
+    >>> propstool.site_properties.default_charset = 'foobar'
+    >>> audio.context.portal_properties = propstool
+
+Due to the fact that the charset will have already been cached, we need
+to manually remove the cache value and try.
+
+    >>> del audio._cached_default_charset
+    >>> audio._default_charset
+    'foobar'
+
+And now we try once more to make sure the caching worked (we delete
+the tool so if caching wasn't working we would get DEFAULT_CHARSET).
+
+    >>> del audio.context.portal_properties
+    >>> audio._default_charset
+    'foobar'
+
+And of course we make a simple _u() call (need to delete the cached charset
+first or else it'll try decoding using the 'foobar' charset).
+
+    >>> del audio._cached_default_charset
+    >>> audio._u('foo')
+    u'foo'
+
+Misc DataAccessor Stuff
+-----------------------
+
+Make sure setting and getting the file attribute works properly (uses
+properties at the moment).
+
+    >>> audio.file
+    <File at foo/file>
+
+When we set the file directly it actually issues an upload command so
+the string value becomes the file object value.
+
+    >>> audio.file = 'foo'
+    >>> audio.file
+    <File at foo/file>
+
+In it's starting condition, the ``audio_image`` field will have no value.
+
+    >>> audio.audio_image is None
+    True
+
+So we start by trying to set the value to a value we know will get ignored.
+
+    >>> audio.audio_image = interfaces.IAudio['audio_image'].missing_value
+    >>> audio.audio_image is None
+    True
+
+The image value can be of instance OFSImage.
+
+    >>> from OFS import Image as ofsimage
+    >>> audio.audio_image = ofsimage.Image('someid', 'sometitle', 'filecontent')
+    >>> audio.audio_image
+    <Image at someid>
+
+If it isn't of type OFSImage, the setter will automatically create
+one based on the value provided (the value is expected to be file-like).
+
+    >>> from StringIO import StringIO
+    >>> sio = StringIO('foo')
+    >>> sio.filename = 'nofilenameset'
+    >>> audio.audio_image = sio
+    >>> audio.audio_image
+    <Image at nofilenameset>
+
+And now we do a quick check to see what the ``audio_type`` is.
+
+    >>> audio.audio_type
+    'mock_type'
+
+Feature Event Handling
+----------------------
+
+Whenever a feature has been activated we have an event handler that
+listens.  It helps ensure that the audio container view is setup properly
+on a container that has had it's layout changed.
+
+    >>> from p4a.common.interfaces import FeatureActivatedEvent
+    >>> evt = FeatureActivatedEvent(interfaces.IAudioContainerEnhanced,
+    ...                             testfolder)
+    >>> hasattr(testfolder, 'layout')
+    False
+    >>> testfolder.layout = 'changed'
+    >>> hasattr(testfolder, 'layout')
+    True
+    >>> atct.feature_activated(evt)
+    >>> hasattr(testfolder, 'layout')
+    False
