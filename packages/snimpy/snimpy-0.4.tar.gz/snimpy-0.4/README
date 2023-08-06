@@ -1,0 +1,167 @@
+snimpy -- Interactive SNMP tool
+===============================
+
+ http://trac.luffy.cx/snimpy
+
+Introduction
+------------
+
+Snimpy is a Python-based tool providing a simple interface to build
+SNMP query. Here is a very simplistic example that allows to display
+the routing table of a given host:
+
+load("IP-FORWARD-MIB")
+m=M()
+routes = m.ipCidrRouteNextHop
+for x in routes:
+    net, netmask, tos, src = x
+    print "%15s/%-15s via %-15s src %-15s" % (net, netmask, routes[x], src)
+
+You can either use snimpy interactively throught its console (derived
+from Python own console or from IPython if available) or write snimpy
+scripts which are just Python scripts with some global variables
+available.
+
+This is not a general-use SNMP module. You can find better ones:
+ - pycopia
+ - pynetsnmp, a ctype based implementation using Net-SNMP
+ - PySNMP, a pure Python implementation
+ - Net-SNMP own library Python
+ - many others
+
+This is not really a replacement for snmpget, snmpwalk and
+snmpset. You cannot query arbitrary OID and you can only walk tables,
+not any node. Moreover, if remote host sends bogus value, snimpy will
+just stop with an exception (this is also a feature).
+
+At least, snimpy does not support SNMPv3 yet.
+
+Snimpy is aimed at being the more Pythonic possible. You should forget
+that you are doing SNMP requests. Snimpy will rely on MIB to hide SNMP
+details. Here are some "features" of snmimpy:
+ - MIB parser based on libsmi
+ - SNMP requests are handled by libnetsnmp
+ - scalars are just attributes of your session object
+ - columns are like a Python dictionary and made available as
+   an attribute
+ - getting an attribute is like issuing a GET method
+ - setting an attribute is like issuing a SET method
+ - iterating over a table is like using GETNEXT
+ - when something goes wrong, you get an exception
+
+License
+-------
+
+Snimpy is licensed under MIT/X11 license. See at the top of source
+files for details. This license allows to interface freely with
+Net-SNMP and OpenSSL.
+
+Installation and usage
+----------------------
+
+You can install using:
+ python setup.py build
+ python setup.py install
+
+Or without installation:
+ python bin/snimpy.py
+
+See examples in examples/ directory for some real examples on how to
+use it.
+
+If you don't specify a file, the interactive console is
+spawned. Otherwise, the given script is executed and the remaining
+arguments are served as arguments for the script.
+
+You get a classic Python environment. There are two additional objects
+available:
+
+ - The load() method that takes a MIB name or a path to a
+   filename. The MIB will be loaded into memory and made available in
+   all SNMP managers:
+      load("IF-MIB")
+      load("/usr/share/mibs/ietf/IF-MIB")
+ - the M class which is used to instantiate a manager (a SNMP client):
+      m = M(host="localhost", community="private", version=2)
+      m = M("localhost", "private", 2)
+      m = M(community="private")
+
+A manager instance contains all the scalars and the columns that are
+in the MIB loaded with the load() method. There is no table, node or
+other entities. For a scalar, getting and setting a value is a simple
+as :
+  print m.sysDescr
+  m.sysName = "newhostname"
+
+For a column, you get a dictionary-like interface:
+  for index in m.ifDescr: print repr(m.ifDescr[i])
+  m.ifAdminStatus[3] = "down"
+
+If you want to group several write into a single request, you can do
+it with "with" keyword of Python 2.5+:
+
+ with M("localhost", "private") as m:
+    m.sysName = "toto"
+    m.ifAdminStatus[20] = "down"
+
+Or:
+
+ m = M("localhost", "private")
+ with m:
+    m.sysName = "toto"
+    m.ifAdminStatus[20] = "down"
+
+There is also a caching mechanism which is disabled by default:
+
+ import time
+ m = M("localhost", cache=True)
+ print m.sysUpTime
+ time.sleep(1)
+ print m.sysUpTime
+ time.sleep(1)
+ print m.sysUpTime
+ time.sleep(10)
+ print m.sysUpTime
+
+You can also use the number of seconds the cache should be hold.
+
+ m = M("localhost", cache=20)
+
+That's all!
+
+Why another tool?
+-----------------
+
+There are a lot of SNMP tools available but most of them have
+important drawback when you need to reliably automatize operations.
+
+snmpget, snmpset and snmpwalk are difficult to use in scripts. Errors
+are printed on standard output and there is no easy way to tell if the
+command was successful or not. Moreover, results can be multiline (a
+long HexString for example). At least, automatisation is done through
+the shell and OID or bit manipulation are quite difficult.
+
+Net-SNMP provides officiel bindings for Perl and
+Python. Unfortunately, the integration is quite poor. You don't have
+an easy way to load and browse MIBs and error handling is
+inexistant. For example, the Python bindings will return None for a
+non-existant OID. Having to check for this on each request is quite
+cumbersome.
+
+For Python, there are other bindings. For example, pysnmp provides a
+pure Python implementation. However, MIBs need to be
+compiled. Moreover, the exposed interface is still low-level. Sending
+a simple SNMP GET can either take 10 lines or one line wrapped into 10
+lines.
+
+Some other Python bindings are not maintained any more. For example
+yasnmp does not compile with current libsnmp.
+
+The two main points of snimpy are:
+ - very high-level interface
+ - raise exceptions when something goes wrong
+
+If you want a more complete interface to SNMP, you can have a look at
+pycopia. It contains a great SNMP library (pure Python) and MIB
+parser (based on libsmi):
+ http://code.google.com/p/pycopia/
