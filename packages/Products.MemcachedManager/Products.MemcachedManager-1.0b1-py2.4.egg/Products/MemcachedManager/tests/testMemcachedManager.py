@@ -1,0 +1,148 @@
+# Copyright (c) 2004 Zope Corporation and Plone Solutions
+# ZPL 2.1 license
+
+import time
+
+from Products.MemcachedManager.tests import mcmtc
+
+
+class TestMemcachedManager(mcmtc.MemcachedManagerTestCase):
+    """ Test MemcachedManager """
+
+    def testCacheManagerPresence(self):
+        cm = self._cachemanager
+        self.failUnless(cm)
+
+    def testCachePresence(self):
+        cache = self._cache
+        self.failUnless(cache)
+
+    def testCacheSetGet(self):
+        cm = self._cachemanager
+        cache = self._cache
+        ob = self._script
+        data = 'test'
+        cache.ZCache_set(ob=ob, data=data)
+        self.dummySleep()
+        cached = cache.ZCache_get(ob=ob)
+        self.failUnlessEqual(cached, data)
+
+    def testCacheInvalidate(self):
+        cm = self._cachemanager
+        cache = self._cache
+        ob = self._script
+        data = 'test'
+        cache.ZCache_set(ob=ob, data=data)
+        time.sleep(0.5)
+        cache.ZCache_invalidate(ob=ob)
+        self.dummySleep()
+        self.failIf(cache.ZCache_get(ob=ob))
+
+    def testCacheCleanup(self):
+        cm = self._cachemanager
+        cache = self._cache
+        ob = self._script
+        data = 'test'
+        cache.ZCache_set(ob=ob, data=data)
+        self.dummySleep()
+        cache.cleanup()
+        self.dummySleep()
+        self.failIf(cache.ZCache_get(ob=ob))
+
+    def testMaxAge(self):
+        self.setMaxAge(1)
+        self.setRefreshInterval(1)
+        cm = self._cachemanager
+        cache = self._cache
+        ob = self._script
+        data = 'test'
+        self.dummySleep()
+        cache.ZCache_set(ob=ob, data=data)
+        self.dummySleep(1)
+        time.sleep(1)
+        # Expired after 1 second
+        res = cache.ZCache_get(ob=ob)
+        self.failIf(res, "Got %s, expected None" % res)
+
+    def testLastmod(self):
+        cm = self._cachemanager
+        cache = self._cache
+        ob = self._script
+        data = 'test'
+        self.dummySleep()
+        cache.ZCache_set(ob=ob, data=data)
+        self.dummySleep(1)
+        time.sleep(1)
+        # Last modified updated - should get None
+        res = cache.ZCache_get(ob=ob, mtime_func=time.time)
+        self.failIf(res, "Got %s, expected None" % res)
+        # Make sure entry is deleted when expired
+        res = cache.ZCache_get(ob=ob, mtime_func=None)
+        self.failIf(res, "Got %s, expected None - entry not deleted on expiry" % res)
+
+    def testMetadataOverwroteData(self):
+        # Test for hash key conflict
+        cm = self._cachemanager
+        cache = self._cache
+        ob = self._script
+        data = 'test'
+        self.dummySleep()
+        cache.ZCache_set(ob=ob, data=data)
+        self.dummySleep(1)
+        oc = cache.getObjectCacheEntries(ob)
+        # The keys are index for data and oc.d for metadata
+        index = oc.aggregateIndex('', ob.REQUEST, cache.request_vars, None)
+        # Overwrite data with metadata
+        metadata = cache.cache.get(oc.d) # d is md5.hexdigest(url)
+        cache.cache.set(index, metadata)
+        # No result as data is invalid
+        res = cache.ZCache_get(ob=ob)
+        self.failUnlessEqual(res, None)
+
+    def testDataOverwroteMetadata(self):
+        # Test for hash key conflict
+        cm = self._cachemanager
+        cache = self._cache
+        ob = self._script
+        data = 'test'
+        self.dummySleep()
+        cache.ZCache_set(ob=ob, data=data)
+        self.dummySleep(1)
+        oc = cache.getObjectCacheEntries(ob)
+
+        # The keys are index for data and oc.d for metadata
+        index = oc.aggregateIndex('', ob.REQUEST, cache.request_vars, None)
+
+        # Overwrite metadata with data
+        cachedata = cache.cache.get(index)
+        cache.cache.set(oc.d, cachedata)
+
+        # Retrieval will work
+        res = cache.ZCache_get(ob=ob)
+        self.failUnlessEqual(res, data)
+
+        # Setting will re-create the meta data structure
+        cache.ZCache_set(ob=ob, data=data)
+
+        # What should happen in this case?
+        metadata = cache.cache.get(oc.d)
+        self.failUnless(metadata.has_key(index))
+
+    def testCacheAcquisitionWrapper(self):
+        # Test for hash key conflict
+        cm = self._cachemanager
+        cache = self._cache
+        ob = self._script
+        data = self.folder
+        self.dummySleep()
+        # This is supposed to thrown a TypeError
+        # cache.ZCache_set(ob=ob, data=data)
+        self.failUnlessRaises(TypeError, cache.ZCache_set, ob=ob, data=data)
+        self.dummySleep(1)
+
+
+def test_suite():
+    from unittest import TestSuite, makeSuite
+    suite = TestSuite()
+    suite.addTest(makeSuite(TestMemcachedManager))
+    return suite
