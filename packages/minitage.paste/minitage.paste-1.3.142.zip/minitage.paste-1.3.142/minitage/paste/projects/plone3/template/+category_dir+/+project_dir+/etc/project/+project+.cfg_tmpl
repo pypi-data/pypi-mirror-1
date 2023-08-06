@@ -1,0 +1,135 @@
+
+# Project specific settings
+
+#if 'zeo' in $mode:
+#set $zeocomment=''
+#else
+#set $zeocomment='#'
+#end if
+#if $with_ploneproduct_fss
+#set $fsscomment=''
+#else
+#set $fsscomment='#'
+#end if
+#if $with_indexing_solr
+#set $solrcomment=''
+#else
+#set $solrcomment='#'
+#end if
+
+[buildout]
+sources-dir=\${buildout:directory}/src.mrdeveloper
+parts += #slurp
+#if $with_ploneproduct_plomino:
+    plomino
+#end if
+#if $with_ploneproduct_vaporisation:
+    vaporisation
+#end if
+
+# extra directories oto add to the python path
+extra-paths=
+auto-checkout +=
+#     my.package
+
+# auto tracked developement products
+[sources]
+# see http://pypi.python.org/pypi/mr.developer for documentation
+#my.package = svn http://example.com/svn/my.package/trunk
+#some.other.package = git git://example.com/git/some.other.package.git
+
+[instance]
+# attacking zopepy:eggs make instance be built after zopepy
+# in any case thx to the buildout automatic parts sort.
+eggs += \${buildout:eggs} #slurp
+#for $product in $additional_eggs:
+#if product.startswith('#'):
+$product
+#else:
+    ${product}
+#end if
+#end for
+
+develop+=
+
+zcml +=#slurp
+#for $product in $plone_zcml:
+#if product.startswith('#'):
+${product}
+#else:
+    ${product}
+#end if
+#end for
+
+#if $with_ploneproduct_plomino:
+products+=
+    \${plomino:location}
+#end if
+
+[kgs]
+file=\${buildout:directory}/etc/${project}-kgs.cfg
+
+[zopepy]
+# Scripts generated filtering
+scripts +=
+#zope2
+    repozo
+    zeoctl
+    zeopack
+    zeopasswd #slurp
+#for $product in $plone_scripts:
+#if product.startswith('#'):
+${product}
+#else:
+    ${product}
+#end if
+#end for
+ 
+# zope.testing testrunner support
+[testenv]
+INSTANCE_HOME=\${instance:location}
+CONFIG_FILE=\${instance:location}/etc/zope.conf
+
+# fake old zope2 products to let the testrunner work
+[fakeproducts]
+recipe=plone.recipe.command
+update-command = \${fakeproducts:command}
+
+command =
+    mkdir -pv \${buildout:directory}/parts/fakeproducts/Products/;
+    touch  \${buildout:directory}/parts/fakeproducts/Products/__init__.py;
+    for i in \$(echo "\${instance:products}");do for j in \$i/*;do if [[ "\$j" != "\$i/" ]] && [[ -d \$j ]];then ln -sfv \$j \${buildout:directory}/parts/fakeproducts/Products/\$(basename \$j);fi;done;done; 
+
+# This testrunner is a zc.recipe.testrunner like
+# See http://pypi.python.org/pypi/zc.recipe.testrunner/
+# It can do xml reports addon if you supply -x as a command line argument
+# It is useful for generating reports for hudson or other contineous integration
+[${sane_name}.test]
+recipe = collective.xmltestreport
+eggs = \${instance:eggs}
+extra-paths = \${instance:extra-paths}
+    \${buildout:directory}/parts/fakeproducts 
+defaults = ['--exit-with-status', '--auto-color', '--auto-progress']
+environment = testenv
+
+
+# Plone site creation if no other plonesite preset
+[plonesite]
+# http://pypi.python.org/pypi/collective.recipe.plonesite/
+recipe = collective.recipe.plonesite
+site-id = \${plone:site}
+site-replace=false
+enabled=true
+instance = instance
+# products to autoinstall
+products-initial=
+# profils to autorun
+profils-initial=
+${zeocomment}zeoserver = zeoserver
+
+# Plone site (re)creation
+[newplonesite]
+<= plonesite
+site-replace=true
+
+# vim:set ft=cfg:
