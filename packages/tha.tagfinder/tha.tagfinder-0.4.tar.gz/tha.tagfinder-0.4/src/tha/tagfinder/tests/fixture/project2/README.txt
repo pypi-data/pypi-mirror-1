@@ -1,0 +1,3 @@
+Some readme.
+
+The directory traversal used to break on non-directories...

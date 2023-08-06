@@ -1,0 +1,124 @@
+"""
+.. :doctest:
+
+Extracting info
+===============
+
+A lister (SvnLister or DirLister) is used by the finder to traverse a dir/svn
+structure.  It looks for a trunk/tags structure and returns that information.
+An extracter is used to extract useful information from that structure.
+
+For testing, we use the fixture_dir:
+
+    >>> fixture_dir
+    '...tha/tagfinder/tests/fixture'
+
+
+Basic information
+-----------------
+
+Set up a dirlister.  Ignore the fixture_dir's ``.svn`` directories:
+
+    >>> from tha.tagfinder import lister
+    >>> startpoint = lister.DirLister(fixture_dir, ignore=['.svn'])
+    >>> project = startpoint.traverse('project1')
+
+The BaseExtractor extracts several things.  The location of the project and
+the trunk location:
+
+    >>> from tha.tagfinder import extracter
+    >>> info = extracter.BaseExtracter(project)
+    >>> info.location
+    '...tests/fixture/project1'
+    >>> info.trunk
+    '...tests/fixture/project1/trunk'
+
+
+Name
+----
+
+To get at least something, the name of the project directory is taken as the
+name:
+
+    >>> info.name
+    'project1'
+
+If a ``setup.py`` file is present and if a name can be extracted with a simple
+regex, that one is used instead:
+
+    >>> setuppy_project = startpoint.traverse('sandbox').traverse(
+    ...     'reinout').traverse('reinout_project')
+    >>> info = extracter.BaseExtracter(setuppy_project)
+    >>> info._base_name()
+    'reinout_project'
+    >>> info._setup_py_name()
+    'vanrees.project2'
+    >>> info.name
+    'vanrees.project2'
+
+
+Tag information
+---------------
+
+Tags should be sorted.  For this a distutils version method is used, wrapped
+by the ``version_key`` utility function:
+
+    >>> extracter.version_key('0.1 dev')
+    [0, 1, ' ', 'dev']
+    >>> versions = ['1.2', '0.1', '0.11', '0.9']
+    >>> versions.sort(key=extracter.version_key)
+    >>> versions
+    ['0.1', '0.9', '0.11', '1.2']
+
+To get from tag to tag location, call ``tag_location()`` (splitted as
+mercurial has a different way of handling tags).  
+
+    >>> project = startpoint.traverse('project1')
+    >>> info = extracter.BaseExtracter(project)
+    >>> info.tag_location('0.1')
+    '...tests/fixture/project1/tags/0.1'
+
+To get the actual tag list:
+
+    >>> info.tags
+    ['0.1', '0.2', '0.3-bugfix']
+
+The tag list doesn't include items that start with a non-number character:
+
+    >>> 'reinout-fixed' in project.traverse('tags').contents
+    True
+
+Request a non-exising tag and you get an error:
+
+    >>> info.tag_location('0.9')
+    Traceback (most recent call last):
+    ...
+    TagNotFoundError: 0.9
+
+In project2, there's no tag directory.  This also raises an error:
+
+    >>> project = startpoint.traverse('project2')
+    >>> info = extracter.BaseExtracter(project)
+    >>> info.tag_location('0.9')
+    Traceback (most recent call last):
+    ...
+    TagNotFoundError: Tag dir not found
+
+No tags are found, either:
+
+    >>> info.tags
+    []
+
+
+svn tests
+---------
+
+To test it also with subversion (which ought to work the same way, but which
+possibly exhibited a bug):
+
+    >>> startpoint = lister.SvnLister(repo_url)
+    >>> project = startpoint.traverse('project1')
+    >>> info = extracter.BaseExtracter(project)
+    >>> info.tags
+    ['0.1', '0.2', '0.3-bugfix']
+
