@@ -1,0 +1,81 @@
+<!--*-markdown-*-->
+
+# Cereal
+
+Cereal is a simple library for constructing serializers. It leans towards use with Django models, but can be used with pretty much any object. To use it, you define transformations from one object space to another using a very simple class-based DSL. The following example shows how the entire workflow might be laid out:
+
+    from django.db import models
+    
+    from cereal import *
+    
+    
+    class Book(models.Model):
+        isbn = models.CharField(max_length=16, unique=True)
+        publisher = models.ForeignKey('Publisher', related_name='books')
+        name = models.CharField(max_length=255)
+        author_name = models.CharField(max_length=255)
+        title = models.CharField(max_length=255)
+        created_at = models.DateTimeField()
+        preview = models.TextField()
+        stores = models.ManyToManyField('BookStore', related_name='books')
+    
+    
+    class BookSerializer(Serializer):
+        
+        proxies_for('name', 'author_name', 'title', 'created_at', 'preview')
+        
+        def publisher(book):
+            # `PublisherSerializer` may be defined elsewhere. `_without()` will
+            # dynamically create a new serializer without the `books`
+            # attribute; this is used to prevent an infinite loop.
+            return PublisherSerializer._without('books')(book.publisher)
+        
+        @with_key('isbn_uri')
+        def isbn(book):
+            return u'urn:isbn:' + book.isbn
+        
+        def store_count(book):
+            return book.stores.count()
+        
+        def stores(book):
+            # Return a list of the first 100 book stores. `StoreSerializer` may
+            # be defined elsewhere. We don't want each store to return its list
+            # of books, since that might result in an infinite loop.
+            return map(StoreSerializer._without('books'), book.stores[:100])
+    
+    
+    # This view could be routed to via '/book/<book_id>/'
+    def myview(request, book_id):
+        import simplejson
+        
+        book = Book.objects.get(pk=int(book_id))
+        serialized = BookSerializer(book) # Returns a serialized dictionary.
+        return HttpResponse(simplejson.dumps(serialized),
+            mimetype='application/json')
+
+**DISCLAIMER**: This library may kill your cat. It is nowhere near feature-completeness, but at the moment is still in one of those 'proof of concept'-type alpha stages.
+
+
+## (Un)license
+
+This is free and unencumbered software released into the public domain.
+
+Anyone is free to copy, modify, publish, use, compile, sell, or distribute this
+software, either in source code form or as a compiled binary, for any purpose,
+commercial or non-commercial, and by any means.
+
+In jurisdictions that recognize copyright laws, the author or authors of this
+software dedicate any and all copyright interest in the software to the public
+domain. We make this dedication for the benefit of the public at large and to
+the detriment of our heirs and successors. We intend this dedication to be an
+overt act of relinquishment in perpetuity of all present and future rights to
+this software under copyright law.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+For more information, please refer to <http://unlicense.org/>
