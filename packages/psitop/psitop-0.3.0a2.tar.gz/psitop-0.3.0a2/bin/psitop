@@ -1,0 +1,518 @@
+#!/usr/bin/env python
+# encoding: utf-8
+"""
+psitop
+"""
+
+__author__ = 'Chris Miles'
+__copyright__ = 'Copyright (c) 2007-2009 Chris Miles'
+__version__ = '0.3.0a1'
+
+# ---- Python Modules
+import grp
+import os
+import pwd
+import sys
+import time
+
+try:
+    import urwid.curses_display
+    import urwid
+except ImportError:
+    sys.stderr.write("Please install Urwid - http://excess.org/urwid/\n")
+    sys.exit(1)
+
+try:
+    import psi
+except ImportError:
+    sys.stderr.write("Please install PSI - http://www.psychofx.com/psi/\n")
+    sys.exit(1)
+
+
+
+# optparse is only available in 2.3+, but optik provides the same 
+# functionality for python 2.2
+try:
+    import optparse
+except ImportError:
+    try:
+        import optik as optparse
+    except ImportError:
+        print "Error: requires Optik on Python 2.2.x (http://optik.sf.net)"
+        sys.exit(1)
+
+
+# ---- Globals ----
+SORTBY_RECENT_PCPU = 'recent_pcpu'  # average cpu use between updates
+SORTBY_SYSTEM_PCPU = 'system_pcpu'  # system-supplied pcpu (not consistent across platforms)
+
+arch = psi.arch.arch_type()
+
+head_format = "%5s %4s %7s %7s %7s %8s %5s"
+line_format = "%5d %4s %7s %7s %7s %8s %4.1f%%"
+
+
+# ---- Classes ----
+
+class UserGroupManager(object):
+    def __init__(self):
+        self.uid2user = {}
+        self.gid2group = {}
+    
+    def user(self, uid):
+        user = self.uid2user.get(uid)
+        if user is None:
+            try:
+                pw = pwd.getpwuid(uid)
+                user = pw.pw_name
+            except KeyError:
+                user = str(uid)
+            self.uid2user[uid] = user
+        return user
+    
+    def group(self, gid):
+        group = self.gid2group.get(gid)
+        if group is None:
+            try:
+                g = grp.getgrgid(gid)
+                group = g.gr_name
+            except KeyError:
+                group = str(gid)
+            self.gid2group[gid] = group
+        return group
+    
+
+
+# ---- Module Functions ----
+
+def loadaverage_line(cols, rows):
+    loadavg = "Load Averages: %0.2f, %0.2f, %0.2f" % psi.loadavg()
+    hostname = arch.nodename.split('.')[0]
+    host = 'Host: '
+    n = cols - len(hostname) - len(loadavg) - len(host)
+    line = loadavg + (' ' * n) + host + hostname
+    return [line]
+
+
+def timedelta2seconds(d):
+    return (d.days * 24*60*60 + d.seconds + d.microseconds*0.000001)
+
+
+def get_process_command(p, full_command=False):
+    if full_command:
+        # fetch full command with arguments, if available
+        try:
+            cmd = None
+            try:
+                if p.command:
+                    cmd = p.command
+            except psi.AttrInsufficientPrivsError:
+                pass
+            if cmd is None:
+                try:
+                    if p.args:
+                        cmd = ' '.join(p.args)
+                except psi.AttrInsufficientPrivsError:
+                    pass
+                if cmd is None:
+                    try:
+                        cmd = p.exe
+                    except (psi.AttrInsufficientPrivsError, psi.AttrNotAvailableError):
+                        pass
+                    if cmd is None:
+                        try:
+                            cmd = p.accounting_name
+                        except psi.AttrInsufficientPrivsError:
+                            cmd = '???'
+        except psi.AttrNotImplementedError, e:
+            cmd = '!!!'
+        
+    else:
+        # Short command name
+        try:
+            cmd = None
+            try:
+                if p.args:
+                    cmd = os.path.basename(p.args[0])
+            except (psi.AttrInsufficientPrivsError, psi.AttrNotAvailableError):
+                pass
+            if cmd is None:
+                try:
+                    if p.command:
+                        cmd = os.path.basename(p.command.split()[0])
+                except psi.AttrInsufficientPrivsError:
+                    pass
+                if cmd is None:
+                    try:
+                        cmd = os.path.basename(p.exe)
+                    except (psi.AttrInsufficientPrivsError, psi.AttrNotAvailableError):
+                        pass
+                    if cmd is None:
+                        try:
+                            if p.accounting_name:
+                                cmd = p.accounting_name
+                        except psi.AttrInsufficientPrivsError:
+                            cmd = '???'
+        except psi.AttrNotImplementedError, e:
+            cmd = '!!!'
+        if cmd is None:
+            cmd = ''
+
+    return cmd
+
+
+class TopProcesses(object):
+    def __init__(self, refresh=1.0):
+        self.refresh = refresh
+        
+        self._previous_cpu_counters = {}
+        self._previous_timestamp = None
+        self._pcpu_for_pid = {}
+        self._lines = []
+        
+        self.snapshot_time = 0.0
+        
+        self.usergroup = UserGroupManager()
+    
+    def get_top(self, cols, rows, full_command=False, sort_by=SORTBY_RECENT_PCPU,
+            command_filter=None, refresh=False):
+        
+        now = time.time()
+        if not refresh and (now - self.snapshot_time) < self.refresh:
+            # Not enough elapsed time since previous snapshot, so return cached data.
+            return self._lines
+        
+        self.snapshot_time = now
+        
+        lines = []
+        
+        ps = psi.process.ProcessTable()
+        
+        if command_filter is None:
+            processes = ps.values()
+        else:
+            processes = [p for p in ps.values() if get_process_command(p, full_command).find(command_filter) >= 0]
+        
+        if sort_by == SORTBY_SYSTEM_PCPU:
+            ps_sorted = sorted(processes, key=self._key_pcpu, reverse=True)    #[:rows-2]
+        elif sort_by == SORTBY_RECENT_PCPU:
+            ps_sorted = self._get_sorted_by_recent_pcpu(processes, reverse=True)
+        else:
+            raise ValueError("Illegal sort_by value for TopProcesses.get_top : %s"%sort_by)
+        
+        head = head_format % ('PID', '#TH', 'USER', 'GROUP', 'RSS', 'VSZ', '%CPU')
+        head = head + ' COMMAND'
+        lines.append(head)
+        
+        for p in ps_sorted:
+            if isinstance(arch, psi.arch.ArchDarwin) and p.pid == 0:
+            # if isinstance(arch, psi.arch.ArchDarwin) and p.exe == 'kernel_task':
+                # Darwin/OS X: ignore kernel_task / pid 0 (represents idle CPU usage)
+                continue
+        
+            try:
+                rss = p.rss / 1024
+            except psi.AttrInsufficientPrivsError:
+                rss = '?'
+        
+            try:
+                vsz = p.vsz / 1024
+            except psi.AttrInsufficientPrivsError:
+                vsz = '?'
+        
+            try:
+                nthreads = p.nthreads
+            except psi.AttrInsufficientPrivsError:
+                nthreads = '?'
+        
+            # line = line_format % (p.pid, nthreads, p.user[:7], p.group[:7], rss, vsz, self._pcpu_for_pid[p.pid])
+            line = line_format % (p.pid, nthreads, self.usergroup.user(p.euid), self.usergroup.group(p.egid), rss, vsz, self._pcpu_for_pid[p.pid])
+            
+            cmd = get_process_command(p, full_command)
+            line = line + ' ' + cmd[:cols-len(line)-2]
+            lines.append(line)
+        
+        self._lines = lines
+        
+        return lines
+    
+    def _key_pcpu(self, o):
+        '''Return system-supplied pcpu (CPU usage %) as a float or
+        0.0 if it is not available.
+        '''
+        try:
+            pcpu = o.pcpu
+        except:
+            pcpu = 0.0
+        self._pcpu_for_pid[o.pid] = pcpu        # store for display
+        return pcpu
+    
+    def _get_sorted_by_recent_pcpu(self, processes, reverse=True):
+        self._pcpu_for_pid = {}
+        new_cputime = {}
+        pcpu_by_pid = {}
+        cpu_used = {}
+        
+        for p in processes:
+            prev_cpu = self._previous_cpu_counters.get(p.pid, None)
+            if prev_cpu is None:
+                try:
+                    pcpu_by_pid[p.pid] = p.pcpu     # default to system-supplied pcpu
+                except (psi.AttrInsufficientPrivsError, AttributeError):
+                    # I think this means the process had died before all its
+                    #   attributes could be collected... have to check this
+                    pcpu_by_pid[p.pid] = 0.0
+            else:
+                cpu = timedelta2seconds(p.cputime) - prev_cpu     # cpu secs used since last update
+                cpu_used[p.pid] = cpu
+            try:
+                new_cputime[p.pid] = timedelta2seconds(p.cputime)
+            except psi.AttrInsufficientPrivsError:
+                # Again, I think this happens if the process had finished
+                #   before all attributes were collected ... 
+                pass
+        
+        self._previous_cpu_counters = new_cputime
+        
+        now = time.time()
+        if self._previous_timestamp is not None:
+            timediff = now - self._previous_timestamp   # seconds since last update
+        self._previous_timestamp = now
+        
+        def _key_cpu_used(o):
+            cpu_secs = cpu_used.get(o.pid, None)
+            if cpu_secs is None:
+                pcpu = pcpu_by_pid.get(o.pid)
+            else:
+                pcpu = 100.0 * cpu_secs / timediff
+            self._pcpu_for_pid[o.pid] = pcpu             # store for display
+            return pcpu
+        
+        return sorted(processes, key=_key_cpu_used, reverse=reverse)
+    
+
+
+
+def top(delay=1.0):
+    
+    ui = urwid.curses_display.Screen()
+    
+    ui.register_palette( [
+        ('header', 'dark blue', 'light gray', 'standout'),
+        ('text', 'white', 'black'),
+        ('banner', 'black', 'light gray', ('standout', 'underline')),
+        ('streak', 'black', 'dark red', 'standout'),
+        ('title', 'light blue', 'black', 'standout'),
+        ('bg', 'black', 'dark blue'),
+        ] )
+    
+    blank_status_line = urwid.Divider()   # blank line separating system info from processes
+    
+    def run():
+        full_command = False
+        finished = False
+        sort_by = SORTBY_RECENT_PCPU    # default sort order
+        flash_msg = None
+        command_filter = None
+        command_filter_prompt = False
+        force_refresh = False
+        
+        cols, rows = ui.get_cols_rows()
+        
+        top = TopProcesses(refresh=delay)
+        
+        while not finished:
+            
+            if command_filter_prompt:
+                # prompt for command filter
+                if status_line is None:
+                    if command_filter is not None:
+                        edit_text = command_filter
+                    else:
+                        edit_text = ''
+                    status_line = urwid.Edit("Command filter /", edit_text=edit_text)
+            
+            elif flash_msg:
+                # flash a message
+                status_line = urwid.Padding(
+                    urwid.Text(flash_msg, align='center'),
+                    'center',
+                    cols,
+                )
+                flash_msg = None
+            
+            else:
+                status_line = blank_status_line   # blank line separating system info from processes
+            
+            lines = top.get_top(
+                cols, rows,
+                full_command = full_command,
+                sort_by = SORTBY_RECENT_PCPU,
+                command_filter = command_filter,
+                refresh = force_refresh,
+            )
+            
+            force_refresh = False
+            
+            content = urwid.PollingListWalker(
+                [
+                    status_line,
+                    urwid.Text('\n'.join(lines)),
+                ]
+            )
+            
+            listbox = urwid.ListBox(content)
+            
+            header = urwid.AttrWrap(urwid.Text(loadaverage_line(cols, rows)), 'header')
+            
+            frame = urwid.Frame(listbox, header, focus_part='body')
+            
+            canvas = frame.render( (cols, rows), focus=True )
+            ui.draw_screen( (cols, rows), canvas )
+            
+            # Process keyboard inputs
+            inp =  ui.get_input()
+            
+            for k in inp:
+                if k == "window resize":
+                    cols, rows = ui.get_cols_rows()
+                    continue
+                    
+                if command_filter_prompt:
+                    if k == 'enter':
+                        command_filter_prompt = False
+                        flash_msg = "Filter: %s" % status_line.edit_text
+                        force_refresh = True
+                    else: # frame.selectable():
+                        frame.keypress( (cols, rows), k )
+                        command_filter = status_line.edit_text
+                    continue
+            
+                if k.lower() == 'q':
+                    # signal program exit
+                    finished = True
+                
+                elif k == ' ':
+                    force_refresh = True
+                
+                elif k == 'c':
+                    # toggle display of full command line
+                    full_command = not full_command
+                    flash_msg = 'Toggle full command display'
+                    force_refresh = True
+            
+                elif k == '%':
+                    # toggle sort by cpu% between recent CPU and system pcpu
+                    if sort_by == SORTBY_RECENT_PCPU:
+                        sort_by = SORTBY_SYSTEM_PCPU
+                        flash_msg = 'Sort by system cpu%'
+                    else:
+                        sort_by = SORTBY_RECENT_PCPU
+                        flash_msg = 'Sort by recent cpu%'
+            
+                elif k == 'h':
+                    display_help(canvas, cols, rows)
+                
+                elif k == '/':
+                    command_filter_prompt = True
+                    status_line = None
+                
+                elif k == 'backspace':
+                    if command_filter is not None:
+                        command_filter = None
+                        flash_msg = 'Filter cleared'
+                        force_refresh = True
+    
+    def display_help(canvas, cols, rows):
+        blank = urwid.Divider()
+        content = urwid.PollingListWalker([
+            blank,
+            urwid.Padding(
+                urwid.Text(('title', "** HELP **"), align='center'),
+                'center',
+                cols,
+            ),
+            blank,
+            urwid.Text("""\
+Keys:
+    'c' : toggle display full command line.
+    'h' : help screen.
+    'q' : quit psitop.
+    '/' : filter by command/argument substring (<backspace> to clear filter).
+    '%' : toggle sort by recent cpu use or system pcpu value.
+
+"""),
+        ])
+        
+        listbox = urwid.ListBox(content)
+        
+        head_text = urwid.Text("psitop %s - %s - http://www.psychofx.com/psi/trac/wiki/psitop" % (__version__, __copyright__))
+        header = urwid.AttrWrap( head_text, 'header' )
+        
+        foot_text = urwid.Text("Hit 'q' to exit help.")
+        footer = urwid.AttrWrap( foot_text, 'header' )
+        
+        frame = urwid.Frame(listbox, header, footer, focus_part='body')
+        
+        # ui.set_input_timeouts(10.0)
+        done = False
+        while not done:
+            canvas = frame.render( (cols, rows) )
+            ui.draw_screen( (cols, rows), canvas )
+            
+            keys = ui.get_input()
+            for k in keys:
+                if k == 'window resize':
+                    cols, rows = ui.get_cols_rows()
+                elif k.lower() == 'q':
+                    done = True
+                    break
+                else:
+                    frame.keypress( (cols, rows), k )
+        
+        # ui.set_input_timeouts(max_wait=delay)
+
+
+    ui.set_input_timeouts(max_wait=delay)
+    ui.run_wrapper( run )
+
+
+def main():
+    '''Command-line entry point.
+    '''
+    
+    # define usage and version messages
+    usageMsg = "usage: %prog [options]"
+    versionMsg = """%%prog %s""" % __version__
+    
+    # get a parser object and define our options
+    parser = optparse.OptionParser(usage=usageMsg, version=versionMsg)
+    parser.add_option('-s', '--delay', dest='delay',
+            default='1',
+            metavar="DELAY", help="Set the delay between updates to DELAY seconds")
+    
+    # Parse.  We dont accept arguments, so we complain if they're found.
+    (options, args) = parser.parse_args()
+    if len(args) > 0:
+        parser.error('Too many arguments.')
+    
+    try:
+        delay = float(options.delay)
+    except:
+        parser.error('Delay must be a positive number.')
+    if delay < 0.1:
+        delay = 0.1
+    
+    try:
+        top(delay=delay)
+    except psi.AttrInsufficientPrivsError:
+        raise
+        sys.stderr.write("You need elevated privileges on this platform (possibly root) to use this command.\n")
+        return 1
+    except:
+        raise
+    
+    return 0
+
+if __name__ == '__main__':
+    sys.exit(main())
