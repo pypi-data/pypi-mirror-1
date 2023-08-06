@@ -1,0 +1,1 @@
+see wikir/__init__.py for documentation
