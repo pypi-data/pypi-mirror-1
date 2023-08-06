@@ -1,0 +1,21 @@
+__version__ = '2.6'
+
+FLAYERS_CORE_FILES = ['ArgvParserContainer.cpp',
+                      'ArgvParser.cpp',
+                      'ClassTopology.cpp',
+                      'fDataSet.cpp',
+                      'fLayersGeneral.cpp',
+                      'fTimeMeasurer.cpp',
+                      'IncBoostTrainer.cpp',
+                      'Layer.cpp',
+                      'LinearRegressor.cpp',
+                      'math_util.cpp',
+                      'NNLayer.cpp',
+                      'OptTopology.cpp',
+                      'PreDefArgvParser.cpp',
+                      'Topology.cpp',
+                      'Trainer.cpp',
+                      'TrainerUtil.cpp',
+                      'TwoDSurfaceData.cpp',
+                      'Weights.cpp',
+                      'WeightsList.cpp']
