@@ -1,0 +1,65 @@
+'''
+AudioPygame: implementation of Sound with Pygame
+'''
+
+__all__ = ('SoundPygame', )
+
+import pymt
+from . import Sound, SoundLoader
+
+try:
+    import pygame
+except:
+    raise
+
+# init pygame sound
+pygame.mixer.pre_init(44100,-16,2, 1024)
+pygame.mixer.init()
+pygame.mixer.set_num_channels(32)
+
+class SoundPygame(Sound):
+    __slots__ = ('_data')
+
+    @staticmethod
+    def extensions():
+        return ('wav', 'ogg', )
+
+    def __init__(self, **kwargs):
+        self._data = None
+        super(SoundPygame, self).__init__(**kwargs)
+
+    def play(self):
+        if not self._data:
+            return
+        self._data.play()
+
+    def stop(self):
+        if not self._data:
+            return
+        self._data.stop()
+
+    def load(self):
+        self.unload()
+        if self.filename is None:
+            return
+        self._data = pygame.mixer.Sound(self.filename)
+
+    def unload(self):
+        self.stop()
+        self._data = None
+
+    def seek(self, position):
+        # Unable to seek in pygame...
+        pass
+
+    def _get_volume(self):
+        if self._data is not None:
+            self._volume = self._data.get_volume()
+        return super(SoundPygame, self)._get_volume()
+
+    def _set_volume(self, volume):
+        if self._data is not None:
+            self._data.set_volume(volume)
+        return super(SoundPygame, self)._set_volume(volume)
+
+SoundLoader.register(SoundPygame)
