@@ -1,0 +1,261 @@
+Metadata-Version: 1.0
+Name: inquant.contentmirror.base
+Version: 0.3
+Summary: mirror plone content transparently in a plone site
+Home-page: https://svn.plone.org/svn/collective/inquant.contentmirror.base/trunk
+Author: Stefan Eletzhofer
+Author-email: stefan.eletzhofer@inquant.de
+License: GPL
+Description: Contentmirror
+        =============
+        
+        :Author:    $Author: seletz $
+        :Date:      $Date: 2008-01-17 11:18:45 +0100 (Do, 17 Jan 2008) $
+        :Revision:  $Revision: 57037 $
+        
+        Abstract
+        --------
+        
+        This package is provides a way to have a instance of a Plone_ content
+        mirrored transparently into one or more locations. To do so, we basically
+        need to:
+        
+        - locate content to be mirrored on traversal
+        
+        - insert the located oject into the traversed context's acquisition chain
+        
+        To do so, we'll implement a adapter for the Zope 3 traversal mechanism, do
+        a lookup for content to be mirrored in this adapter, and insert the object
+        in the adapted contexts acquisition chain.
+        
+        Gotchas, Limitations
+        --------------------
+        
+        Because we do add the mirrored object like this, plone will eventually
+        reindex the object multiple times (for example if one edits the object when
+        appearing on a mirrored path). This has the following consequences:
+        
+        searches -- on a search, the object is listed twice, because it's
+        in the catalog twice. IMHO that's OK, because that's what we actually
+        want, we want the object to appear in two places.
+        
+        edit -- KSS edit and normal edit of mirrored content works as expected. The
+        content will be reindexed on edit. Users which view the same object
+        visible on another path will see the changes on page reload. Nothing
+        unusual here.
+        
+        removal, rename -- there it gets tricky. Because the object is in the
+        twice, something like the **folder_listing** will show the object on
+        mirrored paths despite it's no longer there. All we do is mirroring,
+        not copying. I'll try to handle that with an event subscriber.
+        
+        UID catalog -- because the object may be catalogued multiple times, the UID
+        catalog will contain the UID multiple times. Furthermore, the catalog
+        brains of the additional entries in the uid catalog will return
+        **None** for a **getObject()**. The exact implications of this are
+        unclear to me, that might well be an error in the UID catalog (why does
+        it insert a UID twice in the first place?)
+        
+        Basic Setup
+        -----------
+        
+        some needed imports for this doctest::
+        
+        >>> from zope import interface
+        >>> from zope import component
+        >>> from zope.app.testing import ztapi
+        >>> from zope.publisher.browser import TestRequest
+        
+        Locating content
+        ----------------
+        
+        To locate content, we provide an interface::
+        
+        >>> from inquant.contentmirror.base.interfaces import IMirrorContentLocator
+        
+        We now can define an adapter which is able to locate content from somewhere
+        else::
+        
+        >>> class TestLocator(object):
+        ...     def __init__(self, context):
+        ...         self.context = context
+        ...     def locate( self, name):
+        ...         return self.source.get(name)
+        
+        So basically this adapter just has to return a object for a given name.
+        Let's try that. We need to setup some plone content for this::
+        
+        >>> _ = self.folder.invokeFactory("Folder", "src")
+        >>> _ = self.folder.src.invokeFactory("Document", "doc", title="Muha")
+        >>> _ = self.folder.invokeFactory("Folder", "target")
+        
+        Now we can provide the adapter::
+        
+        >>> from Products.ATContentTypes.content.folder import ATFolder
+        >>> ztapi.provideAdapter(ATFolder,
+        ...    IMirrorContentLocator, TestLocator)
+        
+        And look up the adapter::
+        
+        >>> locator = IMirrorContentLocator(self.folder.target)
+        >>> locator.source = self.folder.src
+        
+        now we can fetch the content by name::
+        
+        >>> locator.locate("doc")
+        <ATDocument at /plone/Members/test_user_1_/src/doc>
+        
+        Ok, that worked.
+        
+        Inserting (mirroring) content
+        -----------------------------
+        
+        Basically what we do is to strip the content to be mirrored from its
+        acquisition context and insert it into the target context's acquisition
+        chain. Lets try that::
+        
+        >>> from Acquisition import aq_inner, aq_base, aq_chain
+        >>> obj = self.folder.src.doc
+        >>> aq_chain(obj)
+        [<ATDocument at /plone/Members/test_user_1_/src/doc>, <ATFolder at /plone/Members/test_user_1_/src>, ...
+        
+        We see, that **obj** has a normal acquisition chain, as one would expect.
+        Next, we'll fake the acquisition chain such that obj_mirrored will
+        **appear** to be below the **target** folder::
+        
+        >>> obj_mirrored = aq_base(obj).__of__(self.folder.target)
+        >>> aq_chain(obj_mirrored)
+        [<ATDocument at /plone/Members/test_user_1_/target/doc>, <ATFolder at /plone/Members/test_user_1_/target>, ...
+        
+        Yay.
+        
+        Traversing
+        ----------
+        
+        Now all wa have to do is to provide a way to hook into Plone's object
+        traversal mechanism, and to alter it such that we can return the mirrored
+        object. The traverser we'll provide uses the **IPublishTraverse**
+        interface, which is the Zope 3 way of doing it::
+        
+        >>> from zope.publisher.interfaces import IPublishTraverse
+        
+        Zope 2 used to use **__bobo_traverse__** to traverse objects. Nowadays,
+        traversal is done by providing a adapter to **IPublishTraverse**. The
+        default traverser is **DefaultPublishTraverse**, which is defined in the
+        Zope 2 publisher::
+        
+        >>> from ZPublisher.BaseRequest import DefaultPublishTraverse
+        
+        This adapter does eventually call **__bobo_traverse__**. Thus, there's no
+        need to overwrite **__bobo_traverse__** anymore. Yay.
+        
+        Our special adapter for our mirror content woll do the following:
+        
+        - try to adapt the traversed context to **IMirrorContentLocator**, and
+        locate a content for the currently traversed name
+        
+        - strip the located content object of its acquisition chain and insert it
+        into the travesed context's acquisition chain, and return it
+        
+        Ok, let's try it.
+        
+        First, we need to create a **IPublishTraverse** adapter. Note that this is
+        a multi adapter adapting a interface and a **IHTTPRequest** to
+        **IPublishTraverse**::
+        
+        >>> class MirrorTraverse(object):
+        ...     def __init__(self,context,request):
+        ...         self.context = context
+        ...         self.request = request
+        ...         self.locator = IMirrorContentLocator(context)
+        ...     def publishTraverse(self, request, name):
+        ...         obj = locator.locate(name)
+        ...         return aq_base(aq_inner(obj)).__of__(self.context)
+        
+        Now, we want to provide the adapter. We do NOT want to overwrite the
+        default behavior, though. That's why we define a marker interface to adapt
+        to **IMirrorContentProvider**. We provide the adapter::
+        
+        >>> from inquant.contentmirror.base.interfaces import IMirrorContentProvider
+        >>> from zope.publisher.interfaces.http import IHTTPRequest
+        >>> ztapi.provideAdapter(
+        ...     (IMirrorContentProvider,IHTTPRequest),
+        ...     IPublishTraverse,
+        ...     MirrorTraverse)
+        
+        Now we should be able to traverse. To call up the adapter we need a test
+        request, though::
+        
+        >>> request = TestRequest()
+        >>> IHTTPRequest.providedBy(request)
+        True
+        
+        Query the ZCA for the adapter::
+        
+        >>> traverser = component.getMultiAdapter(
+        ...     (self.folder.target, request), IPublishTraverse )
+        Traceback (most recent call last):
+        ...
+        ComponentLookupError: ...
+        
+        Ouch!
+        Ah, we need to provide the **IMirrorContentProvider** first::
+        
+        >>> interface.alsoProvides(self.folder.target, IMirrorContentProvider)
+        >>> IMirrorContentProvider.providedBy(self.folder.target)
+        True
+        
+        Try again::
+        
+        >>> traverser = component.queryMultiAdapter(
+        ...     (self.folder.target, request), IPublishTraverse )
+        
+        A-haaa!
+        
+        Unfortunately, for sake of this test, we need to patch in the source
+        manually. In reality, the locator adapter would of course determine the
+        source itself.::
+        
+        >>> traverser.locator.source = self.folder.src
+        
+        Now try to traverse::
+        
+        >>> traverser.publishTraverse(request, "doc")
+        <ATDocument at /plone/Members/test_user_1_/target/doc>
+        
+        Yay! Note that the returned object seems to come from the **target**
+        folder, but it is located in the **src** folder in reality.
+        
+        Cleanup
+        -------
+        
+        Remove the adapter::
+        
+        >>> gsm = component.getGlobalSiteManager()
+        >>> gsm.unregisterAdapter(
+        ...     MirrorTraverse,
+        ...     (IMirrorContentProvider,IHTTPRequest),
+        ...     IPublishTraverse)
+        True
+        >>> gsm.unregisterAdapter(TestLocator, (ATFolder,),
+        ...    IMirrorContentLocator)
+        True
+        
+        Links
+        -----
+        
+        Plone_ is a CMS.
+        
+        .. _Plone: http://plone.org
+        
+        
+        ::
+        
+        vim: set ft=rst tw=75 nocin nosi ai sw=4 ts=4 expandtab:
+        
+Platform: UNKNOWN
+Classifier: Framework :: Plone
+Classifier: Framework :: Zope2
+Classifier: Framework :: Zope3
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
