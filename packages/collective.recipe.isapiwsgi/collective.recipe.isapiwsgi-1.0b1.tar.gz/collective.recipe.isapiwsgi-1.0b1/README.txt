@@ -1,0 +1,95 @@
+Introduction
+============
+
+''collective.recipe.isapiwsgi'' is a `zc.buildout`_ recipe which creates
+a `paste.deploy`_ entry point for isapi-wsgi_.
+
+It is based on ''collective.recipe.modwsgi'' by Wichert Akkerman.
+
+It is very simple to use. This is a minimal ''buildout.cfg'' file
+which creates a WSGI script isapi-wsgi can use::
+
+    [buildout]
+    parts = isapi-wsgi
+
+    [isapi-wsgi]
+    recipe = collective.recipe.isapiwsgi
+    eggs = mywsgiapp
+    config-file = ${buildout:directory}/production.ini
+
+This will create a small python script in parts/isapi-mywsgiapp called
+''isapiwsgi.py'' which isapi-wsgi can use. You can also use the optional
+''extra-paths'' option to specify extra paths that are added to
+the python system path.
+
+IIS configuration and installation
+----------------------------------
+
+ISAPI-WSGI runs as a DLL inside IIS, which is configured as a wildcard
+mapping. The DLL is created from the generated isapiwsgi.py script.
+
+To automatically configure IIS, you need to run the script::
+
+    > cd parts\isapi-wsgi
+    > python isapiwsgi.py install
+  
+To install into a site other than the default, use --server=<name>.
+
+If you want this to be run automatically each time buildout is run,
+you can give a server name to the recipe::
+
+    [isapi-wsgi]
+    recipe = collective.recipe.isapiwsgi
+    eggs = mywsgiapp
+    config-file = ${buildout:directory}/production.ini
+    server = Default
+
+The above command will now be run just after the script has been (re-)created.
+
+NOTE: If IIS is running whilst you run buildout, you may need to stop the
+default application pool so that the DLL file can be re-created.
+
+By default, a wildcard mapping is configured at the root of the site
+in IIS. If you'd like to configure a virtual directory instead, pass its
+name with the ''directory'' option to the recipe::
+
+    [isapi-wsgi]
+    recipe = collective.recipe.isapiwsgi
+    eggs = mywsgiapp
+    config-file = ${buildout:directory}/production.ini
+    directory = my-application
+    server = Default
+
+Logging
+-------
+
+A log file will be written depending on the [loggers] configuration in your
+ini file. You may need to ensure that the user which the application pool
+in IIS uses has write access to this directory.
+
+In addition, you can watch trace messages through the win32traceutil program.
+It is installed with the Python Win32 extensions. First, set the ''debug'' 
+option to true::
+
+    [isapi-wsgi]
+    recipe = collective.recipe.isapiwsgi
+    eggs = mywsgiapp
+    config-file = ${buildout:directory}/production.ini
+    debug = True
+    
+Then run the trace program::
+
+    > python -m win32traceutil
+
+Package installation
+--------------------
+
+This recipe does not fully install packages, which means that console scripts
+will not be created. If you need console scripts you can add a second
+buildout part which uses `zc.recipe.egg`_ to do a full install.
+
+.. _zc.buildout: http://pypi.python.org/pypi/zc.buildout
+.. _paste.deploy: http://pythonpaste.org/deploy/
+.. _isapi-wsgi: http://code.google.com/p/isapi-wsgi/
+.. _zc.recipe.egg: http://pypi.python.org/pypi/zc.recipe.egg
+
