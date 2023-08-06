@@ -1,0 +1,261 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html>
+  <head>
+    <title>py.test funcargs</title>
+    <meta content="text/html;charset=ISO-8859-1" name="Content-Type"/>
+    <link href="../style.css" media="screen" rel="stylesheet" type="text/css"/></head>
+  <body>
+    <div id="navspace">
+      <div><a href="http://pylib.org"><img alt="py lib" height="57" id="pyimg" src="http://codespeak.net/img/pylib.png" width="77"/></a></div>
+      <div id="menubar">
+        <div>
+          <div><a class="menu" href="../announce/release-1.1.1.html">1.1.1 ANN</a></div></div>
+        <div>
+          <div><a class="menu" href="../install.html">INSTALL</a></div></div>
+        <div>
+          <div><a class="menu" href="../contact.html">CONTACT</a></div></div>
+        <div>
+          <div><a class="menu" href="../changelog.html">CHANGELOG</a></div></div>
+        <div>
+          <div><a class="menu" href="../faq.html">FAQ</a></div></div>
+        <div>
+          <div>
+            <h3>py.test:</h3>
+            <div><a class="menu" href="index.html">Index</a></div>
+            <div><a class="menu" href="quickstart.html">Quickstart</a></div>
+            <div><a class="menu" href="features.html">Features</a></div>
+            <div><a class="menu" href="plugin/index.html">Plugins</a></div>
+            <div><a class="menu" href="funcargs.html">Funcargs</a></div>
+            <div><a class="menu" href="customize.html">Customize</a></div>
+            <div><a class="menu" href="talks.html">Tutorials</a></div></div></div>
+        <div>
+          <div>
+            <h3>supporting APIs:</h3>
+            <div><a class="menu" href="../index.html">Index</a></div>
+            <div><a class="menu" href="../path.html">py.path</a></div>
+            <div><a class="menu" href="../code.html">py.code</a></div></div></div></div></div>
+    <div id="contentspace">
+<div class="document" id="funcargs-advanced-test-setup-and-parametrization">
+<h1 class="title"><strong>funcargs</strong>: advanced test setup and parametrization</h1>
+
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><a class="reference internal" href="#what-are-funcargs-and-what-are-they-good-for" id="id2">what are &quot;funcargs&quot; and what are they good for?</a></li>
+<li><a class="reference internal" href="#funcarg-factories-setting-up-test-function-arguments" id="id3">funcarg factories: setting up test function arguments</a><ul>
+<li><a class="reference internal" href="#funcarg-factory-request-objects" id="id4">funcarg factory request objects</a></li>
+<li><a class="reference internal" href="#registering-funcarg-related-finalizers-cleanup" id="id5">registering funcarg related finalizers/cleanup</a></li>
+<li><a class="reference internal" href="#managing-fixtures-across-test-modules-and-test-runs" id="id6">managing fixtures across test modules and test runs</a></li>
+<li><a class="reference internal" href="#requesting-values-of-other-funcargs" id="id7">requesting values of other funcargs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#generating-parametrized-tests" id="id8">generating parametrized tests</a><ul>
+<li><a class="reference internal" href="#test-generators-and-metafunc-objects" id="id9">test generators and metafunc objects</a></li>
+<li><a class="reference internal" href="#the-metafunc-addcall-method" id="id10">the <tt class="docutils literal">metafunc.addcall()</tt> method</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id1" id="id11">Tutorial Examples</a><ul>
+<li><a class="reference internal" href="#application-specific-test-setup-and-fixtures" id="id12">application specific test setup and fixtures</a></li>
+<li><a class="reference internal" href="#example-specifying-and-selecting-acceptance-tests" id="id13">example: specifying and selecting acceptance tests</a></li>
+<li><a class="reference internal" href="#example-decorating-a-funcarg-in-a-test-module" id="id14">example: decorating a funcarg in a test module</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="section" id="what-are-funcargs-and-what-are-they-good-for">
+<h1><a class="toc-backref" href="#id2">what are &quot;funcargs&quot; and what are they good for?</a></h1>
+<p>Named parameters of a test function are called <em>funcargs</em> for short.
+A Funcarg can be a simple number of a complex object.  To perform a
+test function call each parameter is setup by a factory function.
+To call a test function repeatedly with different funcargs sets
+test parameters can be generated.</p>
+</div>
+<div class="section" id="funcarg-factories-setting-up-test-function-arguments">
+<span id="factory"></span><span id="funcarg-factory"></span><h1><a class="toc-backref" href="#id3">funcarg factories: setting up test function arguments</a></h1>
+<p>Test functions can specify one ore more arguments (&quot;funcargs&quot;)
+and a test module or plugin can define factory functions that provide
+the function argument.  Let's look at a simple self-contained
+example that you can put into a test module:</p>
+<p>If you run this with <tt class="docutils literal">py.test test_simplefactory.py</tt> you see something like this:</p>
+<p>This means that the test function was called with a <tt class="docutils literal">myfuncarg</tt> value
+of <tt class="docutils literal">42</tt> and the assert fails accordingly.  Here is how py.test
+calls the test function:</p>
+<ol class="arabic simple">
+<li>py.test discovers the <tt class="docutils literal">test_function</tt> because of the <tt class="docutils literal">test_</tt> prefix.
+The test function needs a function argument named <tt class="docutils literal">myfuncarg</tt>.
+A matching factory function is discovered by looking for the
+name <tt class="docutils literal">pytest_funcarg__myfuncarg</tt>.</li>
+<li><tt class="docutils literal">pytest_funcarg__myfuncarg(request)</tt> is called and
+returns the value for <tt class="docutils literal">myfuncarg</tt>.</li>
+<li><tt class="docutils literal">test_function(42)</tt> call is executed.</li>
+</ol>
+<p>Note that if you misspell a function argument or want
+to use one that isn't available, you'll see an error
+with a list of available function arguments.</p>
+<p>factory functions receive a <a class="reference internal" href="#request-object">request object</a>
+which they can use to register setup/teardown
+functions or access meta data about a test.</p>
+<div class="section" id="funcarg-factory-request-objects">
+<span id="request-object"></span><h2><a class="toc-backref" href="#id4">funcarg factory request objects</a></h2>
+<p>Request objects are passed to funcarg factories and allow
+to access test configuration, test context and <a class="reference internal" href="#useful-caching-and-finalization-helpers">useful caching
+and finalization helpers</a>. Here is a list of attributes:</p>
+<p><tt class="docutils literal">request.function</tt>: python function object requesting the argument</p>
+<p><tt class="docutils literal">request.cls</tt>: class object where the test function is defined in or None.</p>
+<p><tt class="docutils literal">request.module</tt>: module object where the test function is defined in.</p>
+<p><tt class="docutils literal">request.config</tt>: access to command line opts and general config</p>
+<p><tt class="docutils literal">request.param</tt>: if exists was passed by a previous <a class="reference internal" href="#metafunc-addcall">metafunc.addcall</a></p>
+</div>
+<div class="section" id="registering-funcarg-related-finalizers-cleanup">
+<span id="useful-caching-and-finalization-helpers"></span><h2><a class="toc-backref" href="#id5">registering funcarg related finalizers/cleanup</a></h2>
+<p>Calling <tt class="docutils literal">request.addfinalizer()</tt> is useful for scheduling teardown
+functions.  Here is an example for providing a <tt class="docutils literal">myfile</tt>
+object that is to be closed when the execution of a
+test function finishes.</p>
+</div>
+<div class="section" id="managing-fixtures-across-test-modules-and-test-runs">
+<h2><a class="toc-backref" href="#id6">managing fixtures across test modules and test runs</a></h2>
+<p>Calling <tt class="docutils literal">request.cached_setup()</tt> helps you to manage fixture
+objects across several scopes.  For example, for creating a Database object
+that is to be setup only once during a test session you can use the helper
+like this:</p>
+</div>
+<div class="section" id="requesting-values-of-other-funcargs">
+<h2><a class="toc-backref" href="#id7">requesting values of other funcargs</a></h2>
+<p><tt class="docutils literal">request.getfuncargvalue(name)</tt> calls another funcarg factory function.
+You can use this function if you want to <a class="reference internal" href="#decorate-a-funcarg">decorate a funcarg</a>, i.e.
+you want to provide the &quot;normal&quot; value but add something
+extra.  If a factory cannot be found a <tt class="docutils literal">request.Error</tt>
+exception will be raised.</p>
+</div>
+</div>
+<div class="section" id="generating-parametrized-tests">
+<span id="parametrizing-tests"></span><span id="test-generators"></span><h1><a class="toc-backref" href="#id8">generating parametrized tests</a></h1>
+<p>You can parametrize multiple runs of the same test
+function by adding new test function calls with different
+function argument values. Let's look at a simple self-contained
+example:</p>
+<p>If you run this with <tt class="docutils literal">py.test test_example.py</tt> you'll get:</p>
+<p>Here is what happens in detail:</p>
+<ol class="arabic simple">
+<li><tt class="docutils literal">pytest_generate_tests(metafunc)</tt> hook is called once for each test
+function.  It adds ten new function calls with explicit function arguments.</li>
+<li><strong>execute tests</strong>: <tt class="docutils literal">test_func(numiter)</tt> is called ten times with
+ten different arguments.</li>
+</ol>
+<div class="section" id="test-generators-and-metafunc-objects">
+<span id="metafunc-object"></span><h2><a class="toc-backref" href="#id9">test generators and metafunc objects</a></h2>
+<p>metafunc objects are passed to the <tt class="docutils literal">pytest_generate_tests</tt> hook.
+They help to inspect a testfunction and to generate tests
+according to test configuration or values specified
+in the class or module where a test function is defined:</p>
+<p><tt class="docutils literal">metafunc.funcargnames</tt>: set of required function arguments for given function</p>
+<p><tt class="docutils literal">metafunc.function</tt>: underlying python test function</p>
+<p><tt class="docutils literal">metafunc.cls</tt>: class object where the test function is defined in or None.</p>
+<p><tt class="docutils literal">metafunc.module</tt>: the module object where the test function is defined in.</p>
+<p><tt class="docutils literal">metafunc.config</tt>: access to command line opts and general config</p>
+</div>
+<div class="section" id="the-metafunc-addcall-method">
+<span id="metafunc-addcall"></span><h2><a class="toc-backref" href="#id10">the <tt class="docutils literal">metafunc.addcall()</tt> method</a></h2>
+<p><tt class="docutils literal">funcargs</tt> can be a dictionary of argument names
+mapped to values - providing it is called <em>direct parametrization</em>.</p>
+<p>If you provide an <cite>id`</cite> it will be used for reporting
+and identification purposes.  If you don't supply an <cite>id</cite>
+the stringified counter of the list of added calls will be used.
+<tt class="docutils literal">id</tt> values needs to be unique between all
+invocations for a given test function.</p>
+<p><tt class="docutils literal">param</tt> if specified will be seen by any
+<a class="reference internal" href="#funcarg-factory">funcarg factory</a> as a <tt class="docutils literal">request.param</tt> attribute.
+Setting it is called <em>indirect parametrization</em>.</p>
+<p>Indirect parametrization is preferable if test values are
+expensive to setup or can only be created in certain environments.
+Test generators and thus <tt class="docutils literal">addcall()</tt> invocations are performed
+during test collection which is separate from the actual test
+setup and test run phase.  With distributed testing collection
+and test setup/run happens in different process.</p>
+</div>
+</div>
+<div class="section" id="id1">
+<span id="tutorial-examples"></span><h1><a class="toc-backref" href="#id11">Tutorial Examples</a></h1>
+<p>To see how you can implement custom paramtrization schemes,
+see  e.g.  <a class="reference external" href="http://tetamap.wordpress.com/2009/05/13/parametrizing-python-tests-generalized/">parametrizing tests, generalized</a> (blog post).</p>
+<p>To enable creation of test support code that can flexibly
+register setup/teardown functions see the <a class="reference external" href="http://tetamap.wordpress.com/2009/03/03/monkeypatching-in-unit-tests-done-right/">blog post about
+the monkeypatch funcarg</a>.</p>
+<p>If you find issues or have further suggestions for improving
+the mechanism you are welcome to checkout <a class="reference external" href="../contact.html">contact possibilities</a> page.</p>
+<div class="section" id="application-specific-test-setup-and-fixtures">
+<span id="appsetup"></span><span id="application-setup-tutorial-example"></span><h2><a class="toc-backref" href="#id12">application specific test setup and fixtures</a></h2>
+<p>Here is a basic useful step-wise example for handling application
+specific test setup.  The goal is to have one place where we have the
+glue and test support code for bootstrapping and configuring application objects and allow
+test modules and test functions to stay ignorant of involved details.</p>
+<div class="section" id="step-1-use-and-implement-a-test-app-specific-mysetup">
+<h3>step 1: use and implement a test/app-specific &quot;mysetup&quot;</h3>
+<p>Let's write a simple test function living in a test file
+<tt class="docutils literal">test_sample.py</tt> that uses a <tt class="docutils literal">mysetup</tt> funcarg for accessing test
+specific setup.</p>
+<p>To run this test py.test needs to find and call a factory to
+obtain the required <tt class="docutils literal">mysetup</tt> function argument.  The test
+function interacts with the provided application specific setup.</p>
+<p>To provide the <tt class="docutils literal">mysetup</tt> function argument we write down
+a factory method in a <a class="reference external" href="customize.html#local-plugin">local plugin</a> by putting the
+following code into a local <tt class="docutils literal">conftest.py</tt>:</p>
+<p>To run the example we represent our application by putting a pseudo MyApp object into <tt class="docutils literal">myapp.py</tt>:</p>
+<p>You can now run the test with <tt class="docutils literal">py.test test_sample.py</tt> which will
+show this failure:</p>
+<p>This means that our <tt class="docutils literal">mysetup</tt> object was successfully instantiated,
+we asked it to provide an application instance and checking
+its <tt class="docutils literal">question</tt> method resulted in the wrong answer.  If you are
+confused as to what the concrete question or answers actually mean,
+please see <a class="reference external" href="http://uncyclopedia.wikia.com/wiki/The_Hitchhiker's_Guide_to_the_Galaxy">here</a> :)  Otherwise proceed to step 2.</p>
+</div>
+<div class="section" id="step-2-adding-a-command-line-option">
+<span id="tut-cmdlineoption"></span><h3>step 2: adding a command line option</h3>
+<p>If you provide a &quot;funcarg&quot; from a plugin you can easily make methods
+depend on command line options or environment settings.
+To add a command line option we update the conftest.py of
+the previous example to add a command line option
+and to offer a new mysetup method:</p>
+<p>Now any test function can use the <tt class="docutils literal">mysetup.getsshconnection()</tt> method like this:</p>
+<p>Running <tt class="docutils literal">py.test test_ssh.py</tt> without specifying a command line option will result in a skipped test_function:</p>
+<p>Note especially how the test function could stay clear knowing about how to construct test state values or when to skip and with what message. The test function can concentrate on actual test code and test state factories can interact with execution of tests.</p>
+<p>If you specify a command line option like <tt class="docutils literal">py.test <span class="pre">--ssh=python.org</span></tt> the test will get un-skipped and actually execute.</p>
+</div>
+</div>
+<div class="section" id="example-specifying-and-selecting-acceptance-tests">
+<span id="accept-example"></span><h2><a class="toc-backref" href="#id13">example: specifying and selecting acceptance tests</a></h2>
+<p>and the actual test function example:</p>
+<p>If you run this test without specifying a command line option
+the test will get skipped with an appropriate message. Otherwise
+you can start to add convenience and test support methods
+to your AcceptFuncarg and drive running of tools or
+applications and provide ways to do assertions about
+the output.</p>
+</div>
+<div class="section" id="example-decorating-a-funcarg-in-a-test-module">
+<span id="decorate-a-funcarg"></span><h2><a class="toc-backref" href="#id14">example: decorating a funcarg in a test module</a></h2>
+<p>For larger scale setups it's sometimes useful to decorare
+a funcarg just for a particular test module.  We can
+extend the <a class="reference internal" href="#accept-example">accept example</a> by putting this in our test module:</p>
+<p>Our module level factory will be invoked first and it can
+ask its request object to call the next factory and then
+decorate its result.  This mechanism allows us to stay
+ignorant of how/where the function argument is provided -
+in our example from a <a class="reference external" href="customize.html#conftestplugin">conftest plugin</a>.</p>
+<p>sidenote: the temporary directory used here are instances of
+the <a class="reference external" href="../path.html#local">py.path.local</a> class which provides many of the os.path
+methods in a convenient way.</p>
+</div>
+</div>
+</div>
+</div>
+<script type="text/javascript">
+var gaJsHost = (("https:" == document.location.protocol) ? "https://ssl." : "http://www.");
+document.write(unescape("%3Cscript src='" + gaJsHost + "google-analytics.com/ga.js' type='text/javascript'%3E%3C/script%3E"));
+</script>
+<script type="text/javascript">
+try {
+var pageTracker = _gat._getTracker("UA-7597274-3");
+pageTracker._trackPageview();
+} catch(err) {}</script>
+</body></html>
