@@ -1,0 +1,42 @@
+nebgbhist
+=========
+
+Tools for building annotation histories from multiple Genbank files.
+
+Example
+=======
+
+::
+
+    $ mkdir gbhist
+    $ neb-rev-fetch -d gbhist NC_008512
+    $ neb-gbhist -d gbhist | neb-diff-apply NC_008512.git
+    $ git --git-dir=NC_008512.git gc --aggressive
+    $ neb-validate-history -p NC_008512.git -g gbhist/2009-04-29-04-04.gbk
+
+Playing with files
+==================
+
+If you clone the pack repository after building you can poke around at the
+contents on the file system. For larger genomes with lots of edits this may run
+afoul of directory entry limits until I rewrite the object storage. For the
+Carsonella (NC_008512) example I use there isn't an issue.
+
+::
+
+    $ git clone NC_008512.git
+    $ cd NC_008512
+    $ ls -1
+    accession  dblink     keywords   objects/   seq/       version
+    comment    definition locus      ref/       source
+
+Files in the root directory represent keywords defined in the Genbank file. The
+ref and seq subdirectories contain information about references and the sequence
+hashes. The objects directory lists the features in the history. The files
+objects/known and objects/alive are dictionaries of hashes that point toward
+the current version of a feature at a given location. Active features are
+anything that is not deleted or replaced with a new version.
+
+I recommend that you work with nebpack.Pack objects if you want to actually do
+anything with the objects.
+
