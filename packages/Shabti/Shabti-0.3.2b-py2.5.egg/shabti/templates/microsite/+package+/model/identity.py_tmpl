@@ -1,0 +1,117 @@
+from datetime import datetime
+from elixir import *
+from elixir import events
+import hashlib
+from {{package}}.model import Session, metadata
+
+import logging
+log = logging.getLogger(__name__)
+
+options_defaults['inheritance'] = 'multi'
+
+def encrypt_value(value):
+    return hashlib.sha1(value).hexdigest()
+
+class NotAuthenticated(Exception):pass
+
+class User(Entity):
+    """User"""
+    username = Field(Unicode(30), unique=True) # undocumented
+    password = Field(String(40)) # undocumented
+    password_check = Field(String(40)) # undocumented
+    email = Field(String(255)) # undocumented
+    created = Field(DateTime) # undocumented
+    active = Field(Boolean) # undocumented
+    groups = ManyToMany('Group')
+    pages = OneToMany('{{package}}.model.page.Page')
+    using_options(shortnames=True)
+    
+    def __repr__(self):
+        return '<User %r, email: %r, created: %s, active: %s>' \
+               % (self.username, self.email, self.created, self.active)
+    
+    def __str__(self):
+        return '%s' % self.username.encode('utf8', 'xmlcharrefreplace')
+
+    def __unicode__(self):
+        return u'%s' % self.username
+    
+    @classmethod
+    def authenticate(cls, username, password):
+        log.debug("Attempting to authenticate %s with %s" % \
+                                            (username, password))
+        try:
+            user=cls.query.filter_by(username=username, active=True).one()
+            if user:
+                log.debug("User id %s retrieved" % user.id)
+                log.debug("Password comparison, stored: %s, provided: %s" % \
+                    (encrypt_value(password), user.password))
+            else:
+                log.debug("NO user id retrieved!" % user.id)
+            if user and encrypt_value(password) == user.password:
+                return user
+        except Exception, emsg:
+            raise NotAuthenticated
+            log.debug("Authentication failed %s" % emsg)
+        raise NotAuthenticated
+    
+    @events.before_insert
+    @events.before_update
+    def encrypt_password(self):
+        if self.password and self.password != self.password_check:
+            self.password = encrypt_value(self.password)
+            self.password_check = self.password
+    
+    @property
+    def permissions(self):
+        permissions = set()
+        for g in self.groups:
+            permissions = permissions | set(g.permissions)
+        return permissions        
+    
+    @property
+    def permission_names(self):
+        return [p.name for p in self.permissions]
+    
+    def has_permission(self, perm):
+        return (perm in self.permission_names)
+    
+class Group(Entity):
+    """Group"""
+    name = Field(Unicode(30)) # undocumented
+    description = Field(Unicode(255)) # undocumented
+    created = Field(DateTime) # undocumented
+    active = Field(Boolean) # undocumented
+    users = ManyToMany('User')
+    permissions = ManyToMany('Permission')
+    using_options(shortnames=True)
+    
+    def __repr__(self):
+        return '<Group %r, description: %r, created: %s, active: %s>' \
+               % (self.name, self.description, self.created, self.active)
+    
+    def __str__(self):
+        return '%s' % self.name.encode('utf8', 'xmlcharrefreplace')
+    
+    def __unicode__(self):
+        return u'%s' % self.name
+    
+class Permission(Entity):
+    """Permission"""
+    name = Field(Unicode(30)) # undocumented
+    description = Field(Unicode(255)) # undocumented
+    groups = ManyToMany('Group', onupdate = 'CASCADE', ondelete = 'CASCADE', uselist = True)
+    using_options(shortnames=True)
+    
+    def __repr__(self):
+        return '<Permission %r, description: %r>' \
+               % (self.name, self.description)
+    
+    def __str__(self):
+        return '%s' % self.name.encode('utf8', 'xmlcharrefreplace')
+
+    def __unicode__(self):
+        return u'%s' % self.name
+    
+
+__all__=['User', 'Permission', 'Group', 'NotAuthenticated']

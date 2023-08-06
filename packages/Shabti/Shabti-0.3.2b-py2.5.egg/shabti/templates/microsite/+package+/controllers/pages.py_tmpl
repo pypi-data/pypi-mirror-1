@@ -1,0 +1,197 @@
+# -*- coding: utf-8 -*-
+import logging
+
+from pylons import url, session, tmpl_context as c
+from pylons.controllers.util import abort, redirect_to
+from pylons.i18n import set_lang, get_lang, _, ungettext, N_
+
+from {{package}}.lib.base import BaseController, render, bag_it_and_tag_it
+
+log = logging.getLogger(__name__)
+
+from datetime import datetime
+from {{package}} import model as model
+from {{package}}.lib.helpers import dcmeta, get_object_or_404
+from paste import httpexceptions
+
+from {{package}}.lib.decorators import authorize
+from {{package}}.lib.auth.permissions import SignedIn
+
+from tw.api import WidgetBunch
+from tw.mods.pylonshf import validate
+from {{package}}.forms.page import *
+
+from tw.forms import DataGrid, CheckBox
+from webhelpers.text import truncate
+from webhelpers.markdown import markdown
+
+# Define a state factory to provide the Unique validator
+# with the current page object so it can detect an update
+# instead of assuming a new slug is to be created.
+def gen_state():
+    class StateBlob(object):
+        obj = None
+        pass
+        
+        def __repr__(self):
+            return str(self.slug)
+        
+        def __str__(self):
+            return self.slug
+        
+    sb = StateBlob()
+    from pylons import request
+    sb.obj = model.Session.query(model.Page).get(
+                request.environ['pylons.routes_dict'].get('id', 0))
+    return sb
+    
+
+# toscawidgets support
+
+page_form = PageForm('page_form', location = "headbottom")
+new_page_form = NewPageForm('new_page_form', location = "headbottom")
+
+
+class PagesController(BaseController):
+    def __before__(self):
+        c.dcmeta = dcmeta(title="Untitled")
+    
+    def index(self):
+        c.dcmeta.title = c.title = 'tw.forms grid test'
+        fields = [("Slug", "slug"), ("Title", "title"), 
+                  ("Published", "published"), ("Author", "author"), 
+                  ("Display", 'display')]
+        c.grid = DataGrid(name='grid', fields=fields)
+        c.data = model.Session.query(model.Page).all()
+        return render('grid.mak')
+    
+    def show(self, id):
+        # Handle page reference by id (int) or by slug (string)
+        try:
+            from formencode import validators
+            validators.Int().to_python(id)
+            # Need SQLA's exception-raising query
+            c.page = model.Session.query(model.Page).filter_by(id=id).one()
+        except Exception, emsg:
+            c.page = get_object_or_404(model.Page, slug=id)
+        c.content = markdown(c.page.content, 
+                             # encoding='utf8', 
+                             safe_mode = False)
+        c.dcmeta.title = c.dcmeta.title + " :: " + c.page.title
+        return render('page/page.mak')
+    
+    @authorize(SignedIn())
+    def new(self):
+        """GET /new: Form to create a new item."""
+        c.title = _('New Page')
+        c.w = WidgetBunch()
+        c.w.form = new_page_form
+        c.legend = "Page ..."
+        c.value = None
+        c.action = url('create_page')
+        return render('dashboard/page_add.mak')
+    
+    @validate(form=new_page_form, error_handler="new", state_factory=gen_state)
+    @authorize(SignedIn())
+    def create(self):
+        page = model.Page()
+        try:
+            # self.form_result.pop('_method')
+            for k, v in self.form_result.iteritems():
+                setattr(page, k, v)
+            setattr(page, 'published', datetime.utcnow())
+            setattr(page, 'author', c.user)
+            model.Session.save_or_update(page)
+            bag_it_and_tag_it(page, 'page', u'add')
+            model.Session.commit()
+            session['flash'] = "Successful creation."
+        except Exception and Exception != httpexceptions.HTTPFound, msg:
+            log.debug('Page_creation failed: %s' % msg)
+            session['flash'] = "Failed creation"
+        session.save()
+        c.flash = session['flash']
+        return redirect_to(url('pages'))
+    
+    @authorize(SignedIn())
+    def edit(self, id):
+        """GET /id;edit: Form to edit an existing item."""
+        c.page = get_object_or_404(model.Page, id=id)
+        c.title = c.page.title
+        c.dc_description = _("Editing page") + " %s" % c.page.title
+        c.w = WidgetBunch()
+        c.w.form = page_form
+        c.legend = "Page ..."
+        c.value = c.page
+        c.action = url('save_page', id=id)
+        # c.flash = session.get('flash', '')
+        return render('dashboard/page.mak')
+    
+    @validate(form=page_form, error_handler="edit", state_factory=gen_state)
+    @authorize(SignedIn())
+    def update(self, id):
+        """PUT /id: Update an existing item."""
+        c.page = get_object_or_404(model.Page, id=id)
+        try:
+            # form_results = request.environ['paste.parsed_formvars'][0]
+            # N.B. form_results is the result of Paste's parsing of the form.
+            # The bound value is a singleton list containing a MultiDict.
+            #
+            # The self.form_result referenced immediately below is bound
+            # to the result of ToscaWidgets' parsing of the form. The bound
+            # value is a dict.
+            self.form_result.pop('_method')
+            
+            # Delegate handling of FK references
+            author = self.form_result.pop('author')
+            c.page.author = model.Session.query(model.User).get(author.id)
+            
+            # temporary workaround check for uniqueness of slug
+            # because of Unique validator wierdness.
+            slugs = model.Session.query(model.Page).filter_by(
+                                slug=self.form_result['slug']).all()
+            if len(slugs) == 1 and slugs[0] != c.page:
+                self.form_result['slug'] = self.form_result['slug']+'_1'
+            # end of temporary workaround
+            
+            for k, v in self.form_result.iteritems():
+                if getattr(c.page, k) != v:
+                    # log.debug("Changing %s from %s to %s" % \
+                    #                    (k, getattr(page, k), v))
+                    setattr(c.page, k, v)
+            bag_it_and_tag_it(c.page, 'page', u'edit')
+            model.Session.commit()
+            # cache.get_cache('{{package}}.page_%s' % c.page.id).clear()
+            session['flash'] = "Successful update"
+        except Exception, msg:
+            log.debug('Page_update failed: %s' % msg)
+            session['flash'] = "Failed update"
+        session.save()
+        c.flash = session['flash']
+        return redirect_to(url('edit_page', id=id))
+    
+    @authorize(SignedIn())
+    def delete(self, id):
+        """DELETE /id: Delete an existing item."""
+        page = get_object_or_404(model.Page, id=id)
+        try:
+            bag_it_and_tag_it(page, 'page', u'delete')
+            model.Session.delete(page)
+            model.Session.commit()
+            session['flash'] = "Succssful deletion"
+        except Exception, msg:
+            log.debug('Page_delete failed: %s' % msg)
+            session['flash'] = "Failed deletion"
+        c.flash = session['flash']
+        session.save()
+        # Would probably better to return a Status 200 page 
+        # or even better, make this a purely AJAX action
+        return redirect_to(url('pages'))
+    
+    def popup(self, id):
+        c.page = get_object_or_404(model.Page, id=id)
+        c.title = c.page.title.decode('utf-8')
+        c.content = c.page.content.decode('utf-8')
+        return render('thickbox.mak')
+    
+
+
