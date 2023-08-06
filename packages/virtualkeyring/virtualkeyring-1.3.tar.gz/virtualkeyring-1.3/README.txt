@@ -1,0 +1,85 @@
+Virtual Keyring
+===============
+
+:author: Olivier Grisel <olivier.grisel@ensta.org>
+:description: Generate rebuildable strong passwords
+
+Oneliner overview::
+
+  domain_password == base62(sha1(master_password + domain_key))[:8]
+
+
+Goal
+----
+
+This utility script helps generate a set of rebuildable domain-specific strong
+passwords out of a single easy to remember master password and domain specific
+keys such as "login@host".
+
+The generated passwords are strong since they use 8 characters out of a 62
+characters long alphabet (lowercase and uppercase letters + digits) that are not
+to be found in any dictionary.
+
+You can always re-generate your passwords by taking the base 62 encoding of the
+sha1 hash of the concatenation of your master password and domain key.
+
+
+Install
+-------
+
+With setuptools_::
+
+  $ easy_install -U virtualkeyring
+
+.. _setuptools: http://peak.telecommunity.com/DevCenter/setuptools
+
+
+Usage
+-----
+
+Use the interactive command-line tool ``vkr`` that should now be in your PATH,
+and type in you master password and domain key::
+
+  $ vkr
+  master password: mysecret
+  domain key [e.g. 'login@host']: foobar@example.com
+  your password is: hRnf6udB
+  please clean your console (ctrl-L) after usage
+
+To generate passwords with length larger that 8 chars, for instance for an ssh
+key passphrase::
+
+  $ vkr -l 20
+  master password: mysecret
+  domain key [e.g. 'login@host']: foobar@id_rsa
+  your password is: ClRsTi3btiFhT1weDq0L
+  please clean your console (ctrl-L) after usage
+
+To generate passwords for a specific alphabet::
+
+  $ vkr -a 42aAuUTt
+  master password: mysecret
+  domain key [e.g. 'login@host']: foobar@example.com
+  your password is: AatT2UAa
+  please clean your console (ctrl-L) after usage
+
+
+Changes
+-------
+
+- 1.3 (2008-06-01): add factorized out password fetching from stdin (thanks to gawel)
+
+- 1.2 (2008-05-16): add -l and -a parameters
+
+- 1.1 (2008-02-16) use getpass to read the master password from the keyboard
+
+- 1.0 (2007-11-10) initial relase
+
+
+Online version
+--------------
+
+I plan to run a pylons_-based version of the script at
+https://oliviergrisel.name (not yet done).
+
+.. _pylons: http://www.pylonshq.com
