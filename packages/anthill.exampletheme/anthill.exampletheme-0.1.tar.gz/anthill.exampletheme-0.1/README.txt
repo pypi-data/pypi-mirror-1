@@ -1,0 +1,130 @@
+Introduction
+------------
+
+This package provides a public theme for Plone. It is *NOT* useable using
+plain plone. It is intended to be used in conjunction with
+``anthill.skinner`` package. 
+
+To remember: This theme relies on the idea that for anonymous users you want
+to have a flexible theme that is easy to set up and for yourself or content
+editors you want to unleash the full power of Plone by leaving the interface
+as is. This paradigma is enough for most Plone websites imho.
+
+You may want to use this package (including ``anthill.skinner``) if you answer
+one (or all) of the following questions with yes:
+
+- Do you have one of the following usecases: Weblog, Photo-Album,
+  Website to present some texts without heavy community features?
+- Are you afraid of fiddling with the complex Plone template architecture
+  that enforces you to read long and complex howtos in order to create a theme?
+- Did you already tried to theme Plone but your site still looks more like
+  Plone than your original design?
+- Do you still ponder about terms like viewlet, content provider, adapter,
+  browser layer, zcml?
+- Do you think it is a waste of time to adapt a working layout to match the
+  structure of Plone?
+
+Even if you didn't answer any of these with yes (you are a nerd aren't you?
+:-)) then give this package a try. Look at one of these sites - all built on top
+of ``anthill.skinner`` (for Plone 2.5.x) - then decide if this paradigma is
+for you:
+
+- http://www.banality.de/
+- http://www.oxseed.com/
+- http://www.gdd.de/
+- http://www.apo-life.de
+
+And 100+ more can be found online elsewhere - all built on top of Plone using
+a public view.
+
+Time matters
+------------
+
+One of the most striking points in favour of a public view is mass deployment
+of websites. What if you have to deploy two portals each week, having only one
+developer and the design is provided by a plone agnostic web agency?
+
+Without using a public view you can't do such a task with acceptable costs.
+
+Simplicity matters
+------------------
+
+Why should one have to fiddle around with the complex Plone templates? To be
+honest: My favourite product is *GloWorm* and without I wouldn't even start
+searching for the correct template for e.g. the site actions.
+
+Using a public view means that you can concentrate on the real work: Put a
+theme on top of Plone and work on functionalitites requested by the customer.
+
+Installation
+-------------
+
+- Include anthill.exampletheme in your buildout
+- Make sure to have it included in instance zcml and eggs option
+- Go to portal_quickinstaller and install anthill.skinner
+- Then install anthill.exampletheme
+- Click on "Show Preview" on the upper right corner in Plone
+
+How does it look like?
+----------------------
+
+.. image:: http://files.banality.de/public/anthill.exampletheme.jpg
+
+How to create a public skin?
+----------------------------
+
+I'm currently creating a paster template that creates all the files and dirs needed to
+start right away. This template is based on plone3_theme and has no big
+differences (but important and subtle ones).
+
+But before invoking paster you should have a look at this 
+example in order to see how easy it is to create your own layout. I will
+describe the steps needed in order to build a public view:
+
+- I assume you have a ready to use design ready. I took mine from
+  freecsstemplates.org. I got images, one css file and the index.html.
+
+- Create a package (e.g. my.theme) using ``paster create -t plone3_theme my.theme``
+
+- Copy all images to browser/images
+
+- Copy your css file to browser/stylesheets/main.css
+
+- Copy main_template.pt from this package
+  (skins/anthill_exampletheme_custom_templates) to
+  skins/my_theme_custom_templates
+
+- Copy publicmenu_levels.pt from this package
+  (skins/anthill_exampletheme_custom_templates) to
+  skins/my_theme_custom_templates
+
+- Fire up your favourite editor and open
+  skins/my_theme_custom_templates/main_template
+
+- Delete all stuff in the body tag
+
+- Copy the contents of your index.html between body tags
+
+- Look at how this package uses menu structures and insert menu call at
+  correct places. Also have a look at publicmenu_levels.pt where menu
+  definitions live.
+
+- Do not forget to include the "Back to Plone" link!
+
+- Now make sure that your profiles/default/skins.xml matches the one from this
+  package. You do need to change the contents in skin-path to be based on
+  *publicview* and not *Plone Default*. Yu also need to make sure that the
+  first layer (my_theme_custom_templates) has attribute
+  insert-before="anthill_skinner_templates"
+
+Now you should be ready to start with your new skin. Make sure to install
+anthill.skinner first and then install your package. Go to Plone interface and
+then you should have a new link on the upper right that reads "Show Preview".
+Click and if you did all right you should see your shiny layout.
+
+I think you agree that this is very easy and will take you at most an
+hour to have every design ready. How long will it take to have this design on
+top of Plone w/o publicview? Don't know - not my problem :)
+
+Feedback to the author
+
