@@ -1,0 +1,113 @@
+If you want your django model e.g. to be displayed in the datagrid component
+of the dojo javascript toolkit, you'll need to serialize the data to a repr.
+that a dojo datastore understands. 
+
+Lets assume our model looks like that, it will get its primary key field
+automatically:
+
+    class DemoModel(models.Model):
+        title = models.CharField(max_length=255)
+        foo = models.CharField(max_length=3)
+
+Let's create two instances:
+    
+    first_model = DemoModel.objects.create(title="first model", foo="bar")
+    second_model = DemoModel.objects.create(title="second model", foo="baz") 
+    
+Those two models need to be serialized to a dojo data compatible format:
+    
+    from dojoserializer import serialize
+    all_demo_models = DemoModels.objects.all()
+    json_data = serialize(all_demo_models) 
+    
+The serialize method takes a model instance, a collection of model instances
+or a queryset (like here) and returns the following representation:
+
+01    {}&&
+02    {
+03       "numRows":2,
+04       "items":[
+05          {
+06             "id":1
+07             "title":"first model",
+08             "foo":"bar",
+09             "_pk":1,
+10             "_unicode":"DemoModel object"
+11          },
+12          {
+13             "id":2,
+14             "title":"second model",
+15             "foo":"baz",
+16             "_pk":2,
+17             "_unicode":"DemoModel object"
+18          }
+19       ],
+20       "identifier":"_pk",
+21       "label":"_unicode"
+22    }
+
+The prefix {}&& in line 1 is used to prevent JSON hijacking, Dojo understands 
+that. In lines 6-8 and 13-15 you see the expected fields 'id', 'title' and
+'foo'. To have a generic way to get a string representation and a unique 
+identifier of a model, the serializer method adds the fields '_pk' and 
+'_unicode'. To save a bit of data, you can exclude the field 'id' by 
+populating the exclude_fields tuple:
+
+    json_data = serialize(all_demo_models, exclude_fields=('id',))
+    
+Lines 6 and 13 are missing now. There is also a 'fields'-tuple that you can
+set to define a set of fields to serialize. To get the same result as with
+exclude fields earlier, we set the fields to serialize 'title' and 'foo' only:
+
+    json_data = serialize(all_demo_models, fields=('title', 'foo',))
+
+Lines 6 and 13 are also missing. 
+
+You're also able to add two additional fields '_app_label' and '_model_name'
+to your serialized objects by calling the serialize method with the argument
+'add_model_info=True'.
+
+
+
+
+To help you writing views that expose your models to dojo, you can use
+dojoserializer.DojoDataJSONResponse with exactly the same arguments like the
+serialize method takes. But instead of a string it returns a HTTPResponse 
+objects with the headers set to prevent caching.
+
+
+
+
+Here's a JSON representation of a model I used in tests.py, with many
+different field types, a foreign key relation and a n..m relation. Notice
+that the date and time in datetime fields are separated by a capital 'T' and
+that instead of eagerly fetching and adding related objects only their IDs are
+used:
+  
+    {}&&
+    {
+       "numRows":1,
+       "items":[
+          {
+             "datefield":"2009-07-03",
+             "integerfield":123,
+             "many_other_testmodels":[
+                2,
+                3
+             ],
+             "id":4,
+             "_unicode":"testmodel",
+             "nullbooleanfield":null,
+             "floatfield":123.45,
+             "timefield":"23:59:59",
+             "charfield":"testmodel",
+             "_pk":4,
+             "booleanfield":true,
+             "datetimefield":"2009-07-03T13:59:00",
+             "another_testmodel":1,
+             "decimalfield":"123.45"
+          }
+       ],
+       "identifier":"_pk",
+       "label":"_unicode"
+    }
