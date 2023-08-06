@@ -1,0 +1,99 @@
+#!/usr/bin/env python
+# 
+# For my little blue bear.
+
+import sys
+import os
+import btools.common as common
+import btools.pybookmark as pybookmark
+import subprocess
+
+name = "mkbm"
+description = "Make new bookmarks and directories"
+long_description = """mkbm creates a new directory using mkdir and adds it automatically to the bookmark index. \
+A parent argument can also be set to specify in which directory or bookmark the new directory should be made. \
+The parent is by default set to the current working directory."""
+
+commands = [(["-h", "--help"], "", "Help screen"),
+            (["-p", "--parent"], "(DIRECTORY|BOOKMARK)",
+            "Parent directory or bookmark of the new bookmark.")]
+usage = ["BOOKMARK [OPTIONS]"]
+
+examples = [("new_bookmark", "Create new bookmark in current dir"),
+            ("new_bookmark -p other", "Create new bookmark in other bookmark"),
+            ("new_bookmark -p /home/", "Create new bookmark in /home/")]
+
+
+def make_bookmark(bookmark, parent):
+    bm = " ".join(bookmark)
+    p = " ".join(parent)
+    known = pybookmark.read_bookmarks(pybookmark.get_conf_location())
+    if bm == "":
+        print "Error: missing bookmark"
+        print "Parent: %s"
+        print "Usage: mkbm BOOKMARK [OPTIONS]"
+        sys.exit(1)
+    if p == "":
+        dest = os.getcwd()
+    else:
+        if os.path.isdir(p):
+            dest = os.path.realpath(p)
+        else:
+            d = pybookmark.get_bookmark(p, known)
+            dest = ""
+            if len(d) == 0:
+                common.error("No matches for parent bookmark: %s" % p)
+            elif len(d) == 1:
+                dest = d[0][1]
+            else:
+                for b, des in d:
+                    if b == p:
+                        dest = des
+                if dest == "":
+                    common.error("Parent bookmark matches multiple directories")
+    dest = os.path.join(dest, bm)
+    cmd = "mkdir -vp \"%s\"" % dest
+    ret = subprocess.Popen(cmd, shell = True).wait()
+    if ret == 0:
+        pybookmark.add_bookmark(pybookmark.get_conf_location(), bm, dest)
+        common.info("Added new bookmark %s to %s." % (bm, dest))
+    else:
+        common.error("Making bookmark directory failed.")
+
+
+def cli_help():
+    common.cli_module_help( globals() )
+
+
+
+def command_line_interface():
+    if len(sys.argv) == 1:
+        return cli_help()
+
+    bm = []
+    parent = []
+
+    inparent = False
+    for x in sys.argv[1:]:
+        if x in ["-p", "--parent"]:
+            inparent = True
+            continue
+        elif x in ["-h", "--help"]:
+            return cli_help()
+        elif x[0] == "-":
+            common.warning("Unknown option: %s" % x)
+            continue
+
+        if not inparent:
+            bm.append(x)
+        else:
+            parent.append(x)
+
+    if inparent and parent == []:
+        common.error("Missing parent argument")
+    make_bookmark(bm, parent)
+
+
+
+if __name__ == '__main__':
+    command_line_interface()
