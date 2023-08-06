@@ -1,0 +1,85 @@
+Introduction
+============
+
+``pydataportability.discovery`` is a component for discovering resource description
+documents. These are `XRD documents <http://code.google.com/p/webfinger/wiki/XrdFiles>`_ describing 
+a resource and optionally pointing to related resources. One use case is the 
+`webfinger project <http://code.google.com/p/webfinger/>`_ where XRD is used to store
+information about a user. The URI identifying the user is e.g. ``acct:user@example.com``
+and this discovery component is able to retrieve information about the user via
+`LRDD <http://hueniverse.com/2009/03/the-discovery-protocol-stack/>`_.
+
+
+Installation
+------------
+
+The easiest way to install it is via ``easy_install``::
+
+    easy_install pydataportability.discovery
+
+It is recommended to do this inside a `virtualenv <http://pypi.python.org/pypi/virtualenv/1.3.4>`_
+
+
+Simple usage
+------------
+
+After installing you will have 2 new commands in your path (or virtualenv's ``bin/`` directory):
+``discover`` and ``webfinger``. These are just example scripts though. Both do discovery
+on the URI you feed in but the latter will check for webfinger-relationships only and will
+additionally check if you passed in a user identifier starting with ``acct:`` which is the
+proposed scheme of the webfinger protocol. If you didn't, it's adding it for you.
+
+Here is an example::
+
+    $ webfinger someuser@googlemail.com
+
+    Subject:  acct:someuser@googlemail.com
+
+    Rels:  ['http://portablecontacts.net/spec/1.0']
+    URIs: ['http://www-opensocial.googleusercontent.com/api/people/']
+    Media Types: []
+    Prio: 0
+    Templates: []
+
+So this mainly prints the contents of the discovered XRD document. Note that the
+user you are testing it with needs to enable this at Google. Check out the 
+`webfinger homepage <http://code.google.com/p/webfinger/>`_ and 
+`mailing list <http://groups.google.com/group/webfinger/>`_ for more information.
+
+
+Documentation 
+-------------
+
+You can find the documentation for this component at http://dataportability.net
+
+.. warning:: Note that the XRD specification and the webfinger protocol are under heavy
+   development and likely to change. 
+
+License
+=======
+
+This project is released under a BSD license:
+
+
+Copyright (c) 2009, Christian Scholz
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+   disclaimer.
+ * Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following
+   disclaimer in the documentation and/or other materials provided with the distribution.
+ * Neither the name of the author nor the names of its contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
