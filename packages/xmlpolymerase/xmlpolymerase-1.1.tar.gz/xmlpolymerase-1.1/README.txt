@@ -1,0 +1,92 @@
+=============
+xmlpolymerase
+=============
+
+Overview
+========
+
+xmlpolymerase is a simple powerful serializer and deserializer for 
+python-structures into XML. Possible structures are string, int, float, bool, 
+list and dict.
+
+*The primary function of a polymerase is the polymerization of new DNA or RNA 
+against an existing DNA or RNA template in the processes of replication and 
+transcription.* (Cite: Wikipeadia http://en.wikipedia.org/wiki/Polymerase)
+
+Usage
+=====
+
+This is a pure python module. The API is pretty simple, for more read the 
+docstrings, an exampkle follows:
+
+>>> from odict import OrderedDict
+>>> teststructure = OrderedDict()
+>>> teststructure['one'] = 'Eins'
+>>> teststructure['two'] = 'Zwei'
+>>> teststructure['three'] = 'Drei'
+>>> teststructure['four'] = [True, 2, '3-2', 42.23]
+>>> domnode = serialize(structure, nodename='object')
+>>> print domnode.toprettyxml()
+<object>
+    <one>
+            Eins
+    </one>
+    <two>
+            Zwei
+    </two>
+    <three>
+            Drei
+    </three>
+    <four type="list">
+            <entry type="bool">
+                    True
+            </entry>
+            <entry type="int">
+                    2
+            </entry>
+            <entry>
+                    3-2
+            </entry>
+            <entry type="float">
+                    42.23
+            </entry>
+    </four>
+</object>
+<BLANKLINE>
+    
+>>> structure = deserialze(domnode)
+OrderedDict([('one', 'Eins'), ('two', 'Zwei'), ('three', 'Drei'), ('four', [True, 2, '3-2', 23.42])])
+
+Thanks
+======
+
+to Nicola Larosa and Michael Foord for the OrderedDict implementation, which is 
+used and copied (unmodified) into this package in ``odict.py`` here. The code 
+was published under a BSD-License. For details please read the contents of the 
+file.
+
+License
+=======
+
+All code except ``odict.py`` is under the GNU General Public License GPL 2.0 or 
+later.
+
+Copyright and Authors
+=====================
+
+Copyright, BlueDynamics Alliance, Austria
+
+author: Jens Klein <jens@bluedynamics.com>
+
+
+Feedback, Bugreports, ...
+=========================
+
+If you like to give the author feedback about this product just write a mail
+to <dev@bluedynamics.com>.
+
+If you have access to the *plone.org* *collective* you might want to commit 
+bug-fixes direct to trunk or do enhancements on a branch. Anyway, the author 
+would be happy to get a short mail about those changes.
+
+-- Jens Klein <jens@bluedynamics.com>
