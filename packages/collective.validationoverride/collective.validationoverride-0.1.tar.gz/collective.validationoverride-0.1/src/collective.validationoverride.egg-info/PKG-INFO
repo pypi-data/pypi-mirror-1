@@ -1,0 +1,201 @@
+Metadata-Version: 1.0
+Name: collective.validationoverride
+Version: 0.1
+Summary: Allow AT field validatiuon to fail for users who have an override permission
+Home-page: http://pypi.python.org/pypi/collective.validationoverride
+Author: Ross Patterson
+Author-email: me@rpatterson.net
+License: GPL
+Description: .. -*-doctest-*-
+        
+        =============================
+        collective.validationoverride
+        =============================
+        
+        For some sites, it may be useful to allow certain users, such as site
+        administrators, to edit content without satisfying field validators.
+        For example, a site with a content type for capturing member contact
+        information would use required fields for most of the contact
+        information fields.  On rare occasions, however, the contact
+        information object may be required for some purposes, such as general
+        listing, but the full contact information may not be available, such
+        as wen a member is away.
+        
+        The collective.validationoverride package provides patches the
+        Archetypes field validator method such that when field validation
+        failures are logged but validation status is still successful.
+        Specifically, a permission is checked and if the current user has that
+        permission in the context of the object, the validation error is
+        logged and then removed from the list of validation errors allowing
+        for a successful validation status.
+        
+        The permission to check is taken from the
+        'validation_override_permission' field attribute defaulting to the
+        "Override validation" permission.  As such, field validation may be
+        overridden without modifying the content types by assigning the
+        "Override validation" permission to the appropriate roles in the
+        desired contexts.  By default, the "Manager" role has this permission.
+        
+        Examples
+        --------
+        
+        Before installing collective.validationoverride, field validation must
+        be satisfied.
+        
+        Capture logging output.
+        
+        >>> from zope.testing.loggingsupport import InstalledHandler
+        >>> log_handler = InstalledHandler('collective.validationoverride')
+        
+        Open a browser and log in as a user with the "Manager" role.
+        
+        >>> from Products.Five.testbrowser import Browser
+        >>> from Products.PloneTestCase import ptc
+        >>> owner_browser = Browser()
+        >>> owner_browser.handleErrors = False
+        >>> owner_browser.open(portal.absolute_url())
+        >>> owner_browser.getLink('Log in').click()
+        >>> owner_browser.getControl(
+        ...     'Login Name').value = ptc.portal_owner
+        >>> owner_browser.getControl(
+        ...     'Password').value = ptc.default_password
+        >>> owner_browser.getControl('Log in').click()
+        
+        Add an event and try to save it without valid field values.
+        The validation fails and reports the required fields.
+        
+        >>> owner_browser.getLink(url='Event').click()
+        >>> owner_browser.getControl('Event URL').value = 'foo'
+        >>> owner_browser.getControl('Contact E-mail').value = 'bar'
+        >>> owner_browser.getControl('Save').click()
+        >>> print owner_browser.contents
+        <...
+        <dd>Please correct the indicated errors.</dd>...
+        <div class="fieldErrorBox">Title is required, please correct.</div>...
+        <div class="fieldErrorBox">Validation failed(isURL): 'foo' is not a valid url.</div>...
+        <div class="fieldErrorBox">Validation failed(isEmail): 'bar' is not a valid email address.</div>...
+        
+        No validation errors have been logged.
+        
+        >>> for record in log_handler.records:
+        ...     print record.getMessage()
+        
+        After installing collective.validationoverride, field validation
+        failures will be omitted for users with the "Manger" role but not for
+        normal users since the "Override validation" permission is only given
+        to users with the "Manager" role.
+        
+        Install the collective.validationoverride package.
+        
+        >>> portal.portal_quickinstaller.installProduct(
+        ...     'collective.validationoverride')
+        ''
+        
+        Now a user with the "Manager" role can successfully add an event with
+        invalid field values.
+        
+        >>> owner_browser.open(portal.absolute_url())
+        >>> owner_browser.getLink(url='Event').click()
+        >>> owner_browser.getControl('Event URL').value = 'foo'
+        >>> owner_browser.getControl('Contact E-mail').value = 'bar'
+        >>> owner_browser.getControl('Save').click()
+        >>> print owner_browser.contents
+        <...
+        <dd>Changes saved.</dd>...
+        <a href="&#0109;ailto&#0058;bar" class="email fn">bar</a>...
+        <a class="url" href="foo"...
+        
+        All omitted validation errors have been logged.
+        
+        >>> for record in log_handler.records:
+        ...     print record.getMessage()
+        Overriding the validation result u'Title is required, please correct.' on <ATEvent at /plone/portal_factory/Event/event... used for /plone>:
+        {'title': u'Title is required, please correct.'}
+        Overriding the validation result u"Validation failed(isURL): 'foo' is not a valid url." on <ATEvent at /plone/portal_factory/Event/event... used for /plone>:
+        {}
+        Overriding the validation result u"Validation failed(isEmail): 'bar' is not a valid email address." on <ATEvent at /plone/portal_factory/Event/event... used for /plone>:
+        {}...
+        >>> log_handler.clear()
+        
+        Open a browser and log in as a normal user.
+        
+        >>> browser = Browser()
+        >>> browser.handleErrors = False
+        >>> browser.open(portal.absolute_url())
+        >>> browser.getLink('Log in').click()
+        >>> browser.getControl('Login Name').value = ptc.default_user
+        >>> browser.getControl(
+        ...     'Password').value = ptc.default_password
+        >>> browser.getControl('Log in').click()
+        
+        The normal use still cannot add an event with invalid field values.
+        
+        >>> browser.open(self.folder.absolute_url())
+        >>> browser.getLink(url='Event').click()
+        >>> browser.getControl('Event URL').value = 'foo'
+        >>> browser.getControl('Contact E-mail').value = 'bar'
+        >>> browser.getControl('Save').click()
+        >>> print browser.contents
+        <...
+        <dd>Please correct the indicated errors.</dd>...
+        <div class="fieldErrorBox">Title is required, please correct.</div>...
+        <div class="fieldErrorBox">Validation failed(isURL): 'foo' is not a valid url.</div>...
+        <div class="fieldErrorBox">Validation failed(isEmail): 'bar' is not a valid email address.</div>...
+        
+        No validation errors have been logged.
+        
+        >>> for record in log_handler.records:
+        ...     print record.getMessage()
+        
+        Set the 'validation_override_permission' field attribute to a
+        permission the normal user has.
+        
+        >>> from Products.ATContentTypes.content import event
+        >>> schema = event.ATEvent.schema
+        >>> schema['title'].validation_override_permission = (
+        ...     "Modify portal content")
+        >>> schema['eventUrl'].validation_override_permission = (
+        ...     "Modify portal content")
+        >>> schema['contactEmail'].validation_override_permission = (
+        ...     "Modify portal content")
+        
+        Now the user can successfully add an event with invalid field values.
+        
+        >>> browser.open(self.folder.absolute_url())
+        >>> browser.getLink(url='Event').click()
+        >>> browser.getControl('Event URL').value = 'foo'
+        >>> browser.getControl('Contact E-mail').value = 'bar'
+        >>> browser.getControl('Save').click()
+        >>> print browser.contents
+        <...
+        <dd>Changes saved.</dd>...
+        <a href="&#0109;ailto&#0058;bar" class="email fn">bar</a>...
+        <a class="url" href="foo"...
+        
+        All omitted validation errors have been logged.
+        
+        >>> for record in log_handler.records:
+        ...     print record.getMessage()
+        Overriding the validation result u'Title is required, please correct.' on <ATEvent at /plone/Members/test_user_1_/portal_factory/Event/event... used for /plone/Members/test_user_1_>:
+        {'title': u'Title is required, please correct.'}
+        Overriding the validation result u"Validation failed(isURL): 'foo' is not a valid url." on <ATEvent at /plone/Members/test_user_1_/portal_factory/Event/event... used for /plone/Members/test_user_1_>:
+        {}
+        Overriding the validation result u"Validation failed(isEmail): 'bar' is not a valid email address." on <ATEvent at /plone/Members/test_user_1_/portal_factory/Event/event... used for /plone/Members/test_user_1_>:
+        {}...
+        >>> log_handler.clear()
+        
+        Changelog
+        =========
+        
+        0.1 - 2009-11-12
+        ----------------
+        
+        * Initial release
+        
+        
+        TODO
+        ====
+        
+Platform: UNKNOWN
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
