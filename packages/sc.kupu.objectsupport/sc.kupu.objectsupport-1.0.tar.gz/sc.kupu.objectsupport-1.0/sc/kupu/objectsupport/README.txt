@@ -1,0 +1,74 @@
+sc.kupu.objectsupport
+=====================
+
+Overview
+--------
+
+A product that enables external Flash content inside Kupu.. 
+
+Requirements
+------------
+
+    - Kupu 1.4.x (http://plone.org/products/kupu)
+
+    - Plone 3.1.x (http://plone.org/products/plone)
+    
+Installation
+------------
+    
+To enable this product,on a buildout based installation:
+
+    1. Edit your buildout.cfg and add ``sc.kupu.objectsupport``
+       to the list of eggs to install ::
+
+        [buildout]
+        ...
+        eggs = 
+            sc.kupu.objectsupport
+
+    2. Tell the plone.recipe.zope2instance recipe to install a ZCML slug::
+
+        [instance]
+        ...
+        zcml = 
+            ...
+            sc.kupu.objectsupport
+    
+
+If another package depends on the sc.kupu.objectsupport egg or 
+includes its zcml directly you do not need to specify anything in the 
+buildout configuration: buildout will detect this automatically.
+
+After updating the configuration you need to run the ''bin/buildout'',
+which will take care of updating your system.
+
+Go to the 'Site Setup' page in the Plone interface and click on the
+'Add/Remove Products' link.
+
+Choose the product (check its checkbox) and click the 'Install' button.
+
+Uninstall -- This can be done from the same management screen, but only
+if you installed it from the quick installer.
+
+Note: You may have to empty your browser cache and save your resource registries
+in order to see the effects of the product installation.
+
+Sponsoring
+----------
+
+Development of this product was sponsored by `Simples Consultoria 
+<http://www.simplesconsultoria.com.br/>`_ customers including, but not limited 
+to:
+    
+    * `Rede Brasil Atual <http://www.redebrasilatual.com.br>`__
+    
+    * `Portal da Loterofilia <http://www.loterofilia.com.br>`__
+    
+    * `Direitos da Crianca <http://www.direitosdacrianca.org.br>`__
+
+
+Credits
+-------
+    
+    * Erico Andrei (erico at simplesconsultoria dot com dot br) - Packaging and
+      plumbing.
