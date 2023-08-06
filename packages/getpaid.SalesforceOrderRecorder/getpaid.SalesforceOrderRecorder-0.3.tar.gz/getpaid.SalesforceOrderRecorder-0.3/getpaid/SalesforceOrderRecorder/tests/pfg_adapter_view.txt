@@ -1,0 +1,197 @@
+=====================================
+ Salesforce PFG Adapter Edit/View
+=====================================
+
+Get our test browser and get some permissions in place::
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> browser = Browser()
+    >>> portal_url = 'http://nohost/plone'
+    >>> self.app.acl_users.userFolderAddUser('root', 'secret', ['Manager'], [])
+    >>> self.app.acl_users.userFolderAddUser('member', 'secret', ['Member'], [])
+    >>> browser.addHeader('Authorization', 'Basic root:secret')
+
+Set GetPaid required settings. (Especially anonymous checkout)::
+
+    >>> browser.open(portal_url)
+    >>> browser.getLink('Site Setup').click()
+    >>> browser.getLink('GetPaid').click()
+    >>> browser.getLink('Site Profile').click()
+    >>> browser.getControl('Contact Email').value = 'info@plonegetpaid.com'
+    >>> browser.getControl( name="form.store_name").value = 'Test this fake company'
+    >>> browser.getControl('Contact Country').value = ['US']
+    >>> browser.getControl('Apply').click()
+    >>> browser.getLink('GetPaid').click()
+    >>> browser.getLink('Content Types').click()
+    >>> browser.getLink('GetPaid').click()
+    >>> browser.getLink('Payment Options').click()
+    >>> browser.getControl(name = 'form.payment_processor').displayValue = ['Testing Processor']
+    >>> browser.getControl(name = 'form.allow_anonymous_checkout.used').value = 'on'
+    >>> browser.getControl(name = 'form.allow_anonymous_checkout').value = True
+    >>> browser.getControl('Apply').click()
+    >>> browser.getLink('GetPaid').click()
+    >>> browser.getLink('Payment Processor Settings').click()
+    >>> browser.getControl(name="form.allow_authorization").displayValue = ['allow_authorization']
+    >>> browser.getControl(name="form.allow_capture").displayValue = ['allow_capture']
+    >>> browser.getControl(name="form.allow_refunds").displayValue = ['allow_refund']    
+    >>> browser.getControl('Apply').click()
+    >>> browser.getLink('GetPaid').click()
+    >>> browser.getLink('Email Notifications').click()
+    >>> browser.getControl(name='form.merchant_email_notification').displayValue = ['Do not send merchant email notification of a completed transaction']
+    >>> browser.getControl('Apply').click()
+    >>> browser.getLink('GetPaid').click()
+    >>> browser.getLink('Legal Disclaimers').click()
+    >>> browser.getControl(name='form.disclaimer').value = 'Test disclaimer'
+    >>> browser.getControl(name='form.privacy_policy').value = 'Test privacy policy'
+    >>> browser.getControl('Apply').click()
+    >>> browser.getLink('GetPaid').click() 
+    >>> 'Test this fake company' in browser.contents
+    True
+    >>> browser.getLink('Payment Options').click()
+    >>> browser.getControl(name ='form.allow_anonymous_checkout').value
+    True
+
+Here we are setting the buyable types for use in the following tests::
+  
+    >>> from Products.PloneGetPaid.interfaces import IGetPaidManagementOptions
+    >>> options = IGetPaidManagementOptions(self.portal)
+    >>> options.buyable_types = ['FormFolder']
+    >>> options.donate_types = ['FormFolder']
+    >>> options.shippable_types = ['FormFolder']
+
+Here we set up the Credit cards accepted for payment:
+
+    >>> options.accepted_credit_cards = ["Visa"]
+
+Add a new form folder to contain our Adapters:
+
+    >>> browser.getLink('Home').click()
+    >>> browser.getLink('Form Folder').click()
+    >>> browser.getControl('Title').value = 'testform'
+    >>> browser.getControl('Mailer').selected = False
+    >>> browser.getControl('None').selected = True
+    >>> browser.getControl('Save').click()
+
+Add a float field to the form::
+
+    >>> browser.open("%s/testform/view" % portal_url)
+    >>> browser.getLink('Decimal Number Field').click()
+    >>> browser.getControl('Field Label').value = 'Donation Amount'
+    >>> browser.getControl('Save').click()
+
+We need to mark the form as a variable donation content::
+
+    >>> browser.open("%s/testform/view" % portal_url)
+    >>> browser.getLink('Make this a Variable Amount Donation').click()
+    >>> browser.getControl('Donation Description').value = 'Donation Description'
+    >>> browser.getControl('Activate').click()
+
+Let's add a getpaid.formgen adapter::
+
+    >>> browser.open("%s/testform/view" % portal_url)
+    >>> browser.getLink('Getpaid Adapter').click()
+    >>> browser.getControl('Title').value = 'gpa'
+    >>> browser.getControl('Multi item cart add').selected = True
+    >>> browser.getControl('Save').click()
+    >>> gpa = self.portal.testform.gpa
+    >>> gpa.setPayablesMap(({'field_path': 'replyto',  'form_field': 'Your E-Mail Address',  'payable_path': ''}, 
+    ...                     {'field_path': 'topic', 'payable_path': '', 'form_field': 'Subject'}, 
+    ...                     {'field_path': 'comments', 'payable_path': '', 'form_field': 'Comments'}, 
+    ...                     {'field_path': 'donation-amount',  'form_field': 'Donation Amount',  'payable_path': '/plone/testform'}))
+
+Let's now add a GetPaid Salesforce Adapter and populate a few values on our adapter::
+    
+    >>> browser.open("%s/testform/view" % portal_url)
+    >>> browser.getLink('GetPaid PloneFormGen Salesforce Adapter').click()
+    >>> browser.getControl('Title').value = 'sgpa'
+    >>> browser.getControl('Salesforce Object Type').value = ('Lead',)
+    >>> browser.getControl('Save').click()
+    >>> sgpa = self.portal.testform.sgpa
+    >>> sgpa.setFieldMap(({'field_path': 'replyto', 'form_field': 'Your E-Mail Address', 'sf_field': 'Email'}, 
+    ...                   {'field_path': 'topic', 'form_field': 'Subject', 'sf_field': 'Company'}, 
+    ...                   {'field_path': 'comments', 'form_field': 'Comments', 'sf_field': ''}, 
+    ...                   {'field_path': 'donation-amount', 'form_field': 'Donation Amount', 'sf_field': ''}))
+    >>> sgpa.setGetPaidFieldMap(({'field_path': 'contact_information,first_name', 'form_field': 'First Name', 'sf_field': 'FirstName'}, 
+    ...                          {'field_path': 'contact_information,last_name', 'form_field': 'Last Name', 'sf_field': 'LastName'}, 
+    ...                          {'field_path': 'contact_information,phone_number', 'form_field': 'Phone Number', 'sf_field': ''}, 
+    ...                          {'field_path': 'contact_information,email', 'form_field': 'Email', 'sf_field': ''}, 
+    ...                          {'field_path': 'contact_information,marketing_preference', 'form_field': 'Contact Allowed', 'sf_field': ''}, 
+    ...                          {'field_path': 'contact_information,email_html_format', 'form_field': 'Email Format Preference', 'sf_field': ''}, 
+    ...                          {'field_path': 'billing_address,bill_address_street', 'form_field': 'Billing Address Street', 'sf_field': 'Street'}, 
+    ...                          {'field_path': 'billing_address,bill_city', 'form_field': 'Billing Address City', 'sf_field': ''}, 
+    ...                          {'field_path': 'billing_address,bill_country', 'form_field': 'Billing Address Country', 'sf_field': ''}, 
+    ...                          {'field_path': 'billing_address,bill_state', 'form_field': 'Billing Address State', 'sf_field': ''}, 
+    ...                          {'field_path': 'billing_address,bill_postal_code', 'form_field': 'Billing Address Zip', 'sf_field': ''}, 
+    ...                          {'field_path': 'shipping_address,ship_address_street', 'form_field': 'Shipping Address Street', 'sf_field': ''}, 
+    ...                          {'field_path': 'shipping_address,ship_city', 'form_field': 'Shipping Address City', 'sf_field': ''}, 
+    ...                          {'field_path': 'shipping_address,ship_country', 'form_field': 'Shipping Address Country', 'sf_field': ''}, 
+    ...                          {'field_path': 'shipping_address,ship_state', 'form_field': 'Shipping Address State', 'sf_field': ''}, 
+    ...                          {'field_path': 'shipping_address,ship_postal_code', 'form_field': 'Shipping Address Zip', 'sf_field': ''}, 
+    ...                          {'field_path': 'order_id', 'form_field': 'Order Id', 'sf_field': ''}, 
+    ...                          {'field_path': 'created_date', 'form_field': 'Creation Date', 'sf_field': ''}, 
+    ...                          {'field_path': 'getTotalPrice', 'form_field': 'Total', 'sf_field': ''}, 
+    ...                          {'field_path': 'processor_order_id', 'form_field': 'Transaction Id', 'sf_field': ''}, 
+    ...                          {'field_path': 'user_payment_info_last4', 'form_field': 'CC Last 4', 'sf_field': ''}, 
+    ...                          {'field_path': 'shopping_cart,items,quantity', 'form_field': 'Quantity', 'sf_field': ''}, 
+    ...                          {'field_path': 'shopping_cart,items,item_id', 'form_field': 'Item Id', 'sf_field': ''}, 
+    ...                          {'field_path': 'shopping_cart,items,name', 'form_field': 'Item Name', 'sf_field': ''}, 
+    ...                          {'field_path': 'shopping_cart,items,product_code', 'form_field': 'Product Code', 'sf_field': ''}, 
+    ...                          {'field_path': 'shopping_cart,items,cost', 'form_field': 'Item Cost', 'sf_field': ''}, 
+    ...                          {'field_path': 'shopping_cart,items,total_cost', 'form_field': 'Total Line Item Cost', 'sf_field': 'AnnualRevenue'}, 
+    ...                          {'field_path': 'shopping_cart,items,description', 'form_field': 'Item Description', 'sf_field': ''}))
+
+Now that all the adapters are in place let's fill out our form::
+
+    >>> browser.open("%s/testform" % portal_url)
+    >>> browser.getControl('Your E-Mail Address').value = 'test@test.com'
+    >>> browser.getControl('Subject').value = 'Donation'
+    >>> browser.getControl('Comments').value = 'For you'
+    >>> browser.getControl('Donation Amount').value = '10.25'
+    >>> browser.getControl('Make Payment').click()
+    >>> browser.contents
+    '...Your E-Mail Address...
+    ...test@test.com...
+    ...10.25...'
+
+Now let's enter the checkout process::
+
+    >>> browser.open("%s/@@getpaid-checkout-wizard" % portal_url)
+    >>> browser.getControl('Your Name').value = 'First Last'
+    >>> browser.getControl('Phone Number').value = '9999999999'
+    >>> browser.getControl(name='form.email').value = 'test@test.com'
+    >>> browser.getControl(name='form.bill_name').value = 'First Last'
+    >>> browser.getControl(name='form.bill_first_line').value = '123 Fake Street'
+    >>> browser.getControl(name='form.bill_second_line').value = 'Line 2'
+    >>> browser.getControl(name='form.bill_city').value = 'Anytown'
+    >>> browser.getControl(name='form.bill_country').value = ['US']
+    >>> browser.getControl(name='form.bill_state').value = ['US-WA']
+    >>> browser.getControl(name='form.bill_postal_code').value = '98109'
+    >>> browser.getControl('Same as billing address').selected = True
+    >>> browser.getControl('Continue').click()
+    >>> browser.contents
+    '...Checkout...
+    ...First Last...
+    ...10.25...'
+
+Now Let's fill out out payment information::
+
+    >>> browser.getControl('Card Holder Name').value = 'First Last'
+    >>> browser.getControl('Phone Number').value = '9999999999'
+    >>> browser.getControl(name='form.cc_expiration_month').value = ['12']
+    >>> browser.getControl(name='form.cc_expiration_year').value = ['2038']
+    >>> browser.getControl('Credit Card Verfication Number').value = '1111'
+    >>> browser.getControl('Credit Card Type').value = ['Visa']
+    >>> browser.getControl('Credit Card Number').value = '4111111111111111'
+    >>> browser.getControl('Make Payment').click()
+    >>> browser.contents
+    '...Thank you for your order...'
+
+Now we need to load this order from salesforce and verify it made it there::
+
+    >>> res = self.salesforce.query(['Id',], 
+    ...                             'Lead',
+    ...                             "Email='test@test.com' and LastName='Last'")
+    >>> ret = self.salesforce.delete(res['records'][0]['Id'])
+    >>> 1 == res['size']
+    True
+        
