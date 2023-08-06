@@ -1,0 +1,5 @@
+
+class ReadoutModes (object):
+    pass
+
+    
