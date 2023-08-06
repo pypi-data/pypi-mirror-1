@@ -1,0 +1,76 @@
+Here we'll demonstrate the compatibility layer between plone.registry and the initial globals dictionary.
+
+    >>> from opsuite.config.initial_globals_compat import InitialGlobalsCompatibilityLayer
+    >>> glob = InitialGlobalsCompatibilityLayer()
+
+If we add a field to this dict directly it should guess what we want to do::
+
+    >>> glob['example_boolean'] = True
+    >>> glob['example_boolean']
+    True
+
+If we inspect the registry directly, we'd see that it's chosen to store this data as a bool::
+
+    >>> from zope.component import getUtility
+    >>> from plone.registry.interfaces import IRegistry
+    >>> from plone.registry import field
+    >>> registry = getUtility(IRegistry)
+    >>> isinstance(registry.records['example_boolean'].field, field.Bool)
+    True
+    
+So if we try and change this to "Pies", it will fail as it's not of the required type::
+
+    >>> glob['example_boolean'] = u"pies"
+    Traceback (most recent call last):
+    ...
+    WrongType: (u'pies', <type 'bool'>)
+
+Strings will assumed to be unicode, and upgraded silenty to unicode in the simple case::
+    
+    >>> glob['example_string'] = "pies"
+    >>> glob['example_string']
+    u'pies'
+
+and naturally, they're assignable with unicode::
+
+    >>> glob['example_string'] = u"sausage and mash"
+    >>> glob['example_string']
+    u'sausage and mash'
+
+Floats work similarly, but if a field is initialised with an int floats aren't accepted::
+
+    >>> glob['example_float'] = 1.0
+    >>> glob['example_int'] = 1
+    >>> glob['example_float'] == glob['example_int']
+    True
+    >>> glob['example_float'] = 3.14159265
+    >>> glob['example_int'] = 3.14159265
+    Traceback (most recent call last):
+    ...
+    WrongType: (3.1415926..., (<type 'int'>, <type 'long'>))
+
+### The following don't work, it's unclear if they will work in future.
+
+Some things are composed of lists/tuples, which are harder, as they can be recursive::
+
+    >>> glob['example_complicated'] = (
+    ...     ("foo", 10, 3.1, True),
+    ...     ("bar", 11, 10., False),
+    ...     )
+    >>> len(glob['example_complicated'])
+    2
+
+The format is set on first assignment, breaking some of the internals isn't supported::
+
+    >>> glob['example_complicated'] = (
+    ...     ("foo", 10, 3.1, 9),
+    ...     ("bar", 11, 10., 1092),
+    ...     )
+    None
+
+Neither is incoherent initialisation::
+    >>> glob['example_complicated_two'] = (
+    ...     ("foo", 10, 3.1, True),
+    ...     ("bar", 11, 10., 10),
+    ...     )
+    None
