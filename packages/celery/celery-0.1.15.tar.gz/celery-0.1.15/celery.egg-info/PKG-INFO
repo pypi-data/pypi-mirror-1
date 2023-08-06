@@ -1,0 +1,309 @@
+Metadata-Version: 1.0
+Name: celery
+Version: 0.1.15
+Summary: Distributed Task Queue for Django
+Home-page: http://github.com/ask/celery/
+Author: Ask Solem
+Author-email: askh@opera.com
+License: UNKNOWN
+Description: ============================================
+        celery - Distributed Task Queue for Django.
+        ============================================
+        
+        :Authors:
+        Ask Solem (askh@opera.com)
+        :Version: 0.1.15
+        
+        Introduction
+        ------------
+        
+        ``celery`` is a distributed task queue framework for Django.
+        More information will follow.
+        
+        Be sure to also consult the `API Reference Documentation`_
+        
+        .. _`API Reference Docmentation`: http://ask.github.com/celery/
+        
+        Installation
+        =============
+        
+        You can install ``celery`` either via the Python Package Index (PyPI)
+        or from source.
+        
+        To install using ``pip``,::
+        
+        $ pip install celery
+        
+        To install using ``easy_install``,::
+        
+        $ easy_install celery
+        
+        If you have downloaded a source tarball you can install it
+        by doing the following,::
+        
+        $ python setup.py build
+        # python setup.py install # as root
+        
+        Usage
+        =====
+        
+        Have to write a cool tutorial, but here is some simple usage info.
+        
+        *Note* You need to have a AMQP message broker running, like `RabbitMQ`_,
+        and you need to have the amqp server setup in your settings file, as described
+        in the `carrot distribution README`_.
+        
+        *Note* If you're running ``SQLite`` as the database backend, ``celeryd`` will
+        only be able to process one message at a time, this because ``SQLite`` doesn't
+        allow concurrent writes.
+        
+        .. _`RabbitMQ`: http://www.rabbitmq.com
+        .. _`carrot distribution README`: http://pypi.python.org/pypi/carrot/0.3.3
+        
+        
+        Defining tasks
+        --------------
+        
+        >>> from celery.task import tasks
+        >>> from celery.log import setup_logger
+        >>> def do_something(some_arg, **kwargs):
+        ...     logger = setup_logger(**kwargs)
+        ...     logger.info("Did something: %s" % some_arg)
+        >>> task.register(do_something, "do_something")
+        
+        Tell the celery daemon to run a task
+        -------------------------------------
+        
+        >>> from celery.task import delay_task
+        >>> delay_task("do_something", some_arg="foo bar baz")
+        
+        
+        Running the celery daemon
+        --------------------------
+        
+        ::
+        
+        $ cd mydjangoproject
+        $ env DJANGO_SETTINGS_MODULE=settings celeryd
+        [....]
+        [2009-04-23 17:44:05,115: INFO/Process-1] Did something: foo bar baz
+        [2009-04-23 17:44:05,118: INFO/MainProcess] Waiting for queue.
+        
+        
+        
+        
+        Autodiscovery of tasks
+        -----------------------
+        
+        ``celery`` has an autodiscovery feature like the Django Admin, that
+        automatically loads any ``tasks.py`` module in the applications listed
+        in ``settings.INSTALLED_APPS``.
+        
+        A good place to add this command could be in your ``urls.py``,
+        ::
+        
+        from celery.task import tasks
+        tasks.autodiscover()
+        
+        
+        
+        Then you can add new tasks in your applications ``tasks.py`` module,
+        ::
+        
+        from celery.task import tasks
+        from celery.log import setup_logger
+        from clickcounter.models import ClickCount
+        
+        def increment_click(for_url, **kwargs):
+        logger = setup_logger(**kwargs)
+        clicks_for_url, cr = ClickCount.objects.get_or_create(url=for_url)
+        clicks_for_url.clicks = clicks_for_url.clicks + 1
+        clicks_for_url.save()
+        logger.info("Incremented click count for %s (not at %d)" % (
+        for_url, clicks_for_url.clicks)
+        tasks.register(increment_click, "increment_click")
+        
+        
+        Periodic Tasks
+        ---------------
+        
+        Periodic tasks are tasks that are run every ``n`` seconds. They don't
+        support extra arguments. Here's an example of a periodic task:
+        
+        
+        >>> from celery.task import tasks, PeriodicTask
+        >>> from datetime import timedelta
+        >>> class MyPeriodicTask(PeriodicTask):
+        ...     name = "foo.my-periodic-task"
+        ...     run_every = timedelta(seconds=30)
+        ...
+        ...     def run(self, **kwargs):
+        ...         logger = self.get_logger(**kwargs)
+        ...         logger.info("Running periodic task!")
+        ...
+        >>> tasks.register(MyPeriodicTask)
+        
+        
+        For periodic tasks to work you need to add ``celery`` to ``INSTALLED_APPS``,
+        and issue a ``syncdb``.
+        
+        License
+        =======
+        
+        This software is licensed under the ``New BSD License``. See the ``LICENSE``
+        file in the top distribution directory for the full license text.
+        
+        .. # vim: syntax=rst expandtab tabstop=4 shiftwidth=4 shiftround
+        
+        ==============
+        Change history
+        ==============
+        
+        0.1.15 [2009-05-20 04:13 P.M CET] askh@opera.com
+        ------------------------------------------------
+        
+        * The celery daemon was leaking AMQP connections, this should be fixed, if you have any problems with too many files open (like ``emfile`` errors in ``rabbit.log``, please contact us!
+        
+        0.1.14 [2009-05-19 01:08 P.M CET] askh@opera.com
+        ------------------------------------------------
+        
+        * Fixed a syntax error in the ``TaskSet`` class.  (No such variable ``TimeOutError``).
+        
+        0.1.13 [2009-05-19 12:36 P.M CET] askh@opera.com
+        ------------------------------------------------
+        
+        * Forgot to add ``yadayada`` to install requirements.
+        
+        * Now deletes all expired task results, not just those marked as done.
+        
+        * Able to load the Tokyo Tyrant backend class without django
+        configuration, can specify tyrant settings directly in the class
+        constructor.
+        
+        * Improved API documentation
+        
+        * Now using the Sphinx documentation system, you can build
+        the html documentation by doing ::
+        
+        $ cd docs
+        $ make html
+        
+        and the result will be in ``docs/.build/html``.
+        
+        0.1.12 [2009-05-18 04:38 P.M CET] askh@opera.com
+        ------------------------------------------------
+        
+        * delay_task() etc. now returns ``celery.task.AsyncResult`` object, which lets you check the result and any failure that might have happened.  It kind of works like the ``multiprocessing.AsyncResult`` class returned by ``multiprocessing.Pool.map_async``.
+        
+        * Added dmap() and dmap_async(). This works like the * ``multiprocessing.Pool`` versions except they are tasks distributed to the celery server. Example:
+        
+        >>> from celery.task import dmap
+        >>> import operator
+        >>> dmap(operator.add, [[2, 2], [4, 4], [8, 8]])
+        >>> [4, 8, 16]
+        
+        >>> from celery.task import dmap_async
+        >>> import operator
+        >>> result = dmap_async(operator.add, [[2, 2], [4, 4], [8, 8]])
+        >>> result.ready()
+        False
+        >>> time.sleep(1)
+        >>> result.ready()
+        True
+        >>> result.result
+        [4, 8, 16]
+        
+        * Refactored the task metadata cache and database backends, and added a new backend for Tokyo Tyrant. You can set the backend in your django settings file. e.g
+        
+        CELERY_BACKEND = "database"; # Uses the database
+        
+        CELERY_BACKEND = "cache"; # Uses the django cache framework
+        
+        CELERY_BACKEND = "tyrant"; # Uses Tokyo Tyrant
+        TT_HOST = "localhost"; # Hostname for the Tokyo Tyrant server.
+        TT_PORT = 6657; # Port of the Tokyo Tyrant server.
+        
+        0.1.11 [2009-05-12 02:08 P.M CET] askh@opera.com
+        -------------------------------------------------
+        
+        * The logging system was leaking file descriptors, resulting in servers stopping with the EMFILES (too many open files) error. (fixed)
+        
+        0.1.10 [2009-05-11 12:46 P.M CET] askh@opera.com
+        -------------------------------------------------
+        
+        * Tasks now supports both positional arguments and keyword arguments.
+        
+        * Requires carrot 0.3.8.
+        
+        * The daemon now tries to reconnect if the connection is lost.
+        
+        0.1.8 [2009-05-07 12:27 P.M CET] askh@opera.com
+        ------------------------------------------------
+        
+        * Better test coverage
+        * More documentation
+        * celeryd doesn't emit ``Queue is empty`` message if ``settings.CELERYD_EMPTY_MSG_EMIT_EVERY`` is 0.
+        
+        0.1.7 [2009-04-30 1:50 P.M CET] askh@opera.com
+        -----------------------------------------------
+        
+        * Added some unittests
+        
+        * Can now use the database for task metadata (like if the task has been executed or not). Set ``settings.CELERY_TASK_META``
+        
+        * Can now run ``python setup.py test`` to run the unittests from within the ``testproj`` project.
+        
+        * Can set the AMQP exchange/routing key/queue using ``settings.CELERY_AMQP_EXCHANGE``, ``settings.CELERY_AMQP_ROUTING_KEY``, and ``settings.CELERY_AMQP_CONSUMER_QUEUE``.
+        
+        0.1.6 [2009-04-28 2:13 P.M CET] askh@opera.com
+        -----------------------------------------------
+        
+        * Introducing ``TaskSet``. A set of subtasks is executed and you can find out how many, or if all them, are done (excellent for progress bars and such)
+        
+        * Now catches all exceptions when running ``Task.__call__``, so the daemon doesn't die. This does't happen for pure functions yet, only ``Task`` classes.
+        
+        * ``autodiscover()`` now works with zipped eggs.
+        
+        * celeryd: Now adds curernt working directory to ``sys.path`` for convenience.
+        
+        * The ``run_every`` attribute of ``PeriodicTask`` classes can now be a ``datetime.timedelta()`` object.
+        
+        * celeryd: You can now set the ``DJANGO_PROJECT_DIR`` variable for ``celeryd`` and it will add that to ``sys.path`` for easy launching.
+        
+        * Can now check if a task has been executed or not via HTTP.
+        
+        You can do this by including the celery ``urls.py`` into your project,
+        
+        >>> url(r'^celery/$', include("celery.urls"))
+        
+        then visiting the following url,::
+        
+        http://mysite/celery/$task_id/done/
+        
+        this will return a JSON dictionary like e.g:
+        
+        >>> {"task": {"id": $task_id, "executed": true}}
+        
+        * ``delay_task`` now returns string id, not ``uuid.UUID`` instance.
+        
+        * Now has ``PeriodicTasks``, to have ``cron`` like functionality.
+        
+        * Project changed name from ``crunchy`` to ``celery``. The details of the name change request is in ``docs/name_change_request.txt``.
+        
+        0.1.0 [2009-04-24 11:28 A.M CET] askh@opera.com
+        ------------------------------------------------
+        
+        * Initial release
+        
+Platform: any
+Classifier: Development Status :: 3 - Alpha
+Classifier: Framework :: Django
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Environment :: No Input/Output (Daemon)
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: POSIX
+Classifier: Topic :: Communications
+Classifier: Topic :: System :: Distributed Computing
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
