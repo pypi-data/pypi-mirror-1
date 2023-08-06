@@ -1,0 +1,1 @@
+CONTENT_LEADIMAGE_ANNOTATION_KEY = 'collective.contentleadimage'
