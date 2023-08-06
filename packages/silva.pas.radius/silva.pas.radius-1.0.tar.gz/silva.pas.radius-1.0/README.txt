@@ -1,0 +1,58 @@
+silva.pas.radius
+****************
+
+This extension provide an integration of Radius authentication in
+Silva. It's done using PluggableAuthService and ``silva.pas.base``.
+
+This extension require at least `Silva`_ 2.1 or higher.
+
+Installation
+============
+
+If you installed Silva using buildout, by getting one from the `Infrae
+SVN`_ repository, or creating one using `Paster`_, you should edit your
+buildout configuration file ``buildout.cfg`` to add or edit the
+following section::
+
+  [instance]
+
+  eggs = ...
+        silva.pas.radius
+
+  zcml = ...
+        silva.pas.radius
+
+If the section ``instance`` wasn't already in the configuration file,
+pay attention to re-copy values for ``eggs`` and ``zcml`` from the
+profile you use.
+
+After you can restart buildout::
+
+  $ ./bin/buildout
+
+
+If you don't use buildout, you can install this extension using
+``easy_install``, and after create a file called
+``silva.pas.radius-configure.zcml`` in the
+``/path/to/instance/etc/package-includes`` directory.  This file will
+responsible to load the extension and should only contain this::
+
+  <include package="silva.pas.radius" />
+
+
+Latest version
+==============
+
+The latest version is available in a `Subversion repository
+<https://svn.infrae.com/silva.pas.radius/trunk#egg=silva.pas.radius-dev>`_.
+
+Credits
+=======
+
+This have been sponsored by the University of Coimbra
+(http://www.uc.pt).
+
+.. _Silva: http://infrae.com/products/silva
+.. _Infrae SVN: https://svn.infrae.com/buildout/silva/
+.. _Paster: https://svn.infrae.com/buildout/silva/INSTALL.txt
+
