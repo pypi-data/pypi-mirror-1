@@ -1,0 +1,112 @@
+-*- coding: utf-8 -*-
+
+==============================================================================
+Test full text search over Normativa's files
+==============================================================================
+
+Create the browser object we'll be using.
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> from DateTime.DateTime import DateTime
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+    >>> browser.handleErrors = False
+    >>> self.portal.error_log._ignored_exceptions = ()
+
+Log in into the site as manager.
+
+    >>> from Products.PloneTestCase.setup import portal_owner, default_user, default_password
+    >>> login_url = portal_url + '/login_form'
+    >>> logout_url = portal_url + '/logout'
+    >>> browser.open(login_url)
+
+We have the login portlet, so let's use that.
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url)
+
+First, let's create an area where to place our normativas.
+
+    >>> browser.getLink('Add new').click()
+    >>> browser.getControl('Area').click()
+    >>> browser.getControl(name='form.button.Add').click()
+    >>> browser.getControl(name='title').value = 'An Area'
+    >>> browser.getControl(name='sources.source:records:ignore_empty').value = 'Rector'
+    >>> browser.getControl(name='sources.kinds:records:ignore_empty:list').value = ('Ley',)
+    >>> browser.getControl(name='addressBook:lines').value = 'test@test.com\ntest2@test.com\ntest3@test.com'
+    >>> browser.getControl('Save').click()
+    >>> "Changes saved" in browser.contents
+    True
+
+Create two normativas
+
+    >>> import os
+    >>> from Products.DigestoContentTypes.tests.base import test_home
+    >>> from zope.event import notify
+    >>> from Products.Archetypes.event import ObjectInitializedEvent, ObjectEditedEvent
+    >>> input_dir = os.path.join(test_home, 'input')
+    >>> input = open(os.path.join(input_dir, 'test2.pdf'), 'rb')
+    >>> area1 = getattr(self.portal, 'an-area')
+    >>> self.setRoles(('Manager',))
+    >>> area1.invokeFactory('Normativa', 'normativa1', source='Rector', kind='Ley', title='Normativa 1', file=input, date=DateTime('2008/01/01'), number='123')
+    'normativa1'
+    >>> notify(ObjectInitializedEvent(area1.normativa1))
+    >>> normativa1 = area1.rector.ley.normativa1
+    >>> area1.rector.ley.normativa1._renameAfterCreation()
+    >>> normativa1_url = normativa1.absolute_url()
+    >>> browser.open(normativa1_url)
+    >>> 'Normativa 1' in browser.contents
+    True
+
+    >>> area1.invokeFactory('Normativa', 'normativa2', source='Rector', kind='Ley', title='Normativa 2', file=input, date=DateTime('2008/01/01'), number='1234')
+    'normativa2'
+    >>> notify(ObjectInitializedEvent(area1.normativa2))
+    >>> normativa2 = area1.rector.ley.normativa2
+    >>> area1.rector.ley.normativa2._renameAfterCreation()
+    >>> normativa2_url = normativa2.absolute_url()
+    >>> browser.open(normativa2_url)
+    >>> 'Normativa 2' in browser.contents
+    True
+
+
+    >>> browser.open(portal_url + '/an-area')
+    >>> browser.getLink('Send Normativa').click()
+    >>> browser.getControl(name='normativas:list').getControl(value=normativa2_url).selected = 1
+    >>> browser.getControl(name='addressbook:list').value = ('test@test.com', 'test2@test.com',)
+    >>> browser.getControl(name='send_from_address').value = 'sender@test.com'
+    >>> browser.getControl(name='subject').value = 'Asunto de prueba'
+    >>> browser.getControl('Comment').value = 'This is a test comment'
+    >>> browser.getControl('Send').click()
+    >>> 'Mail sent' in browser.contents
+    True
+
+We should have received an e-mail at this point:
+
+    >>> mailhost = self.portal.MailHost
+    >>> len(mailhost.messages)
+    1
+    >>> msg = str(mailhost.messages[-1])
+
+I don't know why but when the message gets generated from a template it comes
+with tons of \x00 characters. Let's remove them here.
+
+    >>> msg = msg.replace('\x00','')
+
+    >>> 'From: sender@test.com' in msg
+    True
+    >>> 'To: test@test.com;test2@test.com' in msg
+    True
+    >>> 'Subject: Asunto de prueba' in msg
+    True
+    >>> 'test3@test.com' in msg
+    False
+    >>> normativa1_url in msg
+    False
+    >>> normativa2_url in msg
+    True
+    >>> 'This is a test comment' in msg
+    True
+
+

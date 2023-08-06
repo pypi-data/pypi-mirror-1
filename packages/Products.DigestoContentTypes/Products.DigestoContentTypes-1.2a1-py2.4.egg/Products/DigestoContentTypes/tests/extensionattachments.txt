@@ -1,0 +1,128 @@
+-*- coding: utf-8 -*-
+
+==============================================================================
+Test the correct name and extension for new attachments
+==============================================================================
+
+Create the browser object we'll be using.
+
+    >>> from Products.Five.testbrowser import Browser
+    >>> from DateTime.DateTime import DateTime
+    >>> browser = Browser()
+    >>> portal_url = self.portal.absolute_url()
+    >>> browser.handleErrors = False
+    >>> self.portal.error_log._ignored_exceptions = ()
+
+Log in into the site as manager.
+
+    >>> from Products.PloneTestCase.setup import portal_owner, default_user, default_password
+    >>> login_url = portal_url + '/login_form'
+    >>> logout_url = portal_url + '/logout'
+    >>> browser.open(login_url)
+
+We have the login portlet, so let's use that.
+
+    >>> browser.getControl(name='__ac_name').value = portal_owner
+    >>> browser.getControl(name='__ac_password').value = default_password
+    >>> browser.getControl(name='submit').click()
+    >>> browser.open(portal_url)
+
+First, let's create an area where to place our normativas.
+
+    >>> browser.getLink('Add new').click()
+    >>> browser.getControl('Area').click()
+    >>> browser.getControl(name='form.button.Add').click()
+    >>> browser.getControl(name='title').value = 'An Area'
+    >>> browser.getControl(name='sources.source:records:ignore_empty').value = 'Rector'
+    >>> browser.getControl(name='sources.kinds:records:ignore_empty:list').value = ('Ley',)
+    >>> browser.getControl(name='addressBook:lines').value = 'test@test.com'
+    >>> browser.getControl('Save').click()
+    >>> "Changes saved" in browser.contents
+    True
+
+Create a normativa and upload a PDF file in the file field with the word 'árbol'
+in the text.
+
+    >>> import os
+    >>> from Products.DigestoContentTypes.tests.base import test_home
+    >>> input_dir = os.path.join(test_home, 'input')
+    >>> input = open(os.path.join(input_dir, 'test1.pdf'), 'rb')
+    >>> area1 = getattr(self.portal, 'an-area')
+    >>> self.setRoles(('Manager',))
+    >>> area1.invokeFactory('Normativa', 'normativa1', source='Rector', kind='Ley', title='Normativa 1', file=input, date=DateTime('2008/01/01'), number='123')
+    'normativa1'
+    >>> from zope.event import notify
+    >>> from Products.Archetypes.event import ObjectInitializedEvent, ObjectEditedEvent
+    >>> area1.normativa1._renameAfterCreation()
+    >>> normativa1 = getattr(area1, '123_2008')
+    >>> notify(ObjectInitializedEvent(normativa1))
+    >>> normativa1 = getattr(area1.rector.ley, '123_2008')
+    >>> normativa1_url = normativa1.absolute_url()
+    >>> browser.open(normativa1_url)
+    >>> 'Normativa 1' in browser.contents
+    True
+
+    >>> 'NOR_123_2008.pdf' in browser.contents
+    True
+
+We add an Attachment whit a diferent file extension and without fill the title in the form.
+
+    >>> browser.getLink('Manage Attachments').click()
+    >>> input_dir = os.path.join(test_home, 'input')
+    >>> input = open(os.path.join(input_dir, 'test1.odt'), 'rb')
+    >>> control = browser.getControl(name='attachmentFile')
+    >>> file_control = control.mech_control
+    >>> file_control.add_file(input, filename='test1.odt')
+    >>> browser.getControl('Upload').click()
+
+We check that the attachment was correctly renamed.
+
+    >>> 'NOR_123_2008.odt' in browser.contents
+    True
+
+We check that the title was correctly auto charged.
+
+    >>> 'test1' in browser.contents
+    True
+
+We add an Attachment an other file and fill the title in the form.
+
+    >>> browser.getLink('Manage Attachments').click()
+    >>> input_dir = os.path.join(test_home, 'input')
+    >>> input = open(os.path.join(input_dir, 'test2.odt'), 'rb')
+    >>> control = browser.getControl(name='attachmentFile')
+    >>> file_control = control.mech_control
+    >>> file_control.add_file(input, filename='test2.odt')
+    >>> browser.getControl(name='attachmentTitle').value = 'Title for the second odt file'
+    >>> browser.getControl('Upload').click()
+
+We check that the attachment was correctly renamed.
+
+    >>> 'NOR_123_2008_1.odt' in browser.contents
+    True
+
+We check that the title was correctly charged.
+
+    >>> 'Title for the second odt file' in browser.contents
+    True
+
+We add an Attachment an other file without extension and fill the title in the form.
+
+    >>> browser.getLink('Manage Attachments').click()
+    >>> input_dir = os.path.join(test_home, 'input')
+    >>> input = open(os.path.join(input_dir, 'testsimplefile'), 'rb')
+    >>> control = browser.getControl(name='attachmentFile')
+    >>> file_control = control.mech_control
+    >>> file_control.add_file(input, filename='testsimplefile')
+    >>> browser.getControl(name='attachmentTitle').value = 'Title for the file without extension'
+    >>> browser.getControl('Upload').click()
+
+We check that the attachment was correctly renamed.
+
+    >>> '>NOR_123_2008</a>' in browser.contents
+    True
+
+We check that the title was correctly charged.
+
+    >>> 'Title for the file without extension' in browser.contents
+    True
