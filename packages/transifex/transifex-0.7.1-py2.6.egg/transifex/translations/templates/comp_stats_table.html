@@ -1,0 +1,70 @@
+{% load i18n %}
+{% load statistics %}
+{% load locks %}
+{% load watches %}
+{% load submissions %}
+{% load permissions %}
+{% load webeditortags %}
+
+{% if stats %}
+{% get_permission "project_perm.submit_file" for request.user and stats.0.object.project as "can_submit_file" %}
+{% get_permission "project_perm.maintain" for request.user and stats.0.object.project as "is_maintainer" %}
+{% url notification.views.notices as notices_url %}
+<table id="stats_comp" class="stats_comp tablesorter">
+   <thead>
+    <tr>
+      <th>{% trans "Language" %}</th>
+      <th class="alcenter">{% trans "Translations" %}</th>
+      <th>{% trans "Options" %}</th>
+    </tr>
+   </thead>
+   <tbody>
+   {% for stat in stats %} 
+      <tr class="{% number_range stat.trans_perc %}">
+        <td class="left name" id="{{stat.language_code}}" name="{{stat.language_code}}">
+          {% if stat.language %}
+              <a href="{{stat.language.get_absolute_url}}" title="{% trans "See statistics for this language" %}">{{stat.language.name}}</a> <span class="stat_message" >({{stat.language.code}})</span>
+          {% else %}
+              <span class="stat_message" title="{% trans "There is no language registered that matches with this code" %}" >{{ stat.language_code }}</span>
+          {% endif %}
+          {% if stat.error %}
+              <span class="i16 notice" title="{% trans "Could not generate statistics for this file" %}"></span>
+          {% endif %}
+        </td>
+        {% with 140 as barwidth %}
+        <td class="stats" style="width: {{ barwidth|add:"2" }}px;">
+          <div class="stats_string_comp" title="{% trans "Trans:" %}{{stat.trans}} {% trans "Fuzzy:" %}{{stat.fuzzy}} {% trans "Untrans:" %}{{stat.untrans}}" >{{stat.trans_perc}}% <span class='trans_detail'>({{stat.trans}}/{{stat.fuzzy}}/{{stat.untrans}})<span></div> 
+          {% stats_bar_full stat barwidth %}
+        </td>
+        {% endwith %}
+        <td class="left actions">
+          {% if stat.is_aggregated %}
+            {% url component_language_detail stat.object.project.slug stat.object.slug stat.language_code as comp_lang_url %}
+            <a class="i16 multifile nodecoration_icon" href="{{ comp_lang_url }}" title="{% trans "Click here to see the multiple files for" %} {{ stat.language_code }}"></a>
+          {% else %}
+           {% url component_view_file stat.object.project.slug stat.object.slug stat.filename as file_view_url %}
+           {% url component_raw_file stat.object.project.slug stat.object.slug stat.filename as file_raw_url %}
+           {% url component_edit_file stat.object.project.slug stat.object.slug stat.filename as file_edit_url %}
+           <a class="i16 view nodecoration_icon" title="{% trans "View " %}{{stat.filename}}" href="{{file_view_url}}"></a>
+           <a class="i16 get_file nodecoration_icon" title="{% trans "Download " %}{{stat.filename}}" href="{{file_raw_url}}"></a>
+           {% pofile_lock stat %}
+           {% if notices_url %}
+             {% if perms.repowatch.add_watch or is_maintainer %}
+                {% watch_toggle stat %}
+             {% endif %}
+           {% endif %}
+           {% if stat.object.allows_submission %}
+             {% if perms.projects.submit_file or can_submit_file or is_maintainer %}
+               {% if file_edit_url and stat.total|webtrans_is_under_max %}
+                 <a class="i16 edit_file nodecoration_icon" title="{% trans "Edit " %}{{stat.filename}}" href="{{file_edit_url}}"></a>
+               {% endif %}
+               {% pofile_submission stat %}
+             {% endif %}
+           {% endif %}
+          {% endif %} 
+        </td>
+      </tr>
+   {% endfor %}
+   </tbody>
+</table>
+{%  endif %}
