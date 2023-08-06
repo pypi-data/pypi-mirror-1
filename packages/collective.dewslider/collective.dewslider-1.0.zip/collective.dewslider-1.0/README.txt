@@ -1,0 +1,55 @@
+Introduction
+============
+
+This collective module register a zope directory resource containing the
+wonderful slider flash Dewslider, developed by alsacreation (http://www.alsacreations.fr/dewslider only french at the moment).
+
+Dewslider version - downloaded 2009-12-24
+
+Installation
+------------
+
+Add collective.dewslider to your buildout as normal. See
+http://plone.org/documentation/tutorial/buildout. 
+
+At the moment this module doesn't add any feature to Plone. It is primary use as
+resource package.
+
+Usage
+-----
+
+Dewslider offer two ways of doing:
+
+* Provide img as parameters
+* Provide an xml file
+
+See examples with img as parameters:
+
+    <object type="application/x-shockwave-flash" data="dewslider.swf?img=image1.jpg,image2.jpg,image3.jpg" width="500" height="300">
+    <param name="movie" value="dewslider.swf?img=image1.jpg,image2.jpg,image3.jpg" />
+    </object>
+
+Or with xml file
+
+    <object type="application/x-shockwave-flash" data="dewslider.swf?xml=dewslider.xml" width="500" height="300">
+    <param name="movie" value="dewslider.swf?xml=dewslider.xml" />
+    </object>
+
+    <?xml version="1.0" ?>
+      <album
+        showbuttons="yes"
+        showtitles="yes"
+        randomstart="yes"
+        timer="5"
+        aligntitles="bottom"
+        alignbuttons="bottom"
+        transition="push"
+        speed="20"
+      >
+      <img src="img/1.jpg" title="Titre 1" />
+      <img src="img/2.jpg" title="Titre 2" href="test.html" />
+      <img src="img/3.jpg" title="Titre 3" href="http://www.blup.fr/" />
+      <img src="img/4.jpg" title="Titre 4" href="http://www.blup.fr/" target="_blank" rollover="alert('yay');" rollout="showdiv('pub');" />
+      <img src="img/5.jpg" title="Titre 5" />
+    </album> 
+
