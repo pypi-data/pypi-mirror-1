@@ -1,0 +1,83 @@
+Title:  Writing A Lamson State Storage Backend
+
+Earlier versions of Lamson assumed that you would use SQLAlchemy, and
+that you wouldn't mind storing your state in the database using
+SQLAlchemy.  Well, during the 0.9 redesign it became very easy to let
+you store the state however and wherever you want.  In the new Lamson setup
+there is a bit more work to create alternative storage, but Lamson comes with
+two default stores that you can use to get started.
+
+h2. The Default Stores
+
+When you get started with Lamson you'll definitely not want to go through the 
+trouble of setting up a custom store.  For your first days of development, using
+the default "MemoryStorage":http://lamsonproject.org/docs/api/lamson.routing.MemoryStorage-class.html
+is the way to go.  After you get further in your development you want to
+switch to the "ShelveStorage":http://lamsonproject.org/docs/api/lamson.routing.ShelveStorage-class.html
+to store the state in a simple Python "shelve":http://docs.python.org/library/shelve.html
+store.
+
+
+@MemoryStorage@ keeps the routing state in a simple dict in memory, and doesn't
+provide any thread protection.  Its purpose is for developer testing and unit
+test runs where keeping the state between disks is more of a pain than it is
+worth.  Use the @MemoryStorage@ (which is the default) for your development
+runs and for simple servers where the state does need to be maintained (very
+rare).
+
+@ShelveStorage@ is used for your small deployments where you are mostly just
+testing the deployment process or doing a small service.  It will store your
+data between runs, and is probably fast enough for most sites, but you'll want
+to ditch it if you ever:
+
+# Run more than one process that needs the state information.
+# Start to store everything in a database anyway.
+
+h2. Using The ShelveStorage
+
+You can use @ShelveStorage@ by simply adding this line to your @config/boot.py@ 
+file just before you do anything else with the @Router@:
+
+<pre class="code">
+Router.STATE_STORE=ShelveStorage("run/states")
+</pre>
+
+It actually doesn't matter currently when you do it, but it's good practice right now.
+
+After you do that, restart lamson and it will start using the new store.  Notice
+that your *tests will not use this*.  It's not a good idea to have tests use
+@ShelveStorage@, but if you want to turn it on for a run to see what happens,
+then you can modify @config/testing.py@ the same way.  You could also write a
+unit test that did this temporarily by putting that line in your test case.
+
+
+h2. What To Implement
+
+If you want to implement your own then you just have to implement the methods in
+"StateStorage":http://lamsonproject.org/docs/api/lamson.routing.StateStorage-class.html
+and make sure it behaves the same as MemoryStorage.  Look at
+"the code to ShelveStorage":http://lamsonproject.org/docs/api/lamson.routing-pysrc.html#ShelveStorage
+to get started.
+
+h2. Important Considerations
+
+I am purposefully *not* telling you how to exactly implement it because I'm not
+exactly sure what is needed as of the 0.9 release.  I use a SQLAlchemy setup and
+the ShelveStorage, but I'd like to hear what other people have written and then
+start building infrastructure to make that easier.
+
+There are some important things to consider when you implement your storage
+though:
+
+# Make sure that the calls to all methods are thread safe, and potentially process safe.
+# If you do thread locking, use the *with* statement and an RLock.
+# If your storage is potentially very slow, then consider a caching scheme inside, but *write that after making it work correctly.*
+# Do *NOT* be tempted to store junk in this like it is a "session".  It should be lean and mean and only do state.
+# Make sure you keep the key being used exactly as given.  You can seriously mess up Lamson's Router if you start getting fancy.
+
+h2. Attaching It To The Router
+
+Your storage backend will then be attached to the lamson.routing.Router in the
+same way as what you did with ShelveStorage.  It really should be that simple
+since the data stored in the state store is very minimal.
+
