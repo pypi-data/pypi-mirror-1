@@ -1,0 +1,853 @@
+Metadata-Version: 1.0
+Name: gocept.reference
+Version: 0.6.1
+Summary: Intrinsic references for Zope/ZODB applications.
+Home-page: http://pypi.python.org/pypi/gocept.reference
+Author: gocept gmbh & co. kg
+Author-email: developers@gocept.com
+License: ZPL 2.1
+Description: ============
+        Introduction
+        ============
+        
+        This package provides a reference implementation.
+        
+        The specific properties of this implementation are:
+        
+        - intended to be used for intrinsic references
+        
+        - provides integrity enforcement
+        
+        - modelled partially after relational `foreign keys`
+        
+        .. contents::
+        
+        
+        Motivation
+        ==========
+        
+        When developing an application we often find the need to reference objects
+        that are stored as application data. Examples of such objects include
+        centrally managed 'master data'.
+        
+        The reference to those objects is typically intrinsic to the application we
+        develop so they should behave like normal Python object references while being
+        under the control of our application.
+        
+        Within the world of Zope and ZODB there are different ways to achieve this. The
+        various approaches have different semantics and side effects. Our goal is to
+        unify the way of intrinsically referencing objects and to provide the ability to
+        switch between different semantics as needed without rewriting application code
+        and without the need to migrate persistent data structures (at least from the
+        application's point of view).
+        
+        
+        Model comparison
+        ================
+        
+        Our goal was to determine the advantages and disadvantages of the different
+        existing approaches. We included three general approaches from the world of
+        Python/Zope/ZODB as well as the standard relational approach to normalisation
+        tables.
+        
+        We used four criteria to describe each solution:
+        
+        Reference data
+        What data is stored to describe the reference?
+        
+        Reference semantics
+        What meaning does the reference have? How can its meaning change?
+        
+        Integrity
+        What might happen to the application if data that is involved in the
+        reference changes or is deleted?
+        
+        Set/Lookup
+        What does the application developer have to do to set a reference or
+        look up a referenced object?
+        
+        
+        ======================    =========================================     ===========================================   ========================================    ====================================================
+        Property                  Python references                              Weak references                              Key reference                               Relational DBs
+        ======================    =========================================     ===========================================   ========================================    ====================================================
+        Reference data            OID                                           OID                                           application-specific key                    application-specific (primary key + table name)
+        
+        Reference semantics       Refers to a specific                          Refers to a specific                          Refers to an object which                   Refers to an object (row) that is associated
+        Python object                                 Python object                                 is associated with the saved key            with the primary key at the time of the lookup.
+        at the time of the lookup.
+        
+        Integrity                 The reference stays valid, however,           The reference might have become stale         The reference might have become             Dependening on the use of `foreign keys`
+        the target object might have lost its         and leave the referencing object in an        stale.                                      and the databases implementation of constraints.
+        meaning for the application.                  invalid state.                                                                            Can usually be forced to stay valid.
+        
+        Set/Lookup                Normal Python attribute access.               Use WeakRef wrapper to store and              Depends on the implementation.              Explicitly store the primary key.
+        __call__ to lookup. Might use properties      Might use properties for convenience.       Use JOIN to look up.
+        for convenience.
+        ======================    =========================================     ===========================================   ========================================    ====================================================
+        
+        
+        Observations
+        ============
+        
+        - Relational: every object (row) has a canonical place that defines a primary
+        key.
+        
+        The ZODB (like a filesystem) can have multiple hard links to an object.
+        Objects are deleted when the last hard link to an object is removed. This
+        makes it impossible to use hard links for referencing an object because
+        object deletion will not be noticed and the objects will continue to live.
+        The ZODB itself does not have a notion of a canonical place where an object
+        is defined.
+        
+        - Relational: When referencing an object we can enforce integrity by declaring
+        a foreign key. This is orthogonal to the data stored.
+        
+        - Relational: As an application-level key is used for identifying the target
+        of a reference, the application can choose to delete a row and re-add a row
+        with the same primary key later. If the integrity is enforced this requires
+        support on the database level to temporarily ignore broken foreign keys.
+        
+        - Normal Python references embed themselves naturally in the application.
+        Properties allow hiding the implementation of looking up and storing
+        references.
+        
+        
+        Conclusions & Requirements for the reference implementation
+        ===========================================================
+        
+        - Allow configuration of `foreign key` constraints (none, always, at the end
+        of the transaction). This configuration must be changable at any time with
+        an automatic migration path provided.
+        
+        - Use application level keys to refer to an object.
+        
+        - Use a canonical location and a primary key to store objects and to determine
+        whether an object was deleted.
+        
+        - Distinguish between two use cases when modifying an object's key:
+        
+        1. The application references the right object but has the wrong key (as the
+        key itself might have meaning for the application). In this case the
+        object must be updated to receive the new, correct key and the references
+        must be updated to refer to this new key.
+        
+        2. The application references the wrong object with the right key. In this
+        case the object referenced by the key must be replaced with a different
+        object.
+        
+        
+        Implementation notes
+        ====================
+        
+        - Canonical location is determined by location/containment. The primary key for
+        a reference is the referenced object's location.
+        
+        - Constraints are enforced by monitoring containment events.
+        
+        - The different ways of updating/changing a key's meaning are supported by an
+        indirection that enumerates all keys and stores a `reference id` on the
+        referencing object instead of the location. The two use cases for changing
+        the meaning are implemented by:
+        
+        1. associating a new path with an existing reference id
+        
+        2. associating a new reference id with an existing path
+        
+        
+        ===================
+        Referencing objects
+        ===================
+        
+        Simple references
+        =================
+        
+        For working with references you have to have a located site set:
+        
+        >>> import zope.site.hooks
+        >>> root = getRootFolder()
+        >>> zope.site.hooks.setSite(root)
+        
+        For demonstration purposes we define two classes, one for referenced objects,
+        the other defining the reference. Classes using references have to implement
+        IAttributeAnnotatable as references are stored as annotations:
+        
+        >>> from zope.container.contained import Contained
+        >>> import gocept.reference
+        >>> import zope.interface
+        >>> from zope.annotation.interfaces import IAttributeAnnotatable
+        
+        >>> class Address(Contained):
+        ...     zope.interface.implements(IAttributeAnnotatable)
+        ...     city = gocept.reference.Reference()
+        
+        >>> class City(Contained):
+        ...     pass
+        
+        As instances of classes defined in a doctest cannot be persisted, we import
+        implementations of the classes from a real Python module:
+        
+        >>> from gocept.reference.testing import Address, City
+        
+        The referenced objects must be stored in the ZODB and must be located:
+        
+        >>> root['dessau'] = City()
+        >>> root['halle'] = City()
+        >>> root['jena'] = City()
+        
+        In order to reference an object, the object only needs to be assigned to the
+        attribute implemented as a reference descriptor:
+        
+        >>> theuni = Address()
+        >>> theuni.city = root['dessau']
+        >>> theuni.city
+        <gocept.reference.testing.City object at 0x...>
+        
+        It is also possible to assign `None` to let the reference point to no
+        object:
+        
+        >>> theuni.city = None
+        >>> print theuni.city
+        None
+        
+        Values can be deleted, the descriptor raises an AttributeError then:
+        
+        >>> del theuni.city
+        >>> theuni.city
+        Traceback (most recent call last):
+        AttributeError: city
+        
+        Only contained objects can be assigned to a reference that has
+        integrity ensurance enabled:
+        
+        >>> theuni.city = 12
+        Traceback (most recent call last):
+        TypeError: ...
+        
+        
+        Integrity-ensured references
+        ============================
+        
+        >>> class Monument(Contained):
+        ...      zope.interface.implements(IAttributeAnnotatable)
+        ...      city = gocept.reference.Reference(ensure_integrity=True)
+        >>> from gocept.reference.testing import Monument
+        
+        Located source
+        --------------
+        
+        Referential integrity can be ensured if the source of the reference is
+        located:
+        
+        >>> root['fuchsturm'] = Monument()
+        >>> root['fuchsturm'].city = root['dessau']
+        >>> root['fuchsturm'].city is root['dessau']
+        True
+        
+        >>> import transaction
+        >>> transaction.commit()
+        
+        >>> del root['dessau']
+        Traceback (most recent call last):
+        IntegrityError: Can't delete or move
+        <gocept.reference.testing.City object at 0x...>.
+        The (sub-)object <gocept.reference.testing.City object at 0x...> is
+        still being referenced.
+        
+        >>> transaction.commit()
+        Traceback (most recent call last):
+        DoomedTransaction
+        
+        >>> transaction.abort()
+        >>> 'dessau' in root
+        True
+        
+        To check whether an object is referenced, it can be adapted to
+        IReferenceTarget:
+        
+        >>> from gocept.reference.interfaces import IReferenceTarget
+        >>> IReferenceTarget(root['dessau']).is_referenced()
+        True
+        
+        >>> root['fuchsturm'].city = None
+        >>> IReferenceTarget(root['dessau']).is_referenced()
+        False
+        
+        >>> del root['dessau']
+        >>> 'dessau' in root
+        False
+        
+        XXX References will also be correctly cancelled when the attribute or the
+        source is deleted.
+        
+        >>> del root['fuchsturm']
+        
+        Non-located source
+        ------------------
+        
+        If the source of a reference is not located, we can do anything we want with
+        references, including breaking them:
+        
+        >>> fuchsturm = Monument()
+        >>> fuchsturm.city =  root['jena']
+        >>> fuchsturm.city is root['jena']
+        True
+        
+        >>> del fuchsturm.city
+        >>> fuchsturm.city
+        Traceback (most recent call last):
+        AttributeError: city
+        
+        >>> fuchsturm.city = root['jena']
+        >>> fuchsturm.city is root['jena']
+        True
+        
+        >>> del root['jena']
+        >>> fuchsturm.city
+        Traceback (most recent call last):
+        LookupError: Reference target u'/jena' no longer exists.
+        
+        
+        Changing the location state of the source
+        -----------------------------------------
+        
+        We cannot put an object with a broken reference back into containment since
+        referential integrity is not given:
+        
+        >>> transaction.commit()
+        
+        >>> root['fuchsturm'] = fuchsturm
+        Traceback (most recent call last):
+        LookupError: Reference target u'/jena' no longer exists.
+        
+        The transaction was doomed, let's recover the last working state:
+        
+        >>> transaction.commit()
+        Traceback (most recent call last):
+        DoomedTransaction
+        
+        >>> transaction.abort()
+        
+        We have to repair the fuchsturm object by hand as it was not part of the
+        transaction:
+        
+        >>> fuchsturm.__parent__ = fuchsturm.__name__ = None
+        
+        >>> from gocept.reference.interfaces import IReferenceSource
+        >>> IReferenceSource(fuchsturm).verify_integrity()
+        False
+        
+        >>> IReferenceTarget(root['halle']).is_referenced()
+        False
+        >>> fuchsturm.city = root['halle']
+        >>> IReferenceSource(fuchsturm).verify_integrity()
+        True
+        >>> IReferenceTarget(root['halle']).is_referenced()
+        False
+        
+        >>> root['fuchsturm'] = fuchsturm
+        >>> IReferenceTarget(root['halle']).is_referenced()
+        True
+        
+        >>> fuchsturm = root['fuchsturm']
+        >>> del root['fuchsturm']
+        >>> fuchsturm.city is root['halle']
+        True
+        
+        >>> del root['halle']
+        >>> 'halle' in root
+        False
+        
+        Hierarchical structures
+        -----------------------
+        
+        Trying to delete objects that contain referenced objects with ensured
+        integrity is also forbidden:
+        
+        >>> import zope.container.sample
+        >>> root['folder'] = zope.container.sample.SampleContainer()
+        >>> root['folder']['frankfurt'] = City()
+        >>> messeturm = Monument()
+        >>> messeturm.city = root['folder']['frankfurt']
+        >>> root['messeturm'] = messeturm
+        
+        Deleting the `folder` will fail now, because a subobject is being referenced.
+        The reference target API (IReferenceTarget) allows us to inspect it
+        beforehand:
+        
+        >>> from gocept.reference.interfaces import IReferenceTarget
+        >>> folder_target = IReferenceTarget(root['folder'])
+        >>> folder_target.is_referenced()
+        True
+        >>> folder_target.is_referenced(recursive=False)
+        False
+        
+        
+        >>> del root['folder']
+        Traceback (most recent call last):
+        IntegrityError: Can't delete or move
+        <zope.container.sample.SampleContainer object at 0x...>.
+        The (sub-)object <gocept.reference.testing.City object at 0x...> is still
+        being referenced.
+        
+        
+        Upgrading from unconstrained to constrained references
+        ------------------------------------------------------
+        
+        XXX
+        
+        Downgrading from integrity ensured references to unensured
+        ----------------------------------------------------------
+        
+        XXX
+        
+        
+        =====================
+        Reference collections
+        =====================
+        
+        To have an attribute of an object reference multiple other objects using a
+        collection you can use a ReferenceCollection property.
+        
+        A collection behaves like a set and manages references while objects are added
+        or removed from the set:
+        
+        >>> import zope.site.hooks
+        >>> root = getRootFolder()
+        >>> zope.site.hooks.setSite(root)
+        
+        We need a class defining a ReferenceCollection. (Importing the class
+        from the test module is necassary to persist instances of the class):
+        
+        >>> from zope.container.contained import Contained
+        >>> import gocept.reference
+        >>> import zope.interface
+        >>> from zope.annotation.interfaces import IAttributeAnnotatable
+        
+        >>> class City(Contained):
+        ...     zope.interface.implements(IAttributeAnnotatable)
+        ...     cultural_institutions = gocept.reference.ReferenceCollection(
+        ...         ensure_integrity=True)
+        >>> from gocept.reference.testing import City
+        
+        Initially, the collection isn't set and accessing it causes an
+        AttributeError:
+        
+        >>> halle = City()
+        >>> halle.cultural_institutions
+        Traceback (most recent call last):
+        AttributeError: cultural_institutions
+        
+        So we define some cultural institutions:
+        
+        >>> class CulturalInstitution(Contained):
+        ...     title = None
+        >>> from gocept.reference.testing import CulturalInstitution
+        
+        >>> root['theatre'] = CulturalInstitution()
+        >>> root['cinema'] = CulturalInstitution()
+        >>> root['park'] = CulturalInstitution()
+        >>> import transaction
+        >>> transaction.commit()
+        
+        Trying to set an individual value instead of a collection, raises a
+        TypeError:
+        
+        >>> halle.cultural_institutions = root['park']
+        Traceback (most recent call last):
+        TypeError: <gocept.reference.testing.CulturalInstitution object at 0x...> can't be assigned as a reference collection: only sets are allowed.
+        
+        
+        Managing whole sets
+        ===================
+        
+        Assigning a set works:
+        
+        >>> halle.cultural_institutions = set([root['park'], root['cinema']])
+        >>> len(halle.cultural_institutions)
+        2
+        >>> list(halle.cultural_institutions)
+        [<gocept.reference.testing.CulturalInstitution object at 0x...>,
+        <gocept.reference.testing.CulturalInstitution object at 0x...>]
+        
+        As `halle` isn't located yet, the integrity ensurance doesn't notice
+        referenced objects being deleted:
+        
+        >>> del root['cinema']
+        
+        The result is a broken reference:
+        
+        >>> list(halle.cultural_institutions)
+        Traceback (most recent call last):
+        LookupError: Reference target u'/cinema' no longer exists.
+        
+        Also, we can not locate `halle` right now, as long as the reference is broken:
+        
+        >>> root['halle'] = halle
+        Traceback (most recent call last):
+        LookupError: Reference target u'/cinema' no longer exists.
+        
+        The transaction was doomed, so we abort:
+        
+        >>> transaction.abort()
+        
+        Unfortunately, the `abort` doesn't roll-back the attributes of Halle because it
+        wasn't part of the transaction yet (as it couldn't be added to the database).
+        We need to clean up manually, otherwise the next assignment won't raise any
+        events:
+        
+        >>> halle.__name__ = None
+        >>> halle.__parent__ = None
+        
+        The cinema is back now, and Halle is in an operational state again:
+        
+        >>> list(halle.cultural_institutions)
+        [<gocept.reference.testing.CulturalInstitution object at 0x...>,
+        <gocept.reference.testing.CulturalInstitution object at 0x...>]
+        
+        Now we can add it to the database:
+        
+        >>> root['halle'] = halle
+        
+        And deleting a referenced object will cause an error:
+        
+        >>> del root['cinema']
+        Traceback (most recent call last):
+        IntegrityError: Can't delete or move <gocept.reference.testing.CulturalInstitution object at 0x...>. The (sub-)object <gocept.reference.testing.CulturalInstitution object at 0x...> is still being referenced.
+        
+        When we remove the referencing collection, the target can be deleted again:
+        
+        >>> halle.cultural_institutions = None
+        >>> del root['cinema']
+        
+        Managing individual items of sets
+        =================================
+        
+        Note: We did not implement the set API 100%. We'll add methods as we need
+        them.
+        
+        In addition to changing sets by assigning complete new sets, we can modify the
+        sets with individual items just as the normal `set` API allows us to do.
+        
+        We'll start out with an empty set:
+        
+        >>> root['jena'] = City()
+        >>> root['jena'].cultural_institutions = set()
+        
+        Our reference engine turns this set into a different object which manages the
+        references:
+        
+        >>> ci = root['jena'].cultural_institutions
+        >>> ci
+        InstrumentedSet([])
+        
+        We can add new references, by adding objects to this set and the referenced
+        integrity is ensured:
+        
+        >>> ci.add(root['park'])
+        >>> del root['park']
+        Traceback (most recent call last):
+        IntegrityError: Can't delete or move <gocept.reference.testing.CulturalInstitution object at 0x...>. The (sub-)object <gocept.reference.testing.CulturalInstitution object at 0x...> is still being referenced.
+        
+        Removing and discarding works:
+        
+        >>> ci.remove(root['park'])
+        >>> del root['park']
+        >>> root['park'] = CulturalInstitution()
+        >>> ci.add(root['park'])
+        >>> del root['park']
+        Traceback (most recent call last):
+        IntegrityError: Can't delete or move <gocept.reference.testing.CulturalInstitution object at 0x...>. The (sub-)object <gocept.reference.testing.CulturalInstitution object at 0x...> is still being referenced.
+        >>> ci.discard(root['park'])
+        >>> del root['park']
+        >>> ci.discard(root['halle'])
+        
+        Clearing works:
+        
+        >>> ci.add(root['theatre'])
+        >>> del root['theatre']
+        Traceback (most recent call last):
+        IntegrityError: Can't delete or move <gocept.reference.testing.CulturalInstitution object at 0x...>. The (sub-)object <gocept.reference.testing.CulturalInstitution object at 0x...> is still being referenced.
+        >>> ci.clear()
+        >>> len(ci)
+        0
+        >>> del root['theatre']
+        
+        >>> root['cinema'] = CulturalInstitution()
+        >>> root['cinema'].title = 'Cinema'
+        >>> ci.add(root['cinema'])
+        >>> del root['cinema']
+        Traceback (most recent call last):
+        IntegrityError: Can't delete or move <gocept.reference.testing.CulturalInstitution object at 0x...>. The (sub-)object <gocept.reference.testing.CulturalInstitution object at 0x...> is still being referenced.
+        >>> ci.pop().title
+        'Cinema'
+        >>> del root['cinema']
+        
+        Updating works:
+        
+        >>> root['cinema'] = CulturalInstitution()
+        >>> root['theatre'] = CulturalInstitution()
+        >>> ci.update([root['cinema'], root['theatre']])
+        >>> len(ci)
+        2
+        >>> del root['cinema']
+        Traceback (most recent call last):
+        IntegrityError: Can't delete or move <gocept.reference.testing.CulturalInstitution object at 0x...>. The (sub-)object <gocept.reference.testing.CulturalInstitution object at 0x...> is still being referenced.
+        >>> del root['theatre']
+        Traceback (most recent call last):
+        IntegrityError: Can't delete or move <gocept.reference.testing.CulturalInstitution object at 0x...>. The (sub-)object <gocept.reference.testing.CulturalInstitution object at 0x...> is still being referenced.
+        
+        
+        =============================
+        Verifying reference existence
+        =============================
+        
+        It is not so easy to verify a class implements an attribute as a
+        reference as their usage is transparent.
+        
+        References
+        ==========
+        
+        Let's build an example interface and class using a reference:
+        
+        >>> import zope.interface
+        >>> import gocept.reference
+        >>> import zope.annotation.interfaces
+        >>> class IAddress(zope.interface.Interface):
+        ...     city = zope.interface.Attribute("City the address belonges to.")
+        >>> class Address(object):
+        ...     zope.interface.implements(
+        ...         zope.annotation.interfaces.IAttributeAnnotatable, IAddress)
+        ...     city = gocept.reference.Reference()
+        
+        verifyClass does not check for attributes:
+        
+        >>> import zope.interface.verify
+        >>> zope.interface.verify.verifyClass(IAddress, Address)
+        True
+        
+        verifyObject tells that the object does not completly fulfill the
+        interface:
+        
+        >>> zope.interface.verify.verifyObject(IAddress, Address())
+        Traceback (most recent call last):
+        BrokenImplementation: An object has failed to implement interface <InterfaceClass __builtin__.IAddress>
+        The city attribute was not provided.
+        
+        Setting a value on the reference attribute does not help because after
+        that it ist not possible to check if there is a reference as the
+        reference is transparent. Even worse, a class which does not define
+        the required attribute and an instance thereof with the attribute set,
+        lets the test pass without defining the reference at all:
+        
+        >>> class AddressWithoutReference(object):
+        ...     zope.interface.implements(IAddress)
+        >>> address_without_ref = AddressWithoutReference()
+        >>> address_without_ref.city = None
+        >>> zope.interface.verify.verifyObject(IAddress, address_without_ref)
+        True
+        
+        So we need a special verifyObject function which does a check on the
+        class if there is a missing attribute:
+        
+        >>> import gocept.reference.verify
+        >>> gocept.reference.verify.verifyObject(IAddress, Address())
+        True
+        
+        This function is not fully fool proof because it also works with the
+        instance wich has the attribute set. The reason for this behavior is
+        that the interface does not tell that the attribute must be
+        implemented as a reference:
+        
+        >>> gocept.reference.verify.verifyObject(IAddress, address_without_ref)
+        True
+        
+        But if the attribute which does not exist on the instance does not
+        have a reference descriptior on the class the gocept.reference's
+        verifyObject can detect this:
+        
+        >>> class StrangeAddress(object):
+        ...     zope.interface.implements(IAddress)
+        ...     @property
+        ...     def city(self):
+        ...         raise AttributeError
+        >>> strange_address = StrangeAddress()
+        >>> gocept.reference.verify.verifyObject(IAddress, strange_address)
+        Traceback (most recent call last):
+        BrokenImplementation: An object has failed to implement interface <InterfaceClass __builtin__.IAddress>
+        The city attribute was not provided.
+        
+        >>> zope.interface.verify.verifyObject(IAddress, strange_address)
+        Traceback (most recent call last):
+        BrokenImplementation: An object has failed to implement interface <InterfaceClass __builtin__.IAddress>
+        The city attribute was not provided.
+        
+        Reference collections
+        =====================
+        
+        Reference collections suffer the same problem when checked with
+        zope.inferface.verify.verfyObject:
+        
+        >>> class ICity(zope.interface.Interface):
+        ...     cultural_institutions = zope.interface.Attribute(
+        ...         "Cultural institutions the city has.")
+        >>> class City(object):
+        ...     zope.interface.implements(
+        ...         zope.annotation.interfaces.IAttributeAnnotatable, ICity)
+        ...     cultural_institutions = gocept.reference.ReferenceCollection()
+        
+        >>> zope.interface.verify.verifyObject(ICity, City())
+        Traceback (most recent call last):
+        BrokenImplementation: An object has failed to implement interface <InterfaceClass __builtin__.ICity>
+        The cultural_institutions attribute was not provided.
+        
+        But the special variant in gocept.reference works for collections, too:
+        
+        >>> gocept.reference.verify.verifyObject(ICity, City())
+        True
+        
+        =================
+        zope.schema field
+        =================
+        
+        To comply with zope.schema, gocept.reference has an own set field
+        which has the internally used InstrumentedSet class as type.
+        
+        For demonstration purposes we create an interface which uses both
+        gocept.reference.field.Set and zope.schema.Set:
+        
+        >>> import gocept.reference
+        >>> import gocept.reference.field
+        >>> import zope.annotation.interfaces
+        >>> import zope.interface
+        >>> import zope.schema
+        >>> import zope.schema.vocabulary
+        >>> dumb_vocab = zope.schema.vocabulary.SimpleVocabulary.fromItems(())
+        >>> class ICollector(zope.interface.Interface):
+        ...     gr_items = gocept.reference.field.Set(
+        ...         title=u'collected items using gocept.reference.field',
+        ...         value_type=zope.schema.Choice(title=u'items', vocabulary=dumb_vocab)
+        ...     )
+        ...     zs_items = zope.schema.Set(
+        ...         title=u'collected items using zope.schema',
+        ...         value_type=zope.schema.Choice(title=u'items', vocabulary=dumb_vocab)
+        ...     )
+        
+        >>> class Collector(object):
+        ...     zope.interface.implements(
+        ...         ICollector, zope.annotation.interfaces.IAttributeAnnotatable)
+        ...     gr_items = gocept.reference.ReferenceCollection()
+        ...     zs_items = gocept.reference.ReferenceCollection()
+        
+        >>> collector = Collector()
+        >>> collector.gr_items = set()
+        >>> collector.gr_items
+        InstrumentedSet([])
+        >>> collector.zs_items = set()
+        >>> collector.zs_items
+        InstrumentedSet([])
+        
+        Successful valudation returns None but failing leads to an exception:
+        
+        >>> ICollector['gr_items'].bind(collector).validate(collector.gr_items) is None
+        True
+        >>> ICollector['zs_items'].bind(collector).validate(collector.zs_items)
+        Traceback (most recent call last):
+        WrongType: (InstrumentedSet([]), <type 'set'>)
+        
+        
+        =======
+        Changes
+        =======
+        
+        0.6.1 (2009-03-27)
+        ==================
+        
+        - ``zope.app.form`` breaks encapsulation of the fields by using the
+        ``_type`` attribute to convert form values to field values. Using
+        ``InstrumentedSet`` as ``_type`` was a bad idea, as only the
+        reference collection knows how to instantiate an
+        ``InstrumentedSet``. Now the trick is done on validation where the
+        ``_type`` gets set to ``InstrumentedSet`` temporarily.
+        
+        
+        0.6 (2009-03-26)
+        ================
+        
+        - Take advantage of the simpler zope package dependencies achieved at the Grok
+        cave sprint in January 2009.
+        
+        - Added zope.schema field ``gocept.reference.field.Set`` which has the
+        internally used InstrumentedSet as field type, so validation does
+        not fail.
+        
+        - gocept.reference 0.5.2 had a consistency bug: Causing a TypeError by
+        trying to assign a non-collection to a ReferenceCollection attribute
+        would break integrity enforcement for that attribute while keeping
+        its previously assigned value.
+        
+        
+        0.5.2 (2008-10-16)
+        ==================
+        
+        - Fixed: When upgrading gocept.reference to version 0.5.1, a
+        duplication error was raised.
+        
+        
+        0.5.1 (2008-10-10)
+        ==================
+        
+        - Made sure that the reference manager is installed using
+        zope.app.generations before other packages depending on
+        gocept.reference.
+        
+        0.5 (2008-09-11)
+        ================
+        
+        - Added specialized variant of zope.interface.verify.verifyObject
+        which can handle references and reference collections correctly.
+        
+        
+        0.4 (2008-09-08)
+        ================
+        
+        - Moved InstrumentedSet to use BTree data structures for better performance.
+        
+        - Added `update` method to InstrumentedSet.
+        
+        - Updated documentation.
+        
+        
+        0.3 (2008-04-22)
+        ================
+        
+        - Added a `set` implementation for referencing collections of objects.
+        
+        0.2 (2007-12-21)
+        ================
+        
+        - Extended the API for `IReferenceTarget.is_referenced` to allow specifying
+        whether to query for references recursively or only on a specific object.
+        By default the query is recursive.
+        
+        - Fixed bug in the event handler for enforcing ensured constraints: referenced
+        objects could be deleted if they were deleted together with a parent
+        location.
+        
+        0.1 (2007-12-20)
+        ================
+        
+        Initial release.
+        
+Keywords: zodb zope3 intrinsic reference
+Platform: UNKNOWN
+Classifier: Topic :: Software Development
+Classifier: Topic :: Database
+Classifier: Framework :: ZODB
+Classifier: Framework :: Zope3
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
