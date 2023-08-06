@@ -1,0 +1,208 @@
+Supported options
+=================
+
+The recipe supports the following options:
+
+backup-script-name
+    Name of the backup script. Default: `backup`
+
+restore-script-name
+    Name of the restore script. Default: `restore`
+
+archive-root-name   
+    Name used in the archive filename. The filename will be named:
+    YYYY-MM-DD-HH-MM-`archive-root-name`.tgz. Default is `archive`.
+
+exclude-folders
+    Names of folder to avoid backing up. Relative to buildout root. 
+
+target-folder   
+    Folder where the archives are stored. **Mandatory**
+
+log-file
+    File where all calls are recorded. **Mandatory**
+
+Example usage
+=============
+
+We'll start by creating a buildout that uses the recipe::
+
+    >>> import os
+    >>> root =  os.path.split(sample_buildout)[0]
+    >>> if root == '':
+    ...     root = '.'
+
+    >>> write('buildout.cfg',
+    ... """
+    ... [buildout]
+    ... parts = backup
+    ... index = http://pypi.python.org/simple
+    ...
+    ... [backup]
+    ... recipe = iw.recipe.backup
+    ...
+    ... archive-root-name = backup
+    ... target-folder = %(root)s
+    ... log-file = %(root)s/backup.log
+    ... """ % {'root': root})
+
+Running the buildout gives us two scripts::
+
+    >>> print system(buildout+' -D')
+    Installing backup.
+    ...
+    Generated script '...backup'.
+    Generated script '...restore'.
+
+Let's see what we got in the backup script::
+    
+    >>> print open(join(sample_buildout, 'bin', 'backup')).read()
+    #!...
+    <BLANKLINE>
+    import sys
+    sys.path[0:0] = [
+      ...
+      ]
+    <BLANKLINE>
+    import iw.recipe.backup.archive
+    <BLANKLINE>
+    if __name__ == '__main__':
+        iw.recipe.backup.archive.archive_buildout(('...', 'backup', '..._TEST_', '...backup.log', []))
+    <BLANKLINE>
+
+Ok, let's call it to backup the current buildout::
+
+    >>> print system(join(sample_buildout, 'bin', 'backup'))
+    Starting the backup...
+    Archived in ...-backup.tar.gz
+
+We should have a log file generated as well::
+
+    >>> print open(join(root, 'backup.log')).read()
+    20...-... INFO Archived in ...backup.tar.gz
+ 
+We also have a restore feature::
+
+    >>> print system(join(sample_buildout, 'bin', 'restore'))   
+    Usage: ...restore archive_name
+    <BLANKLINE>
+
+Let's set the user input::
+
+    >>> from iw.recipe.backup.testing import set_input
+    >>> set_input('Y')
+
+Oh right, the restore script takes the name of the archive::
+
+    >>> import glob
+    >>> arc = glob.glob('%s/*.tar.gz' % root)[0]
+    >>> print system(join(sample_buildout, 'bin', 'restore %s' % arc))   
+    Are you sure you want to restore ? Every data will be lost ! (y/N)  Y 
+    Archiving current folder before restoring
+    Starting the backup...
+    Archived in ...-before-restore.tar.gz
+    Starting the restore...
+    Archive restored in /sample-buildout
+    <BLANKLINE>
+
+And a restore *always* makes an archive on the current folder before
+it is applied, to make sure nothing is never lost.
+
+There's also something quite important: make sure the archive and
+log files are not located in the buildout !::
+
+    >>> write('buildout.cfg',
+    ... """
+    ... [buildout]
+    ... parts = backup
+    ... index = http://pypi.python.org/simple
+    ...
+    ... [backup]
+    ... recipe = iw.recipe.backup
+    ...
+    ... archive-root-name = backup
+    ... target-folder = %(root)s
+    ... log-file = %(root)s/backup.log
+    ... """ % {'root': sample_buildout})
+
+    >>> print system(buildout)
+    Uninstalling backup.
+    Installing backup.
+    While:
+      Installing backup.
+    <BLANKLINE>
+    An internal error occured due to a bug in either zc.buildout or in a
+    recipe being used:
+    <BLANKLINE>
+    ValueError:
+    Cannot backup within the buildout ! Check your values
+    <BLANKLINE>
+
+A bit of cleaning::    
+
+    >>> import glob
+    >>> arc = glob.glob('%s/*.tar.gz' % root)
+    >>> for f in arc:
+    ...     os.remove(f)
+
+We can also exclude some folders from being archived::
+
+    >>> os.mkdir(join(sample_buildout, 'not'))
+    >>> open(join(sample_buildout, 'not', 'f'), 'w').write('me file')
+
+    >>> os.mkdir(join(sample_buildout, 'neh'))
+
+    >>> write('buildout.cfg',
+    ... """
+    ... [buildout]
+    ... parts = backup
+    ... index = http://pypi.python.org/simple
+    ...
+    ... [backup]
+    ... recipe = iw.recipe.backup
+    ...
+    ... archive-root-name = backup
+    ... target-folder = %(root)s
+    ... log-file = %(root)s/backup.log
+    ...
+    ... exclude-folders =
+    ...     %(sample_buildout)s/not
+    ...     %(sample_buildout)s/neh 
+    ... """ % {'root': root, 'sample_buildout': sample_buildout})
+
+Running the buildout again::
+
+    >>> print system(buildout+' -D')
+    Installing backup.
+    Generated script '...backup'.
+    Generated script '...restore'.
+    <BLANKLINE>
+
+Let's backup::
+
+    >>> print system(join(sample_buildout, 'bin', 'backup'))
+    Starting the backup...
+    Archived in ...-backup.tar.gz
+    <BLANKLINE>
+
+Let's remove the folder::
+   
+    >>> import shutil
+    >>> shutil.rmtree(join(sample_buildout, 'not'))
+    >>> os.rmdir(join(sample_buildout, 'neh'))
+
+Let's restore::
+
+    >>> arc = glob.glob('%s/*.tar.gz' % root)[0]
+    >>> print system(join(sample_buildout, 'bin', 'restore %s' % arc))
+    Are you sure you want to restore ? Every data will be lost ! (y/N)  Y
+    ...
+    <BLANKLINE>
+
+And make sure the `not` folder is not back !
+
+    >>> os.path.exists(join(sample_buildout, 'not'))
+    False
+    >>> os.path.exists(join(sample_buildout, 'neh'))
+    False
+
