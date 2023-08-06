@@ -1,0 +1,1344 @@
+Metadata-Version: 1.0
+Name: z3c.formjs
+Version: 0.4.0
+Summary: Javascript integration into ``z3c.form``
+Home-page: http://svn.zope.org/z3c.formjs
+Author: Paul Carduner and the Zope Community
+Author-email: zope3-dev@zope.org
+License: ZPL 2.1
+Description: This package is going to provide javascript support/enhancements to
+        the z3c.form library.
+        
+        Detailed Documentation
+        **********************
+        
+        ===========================
+        Form Javascript Integration
+        ===========================
+        
+        This package is designed to provide a Python API to common Javascript
+        features for forms written with the ``z3c.form*`` packages. While the
+        reference backend-implementation is for the JQuery library, any other
+        Javascript library can be hooked into the Python API.
+        
+        The documents are ordered in the way they should be read:
+        
+        - ``jsaction.txt`` [must read]
+        
+        This document describes how JS scripts can be connected to events on a
+        any widget, inclduing buttons.
+        
+        - ``jsvalidator.txt`` [must read]
+        
+        This document demonstrates how "live" widget value validation can be
+        achieved.
+        
+        - ``jsevent.txt`` [advanced users]
+        
+        This documents describes the generalization that allows hooking up script to
+        events on any field.
+        
+        - ``jqueryrenderer.txt`` [advanced users]
+        
+        This document demonstrates all necessary backend renderer components
+        necessary to accomplish any of the features of this package.
+        
+        =============================
+        Javascript Events for Buttons
+        =============================
+        
+        In the ``z3c.form`` package, buttons are most commonly rendered as "submit"
+        input fields within a form, meaning that the form will always be
+        submitted. When working with Javascript, on the other hand, a click on the
+        button often simply executes a script. The ``jsaction`` module of this package
+        is designed to implement the latter kind.
+        
+        &gt;&gt;&gt; from z3c.formjs import jsaction
+        
+        
+        Javascript Buttons
+        ------------------
+        
+        Before we can write a form that uses Javascript buttons, we have to define
+        them first. One common way to define buttons in ``z3c.form`` is to write a
+        schema describing them; so let's do that now:
+        
+        &gt;&gt;&gt; import zope.interface
+        &gt;&gt;&gt; class IButtons(zope.interface.Interface):
+        ...     hello = jsaction.JSButton(title=u'Hello World!')
+        ...     dblhello = jsaction.JSButton(title=u'Double Hello World!')
+        
+        Instead of declaring ``z3c.form.button.Button`` fields, we are now using a
+        derived Javascript button field. While there is no difference initially, they
+        will later be rendered differently. (Basically, ``JSButton`` fields render as
+        button widgets.)
+        
+        
+        Widget Selector
+        ---------------
+        
+        Like for regular fields, the action of the buttons is defined using handlers,
+        in our case Javascript handler. Selectors are used to determine the DOM
+        element or elements for which a handler is registered. The widget selector
+        uses a widget to provide the selector API:
+        
+        &gt;&gt;&gt; from z3c.form.testing import TestRequest
+        &gt;&gt;&gt; request = TestRequest()
+        
+        &gt;&gt;&gt; from z3c.form.browser import text
+        &gt;&gt;&gt; msg = text.TextWidget(request)
+        &gt;&gt;&gt; msg.id = 'form-msg'
+        &gt;&gt;&gt; msg.name = 'msg'
+        
+        &gt;&gt;&gt; selector = jsaction.WidgetSelector(msg)
+        &gt;&gt;&gt; selector
+        &lt;WidgetSelector "form-msg"&gt;
+        
+        Since the widget selector can determine the widget's id, it is also an id
+        selector (see ``jsevent.txt``):
+        
+        &gt;&gt;&gt; from z3c.formjs import interfaces
+        &gt;&gt;&gt; interfaces.IIdSelector.providedBy(selector)
+        True
+        &gt;&gt;&gt; selector.id
+        'form-msg'
+        
+        This has the advantage that we can reuse the renderer of the id
+        selector.
+        
+        
+        Javascript Event Subscriptions
+        ------------------------------
+        
+        As discussed in ``jsevent.txt``, all the Javascript event subscriptions are
+        stored on the view in a special attribute called ``jsSubscriptions``. While
+        updating the form, one can simply add subscriptions to this registry. So let's
+        say we have the following handler:
+        
+        &gt;&gt;&gt; def showSelectedWidget(event, selector, request):
+        ...     return 'alert("%r");' %(selector.widget)
+        
+        We now want to connect this handler to the ``msg`` widget to be executed when
+        the mouse is clicked within this element:
+        
+        &gt;&gt;&gt; import zope.interface
+        &gt;&gt;&gt; from z3c.formjs import jsevent
+        
+        &gt;&gt;&gt; class Form(object):
+        ...     zope.interface.implements(interfaces.IHaveJSSubscriptions)
+        ...     jsSubscriptions = jsevent.JSSubscriptions()
+        ...
+        ...     def update(self):
+        ...         self.jsSubscriptions.subscribe(
+        ...             jsevent.CLICK, selector, showSelectedWidget)
+        
+        &gt;&gt;&gt; form = Form()
+        &gt;&gt;&gt; form.update()
+        
+        After registering the subscription-related renderers,
+        
+        &gt;&gt;&gt; from z3c.formjs import testing
+        &gt;&gt;&gt; testing.setupRenderers()
+        
+        we can use the subscription rendering viewlet to check the subscription
+        output:
+        
+        &gt;&gt;&gt; viewlet = jsevent.JSSubscriptionsViewlet(None, request, form, None)
+        &gt;&gt;&gt; viewlet.update()
+        &gt;&gt;&gt; print viewlet.render()
+        &lt;script type="text/javascript"&gt;
+        $(document).ready(function(){
+        $("#form-msg").bind("click", function(){alert("&lt;TextWidget 'msg'&gt;");});
+        })
+        &lt;/script&gt;
+        
+        The z3c.formjs package provides a viewlet manager with this viewlet
+        already registered for it.  The viewlet manager has the name
+        ``z3c.formjs.interfaces.IDynamicJavaScript`` and can be rendered in
+        any template with the following:
+        
+        &lt;script tal:replace="structure
+        provider:z3c.formjs.interfaces.IDynamicJavaScript"&gt;
+        &lt;/script&gt;
+        
+        
+        Forms with Javascript Buttons
+        -----------------------------
+        
+        The next step is create the form. Luckily we do not need any fields to
+        render a form. Also, instead of using usual
+        ``z3c.form.button.handler()`` function, we now have a special handler
+        decorator that connects a button to a Javascript event, along with an
+        additional decorator that creates the button at the same time. The
+        output of the handler itself is a string that is used as the
+        Javascript script that is executed.
+        
+        &gt;&gt;&gt; from z3c.form import button, form
+        
+        &gt;&gt;&gt; class Form(form.Form):
+        ...     buttons = button.Buttons(IButtons)
+        ...
+        ...     @jsaction.handler(buttons['hello'])
+        ...     def showHelloWorldMessage(self, event, selector):
+        ...         return 'alert("%s");' % selector.widget.title
+        ...
+        ...     @jsaction.handler(buttons['dblhello'], event=jsevent.DBLCLICK)
+        ...     def showDoubleHelloWorldMessage(self, event, selector):
+        ...         return 'alert("%s");' % selector.widget.title
+        ...
+        ...     @jsaction.buttonAndHandler(u"Click Me")
+        ...     def handleClickMe(self, event, selector):
+        ...         return 'alert("You clicked the Click Me button.");'
+        
+        
+        
+        The ``handler()`` decorator takes two arguments, the button (acting as the DOM
+        element selector) and the event to which to bind the action. By default the
+        event is ``jsevent.CLICK``.
+        
+        And that is really everything that is required from a user's point of
+        view. Let us now see how those handler declarations are converted into actions
+        and Javascript subscriptions. First we need to initialize the form:
+        
+        &gt;&gt;&gt; from z3c.form.testing import TestRequest
+        &gt;&gt;&gt; request = TestRequest()
+        
+        &gt;&gt;&gt; demoform = Form(None, request)
+        
+        We also need to register an adapter to create an action from a button:
+        
+        &gt;&gt;&gt; from z3c.form.interfaces import IButtonAction
+        &gt;&gt;&gt; zope.component.provideAdapter(
+        ...     jsaction.JSButtonAction, provides=IButtonAction)
+        
+        Finally, for the Javascript subscriptions to be registered, we need an event
+        listener that reacts to "after widget/action update" events:
+        
+        &gt;&gt;&gt; zope.component.provideHandler(jsaction.createSubscriptionsForWidget)
+        
+        Action managers are instantiated using the form, request, and
+        context/content. A button-action-manager implementation is avaialble in the
+        ``z3c.form.button`` package:
+        
+        &gt;&gt;&gt; actions = button.ButtonActions(demoform, request, None)
+        &gt;&gt;&gt; actions.update()
+        
+        Once the action manager is updated, the buttons should be available as
+        actions:
+        
+        &gt;&gt;&gt; actions.keys()
+        ['hello', 'dblhello', '436c69636b204d65']
+        &gt;&gt;&gt; actions['hello']
+        &lt;JSButtonAction 'form.buttons.hello' u'Hello World!'&gt;
+        
+        Since special Javascript handlers were registered for those buttons, creating
+        and updating the actions has also caused the form to become an
+        ``IHaveJSSubscriptions`` view:
+        
+        &gt;&gt;&gt; from z3c.formjs import interfaces
+        
+        &gt;&gt;&gt; interfaces.IHaveJSSubscriptions.providedBy(demoform)
+        True
+        &gt;&gt;&gt; demoform.jsSubscriptions
+        &lt;z3c.formjs.jsevent.JSSubscriptions object at ...&gt;
+        
+        The interesting part about button subscriptions is the selector.
+        
+        &gt;&gt;&gt; selector = list(demoform.jsSubscriptions)[0].selector
+        &gt;&gt;&gt; selector
+        &lt;WidgetSelector "form-buttons-hello"&gt;
+        
+        As you can see, the system automatically created a widget selector:
+        
+        &gt;&gt;&gt; selector.id
+        'form-buttons-hello'
+        &gt;&gt;&gt; selector.widget
+        &lt;JSButtonAction 'form.buttons.hello' u'Hello World!'&gt;
+        
+        With the declarations in place, we can now go on.
+        
+        
+        Rendering the Form
+        ------------------
+        
+        Let's now see what we need to do to make the form render correctly and
+        completely.
+        
+        &gt;&gt;&gt; demoform = Form(None, request)
+        
+        First we need some of the standard ``z3c.form`` registrations:
+        
+        &gt;&gt;&gt; from z3c.form import field, button
+        &gt;&gt;&gt; zope.component.provideAdapter(field.FieldWidgets)
+        &gt;&gt;&gt; zope.component.provideAdapter(button.ButtonActions)
+        
+        Next we need to register the template for our button actions:
+        
+        &gt;&gt;&gt; from zope.pagetemplate.interfaces import IPageTemplate
+        &gt;&gt;&gt; from z3c.form import widget
+        &gt;&gt;&gt; from z3c.form.interfaces import IButtonWidget, INPUT_MODE
+        &gt;&gt;&gt; from z3c.form.testing import getPath
+        
+        &gt;&gt;&gt; zope.component.provideAdapter(
+        ...     widget.WidgetTemplateFactory(getPath('button_input.pt'), 'text/html'),
+        ...     (None, None, None, None, IButtonWidget),
+        ...     IPageTemplate, name=INPUT_MODE)
+        
+        We also need to setup a Javascript viewlet manager and register the
+        subscription viewlet for it, so that the subscriptions actually appear in the
+        HTML page. (This is a bit tedious to do using the Python API, but using ZCML
+        this is much simpler.)
+        
+        * Hook up the "provider" TALES expression type:
+        
+        &gt;&gt;&gt; from zope.app.pagetemplate.engine import TrustedEngine
+        &gt;&gt;&gt; from zope.contentprovider import tales
+        &gt;&gt;&gt; TrustedEngine.registerType('provider', tales.TALESProviderExpression)
+        
+        * Create a viewlet manager that does not require security to be setup:
+        
+        &gt;&gt;&gt; from zope.viewlet import manager
+        &gt;&gt;&gt; class JSViewletManager(manager.ViewletManagerBase):
+        ...     def filter(self, viewlets):
+        ...         return viewlets
+        
+        * Register the viewlet manager as a content provider known as "javascript":
+        
+        &gt;&gt;&gt; from z3c.form.interfaces import IFormLayer
+        &gt;&gt;&gt; from zope.contentprovider.interfaces import IContentProvider
+        &gt;&gt;&gt; zope.component.provideAdapter(
+        ...     JSViewletManager,
+        ...     (None, IFormLayer, None),
+        ...     IContentProvider,
+        ...     name='javascript')
+        
+        * Register the JS Subscriber viewlet for this new viewlet manager:
+        
+        &gt;&gt;&gt; from zope.viewlet.interfaces import IViewlet
+        &gt;&gt;&gt; zope.component.provideAdapter(
+        ...     jsevent.JSSubscriptionsViewlet,
+        ...     (None, IFormLayer, interfaces.IHaveJSSubscriptions,
+        ...      JSViewletManager), IViewlet, name='subscriptions')
+        
+        Finally, we need a template for our form:
+        
+        &gt;&gt;&gt; testing.addTemplate(demoform, 'buttons_form.pt')
+        
+        We can now render the form:
+        
+        &gt;&gt;&gt; demoform.update()
+        &gt;&gt;&gt; print demoform.render()
+        &lt;html&gt;
+        &lt;head&gt;
+        &lt;script type="text/javascript"&gt;
+        $(document).ready(function(){
+        $("#form-buttons-hello").bind("click",
+        function(){alert("Hello World!");});
+        $("#form-buttons-dblhello").bind("dblclick",
+        function(){alert("Double Hello World!");});
+        $("#form-buttons-436c69636b204d65").bind("click",
+        function(){alert("You clicked the Click Me button.");});
+        })
+        &lt;/script&gt;
+        &lt;/head&gt;
+        &lt;body&gt;
+        &lt;div class="action"&gt;
+        &lt;input type="button" id="form-buttons-hello"
+        name="form.buttons.hello" class="button-widget jsbutton-field"
+        value="Hello World!" /&gt;
+        &lt;/div&gt;
+        &lt;div class="action"&gt;
+        &lt;input type="button" id="form-buttons-dblhello"
+        name="form.buttons.dblhello" class="button-widget jsbutton-field"
+        value="Double Hello World!" /&gt;
+        &lt;/div&gt;
+        &lt;div class="action"&gt;
+        &lt;input type="button" id="form-buttons-436c69636b204d65"
+        name="form.buttons.436c69636b204d65"
+        class="button-widget jsbutton-field" value="Click Me" /&gt;
+        &lt;/div&gt;
+        &lt;/body&gt;
+        &lt;/html&gt;
+        
+        As you can see, the subscriptions are correctly placed into the header, while
+        the buttons render as usual with exception to the input type, which is now a
+        "button".
+        
+        
+        Multiple Handlers
+        -----------------
+        
+        Since there are multiple events in Javascript, one element can have multiple
+        handlers. So let's define a new form that declares two handlers for the same
+        button:
+        
+        &gt;&gt;&gt; class Form(form.Form):
+        ...     buttons = button.Buttons(IButtons).select('hello')
+        ...
+        ...     @jsaction.handler(buttons['hello'])
+        ...     def showHelloWorldMessage(self, event, selector):
+        ...         return 'alert("Hello World!");'
+        ...
+        ...     @jsaction.handler(buttons['hello'], event=jsevent.DBLCLICK)
+        ...     def showDoubleHelloWorldMessage(self, event, selector):
+        ...         return 'alert("Hello World! x 2");'
+        
+        Let's now instantiate and update the form:
+        
+        &gt;&gt;&gt; demoform = Form(None, request)
+        &gt;&gt;&gt; demoform.update()
+        
+        The subscriptions are now available:
+        
+        &gt;&gt;&gt; list(demoform.jsSubscriptions)
+        [&lt;JSSubscription
+        event=&lt;JSEvent "click"&gt;,
+        selector=&lt;WidgetSelector "form-buttons-hello"&gt;,
+        handler=&lt;JSHandler &lt;function showHelloWorldMessage ...&gt;&gt;&gt;,
+        &lt;JSSubscription
+        event=&lt;JSEvent "dblclick"&gt;,
+        selector=&lt;WidgetSelector "form-buttons-hello"&gt;,
+        handler=&lt;JSHandler &lt;function showDoubleHelloWorldMessage ...&gt;&gt;&gt;]
+        
+        Next we can look at a case where one handler is registered for all buttons and
+        events, and another overrides the click of the "hello" button to something
+        else:
+        
+        &gt;&gt;&gt; from z3c.form.interfaces import IButton
+        &gt;&gt;&gt; class Form(form.Form):
+        ...     buttons = button.Buttons(IButtons)
+        ...
+        ...     @jsaction.handler(IButton, interfaces.IJSEvent)
+        ...     def showHelloWorldMessage(self, event, selector):
+        ...         return '''alert("The event '%s' occured.");''' %event.name
+        ...
+        ...     @jsaction.handler(buttons['hello'], event=jsevent.CLICK)
+        ...     def showDoubleHelloWorldMessage(self, event, selector):
+        ...         return 'alert("Hello World clicked!");'
+        
+        &gt;&gt;&gt; demoform = Form(None, request)
+        &gt;&gt;&gt; demoform.update()
+        
+        Rendering the subscriptions gives the following result:
+        
+        &gt;&gt;&gt; renderer = zope.component.getMultiAdapter(
+        ...     (demoform.jsSubscriptions, request), interfaces.IRenderer)
+        &gt;&gt;&gt; renderer.update()
+        &gt;&gt;&gt; print renderer.render()
+        $(document).ready(function(){
+        $("#...-hello").bind("dblclick", function(){alert("The ...");});
+        $("#...-hello").bind("change", function(){alert("The ...");});
+        $("#...-hello").bind("load", function(){alert("The ...");});
+        $("#...-hello").bind("blur", function(){alert("The ...");});
+        $("#...-hello").bind("focus", function(){alert("The ...");});
+        $("#...-hello").bind("keydown", function(){alert("The ...");});
+        $("#...-hello").bind("keyup", function(){alert("The ...");});
+        $("#...-hello").bind("mousedown", function(){alert("The ...");});
+        $("#...-hello").bind("mousemove", function(){alert("The ...");});
+        $("#...-hello").bind("mouseout", function(){alert("The ...");});
+        $("#...-hello").bind("mouseover", function(){alert("The ...");});
+        $("#...-hello").bind("mouseup", function(){alert("The ...");});
+        $("#...-hello").bind("resize", function(){alert("The ...");});
+        $("#...-hello").bind("select", function(){alert("The ...");});
+        $("#...-hello").bind("submit", function(){alert("The ...");});
+        $("#...-dblhello").bind("click", function(){alert("The ...");});
+        $("#...-dblhello").bind("dblclick", function(){alert("The ...");});
+        $("#...-dblhello").bind("change", function(){alert("The ...");});
+        $("#...-dblhello").bind("load", function(){alert("The ...");});
+        $("#...-dblhello").bind("blur", function(){alert("The ...");});
+        $("#...-dblhello").bind("focus", function(){alert("The ...");});
+        $("#...-dblhello").bind("keydown", function(){alert("The ...");});
+        $("#...-dblhello").bind("keyup", function(){alert("The ...");});
+        $("#...-dblhello").bind("mousedown", function(){alert("The ...");});
+        $("#...-dblhello").bind("mousemove", function(){alert("The ...");});
+        $("#...-dblhello").bind("mouseout", function(){alert("The ...");});
+        $("#...-dblhello").bind("mouseover", function(){alert("The ...");});
+        $("#...-dblhello").bind("mouseup", function(){alert("The ...");});
+        $("#...-dblhello").bind("resize", function(){alert("The ...");});
+        $("#...-dblhello").bind("select", function(){alert("The ...");});
+        $("#...-dblhello").bind("submit", function(){alert("The ...");});
+        $("#...-hello").bind("click", function(){alert("Hello World clicked!");});
+        })
+        
+        While this output might seem excessive, it demonstrates that the generic
+        ``IJSEvent`` subscription truly causes a subscription to all events. Further,
+        a more specific directive takes precendence over the more generic one. This is
+        due to the built-in adapter registry of the ``JSHandlers`` class.
+        
+        Finally, handler declarations can also be chained, allowing a handler to be
+        registered for multiple field-event combinations that cannot be expressed by
+        common interfaces:
+        
+        &gt;&gt;&gt; class Form(form.Form):
+        ...     buttons = button.Buttons(IButtons)
+        ...
+        ...     @jsaction.handler(IButtons['hello'], jsevent.CLICK)
+        ...     @jsaction.handler(IButtons['hello'], jsevent.DBLCLICK)
+        ...     def showHelloWorldMessage(self, event, selector):
+        ...         return '''alert("The event '%s' occured.");''' %event.name
+        
+        &gt;&gt;&gt; demoform = Form(None, request)
+        &gt;&gt;&gt; demoform.update()
+        
+        Rendering the subscriptions gives the following result:
+        
+        &gt;&gt;&gt; renderer = zope.component.getMultiAdapter(
+        ...     (demoform.jsSubscriptions, request), interfaces.IRenderer)
+        &gt;&gt;&gt; renderer.update()
+        &gt;&gt;&gt; print renderer.render()
+        $(document).ready(function(){
+        $("#form-buttons-hello").bind("click", function(){alert("The ...");});
+        $("#form-buttons-hello").bind("dblclick", function(){alert("The ...");});
+        })
+        
+        
+        Attaching Events to Form Fields
+        -------------------------------
+        
+        Javascript handlers do not only work for buttons, but also for fields. Let's
+        create a simple schema that we can use to create a form:
+        
+        &gt;&gt;&gt; import zope.schema
+        
+        &gt;&gt;&gt; class IPerson(zope.interface.Interface):
+        ...     name = zope.schema.TextLine(title=u'Name')
+        ...     age = zope.schema.Int(title=u'Age')
+        
+        Even though somewhat pointless, whenever the "age" field is clicked on or the
+        "name" widget value changed, we would like to get an alert:
+        
+        &gt;&gt;&gt; class PersonAddForm(form.AddForm):
+        ...     fields = field.Fields(IPerson)
+        ...
+        ...     @jsaction.handler(fields['age'])
+        ...     def ageClickEvent(self, event, selector):
+        ...         return 'alert("The Age was Clicked!");'
+        ...
+        ...     @jsaction.handler(fields['name'], event=jsevent.CHANGE)
+        ...     def nameChangeEvent(self, event, selector):
+        ...         return 'alert("The Name was Changed!");'
+        
+        We also need to register all of the default ``z3c.form`` registrations:
+        
+        &gt;&gt;&gt; from z3c.form.testing import setupFormDefaults
+        &gt;&gt;&gt; setupFormDefaults()
+        
+        After adding a simple template for the form, it can be rendered:
+        
+        &gt;&gt;&gt; addform = PersonAddForm(None, request)
+        &gt;&gt;&gt; testing.addTemplate(addform, 'simple_edit.pt')
+        &gt;&gt;&gt; addform.update()
+        &gt;&gt;&gt; print addform.render()
+        &lt;html&gt;
+        &lt;head&gt;
+        &lt;script type="text/javascript"&gt;
+        $(document).ready(function(){
+        $("#form-widgets-name").bind("change",
+        function(){alert("The Name was Changed!");});
+        $("#form-widgets-age").bind("click",
+        function(){alert("The Age was Clicked!");});
+        })
+        &lt;/script&gt;
+        &lt;/head&gt;
+        &lt;body&gt;
+        &lt;form action="."&gt;
+        &lt;div class="row"&gt;
+        &lt;label for="form-widgets-name"&gt;Name&lt;/label&gt;
+        &lt;input type="text" id="form-widgets-name" name="form.widgets.name"
+        class="text-widget required textline-field" value="" /&gt;
+        &lt;/div&gt;
+        &lt;div class="row"&gt;
+        &lt;label for="form-widgets-age"&gt;Age&lt;/label&gt;
+        &lt;input type="text" id="form-widgets-age" name="form.widgets.age"
+        class="text-widget required int-field" value="" /&gt;
+        &lt;/div&gt;
+        &lt;div class="action"&gt;
+        &lt;input type="submit" id="form-buttons-add" name="form.buttons.add"
+        class="submit-widget button-field" value="Add" /&gt;
+        &lt;/div&gt;
+        &lt;/form&gt;
+        &lt;/body&gt;
+        &lt;/html&gt;
+        
+        As you can see, the form rendered perferctly, even allowing classic and
+        Javascript handlers to co-exist.
+        
+        
+        Appendix A: Javascript Event Handlers Manager
+        ---------------------------------------------
+        
+        The ``IJSEventHandlers`` implementataion (``JSHandlers`` class) is really an
+        advanced component with great features, so it deserves some additional
+        attention.
+        
+        &gt;&gt;&gt; handlers = jsaction.JSHandlers()
+        &gt;&gt;&gt; handlers
+        &lt;JSHandlers []&gt;
+        
+        When a handlers component is initialized, it creates an internal adapter
+        registry. If a handler is registered for a button, it simply behaves as an
+        instance-adapter.
+        
+        &gt;&gt;&gt; handlers._registry
+        &lt;zope.interface.adapter.AdapterRegistry object at ...&gt;
+        
+        The object itself is pretty simple. To add a handler, we first have to create
+        a handler, ...
+        
+        &gt;&gt;&gt; def doSomething(form, event, selector):
+        ...     pass
+        &gt;&gt;&gt; handler = jsaction.JSHandler(doSomething)
+        
+        The only special thing about the handler is that it has the same name
+        as the function.
+        
+        &gt;&gt;&gt; handler.__name__
+        'doSomething'
+        
+        and a field/button:
+        
+        &gt;&gt;&gt; button1 = jsaction.JSButton(name='button1', title=u'Button 1')
+        
+        Let's now add the handler:
+        
+        &gt;&gt;&gt; handlers.addHandler(button1, jsevent.CLICK, handler)
+        
+        But you can also register handlers for groups of fields, either by interface
+        or class:
+        
+        &gt;&gt;&gt; class SpecialButton(jsaction.JSButton):
+        ...     pass
+        
+        &gt;&gt;&gt; handlers.addHandler(
+        ...     SpecialButton, jsevent.CLICK, jsaction.JSHandler('specialAction'))
+        
+        &gt;&gt;&gt; handlers
+        &lt;JSHandlers
+        [&lt;JSHandler &lt;function doSomething at ...&gt;&gt;,
+        &lt;JSHandler 'specialAction'&gt;]&gt;
+        
+        Now all special buttons should use that handler:
+        
+        &gt;&gt;&gt; button2 = SpecialButton(name='button2', title=u'Button 2')
+        &gt;&gt;&gt; button3 = SpecialButton(name='button3', title=u'Button 3')
+        
+        &gt;&gt;&gt; handlers.getHandlers(button2)
+        ((&lt;JSEvent "click"&gt;, &lt;JSHandler 'specialAction'&gt;),)
+        &gt;&gt;&gt; handlers.getHandlers(button3)
+        ((&lt;JSEvent "click"&gt;, &lt;JSHandler 'specialAction'&gt;),)
+        
+        However, registering a more specific handler for button 2 will override the
+        general handler:
+        
+        &gt;&gt;&gt; handlers.addHandler(
+        ...     button2, jsevent.CLICK, jsaction.JSHandler('specificAction2'))
+        
+        &gt;&gt;&gt; handlers.getHandlers(button2)
+        ((&lt;JSEvent "click"&gt;, &lt;JSHandler 'specificAction2'&gt;),)
+        &gt;&gt;&gt; handlers.getHandlers(button3)
+        ((&lt;JSEvent "click"&gt;, &lt;JSHandler 'specialAction'&gt;),)
+        
+        The same flexibility that is available to the field is also available for the
+        event.
+        
+        &gt;&gt;&gt; handlers = jsaction.JSHandlers()
+        
+        So let's register a generic handler for all events:
+        
+        &gt;&gt;&gt; handlers.addHandler(
+        ...     jsaction.JSButton, jsevent.JSEvent,
+        ...     jsaction.JSHandler('genericEventAction'))
+        
+        So when asking for the handlers of button 1, we get a very long list:
+        
+        &gt;&gt;&gt; handlers.getHandlers(button1)
+        ((&lt;JSEvent "click"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "dblclick"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "change"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "load"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "blur"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "focus"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "keydown"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "keyup"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "mousedown"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "mousemove"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "mouseout"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "mouseover"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "mouseup"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "resize"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "select"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "submit"&gt;, &lt;JSHandler 'genericEventAction'&gt;))
+        
+        So at this point you might ask: How is the complete set of events determined?
+        At this point we use the list of all events as listed in the
+        ``jsevent.EVENTS`` variable.
+        
+        Let's now register a special handler for the "click" event:
+        
+        &gt;&gt;&gt; handlers.addHandler(
+        ...     button1, jsevent.CLICK, jsaction.JSHandler('clickEventAction'))
+        
+        So this registration takes precedence over the generic one:
+        
+        &gt;&gt;&gt; handlers.getHandlers(button1)
+        ((&lt;JSEvent "click"&gt;, &lt;JSHandler 'clickEventAction'&gt;),
+        (&lt;JSEvent "dblclick"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "change"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "load"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "blur"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "focus"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "keydown"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "keyup"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "mousedown"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "mousemove"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "mouseout"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "mouseover"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "mouseup"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "resize"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "select"&gt;, &lt;JSHandler 'genericEventAction'&gt;),
+        (&lt;JSEvent "submit"&gt;, &lt;JSHandler 'genericEventAction'&gt;))
+        
+        You can also add handlers objects:
+        
+        &gt;&gt;&gt; handlers = jsaction.JSHandlers()
+        &gt;&gt;&gt; handlers.addHandler(
+        ...     button1, jsevent.CLICK, jsaction.JSHandler('button1ClickAction'))
+        
+        &gt;&gt;&gt; handlers2 = jsaction.JSHandlers()
+        &gt;&gt;&gt; handlers2.addHandler(
+        ...     button2, jsevent.CLICK, jsaction.JSHandler('button2ClickAction'))
+        
+        &gt;&gt;&gt; handlers + handlers2
+        &lt;JSHandlers
+        [&lt;JSHandler 'button1ClickAction'&gt;,
+        &lt;JSHandler 'button2ClickAction'&gt;]&gt;
+        
+        However, adding other components is not supported:
+        
+        &gt;&gt;&gt; handlers + 1
+        Traceback (most recent call last):
+        ...
+        NotImplementedError
+        
+        The handlers also provide a method to copy the handlers to a new instance:
+        
+        &gt;&gt;&gt; copy = handlers.copy()
+        &gt;&gt;&gt; isinstance(copy, jsaction.JSHandlers)
+        True
+        &gt;&gt;&gt; copy is handlers
+        False
+        
+        This is commonly needed when one wants to extend the handlers of a super-form.
+        
+        
+        Appendix B: The Subscription-Creating Event Subscriber
+        ------------------------------------------------------
+        
+        The ``createSubscriptionsForWidget(event)`` event subscriber listens to
+        ``IAfterWidgetUpdateEvent`` events and is responsible for looking up any
+        Javascript action handlers and create event subscriptions for them.
+        
+        So let's setup the environment:
+        
+        &gt;&gt;&gt; class Form(form.Form):
+        ...     buttons = button.Buttons(IButtons)
+        ...
+        ...     @jsaction.handler(buttons['hello'])
+        ...     def showHelloWorldMessage(self, event, selector):
+        ...         return 'alert("Hello World!");'
+        
+        &gt;&gt;&gt; form = Form(None, request)
+        
+        Of course, not just any widget can have Javascript handlers. First of all, the
+        widget must be a field widget:
+        
+        &gt;&gt;&gt; from z3c.form import widget
+        &gt;&gt;&gt; simpleWidget = widget.Widget(request)
+        
+        &gt;&gt;&gt; jsaction.createSubscriptionsForWidget(
+        ...     widget.AfterWidgetUpdateEvent(simpleWidget))
+        
+        &gt;&gt;&gt; interfaces.IHaveJSSubscriptions.providedBy(form)
+        False
+        
+        And even if the widget is a field widget,
+        
+        &gt;&gt;&gt; from z3c.form.browser.button import ButtonFieldWidget
+        &gt;&gt;&gt; helloWidget = ButtonFieldWidget(form.buttons['hello'], request)
+        
+        it still needs to be a form-aware widget:
+        
+        &gt;&gt;&gt; jsaction.createSubscriptionsForWidget(
+        ...     widget.AfterWidgetUpdateEvent(helloWidget))
+        
+        &gt;&gt;&gt; interfaces.IHaveJSSubscriptions.providedBy(form)
+        False
+        
+        So let's now make it work and add the form to the widget:
+        
+        &gt;&gt;&gt; from z3c.form.interfaces import IFormAware
+        &gt;&gt;&gt; helloWidget.form = form
+        &gt;&gt;&gt; zope.interface.alsoProvides(helloWidget, IFormAware)
+        
+        After the subscriber successfully completes, we should have a sJavascript
+        subscription attached to the form:
+        
+        &gt;&gt;&gt; jsaction.createSubscriptionsForWidget(
+        ...     widget.AfterWidgetUpdateEvent(helloWidget))
+        
+        &gt;&gt;&gt; interfaces.IHaveJSSubscriptions.providedBy(form)
+        True
+        &gt;&gt;&gt; len(list(form.jsSubscriptions))
+        1
+        &gt;&gt;&gt; list(form.jsSubscriptions)
+        [&lt;JSSubscription
+        event=&lt;JSEvent "click"&gt;, selector=&lt;WidgetSelector "hello"&gt;,
+        handler=&lt;JSHandler &lt;function showHelloWorldMessage at ...&gt;&gt;&gt;]
+        
+        In the event that the widget is updated multiple times, and the
+        subscriber gets called multiple times, duplicate subscriptions will
+        not be created.
+        
+        &gt;&gt;&gt; jsaction.createSubscriptionsForWidget(
+        ...     widget.AfterWidgetUpdateEvent(helloWidget))
+        &gt;&gt;&gt; len(list(form.jsSubscriptions))
+        1
+        
+        Finally, if the form does not have any Javascript handlers, in other words, it
+        does not have a ``jsHandlers`` attribute, then the subscriber also aborts:
+        
+        &gt;&gt;&gt; form = Form(None, request)
+        &gt;&gt;&gt; helloWidget.form = object()
+        
+        &gt;&gt;&gt; jsaction.createSubscriptionsForWidget(
+        ...     widget.AfterWidgetUpdateEvent(helloWidget))
+        
+        &gt;&gt;&gt; interfaces.IHaveJSSubscriptions.providedBy(form)
+        False
+        
+        And that's all.
+        
+        ==========================
+        JavaScript Form Validation
+        ==========================
+        
+        This package also supports widget value validation via Javascript. In
+        particular, the ``jsvalidator`` module implements server-side validation via
+        AJAX.
+        
+        &gt;&gt;&gt; from z3c.formjs import jsvalidator
+        
+        There are two components to the validation API. The first is the validator, a
+        form mix-in class that makes the validation functionality via a URL and
+        defines the communication protocol of the validation; for example, it defines
+        what path must be accessed for the validation and what data to send and
+        return. The second component is the validation script, which is responsible
+        for defining the Javascript code that is executed when validation is
+        requested.
+        
+        
+        Message Validator
+        -----------------
+        
+        The goal of the specific message validator is to validate a value, then
+        convert any error into a message and insert the message into the page's
+        content.
+        
+        So let's do some necessary setups:
+        
+        &gt;&gt;&gt; from z3c.form.testing import setupFormDefaults
+        &gt;&gt;&gt; setupFormDefaults()
+        
+        &gt;&gt;&gt; import zope.component
+        &gt;&gt;&gt; from z3c.form import error
+        &gt;&gt;&gt; zope.component.provideAdapter(error.ValueErrorViewSnippet)
+        
+        We now create a simple form in which all widgets will be validated:
+        
+        &gt;&gt;&gt; import zope.interface
+        &gt;&gt;&gt; import zope.schema
+        
+        &gt;&gt;&gt; class IAddress(zope.interface.Interface):
+        ...     zip = zope.schema.Int(title=u"Zip Code")
+        
+        &gt;&gt;&gt; from z3c.form import form, field
+        &gt;&gt;&gt; from z3c.form.interfaces import IField
+        &gt;&gt;&gt; from z3c.formjs import jsevent, jsaction
+        
+        &gt;&gt;&gt; class AddressEditForm(jsvalidator.MessageValidator, form.AddForm):
+        ...     fields = field.Fields(IAddress)
+        ...
+        ...     @jsaction.handler(IField, event=jsevent.CHANGE)
+        ...     def fieldValidator(self, event, selector):
+        ...         return self.ValidationScript(self, selector.widget).render()
+        
+        After instantiating the form, ...
+        
+        &gt;&gt;&gt; from z3c.form.testing import TestRequest
+        &gt;&gt;&gt; request = TestRequest()
+        &gt;&gt;&gt; edit = AddressEditForm(None, request)
+        &gt;&gt;&gt; edit.update()
+        
+        we can execute the handler to ensure we get some output:
+        
+        &gt;&gt;&gt; from z3c.formjs import testing
+        &gt;&gt;&gt; testing.setupRenderers()
+        
+        &gt;&gt;&gt; from z3c.formjs import jsaction
+        &gt;&gt;&gt; print edit.fieldValidator(
+        ...     None, jsaction.WidgetSelector(edit.widgets['zip']))
+        $.get('/validate', function(data){ alert(data) })
+        
+        Validators use AJAX handlers to communicate with the server. Commonly the AJAX
+        handler is looked up via the "ajax" view -- see ``ajax.txt`` for more
+        details. In this case we just create a small helper function:
+        
+        &gt;&gt;&gt; from z3c.formjs import ajax
+        
+        &gt;&gt;&gt; def AJAXPlugin(view):
+        ...     return ajax.AJAXRequestTraverserPlugin(view, view.request)
+        
+        
+        &gt;&gt;&gt; from z3c.formjs import ajax, interfaces
+        &gt;&gt;&gt; from zope.publisher.interfaces.browser import IBrowserRequest
+        
+        &gt;&gt;&gt; zope.component.provideSubscriptionAdapter(
+        ...     ajax.AJAXRequestTraverserPlugin,
+        ...     (interfaces.IFormTraverser, IBrowserRequest))
+        
+        we can traverse to the ``validate`` method from the "ajax" view and render
+        it. Let's first render some valid input:
+        
+        &gt;&gt;&gt; request = TestRequest(form={'widget-name' : 'zip',
+        ...                             'form.widgets.zip' : u'29132'})
+        &gt;&gt;&gt; edit = AddressEditForm(None, request)
+        &gt;&gt;&gt; edit.update()
+        &gt;&gt;&gt; AJAXPlugin(edit).publishTraverse(None, 'validate')()
+        u''
+        
+        As you can see there is no error message. Let's now provide an invalid ZIP
+        code. As you can see, we get the expected error message:
+        
+        &gt;&gt;&gt; request = TestRequest(form={'widget-name': 'zip',
+        ...                             'form.widgets.zip':'notazipcode'})
+        &gt;&gt;&gt; edit = AddressEditForm(None, request)
+        &gt;&gt;&gt; edit.update()
+        &gt;&gt;&gt; AJAXPlugin(edit).publishTraverse(None, 'validate')()
+        u'The system could not process the given value.'
+        
+        Of course, one cannot just traverse to any attribute in the form:
+        
+        &gt;&gt;&gt; AJAXPlugin(edit).publishTraverse(None, 'ValidationScript')()
+        Traceback (most recent call last):
+        ...
+        NotFound: Object: &lt;AddressEditForm ...&gt;, name: 'ValidationScript'
+        
+        And that's it.
+        
+        ===============================
+        Connecting to Javascript Events
+        ===============================
+        
+        The ``jsevent`` module of this package implements a mechanism to connect a
+        Javascript script to an event of a DOM element. So let's have a look at how
+        this works.
+        
+        &gt;&gt;&gt; from z3c.formjs import interfaces, jsevent
+        
+        To implement this functionality, we need to model three components: events,
+        DOM elements (selector), and the script (handler). We will also need a manager
+        to keep track of all the mappings. This is indeed somewhat similar to the Zope
+        3 event model, though we do not need DOM elements to connect the events there.
+        
+        
+        Subscription Manager
+        --------------------
+        
+        So first we need to create a subscription manager in which to collect the
+        subscriptions:
+        
+        &gt;&gt;&gt; manager = jsevent.JSSubscriptions()
+        
+        Initially, we have no registered events:
+        
+        &gt;&gt;&gt; list(manager)
+        []
+        
+        We now want to subscribe to the "click" event of a DOM element with the id
+        "message". When the event occurs, we would like to display a simple "Hello
+        World" message.
+        
+        The events are available in all capital letters, for example:
+        
+        &gt;&gt;&gt; jsevent.CLICK
+        &lt;JSEvent "click"&gt;
+        
+        The DOM element is selected using a selector, in our case an id selector:
+        
+        &gt;&gt;&gt; selector = jsevent.IdSelector('message')
+        &gt;&gt;&gt; selector
+        &lt;IdSelector "message"&gt;
+        
+        The handler of the event is a callable accepting the event, selector and the
+        request:
+        
+        &gt;&gt;&gt; def showHelloWorldAlert(event, selector, request):
+        ...     return u'alert("Hello World!")'
+        
+        We have finally all the pieces together to subscribe the event:
+        
+        &gt;&gt;&gt; manager.subscribe(jsevent.CLICK, selector, showHelloWorldAlert)
+        &lt;JSSubscription event=&lt;JSEvent "click"&gt;,
+        selector=&lt;IdSelector "message"&gt;,
+        handler=&lt;function showHelloWorldAlert at ...&gt;&gt;
+        
+        So now we can see the subscription:
+        
+        &gt;&gt;&gt; list(manager)
+        [&lt;JSSubscription event=&lt;JSEvent "click"&gt;,
+        selector=&lt;IdSelector "message"&gt;,
+        handler=&lt;function showHelloWorldAlert at ...&gt;&gt;]
+        
+        We can also get a specific subscription from the manager.
+        
+        &gt;&gt;&gt; manager['showHelloWorldAlert']
+        [&lt;JSSubscription event=&lt;JSEvent "click"&gt;,
+        selector=&lt;IdSelector "message"&gt;,
+        handler=&lt;function showHelloWorldAlert at ...&gt;&gt;]
+        
+        So now, how does this get rendered into Javascript code? Since this package
+        strictly separates definition from rendering, a renderer will be responsible
+        to produce the output.
+        
+        
+        Renderers
+        ---------
+        
+        So let's define some renderers for the various components. We have already
+        prepared renderers for testing purposes in the ``testing`` support module. The
+        first one is for the id selector
+        
+        &gt;&gt;&gt; import zope.component
+        &gt;&gt;&gt; from z3c.formjs import testing
+        &gt;&gt;&gt; zope.component.provideAdapter(testing.IdSelectorRenderer)
+        
+        Of course, like all view components, the renderer supports the update/render
+        pattern. We can now render the selector:
+        
+        &gt;&gt;&gt; from zope.publisher.browser import TestRequest
+        &gt;&gt;&gt; request = TestRequest()
+        
+        &gt;&gt;&gt; renderer = zope.component.getMultiAdapter(
+        ...     (selector, request), interfaces.IRenderer)
+        &gt;&gt;&gt; renderer.update()
+        &gt;&gt;&gt; renderer.render()
+        u'#message'
+        
+        Next we need a renderer for the subscription. Let's assume we can bind the
+        subscription as follows: ``$(&lt;selector&gt;).bind("&lt;event&gt;", &lt;script&gt;)``
+        
+        &gt;&gt;&gt; zope.component.provideAdapter(testing.SubscriptionRenderer)
+        
+        Rendering the subscription then returns this:
+        
+        &gt;&gt;&gt; renderer = zope.component.getMultiAdapter(
+        ...     (list(manager)[0], request), interfaces.IRenderer)
+        &gt;&gt;&gt; renderer.update()
+        &gt;&gt;&gt; print renderer.render()
+        $("#message").bind("click", function(){alert("Hello World!")});
+        
+        And now to the grant finale. We create a renderer for the subscription manager.
+        
+        &gt;&gt;&gt; zope.component.provideAdapter(testing.ManagerRenderer)
+        
+        Let's now render the entire manager.
+        
+        &gt;&gt;&gt; renderer = zope.component.getMultiAdapter(
+        ...     (manager, request), interfaces.IRenderer)
+        &gt;&gt;&gt; renderer.update()
+        &gt;&gt;&gt; print renderer.render()
+        $(document).ready(function(){
+        $("#message").bind("click", function(){alert("Hello World!")});
+        })
+        
+        
+        The Subscription Decorator
+        --------------------------
+        
+        When defining JS event subscriptions from within a presentation component,
+        using the low-level subscription API is somewhat cumbersome. Thus, there
+        exists a decorator called ``subscribe``, which can convert a component method
+        as a subscription handler. Let's have a look:
+        
+        &gt;&gt;&gt; class MyView(object):
+        ...
+        ...     @jsevent.subscribe(jsevent.IdSelector('myid'), jsevent.DBLCLICK)
+        ...     def alertUser(event, selector, request):
+        ...         return u"alert('`%s` event occured on DOM element `%s`');" %(
+        ...             event.name, selector.id)
+        
+        As you can see, the function is never really meant to be a method, but a
+        subscription handler; thus no ``self`` as first argument. The subscription is
+        now available in the subscriptions manager of the view:
+        
+        &gt;&gt;&gt; list(MyView.jsSubscriptions)
+        [&lt;JSSubscription event=&lt;JSEvent "dblclick"&gt;,
+        selector=&lt;IdSelector "myid"&gt;,
+        handler=&lt;function alertUser at ...&gt;&gt;]
+        
+        Let's now render the subscription:
+        
+        &gt;&gt;&gt; renderer = zope.component.getMultiAdapter(
+        ...     (list(MyView.jsSubscriptions)[0], request), interfaces.IRenderer)
+        &gt;&gt;&gt; renderer.update()
+        &gt;&gt;&gt; print renderer.render()
+        $("#myid").bind("dblclick",
+        function(){alert('`dblclick` event occured on DOM element `myid`');});
+        
+        Subscribe-decorators can also be chained, so that the same handler can be used
+        for multiple selectors and events:
+        
+        &gt;&gt;&gt; class MyView(object):
+        ...
+        ...     @jsevent.subscribe(jsevent.IdSelector('myid'), jsevent.CLICK)
+        ...     @jsevent.subscribe(jsevent.IdSelector('myid'), jsevent.DBLCLICK)
+        ...     def alertUser(event, selector, request):
+        ...         return u"alert('`%s` event occured on DOM element `%s`');" %(
+        ...             event.name, selector.id)
+        
+        In this example we register this handler for both the click and double click
+        event for the DOM element with the id "myid".
+        
+        &gt;&gt;&gt; list(MyView.jsSubscriptions)
+        [&lt;JSSubscription event=&lt;JSEvent "dblclick"&gt;,
+        selector=&lt;IdSelector "myid"&gt;,
+        handler=&lt;function alertUser at ...&gt;&gt;,
+        &lt;JSSubscription event=&lt;JSEvent "click"&gt;,
+        selector=&lt;IdSelector "myid"&gt;,
+        handler=&lt;function alertUser at ...&gt;&gt;]
+        
+        
+        Javascript Viewlet
+        ------------------
+        
+        Putting in the Javascript by hand in every layout is a bit lame. Instead we
+        can just register a viewlet for the JS viewlet manager that renders the
+        subscriptions if a manager is found.
+        
+        To use the viewlet we need a view that provides a subscription manager:
+        
+        &gt;&gt;&gt; class View(object):
+        ...     zope.interface.implements(interfaces.IHaveJSSubscriptions)
+        ...     jsSubscriptions = manager
+        
+        We can now initialize, update, and finally render the viewlet:
+        
+        &gt;&gt;&gt; viewlet = jsevent.JSSubscriptionsViewlet(
+        ...     object(), request, View(), object())
+        &gt;&gt;&gt; viewlet.update()
+        &gt;&gt;&gt; print viewlet.render()
+        &lt;script type="text/javascript"&gt;
+        $(document).ready(function(){
+        $("#message").bind("click", function(){alert("Hello World!")});
+        })
+        &lt;/script&gt;
+        
+        
+        Selectors
+        ---------
+        
+        The module provides several DOM element selectors. It is the responsibility of
+        the corresponding rednerer to interpret the selector.
+        
+        Id Selector
+        ~~~~~~~~~~~
+        
+        The id selector selects a DOM element by id, as seen above. It is simply
+        initialized using the the id:
+        
+        &gt;&gt;&gt; idselect = jsevent.IdSelector('myid')
+        &gt;&gt;&gt; idselect
+        &lt;IdSelector "myid"&gt;
+        
+        The id is also available as attribute:
+        
+        &gt;&gt;&gt; idselect.id
+        'myid'
+        
+        We already saw before how it gets rendered:
+        
+        &gt;&gt;&gt; renderer = zope.component.getMultiAdapter(
+        ...     (idselect, request), interfaces.IRenderer)
+        &gt;&gt;&gt; renderer.update()
+        &gt;&gt;&gt; renderer.render()
+        u'#myid'
+        
+        CSS Selector
+        ~~~~~~~~~~~~
+        
+        The CSS selector selects a DOM element using an arbitrary CSS selector
+        expression. This selector is initialized using the expression:
+        
+        &gt;&gt;&gt; cssselect = jsevent.CSSSelector('div.myclass')
+        &gt;&gt;&gt; cssselect
+        &lt;CSSSelector "div.myclass"&gt;
+        
+        The CSS selector expression is also available as attribute:
+        
+        &gt;&gt;&gt; cssselect.expr
+        'div.myclass'
+        
+        Let's now see an example on how the CSS selector can be rendered:
+        
+        &gt;&gt;&gt; zope.component.provideAdapter(testing.CSSSelectorRenderer)
+        
+        &gt;&gt;&gt; renderer = zope.component.getMultiAdapter(
+        ...     (cssselect, request), interfaces.IRenderer)
+        &gt;&gt;&gt; renderer.update()
+        &gt;&gt;&gt; renderer.render()
+        u'div.myclass'
+        
+        Since most JS libraries support CSS selectors by default, the renderer simply
+        converts the expression to unicode.
+        
+        
+        Available Events
+        ----------------
+        
+        This package maps all of the available JavaScript events. Here is the complete
+        list:
+        
+        &gt;&gt;&gt; jsevent.CLICK
+        &lt;JSEvent "click"&gt;
+        &gt;&gt;&gt; jsevent.DBLCLICK
+        &lt;JSEvent "dblclick"&gt;
+        &gt;&gt;&gt; jsevent.CHANGE
+        &lt;JSEvent "change"&gt;
+        &gt;&gt;&gt; jsevent.LOAD
+        &lt;JSEvent "load"&gt;
+        &gt;&gt;&gt; jsevent.BLUR
+        &lt;JSEvent "blur"&gt;
+        &gt;&gt;&gt; jsevent.FOCUS
+        &lt;JSEvent "focus"&gt;
+        &gt;&gt;&gt; jsevent.KEYDOWN
+        &lt;JSEvent "keydown"&gt;
+        &gt;&gt;&gt; jsevent.KEYUP
+        &lt;JSEvent "keyup"&gt;
+        &gt;&gt;&gt; jsevent.MOUSEDOWN
+        &lt;JSEvent "mousedown"&gt;
+        &gt;&gt;&gt; jsevent.MOUSEMOVE
+        &lt;JSEvent "mousemove"&gt;
+        &gt;&gt;&gt; jsevent.MOUSEOUT
+        &lt;JSEvent "mouseout"&gt;
+        &gt;&gt;&gt; jsevent.MOUSEOVER
+        &lt;JSEvent "mouseover"&gt;
+        &gt;&gt;&gt; jsevent.MOUSEUP
+        &lt;JSEvent "mouseup"&gt;
+        &gt;&gt;&gt; jsevent.RESIZE
+        &lt;JSEvent "resize"&gt;
+        &gt;&gt;&gt; jsevent.SELECT
+        &lt;JSEvent "select"&gt;
+        &gt;&gt;&gt; jsevent.SUBMIT
+        &lt;JSEvent "submit"&gt;
+        
+        These are also provided as utilities so they can be looked up by name.
+        
+        &gt;&gt;&gt; import zope.component
+        &gt;&gt;&gt; zope.component.provideUtility(jsevent.CLICK, name='click')
+        
+        Of course, we can now just look up the utility:
+        
+        &gt;&gt;&gt; zope.component.getUtility(interfaces.IJSEvent, 'click')
+        &lt;JSEvent "click"&gt;
+        
+        
+        =======
+        CHANGES
+        =======
+        
+        Version 0.4.0 (2008-08-26)
+        --------------------------
+        
+        - Feature: There is now a special unique prefix generator that uses
+        `z3c.form`'s new ``createCSSId()`` function to generate css selectable
+        prefixes for ajax forms.
+        
+        - Feature: There is now a viewlet manager already registered with all
+        the viewlets necessary to use `z3c.formjs`.  You can now just do:
+        
+        &lt;script tal:replace="structure
+        provider:z3c.formjs.interfaces.IDynamicJavaScript"&gt;
+        &lt;/script&gt;
+        
+        - Feature: When AJAX handlers return complex data structures (dictionaries,
+        lists and tuples), the data is automatically converted into JSON
+        format before delivery.
+        
+        - Restructure: Make package run on latest z3c.form 1.9.0 release.
+        
+        - Bug: Widgets that were being updated multiple times were generating
+        duplicate javascript event subscriptions. This is now fixed.
+        
+        
+        Version 0.3.0 (2007-10-03)
+        --------------------------
+        
+        - Feature: Made a JavaScript renderer for calls to JS Functions.
+        
+        - Feature: Implemented tools to make server side events propagate to
+        the client.
+        
+        - Feature: Now the ``jsevent.subscribe`` and ``jsaction.handler`` decorators
+        can be chained together, allowing them to be called multiple time for the
+        same methods.
+        
+        - Feature: Implemented ability to switch widget modes on a form.
+        
+        
+        Version 0.2.0 (2007-07-18)
+        --------------------------
+        
+        - Feature: Registration of public AJAX server calls via a simple
+        decorator. The calls are made available via a special ``ajax`` view on the
+        original view.
+        
+        - Feature: Allow registering of JS subscriptions via a decorator within the
+        presentation component.
+        
+        - Feature: Added a new CSS selector.
+        
+        - Feature: Implementation of AJAX-driven widget value validation.
+        
+        - Restructure: Completely overhauled the entire API to be most easy to use and
+        have the most minimal implementation.
+        
+        - Bug: The package is now 100% tested.
+        
+        - Feature: Implementation of AJAX request handlers in forms.
+        
+        Version 0.1.0 (2007-06-29)
+        --------------------------
+        
+        - Initial Release
+        
+        * Feature: JS event association with fields and buttons.
+        
+        
+        ====
+        TODO
+        ====
+        
+        - client side js validators for simple fields.  (maybe we can use an
+        existing library?)
+        
+Keywords: zope3 form javascript
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Zope Public License
+Classifier: Programming Language :: Python
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Framework :: Zope3
