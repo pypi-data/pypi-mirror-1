@@ -1,0 +1,175 @@
+===========
+tl.cli.page
+===========
+
+The ``tl.cli.page`` module defines a function named ``page`` that takes a
+piece of text (either as an encoded string or a file-like object) and passes
+it to an external pager so that the user can page through it. Another function
+named ``page_file`` runs the pager on a file given by its file system path.
+This is not strictly limited to command line environments, but it's probably a
+lot more common for text user interfaces than for graphical ones.
+
+
+Invoking the pager
+==================
+
+There are three ways of selecting an external pager to run:
+
+- passing a file system path to the executable to ``page``
+- falling back to the path stored in the PAGER environment variable
+- relying on the hard-coded default pager, which is ``more``
+
+To demonstrate this, let's install mock pagers that write the text from
+standard input to a known file and add a characteristic line in order to make
+clear which pager was run. We remove any pager settings from the environment
+and define a script installer for mock pagers to improve readability:
+
+>>> from tl.testing.script import install, original_environ
+>>> import os
+>>> original_environ['PAGER'] = os.environ.pop('PAGER', None)
+
+>>> import tempfile
+>>> handle, check_file = tempfile.mkstemp()
+
+>>> def install_pager(line, **options):
+...     return install("""\
+... open('%s', 'w').write(sys.stdin.read() + '%s')
+... """ % (check_file, line), **options)
+
+>>> def check():
+...     print open(check_file).read(1024) # avoid insanely long output
+
+Now we try each step of the fall-back chain, back to front. Both paging
+functions determine the pager in the same manner, so we show only ``page``:
+
+>>> from tl.cli.page import page
+>>> _ = install_pager('Pager "more" found on PATH', name='more', on_path=True)
+>>> page('foo\n')
+>>> check()
+foo
+Pager "more" found on PATH
+
+>>> _ = install_pager('Pager named by the PAGER variable', env='PAGER')
+>>> page('bar\n')
+>>> check()
+bar
+Pager named by the PAGER variable
+
+>>> pager_path = install_pager('Explicitly specified mock pager')
+>>> page('baz\n', pager=pager_path)
+>>> check()
+baz
+Explicitly specified mock pager
+
+These examples have already shown the first of the three ways of using a
+pager: paging through a given string of text.
+
+
+Paging through a text stream
+============================
+
+It is common for larger amounts of text to be available from a stream, i.e. a
+file-like object. We can pass a file-like object to the ``page`` function. It
+tries to read the stream to the end, write it to the pager, then closes the
+communication channel so our mock pager stops reading:
+
+>>> _ = install_pager('', env='PAGER')
+>>> from StringIO import StringIO
+>>> page(StringIO('foo\nbar\nbaz'))
+>>> check()
+foo
+bar
+baz
+
+This also works for very long runs of text:
+
+>>> class VeryLongStream(object):
+...     remaining = 12345678
+...     def read(self, length):
+...         length = min(length, self.remaining)
+...         self.remaining -= length
+...         return 'x'*length
+
+>>> page(VeryLongStream())
+>>> check()
+xxxxxxxx...
+>>> import os.path
+>>> os.path.getsize(check_file)
+12345678L
+
+When the pager quits in the middle, the ``page`` function will stop reading
+from the stream. To show this, we use a never-ending stream that logs every
+read access, and a mock pager that reads a couple of bytes and then quits:
+
+>>> class NeverEndingStream(object):
+...     def read(self, length):
+...         print 'accessed'
+...         return 'y'*length
+
+>>> _ = install("""\
+... open('%s', 'w').write(sys.stdin.read(8))
+... """ % check_file, env='PAGER')
+
+>>> page(NeverEndingStream())
+accessed
+...
+>>> check()
+yyyyyyyy
+
+
+Paging through files from disk
+==============================
+
+Sometimes it is useful to display a file that has been written to disk before
+continuing with an application. The ``page_file`` function takes as its
+mandatory argument a file name that is passed to the pager as the only command
+line argument:
+
+>>> _ = install("""\
+... open('%s', 'w').write(sys.argv[1])
+... """ % check_file, env='PAGER')
+
+>>> from tl.cli.page import page_file
+>>> page_file('foo/bar/baz')
+>>> check()
+foo/bar/baz
+
+
+Waiting for the pager to exit
+=============================
+
+In all three usage scenarios, the ``page`` function waits for the pager to
+exit after it has stopped communicating, so the user may take his time to use
+the pager:
+
+>>> _ = install("""\
+... import time
+... time.sleep(1)
+... open('%s', 'w').write(
+...     sys.argv[1] if len(sys.argv) > 1 else sys.stdin.read())
+... """ % check_file, env='PAGER')
+
+>>> page('foo')
+>>> check()
+foo
+
+>>> page(StringIO('bar'))
+>>> check()
+bar
+
+>>> page_file('baz')
+>>> check()
+baz
+
+
+Clean-up
+========
+
+We need to remove the check file we created in the beginning:
+
+>>> os.remove(check_file)
+
+
+.. Local Variables:
+.. mode: rst
+.. End:

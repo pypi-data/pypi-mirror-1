@@ -1,0 +1,194 @@
+===========
+tl.readline
+===========
+
+This doctest file does not cover functionality that needs the contents of the
+standard library's ``readline`` module, which may be unavailable to the Python
+interpreter running the test suite if it was built without readline support.
+
+
+``readline`` detection
+======================
+
+The ``tl.readline`` module defines some utility methods to be used with the
+``readline`` module from the standard library. Some of them require the
+``readline`` module, so the first thing ``tl.readline`` does is to determine
+whether ``readline`` can be imported, and do so if possible.
+
+As only the presence of the ``readline`` module, but not its contents is of
+interest at this point, we'll fake its presence and absence in turn, then
+restore everything. Note that the implementation of ``tl.readline`` is done in
+``tl.cli._readline`` in order to avoid module name conflicts when importing
+``readline`` inside it.
+
+>>> import tl.readline
+>>> _import = __import__
+
+>>> def __import__(name, *args, **kwargs):
+...     if name == 'readline':
+...         return object()
+...     return _import(name, *args, **kwargs)
+>>> __builtins__['__import__'] = __import__
+>>> _ = reload(tl.cli._readline)
+>>> _ = reload(tl.readline)
+>>> tl.readline.HAVE_READLINE
+True
+
+>>> import sys
+>>> _ = sys.modules.pop('readline', None)
+>>> def __import__(name, *args, **kwargs):
+...     if name == 'readline':
+...         raise ImportError
+...     return _import(name, *args, **kwargs)
+>>> __builtins__['__import__'] = __import__
+>>> _ = reload(tl.cli._readline)
+>>> _ = reload(tl.readline)
+>>> tl.readline.HAVE_READLINE
+False
+
+>>> __builtins__['__import__'] = _import
+>>> _ = reload(tl.cli._readline)
+>>> _ = reload(tl.readline)
+
+
+Convenience functions for custom tab completion
+===============================================
+
+Static completions
+------------------
+
+The Python ``readline`` module uses two kinds of functions for implementing
+custom tab completion rules:
+
+- Completers that determine all possible completions on some partial text and
+  possibly the whole input line. The return value is an iterable of all
+  possible matching strings.
+
+- Completion generators that return possible completions on some partial text
+  one at a time. Their iteration behaviour is controlled by a status argument.
+
+``tl.readline`` provides a function factory that produces a completer function
+of the former kind that completes partial text from a static list of strings:
+
+>>> completer = tl.readline.static_completions(["foo", "bar", "barz"])
+>>> completer
+<function completions at 0x...>
+
+Calling this completer function produces a list of possible completions:
+
+>>> completer("")
+['foo', 'bar', 'barz']
+>>> completer("asdf")
+[]
+>>> completer("f")
+['foo']
+>>> completer("ba")
+['bar', 'barz']
+>>> completer("bar")
+['bar', 'barz']
+
+If, however, the partial text to complete is the only possible completion, the
+returned list is empty in order to stop readline from offering that single
+completion again and again:
+
+>>> completer("foo")
+[]
+
+
+File name completions
+---------------------
+
+File name completion works by inspecting a directory in the file system that
+is determined by a base directory and the directory part of the partial path
+contained in the string to complete. ``tl.readline`` defines a factory for the
+file name completer function that is passed the base directory as an argument.
+If the argument isn't given, the factory uses the current working directory of
+the process at the time it is called.
+
+To demonstrate this, we create a directory with a few files in it and let the
+factory produce a completer function without specifying the base directory.
+Note that our current working directory is being set to the sandbox by the
+test helper. the completer function takes the string to complete as an
+argument and returns a list of possible completions.
+
+>>> from tl.testing.fs import new_sandbox
+>>> new_sandbox("""\
+... f foo
+... d bar
+... f baz
+... """)
+>>> completer = tl.readline.filename_completions()
+>>> completer("")
+['bar', 'baz', 'foo']
+
+Let's remember the sandbox path for later use, and create and move to another
+sandbox. A completer function produced without an explicit path passed to the
+factory will now use the new sandbox:
+
+>>> import os
+>>> old_sandbox = os.getcwd()
+>>> new_sandbox("""\
+... f foo
+... d bar
+... f bar/asdf
+... d bar/bsdf
+... f barz
+... d baz/
+... """)
+>>> completer = tl.readline.filename_completions()
+>>> completer("")
+['bar', 'barz', 'baz', 'foo']
+
+The old sandbox can still be used if we do pass its path to the completion
+factory:
+
+>>> completer = tl.readline.filename_completions(old_sandbox)
+>>> completer("")
+['bar', 'baz', 'foo']
+
+Let's return to the new sandbox and see how the completer function produces
+lists of file and directory names. Note that directory names don't get a path
+separator appended in the cases we demonstrate:
+
+>>> completer = tl.readline.filename_completions()
+>>> completer("asdf")
+[]
+>>> completer("f")
+['foo']
+>>> completer("ba")
+['bar', 'barz', 'baz']
+>>> completer("bar")
+['bar', 'barz']
+
+If a directory path without a trailing path separator was passed as the
+partial path and iff it is the only possible completion, a path separator will
+be added as the next possible completion:
+
+>>> completer("bar")
+['bar', 'barz']
+>>> completer("baz")
+['baz/']
+
+But if the partial path itself is the only possible completion and points to a
+file, in which case there is no next completion to be generated by adding a
+path separator, the result will be an empty list in order to suppress spurious
+readline activity:
+
+>>> completer("foo")
+[]
+
+Filename completion also works for subdirectories of the base directory:
+
+>>> completer("bar/")
+['bar/asdf', 'bar/bsdf']
+>>> completer("bar/a")
+['bar/asdf']
+>>> completer("bar/asdf")
+[]
+>>> completer("bar/fdsa")
+[]
+
+
+.. Local Variables:
+.. mode: rst
+.. End:

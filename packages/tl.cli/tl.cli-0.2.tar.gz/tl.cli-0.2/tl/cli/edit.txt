@@ -1,0 +1,129 @@
+===========
+tl.cli.edit
+===========
+
+The ``tl.cli.edit`` module defines a function named ``edit`` that takes a
+piece of text (as either ``str`` or ``unicode``), lets the user edit it using
+an external text editor and returns the result. This is not strictly limited
+to command line environments, but it's probably a lot more common for text
+user interfaces than for graphical ones.
+
+
+Invoking the editor
+===================
+
+There are three ways of selecting an external editor to run:
+
+- passing a file system path to the executable to ``edit``
+- falling back to the path stored in the EDITOR environment variable
+- relying on the hard-coded default editor, which is ``vi``
+
+To demonstrate this, let's install mock editors that mark a file's content as
+old and add a characteristic line in order to make clear which editor was
+applied to which file. We remove any editor settings from the environment and
+define a script installer for mock editors to improve readability:
+
+>>> from tl.testing.script import install, original_environ
+>>> import os
+>>> original_environ['EDITOR'] = os.environ.pop('EDITOR', None)
+
+>>> def install_editor(line, **options):
+...     return install("""\
+... old = open(sys.argv[1]).read()
+... open(sys.argv[1], 'w').write('old: %%s\\nnew: %s' %% old)
+... """ % line, **options)
+
+Now we try each step of the fall-back chain, back to front:
+
+>>> from tl.cli.edit import edit
+>>> _ = install_editor('Editor "vi" found on PATH', name='vi', on_path=True)
+>>> print edit('foo')
+old: foo
+new: Editor "vi" found on PATH
+
+>>> _ = install_editor('Editor named by the EDITOR variable', env='EDITOR')
+>>> print edit('bar')
+old: bar
+new: Editor named by the EDITOR variable
+
+>>> editor_path = install_editor('Explicitly specified mock editor')
+>>> print edit('baz', editor=editor_path)
+old: baz
+new: Explicitly specified mock editor
+
+
+Unicode and text encodings
+==========================
+
+The ``edit`` function accepts both unicode and non-unicode text and optionally
+an encoding to use for writing the temporary file that will be opened in the
+editor. We'll now look at the possible combinations of text type and encoding.
+
+In order to see exactly what bytes the temporary file contains and how the
+edited text is returned in each case, we use a mock editor that acts by
+appending the representation of the file's content to the file:
+
+>>> _ = install("""\
+... old = open(sys.argv[1]).read()
+... open(sys.argv[1], 'a').write(' ' + repr(old))
+... """, env='EDITOR')
+
+>>> edit('foo')
+"foo 'foo'"
+
+If we pass non-unicode text that contains characters beyond 7-bit ASCII, but
+don't specify an encoding, the text will end up in the file as-is and we'll
+get back the edited text as a non-unicode string:
+
+>>> edit('b\xe4r')
+"b\xe4r 'b\\xe4r'"
+
+Passing unicode text to ``edit`` makes it return a unicode result. Not
+specifying an encoding implies that the file will be written in UTF-8:
+
+>>> edit(u'b\u00e4r')
+u"b\xe4r 'b\\xc3\\xa4r'"
+
+If an encoding is specified, it is used instead:
+
+>>> edit(u'b\u00e4r', file_encoding='latin-1')
+u"b\xe4r 'b\\xe4r'"
+
+A specified encoding is also applied if non-unicode text is edited; in this
+case the result will be unicode:
+
+>>> edit('foo', file_encoding='rot13')
+u"foo 'foo'"
+
+This will fail, however, if the text contains non-ASCII characters since the
+encoding is only applied to the file and the unicode meaning of the text
+passed to the function is unknown:
+
+>>> edit('b\xe4r', file_encoding='latin-1')
+Traceback (most recent call last):
+UnicodeDecodeError: 'ascii' codec can't decode byte 0xe4 in position 1:
+                    ordinal not in range(128)
+
+
+Managing the temporary file
+===========================
+
+The temporary file written to the file system for the editor to work on is
+created in the temporary directory as used by the ``tempfile`` module, and
+deleted before the ``edit`` call returns. We show this using a mock editor
+that replaces the temporary file's content with its path:
+
+>>> _ = install("open(sys.argv[1], 'w').write(sys.argv[1])", env='EDITOR')
+>>> import os.path
+>>> import tempfile
+
+>>> path = edit('foo')
+>>> os.path.dirname(path) == tempfile.gettempdir()
+True
+>>> os.path.exists(path)
+False
+
+
+.. Local Variables:
+.. mode: rst
+.. End:
