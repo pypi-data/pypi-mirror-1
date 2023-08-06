@@ -1,0 +1,34 @@
+This package speeds up Archetypes Schemas and is a patch for 
+Products.Archetypes_.
+
+.. _Products.Archetypes: http://pypi.python.org/pypi/Products.Archetypes
+
+It uses plone.memoize to cache Archetypes Schemas instead of factoring and 
+modifying them every time its accessed. Factoring a schema is usally fast
+anyway. I.e. in an average Plone Site a, ATDocuemnts schema is accessed per 
+request 80 times. So caching it makes sense anyway, even if a single call is 
+fast. With schematuning ATDocument in PythonProfiler (which linear slows down 
+whole Python) came down from 1.518s down to 0.084s for Schema calls. This makes 
+it roughly 18 times faster.  
+
+History
+=======
+
+Roche Compaan and Hedley Ross found while working on one if their projects
+several performance issues. One of it was the often repeated BaseObject.Schema()
+method. Read about it on the Mailing-List_.
+
+.. _Mailing-List: http://plone.org/support/forums/core#nabble-td1303544
+
+License
+=======
+
+GNU General Public License, GPL
+
+Authors
+=======
+
+* Hedley Ross (tests, better cache-key, invalidation)
+
+* Jens Klein (initial code, maintainer) <dev@bluedynamics.com> 
+   
