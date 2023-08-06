@@ -1,0 +1,63 @@
+plonetheme.inbusiness Package Readme
+=========================
+
+Overview
+--------
+
+"In Business Theme" is a theme for Plone
+
+Installation
+
+	To install plonetheme.inbusiness into the global Python environment (or a workingenv),
+	using a traditional Zope 2 instance, you can do this:
+
+	The buildout way:
+
+	    1. Unpack plonetheme.inbusiness package to src/ folder of your buildout
+	    2. Edit your buildout.cfg and add the following information::
+
+	        [buildout]
+	        ...
+	        eggs = 
+	            plonetheme.inbusiness
+
+	        [instance]
+	        zcml = 
+	            ...
+	            plonetheme.inbusiness
+    
+	    The last line tells buildout to generate a zcml snippet that tells
+	    Zope to configure plonetheme.inbusiness.
+
+	    If another package depends on the plonetheme.inbusiness egg or includes
+	    its zcml directly you do not need to specify anything in the buildout
+	    configuration: buildout will detect this automatically.
+
+	    After updating the configuration you need to run the ''bin/buildout'',
+	    which will take care of updating your system.
+
+	Go to the 'Site Setup' page in the Plone interface and click on the
+	'Add/Remove Products' link.
+
+	Choose the product (check its checkbox) and click the 'Install' button.
+
+	Uninstall -- This can be done from the same management screen, but only
+	if you installed it from the quick installer.
+
+	Note: You may have to empty your browser cache to see the effects of the
+	product installation.
+
+
+Features
+
+	1. Colors used in theme are customizable using your sites Base Properties.
+	
+	2. Uses a custom viewlet to display the site's title along with its description.
+	Set your site's description and it will appear below the site's title.
+
+
+Credits
+
+    Tjobbe Andrews from NOW:design [www.now-design.co.uk] downloaded from the oswd.org site - design
+    
+    Scott Greiff [scott@greiff.org] - Plone theme for Plone 3.x
