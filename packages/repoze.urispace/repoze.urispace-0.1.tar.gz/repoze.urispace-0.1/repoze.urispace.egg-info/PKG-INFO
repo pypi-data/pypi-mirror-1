@@ -1,0 +1,325 @@
+Metadata-Version: 1.0
+Name: repoze.urispace
+Version: 0.1
+Summary: Library / middleware for URI-based assertions
+Home-page: http://www.repoze.org
+Author: Agendaless Consulting
+Author-email: repoze-dev@lists.repoze.org
+License: BSD-derived (http://www.repoze.org/LICENSE.txt)
+Description: *********************************************************
+        :mod:`repoze.urispace` -- Hierarchical URI-based metadata
+        *********************************************************
+        
+        :Author: Tres Seaver
+        :Version: |version|
+        
+        .. toctree::
+        :maxdepth: 2
+        
+        .. module:: repoze.urispace
+        :synopsis: Hierarchical URI-based metadata
+        
+        .. topic:: Overview
+        
+        :mod:`repoze.urispace` implements the URISpace_ 1.0 spec, as proposed
+        to the W3C by Akamai.  Its aim is to provide an implementation of
+        that language as a vehicle for asserting declarative metadata about a
+        resource based on pattern matching against its URI.
+        
+        Once asserted, such metadata can be used to guide the application in
+        serving the resource, with possible applciations including:
+        
+        - Setting cache control headers.
+        
+        - Selecting externally applied themes, e.g. in :mod:`Deliverance`
+        
+        - Restricting access, e.g. to emulate Zope's "placeful security."
+        
+        
+        URISpace Specification
+        ----------------------
+        
+        The URISpace_ specification provides for matching on the following
+        portions of a URI:
+        
+        - scheme
+        
+        - authority (see URIRFC_)
+        
+        o host, including wildcarding (leading only) and port
+        
+        o user (if specified in the URI)
+        
+        - path elements, including nesting and wildcarding, as well as
+        parameters, where used.
+        
+        - query elements, including test for presence or for specific value
+        
+        - fragments (likely irrelevant for server-side applications)
+        
+        .. Note:: :mod:`repoze.urispace` does not yet provide support for
+        fragment matching.
+        
+        The asserted metadata can be scalar, or can use RDF Bag and Sequences
+        to indicate sets or ordered collections.
+        
+        .. Note:: :mod:`repoze.urispace` does not yet provide support for
+        parsing multi-valued assertions using RDF.
+        
+        Operators are provided to allow for incrementally updating or clearing
+        the value for a given metadata element.  Specified operators include:
+        
+        ``replace``
+        Completely replace any previously asserted value with a new one.
+        This is the default operator.
+        
+        ``clear``
+        Remove any previously asserted value.
+        
+        ``union``
+        Perform a set union: ``old | new``
+        
+        ``intersection``
+        Perform a set intersection: ``old & new``
+        
+        ``rev-intersection``
+        Perform a set exclusion:  ``old ^ new``
+        
+        ``difference``
+        Perform set subtraction:  ``old - new``
+        
+        ``rev-difference``
+        Perform set subtraction:  ``new - old``
+        
+        ``prepend``
+        Insert  ``new`` values at the head of ``old`` values
+        
+        ``append``
+        Insert  ``new`` values at the tail of ``old`` values
+        
+        
+        Example
+        -------
+        
+        Suppose we want to select different Delieverance themes and or rulesets
+        based on the URI of the resource being themed.  In particular:
+        
+        - The ``news``, ``lifestyle``, and ``sports`` sections of the site each get
+        custom themes, with the homepage and any other sections sharing the
+        default theme.
+        
+        - Within the news section, the ``world``, ``national``, and ``local``
+        sections all use a different theme URL (one with the desired color
+        scheme name encoded as a query string).
+        
+        - Within any section, the ``index.html`` page should use a different
+        ruleset, than that for stories in that section (whose final path element
+        will be ``<slug>.html``): the index page's HTML structured very differently
+        from that used for stories.
+        
+        A URISpace file specifying these policies would look like:
+        
+        .. include:: examples/dv_news.xml
+        :literal:
+        
+        Given that URISpace file, one can test how given URIs matches using
+        the ``uri_test`` script::
+        
+        $ /path/to/bin/uri_test examples/dv_news.xml \
+        http://example.com/foo \
+        http://example.com/news/ \
+        http://example.com/news/index.html \
+        http://example.com/news/world/index.html \
+        http://example.com/sports/ \
+        http://example.com/sports/world_series_2008.html
+        ------------------------------------------------------------------------------
+        URI: http://example.com/
+        ------------------------------------------------------------------------------
+        {http://pypi.python.org/pypi/Deliverance/}rules = http://static.example.com/rules/default.xml
+        {http://pypi.python.org/pypi/Deliverance/}theme = http://themes.example.com/default.html
+        
+        ------------------------------------------------------------------------------
+        URI: http://example.com/news/
+        ------------------------------------------------------------------------------
+        {http://pypi.python.org/pypi/Deliverance/}rules = http://static.example.com/rules/default.xml
+        {http://pypi.python.org/pypi/Deliverance/}theme = http://themes.example.com/news.html
+        
+        ------------------------------------------------------------------------------
+        URI: http://example.com/news/index.html
+        ------------------------------------------------------------------------------
+        {http://pypi.python.org/pypi/Deliverance/}rules = http://static.example.com/rules/default.xml
+        {http://pypi.python.org/pypi/Deliverance/}theme = http://themes.example.com/news.html
+        
+        ------------------------------------------------------------------------------
+        URI: http://example.com/news/world/index.html
+        ------------------------------------------------------------------------------
+        {http://pypi.python.org/pypi/Deliverance/}rules = http://static.example.com/rules/default.xml
+        {http://pypi.python.org/pypi/Deliverance/}theme = http://themes.example.com/news.html?style=world
+        
+        ------------------------------------------------------------------------------
+        URI: http://example.com/sports/
+        ------------------------------------------------------------------------------
+        {http://pypi.python.org/pypi/Deliverance/}rules = http://static.example.com/rules/default.xml
+        {http://pypi.python.org/pypi/Deliverance/}theme = http://themes.example.com/sports.html
+        
+        ------------------------------------------------------------------------------
+        URI: http://example.com/sports/world_series_2008.html
+        ------------------------------------------------------------------------------
+        {http://pypi.python.org/pypi/Deliverance/}rules = http://static.example.com/rules/default.xml
+        {http://pypi.python.org/pypi/Deliverance/}theme = http://themes.example.com/sports.html
+        
+        
+        
+        Parser Implementation Notes
+        ---------------------------
+        
+        - The root node of a URISpace is not required to be any particular element,
+        nor even in the URISpace namespace (see the first example in "Appendix C",
+        of URISpace_, for instance).  The root node is always mapped to a
+        :class:`repoze.urispace.selectors.TrueSelector`, for regularity.
+        
+        - Create selectors for nodes based on their QNames, using a dictionary.
+        Create predicates for the selectors (where required) from the
+        ``urispace:match`` attribute.
+        
+        - Any node whose QName does not map to a selector type should be treated as
+        an operator.  The default operator type is ``replace``, with overrides
+        coming from the ``urispace:op`` attribute.
+        
+        - The QName of an operator element is used to look up a converter, which
+        is then passed the entire element (including children), and must return
+        a ``(key, value)`` pair.
+        
+        - The default converter, used if no other is registered for the operator
+        node's QName, return the node's QName as the key, and the node's text as
+        the value.
+        
+        
+        Evaluating URIs against a URISpace
+        ----------------------------------
+        
+        Once parsing is complete, the URISpace is available as tree-like object.
+        The canonical operators to extract metadata for a given URI are::
+        
+        scheme, nethost, path, query, fragment = urlsplit(uri)
+        
+        path = path.split('/')
+        if len(path) > 1 and path[0] == '':
+        path = path[1:]
+        
+        info = {'scheme': scheme,
+        'nethost': nethost,
+        'path': path,
+        'query': parse_qs(query, keep_blank_values=1),
+        'fragment': fragment,
+        }
+        operators = urispace.collect(info)
+        assertions = {}
+        for operator in operators:
+        operator.apply(assertions)
+        
+        At this point, ``assertions`` will contain keys and values for all
+        operators found while matching against the URI.
+        
+        Implementing the Spec
+        ---------------------
+        
+        - :mod:`repoze.urispace` implements "Scheme Selectors" (section 3.1)
+        by combining a selector and a predicate:
+        
+        - :class:`repoze.urispace.selectors.PredicateSelector`
+        - :class:`repoze.urispace.predicates.SchemePredicate`
+        
+        - Of the "Authority Selectors" (section 3.2), :mod:`repoze.urispace`
+        implements the "Host" variant (section 3.2.2) by combining a selector
+        and a predicate:
+        
+        - :class:`repoze.urispace.selectors.PredicateSelector`
+        - :class:`repoze.urispace.predicates.NethostPredicate`
+        
+        :mod:`repoze.urispace` does not implement selectors for "Authority Name"
+        (section 3.2.1) or "User" (section 3.2.3). at this time.
+        
+        - :mod:`repoze.urispace` implements "Path Segment Selectors" (section 3.3)
+        by combining a selector and a predicate:
+        
+        - :class:`repoze.urispace.selectors.PredicateSelector`
+        - :class:`repoze.urispace.predicates.PathFirstPredicate`
+        
+        .. Note:: the semantics of the path segment selector in the spec require
+        matching only on the first element of the current path.
+        :mod:`repoze.urispace` provides extensions which allow for matches on
+        the last element of the current path, and for matches on any element
+        of the current path.  See `Extending the Spec`_.
+        
+        - :mod:`repoze.urispace` implements "Query Selectors" (section 3.4)
+        by combining a selector and one of two predicates, based on whether
+        the match string includes an ``=``:
+        
+        - :class:`repoze.urispace.selectors.PredicateSelector`
+        - :class:`repoze.urispace.predicates.QueryKeyPredicate`
+        - :class:`repoze.urispace.predicates.QueryValuePredicate`
+        
+        
+        Extending the Spec
+        ------------------
+        
+        The URISpace_ specification contemplates extension via what it calls
+        "External Selectors" (see chapter 4).  :mod:`repoze.urispace` in fact
+        uses this facility to provide additional selectors:
+        
+        - :mod:`repoze.urispace` implements an extension to "Path Segment"
+        selectors (section 3.3), allowing a match on the last element of the
+        current path:
+        
+        - :class:`repoze.urispace.selectors.PredicateSelector`
+        - :class:`repoze.urispace.predicates.PathLastPredicate`
+        
+        - :mod:`repoze.urispace` implements an extension to "Path Segment"
+        selectors (section 3.3), allowing a match on any element of the
+        current path:
+        
+        - :class:`repoze.urispace.selectors.PredicateSelector`
+        - :class:`repoze.urispace.predicates.PathAnyPredicate`
+        
+        - :class:`repoze.urispace.selectors.TrueSelector` always dispatches
+        to contained elements;  its primary use is to represent the root
+        node of a URISpace.
+        
+        - :class:`repoze.urispace.selectors.FalseSelector` never dispatches
+        to contained elements.  Its primary use is in "commenting out"
+        sections of the URISpace.
+        
+        
+        Extending :mod:`repoze.urispace`
+        --------------------------------
+        
+        - Registering custom selectors (TBD)
+        
+        - Registering operator converters (TBD)
+        
+        
+        .. _URISpace: http://www.w3.org/TR/urispace.html
+        
+        .. _URIRFC: http://www.ietf.org/rfc/rfc2396.txt
+        
+        .. target-notes::
+        
+        
+        repoze.urispace Changelog
+        =========================
+        
+        0.1 (unreleased)
+        --------------
+        
+        - Initial release.
+        
+Keywords: web wsgi zope URISpace
+Platform: UNKNOWN
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Topic :: Internet :: WWW/HTTP :: Dynamic Content
+Classifier: Topic :: Internet :: WWW/HTTP :: WSGI
+Classifier: Topic :: Internet :: WWW/HTTP :: WSGI :: Middleware
