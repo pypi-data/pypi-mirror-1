@@ -1,0 +1,198 @@
+repoze.obob Overview
+
+  This package provides a paste-configurable version of the classic
+  'bobo' publisher, which maps request URLs to objects via graph traversal.
+  It is desgined to be the endpoint ("application") in a WSGI
+  filter / application pipeline.
+
+  The publisher is responsible for:
+
+    - converting the WSGI environment into a request object and its
+      corresponding resopnse object;
+
+    - selecting the "root" object of the graph for a given request / URL;
+
+    - traversing from that root object along the "edges" defined by
+      the URL path elements to find the "published object";
+
+    - invoking the published object, mapping any request parameters onto
+      its arguments;
+
+    - mapping response headers and body, along with the result from
+      calling the published object, into appropriate WSGI output.
+
+  The publisher is *not* responsible for the following tasks, which
+  belong to WSGI "middleware" components:
+
+    - setting up any transaction;
+
+    - committing or aborting a transaction;
+
+    - retrying failed / conflicting requests;
+
+    - converting Python exceptions into HTTP response codes.
+
+Configuring obob
+
+  The obob instance can be configured either through paste or through
+  the equivalent constructor arguments, each of which is either a
+  "dotted name" or a paste / setuptools entry point name resolving to
+  a callable:
+
+    'helper_factory' -- optional; called at the beginning of processing.
+ 
+      Contract::
+
+        helper_factory(wsgi_environ) -> helper
+
+      The helper will then be used to implement the pluggable policies
+      for graph traversal.
+
+      The default implementation returns an instance of
+      'repoze.obob.publisher.DefaultHelper'.  It is presumed that
+      specific applications will use their own helper implementations
+      (e.g. repoze.zope2's Zope2ObobHelper).
+
+    'get_root' -- optional; called at the beginning of processing.
+
+      Contract::
+
+        get_root(helper) -> root
+
+      E.g., in the Zope2 stack, return the ZODB root object.
+
+      'helper' is the traversal policy helper object, which will normally
+      wrap the environment.
+
+      The default implementation returns a mapping object containing
+      keys defined in the configuration using an 'obob.' prefix.  If
+      called, this object returns a simple HTML list of links to the
+      dispatchable names.
+
+      The returned object will be used as the root of the traversal graph.
+      If needed, create / check out database connections, etc., based on
+      request, as well as initializing any per-request policy settings.
+
+Supplying a different publication helper
+
+  The default helper (repoze.obob.publisher.DefaultHelper) provides
+  "sensible defaults" for the various traversal policies needed by obob.
+  Applications which need different policies can either override the
+  class, or supply a factory returning an object (e.g., a module) implementing
+  the same methods:
+
+    'setup' -- called before any other request processing.
+      
+      Contract::
+
+        setup()
+
+      E.g. in the Zope2 stack, call 'newInteraction',
+      'setDefaultSkin', create a request, create a stack of names from
+      'PATH_INFO', etc.
+
+      The default implementation is a no-op.
+
+    'next_name' -- returns the next name in the stack of path elements
+      to be traversed
+      
+      Contract::
+
+        next_name() -> name
+
+      E.g., in the Zope2`stack, use the stack of names from the
+      'PATH_INFO' environment value into elements, and form a stack.
+      Each call to next_name() pops a path element from the stack and
+      returns it.
+
+    'before_traverse' -- called before traversing each edge.
+      
+      Contract::
+
+        before_traverse(current, name) # raise to veto
+
+      E.g. in the Zope2 stack, call '__before_publishing_traverse__'.
+
+      The default implementation is a no-op.
+
+    'traverse' -- called to traverse each path element.
+      
+      Contract::
+
+        traverse(current, name) -> next
+
+      E.g., in the Zope2`stack, use component architecture lookups, or
+      fall back to BBB DWIM.
+      
+      The default implementaition calls '__getitem__' on 'current'.
+
+    'before_invoke' -- called, if defined, just before invoking
+      the published object.
+     
+      Contract::
+
+        before_invoke(published) # raise to veto
+
+      E.g., in the Zope2 stack, ask the security machinery to authorize
+      access to the published object.
+
+      The default implementation is a no-op.
+
+    'invoke' -- called to get the result from the published object.
+      
+      Contract::
+
+        invoke(published) -> result
+
+      E.g., in the Zope2`stack, use 'mapply'.
+      
+      The default implementaition just calls 'published'.
+
+    'map_result' -- called to map the result onto triple for WSGI.
+      
+      Contract::
+
+        map_result(result) -> status, headers, body_iter
+
+      E.g., in the Zope2`stack, extract status, headers, and body_iter from
+      the response object.
+      
+      The default implementaition just returns simple success values:
+      status is 200, headers is an empty dict, body_iter is a list
+      containing the result.
+
+    'teardown' -- called at end of request processing
+
+      Contract::
+
+        teardown()
+
+      E.g., in the Zope2 stack, call 'endInteraction' and close the
+      request.
+
+      The default implementation is a no-op.
+
+    'handle_exception' -- called if any other helper step raises an exception
+
+      Contract::
+
+        handle_exception(exc_info)
+
+      The handle_exception method should either raise an exception or
+      return.  If it returns, the original exception is reraised.  The
+      default implementation is a no-op.
+
+Sample obob configurations
+
+  The absolute minium configuration would thus be::
+
+    [app:hello_world]
+    paste.app_factory = repoze.obob:make_obob
+    repoze.obob.hello_world = mypackage#hello_world
+
+  The notional Zope2 stack might look something like::
+
+    [app:obob]
+    paste.app_factory = repoze.obob:make_obob
+    repopze.obob.get_root = repoze.zope2#get_application
+    repopze.obob.helper_factory = repoze.zope2#get_helper
