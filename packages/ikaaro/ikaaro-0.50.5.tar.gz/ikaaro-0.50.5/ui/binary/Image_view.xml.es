@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<stl:block xmlns="http://www.w3.org/1999/xhtml" xmlns:stl="http://www.hforge.org/xml-namespaces/stl">
+  <script type="text/javascript">
+    $(document).ready(function() {
+      // "images" is defined in "/ui/gallery/javascript.js"
+      images = new Array(${preload});
+      preload_init();
+    });
+  </script>
+
+  <p id="image_toolbar">
+    <a href="${parent_link}/;preview_content?size=${size}&amp;width=${width}&amp;height=${height}" title="Back"><img src="/ui/icons/16x16/up.png"></img></a>  <a href="${prev_link}/;view?size=${size}&amp;width=${width}&amp;height=${height}" title="Previous" stl:if="prev_link"><img src="/ui/icons/16x16/previous.png" style="vertical-align: bottom"></img></a>  <a href="${next_link}/;view?size=${size}&amp;width=${width}&amp;height=${height}" title="Next" stl:if="next_link"><img src="/ui/icons/16x16/next.png" style="vertical-align: bottom"></img></a>  <a href="?size=${size}&amp;width=${option/name}&amp;height=${option/name}" stl:repeat="option widths" stl:omit-tag="option/selected">${option/value}</a> (${image_width}x${image_height})
+  </p>
+
+  <a href="${image_link}/;download">
+    <img src="${image_view}"></img>
+  </a>
+
+</stl:block>

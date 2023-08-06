@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<stl:block xmlns="http://www.w3.org/1999/xhtml" xmlns:stl="http://www.hforge.org/xml-namespaces/stl">
+
+<object>
+<!--
+  id="rvocx" classid="clsid:CFCDAA03-8BE4-11cf-B84B-0020AFBBCCFA"
+  width="320" height="30">
+-->
+  <param value="." name="src"></param>
+  <!--
+  <param name="autostart" value="true" />
+  <param name="controls" value="ControlPanel" />
+  <param name="console" value="video" />
+  -->
+  <embed src=";download" type="${format}"/>
+<!--
+    width="320" height="30" controls="ControlPanel"
+    console="video" autostart="true">
+-->
+  
+</object>
+
+</stl:block>
