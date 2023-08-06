@@ -1,0 +1,225 @@
+from pylons import url
+import datetime
+from {{package}}.tests import *
+from {{package}}.model import *
+
+class TestRestServer(TestAuthenticatedController):
+    """
+    Testing ...
+    1. GET    /users              -> users.index()     -> url('users')
+    2. GET    /users/1            -> users.show(id)    -> url('user', id=1)
+    3. GET    /users/1/edit       -> users.edit(id)    -> url('edit_user', id=1)
+    4. GET    /users/new          -> users.new()       -> url('new_user')
+    5. POST   /users              -> users.create()    -> url('users')
+    6. PUT    /users/1            -> users.update(id)  -> url('user', id=1)
+    7. DELETE /users/1            -> users.delete(id)  -> url('user', id=1)
+    8. GET    users.xml           -> users.index()     -> url('formatted_users', format='xml')
+    9. GET    users/new.xml       -> users.new()       -> url('formatted_new_user', format='xml')
+   10. GET    users/1.xml/edit    -> users.edit(id)    -> url('formatted_edit_user' id=1, format='xml')
+   11. GET    users/1.xml         -> users.show(id)    -> url('formatted_user', id=1, format='xml')
+
+    """
+    def setUp(self):
+        TestModel.setUp(self)
+    
+
+    def tearDown(self):
+        TestModel.tearDown(self)
+        Session.close()
+    
+
+    def test_rest_GET_succeeds(self):
+        """
+        1. GET    /users         -> users.index()     -> url('users')
+        Ensure that GET returns an collection index
+        """
+        response = self.app.get(url('users'))
+        assert response.status_int == 200
+        assert '<title>Dashboard :: User Administration</title>' in response
+    
+
+    def test_rest_GET_id_succeeds(self):
+        """
+        2. GET    /users/1       -> users.show(id)    -> url('user', id=1)
+        Ensure that GET id returns a member resource
+        """
+        response = self.app.get(url('show_user', id=1))
+        assert response.status_int == 200
+        assert '<title>User :: admin</title>' in response
+    
+
+    def test_rest_GET_id_edit_succeeds(self):
+        """
+        3. GET    /users/1/edit  -> users.edit(id)    -> url('edit_user', id=1)
+        Ensure that GET id returns a member resource
+        """
+        response = self.app.get(url('edit_user', id=1))
+        assert response.status_int == 200
+        assert '<title>Dashboard :: Editing &#171;admin&#187;</title>' in response
+    
+
+    def test_rest_GET_new_succeeds(self):
+        """
+        4. GET    /users/new     -> users.new()       -> url('new_user')
+        Ensure that GET new returns a new member resource form that
+        is accepted when properly completed
+        """
+        response = self.app.get(url('new_user'))
+        
+        form = response.forms.get('new_user_form')
+        
+        d = {'username' : u"fakename",
+             'email' : "test@example.com",
+             'password' : "test",
+             'password_check' : "test"
+             }
+
+        # Step two, insert the new values
+        for k in d.keys():
+            form.set(k, d[k])
+        
+        # Step 4, submit the form and test the database for
+        # the expected addition
+        res = form.submit()
+        assert res.environ['paste.testing_variables']['session'].get('flash',False) == 'Successful creation'
+        newusers = Session.query(User).filter_by(username=u'fakename').all()
+        assert len(newusers) == 1
+        assert newusers[0].email == "test@example.com"
+        newresponse = res.follow()
+        assert newresponse.status_int == 200
+        assert '<title>Dashboard :: User Administration</title>' in newresponse
+    
+
+    def test_rest_POST_succeeds(self):
+        """
+        5. POST   /users         -> users.create()    -> url('users')
+        Ensure that POST returns a new member resource
+        """
+        d = {'username' : u"fakename",
+             'email' : "test@example.com",
+             'password' : "test",
+             'password_check' : "test"
+             }
+
+        response = self.app.post(url('create_user'), params=d)
+        assert response.environ['paste.testing_variables']['session'].get('flash',False) == 'Successful creation'
+        newusers = Session.query(User).filter_by(username=u'fakename').all()
+        assert len(newusers) == 1
+        assert newusers[0].email == "test@example.com"
+        newresponse = response.follow()
+        assert newresponse.status_int == 200
+        assert '<title>Dashboard :: User Administration</title>' in newresponse
+    
+
+    def test_rest_PUT_id_succeeds(self):
+        """
+        6. PUT    /users/1       -> users.update(id)  -> url('user', id=1)
+        Ensure that PUT id changes a member resource
+        """
+        d = dict(_method = 'PUT', 
+                 email = "test2@example.com",
+                 username = 'admin',
+                 password = 'admin',
+                 password_check = 'admin')
+        response = self.app.put(url('save_user', id=1), params=d)
+        assert 'Successful update.' in response.request.environ['paste.testing_variables']['session'].get('flash', '') 
+        newusers = Session.query(User).filter_by(email='test2@example.com').all()
+        assert len(newusers) == 1
+        assert response.status_int == 302
+        assert 'http://localhost/users/1/edit' in response
+    
+
+    def test_rest_PUT_fails(self):
+        """
+        6. PUT    /users/1       -> users.update(id)  -> url('user', id=1)
+        Ensure that PUT id changes a member resource
+        """
+        d = {'username' : u"fakename",
+             'email' : "test@example.com",
+             'password' : "test",
+             'password_check' : "test"
+             }
+        
+        response = self.app.put(url('users'), params=d)
+        newusers = Session.query(User).filter_by(username=u'fakename').all()
+        assert len(newusers) == 0
+        assert response.status_int == 200
+        
+    
+
+    def test_rest_DELETE_id_succeeds(self):
+        """
+        7. DELETE /users/1       -> users.delete(id)  -> url('user', id=1)
+        Ensure that DELETE id deletes a member resource
+        """
+        response = self.app.delete(url('delete_user', id=1))
+        assert response.environ['paste.testing_variables']['session'].get(
+                        'flash',False) == 'Successful deletion.'
+        assert response.status_int == 302
+        assert response.location == 'http://localhost/users'
+        
+    
+
+    def test_rest_DELETE_fails(self):
+        """
+        7a. DELETE /users       -> users.delete()  -> url('user', id=1)
+        Ensure that DELETE id deletes a member resource
+        """
+        response = self.app.delete(url('users'))
+        users = Session.query(User).all()
+        assert len(users) == 2
+        assert response.status_int == 200
+    
+
+    def test_rest_GET_formatted_id_succeeds(self):
+        """
+        11. GET users/1.xml -> users.show(id) -> url('formatted_user', id=1, format='xml')
+        Ensure that GET new returns a new member resource form that
+        is accepted when properly completed
+        """
+        
+        response = self.app.get(url('formatted_user', id=1, format="xml"))
+        assert response.status_int == 200
+        assert '<user.email>admin@example.com</user.email>' in response
+    
+
+    # Can't be arsed to write format-returning code for these controller actions
+
+    # def test_rest_GET_formatted_succeeds(self):
+    #     """
+    #     8. GET users.xml -> users.index() -> url('formatted_users', format='xml')
+    #     Ensure that GET returns an collection index
+    #     """
+    #     response = self.app.get(url('formatted_users', format='json'))
+    #     print(response)
+    #     assert response.status_int == 200
+    #     assert '<username>admin</username>' in response
+    # 
+    # 
+    # def test_rest_GET_formatted_new_succeeds(self):
+    #     """
+    #     9. GET users/new.xml -> users.new() -> url('formatted_new_user', format='xml')
+    #     Ensure that GET id returns a member resource
+    #     """
+    #     response = self.app.get(url('formatted_new_user', format='xml'))
+    #     assert response.status_int == 200
+    #     assert '<email>noone@example.com</email>' in response
+    # 
+    # 
+    # def test_rest_GET_formatted_id_edit_succeeds(self):
+    #     """
+    #     10. GET users/1.xml;edit -> users.edit(id) -> url('formatted_edit_user' id=1, format='xml')
+    #     Ensure that GET id returns a member resource
+    #     """
+    #     addr = url('formatted_edit_user', id=1, format='xml')
+    #     response = self.app.get(addr)
+    #     print(response)
+    #     assert response.status_int == 200
+    #     assert '<username>admin</username>' in response
+    # 
+
+
+
+
+
+

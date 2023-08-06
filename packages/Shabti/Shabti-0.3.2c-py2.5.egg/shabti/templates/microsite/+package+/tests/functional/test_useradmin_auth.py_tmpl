@@ -1,0 +1,115 @@
+from datetime import datetime, timedelta
+import time
+import hashlib
+from pylons import url, config
+from {{package}}.model import *
+from {{package}}.tests import *
+try:
+    import json
+except ImportError:
+    # Python < 2.6
+    import simplejson as json
+
+class TestUserAdminController(TestAuthenticatedController):
+
+    def setUp(self):
+        TestModel.setUp(self)
+    
+
+    def tearDown(self):
+        TestModel.tearDown(self)
+        Session.close()
+    
+
+    def test_authorised_user_GET_allowed(self):
+        """Authorised user GET requests are permitted"""
+        response = self.app.get(url('show_user', id=2))
+        
+        assert '<title>User :: test</title>' in response
+    
+
+    def test_authorised_user_GET_nonexistent_prohibited(self):
+        """Authorised but improper user GET requests are prohibited"""
+        response = self.app.get(url('show_user', id=20),
+                                status=404,
+                                expect_errors=True)
+        
+        assert response.status_int == 404
+    
+
+    def test_authorised_user_GET_update_prohibited(self):
+        """Authorised user GET update requests are prohibited"""
+        
+        response = self.app.get(url('save_user', id='1'),
+                                params={'email': 'newemail@example.com'},
+                                status=404,
+                                expect_errors=True)
+        assert Session.query(User).get(1).email != 'newemail@example.com'
+    
+
+    def test_authorised_user_GET_delete_prohibited(self):
+        """Authorised user GET delete requests are prohibited"""
+
+        response = self.app.get(url=url('delete_user', id=2),
+                                status=404,
+                                expect_errors=True)
+
+        assert Session.query(User).get(2) != None
+    
+
+    def test_authorised_user_DELETE_nonexistent_prohibited(self):
+        """Authorised deletions of non-existent users are prohibited"""
+        response = self.app.delete(url=url('delete_user', id='4'),
+                                   status=404,
+                                   expect_errors=True)
+
+        assert response.status_int == 404
+    
+
+    def test_authorised_user_PUT_update_allowed(self):
+        """Authorised user POST updated requests are permitted"""
+
+        d = dict(username="test", 
+                 password="test",
+                 password_check="test", 
+                 _method="PUT",
+                 email='newemail@example.com',
+                 active=True)
+        
+        response = self.app.post(url=url('save_user', id=2),
+                                 params=d)
+        
+        newresponse = response.follow()
+        
+        email1 = newresponse.forms.get('user_form').fields.get('email', '')[0].value
+            
+        assert email1 == 'newemail@example.com'
+    
+
+    def test_authorised_user_POST_create_allowed(self):
+        """Authorised user PUT(POST) create requests are permitted"""
+        # Step one, retrieve the resource from /user/new ..
+        response = self.app.get(url('new_user'))
+        
+        form = response.forms.get('new_user_form')
+        d = dict(username=u"newuser", 
+                 password="foo",
+                 password_check="foo", 
+                 active=True,
+                 email='newuser@example.com')
+        
+        # Step two, insert the new values
+        for k in d.keys():
+            form.set(k, d[k])
+        
+        # Step 4, submit the form and test the database for
+        # the expected addition
+        res = form.submit()
+        
+        newusers = Session.query(User).filter_by(username=u'newuser').all()
+        
+        assert len(newusers) == 1
+        
+        assert newusers[0].username == u'newuser'
+    
+

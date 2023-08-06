@@ -1,0 +1,100 @@
+from datetime import datetime, timedelta
+import time
+import hashlib
+from pylons import url, config
+from {{package}}.model import *
+from {{package}}.tests import *
+
+class TestPermissionAdminController(TestAuthenticatedController):
+
+    def setUp(self):
+        TestModel.setUp(self)
+    
+
+    def tearDown(self):
+        TestModel.tearDown(self)
+        Session.close()
+    
+
+    def test_authorised_permission_GET_allowed(self):
+        """Authorised permission GET requests are permitted"""
+        response = self.app.get(url('show_permission', id=1))
+        
+        assert response.status_int == 200
+    
+
+    def test_authorised_permission_GET_nonexistent_prohibited(self):
+        """Authorised but improper page GET requests are prohibited"""
+        response = self.app.get(url('show_permission', id=20),
+                                status=404,
+                                expect_errors=True)
+        
+        assert response.status_int == 404
+    
+
+    def test_authorised_permission_GET_update_prohibited(self):
+        """Authorised permission GET update requests are prohibited"""
+        response = self.app.get(url('save_permission', id='1'),
+                                params={'name': 'Fake Name'},
+                                status=404,
+                                expect_errors=True)
+
+        assert response.status_int == 404
+    
+
+    def test_authorised_permission_GET_delete_prohibited(self):
+        """Authorised permission GET delete requests are prohibited"""
+        response = self.app.get(url('delete_permission', id=1),
+                                status=404,
+                                expect_errors=True)
+        assert Session.query(User).get(1) != None
+    
+
+    def test_authorised_permission_DELETE_nonexistent_prohibited(self):
+        """Authorised deletions of non-existent users are prohibited"""
+        response = self.app.delete(url('delete_permission', id='4'),
+                                    status=404,
+                                    expect_errors=True)
+        
+        assert response.status_int == 404
+    
+
+    def test_authorised_permission_PUT_update_allowed(self):
+        """Authorised permission POST updated requests are permitted"""
+
+        d = dict(name=u"Fake Name", _method="PUT", 
+                 description=u"Fake description")
+
+        response = self.app.put(url('save_permission', id=1),params=d)
+
+        newresponse = response.follow()
+        
+        name1 = newresponse.forms.get('permission_form').fields.get('name', '')[0].value
+            
+        assert name1 == 'Fake Name'
+    
+
+    def test_authorised_permission_POST_create_allowed(self):
+        """Authorised permission PUT(POST) create requests are permitted"""
+        # Step one, retrieve the resource from /user/new ..
+        response = self.app.get(url('new_permission'))
+        
+        form = response.forms.get('new_permission_form')
+
+        d = dict(name=u"Fake name", 
+                 description=u'Fake description')
+        
+        # Step two, insert the new values
+        for k in d.keys():
+            form.set(k, d[k])
+        
+        # Step 4, submit the form and test the database for
+        # the expected addition
+        res = form.submit()
+        
+        newperms = Session.query(Permission).filter_by(name=u'Fake name').all()
+        
+        assert len(newperms) == 1
+        
+        assert newperms[0].name == u'Fake name'
+    

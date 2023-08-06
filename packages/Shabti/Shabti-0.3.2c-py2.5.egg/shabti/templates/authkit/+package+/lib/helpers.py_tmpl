@@ -1,0 +1,163 @@
+# -*- coding: utf-8 -*-
+"""Helper functions
+
+Consists of functions to typically be used within templates, but also
+available to Controllers. This module is available to both as 'h'.
+"""
+from datetime import datetime
+
+from webhelpers import *
+from webhelpers.html.tags import *
+from {{package}}.lib.asset_tag import *
+from routes import redirect_to
+from pylons import url
+# from pylons.util import _, log, set_lang, get_lang
+
+{{if template_engine == 'genshi'}}
+from genshi.core import Markup
+{{endif}}
+
+{{if template_engine == 'genshi'}}
+def wrap_helpers(localdict):
+    """Wrap the helpers for use in Genshi templates"""
+    def helper_wrapper(func):
+        def wrapped_helper(*args, **kwargs):
+            return Markup(func(*args, **kwargs))
+        try:
+            wrapped_helper.__name__ = func.__name__
+        except TypeError:
+            # Python < 2.4
+            pass
+        wrapped_helper.__doc__ = func.__doc__
+        return wrapped_helper
+    for name, func in localdict.iteritems():
+        if (not callable(func) or
+            not func.__module__.startswith('webhelpers.rails')):
+            continue
+        localdict[name] = helper_wrapper(func)
+
+wrap_helpers(locals())
+{{endif}}
+
+def mail(**params):#msg, me, to, subject, smtpServer, blind=False
+    """Function to send a text only email via SMTP.
+        msg         - Text of the message.
+        to          - A list of recipient addresses in the form: addr@addr.com separated by commas.
+        subject     - Email subject.
+        smtp        - SMTP server address.
+        sendmail    - Sendmail path.
+        method      - Which method to use if smtp or sendmail aren't specified.
+        blind       - Whether to send the emails blind or not.
+        reply       - The name and address of the person sending the email in the form: "sender name <addr@example.com>"
+        replyName
+        replyEmail
+        type        - The second part of the content-type, eg 'plain' for 'Content-type: text/plain\n\n'
+    """
+    # imports
+    import StringIO
+    import smtplib
+    from email.MIMEText import MIMEText
+    from email.MIMEBase import MIMEBase
+    import email.Utils
+    
+    if params.has_key('replyName') and not params.has_key('replyEmail'):
+        raise Exception("You must specify a 'replyEmail' as well as a 'replyName'.")
+    elif params.has_key('replyEmail') and not params.has_key('replyName'):
+        raise Exception("You must specify a 'replyName' as well as a 'replyEmail'.")
+    if params.has_key('reply') and (params.has_key('replyEmail') or params.has_key('replyName')):
+        raise Exception("You cannot specify 'reply' as well as a 'replyName' and 'replyEmail'.")
+    if not params.has_key('reply'):
+        params['reply'] = "%s <%s>"%(params['replyName'], params['replyEmail'])
+    
+    if not params.has_key('blind'):
+        params['blind'] = False
+    if params['blind'] not in [True, False]:
+        raise Exception("'blind' can only be True or False.")
+    # Make sure the essential attributes are there
+    for p in ['msg', 'to', 'subject']:
+        if not params.has_key(p):
+            raise Exception("You must specify the attribute '%s' to send an email."%p)
+    # Make sure they are stings
+    for p in ['msg', 'subject']:
+        if type(params[p]) <> type(''):
+            raise Exception("The attribute '%s' must be a string."%p)
+    # Check method
+    if params['method'] not in ['sendmail','smtp']:
+        raise Exception("The method parameter cannot be '%s'."%params['method'])
+    # Open a plain text file for reading.  For this example, assume that
+    # the text file contains only ASCII characters.
+    fp = StringIO.StringIO(params['msg'])
+    if not params.has_key('type'):
+        msg = MIMEText(fp.read())
+    else:
+        msg = MIMEBase('text',params['type'])
+        msg.set_payload(fp.read())
+    fp.close()
+    msg['From'] = params['reply']
+    msg['Subject'] = params['subject']
+    if type(params['to']) == type(''):
+        params['to']=[params['to']]
+    if params['method'] == 'sendmail':
+        if params['blind'] == True:
+            msg['Bcc'] = ', '.join(params['to'])
+        else:
+            msg['To'] = ', '.join(params['to'])
+        import os
+        if not os.path.exists(params['sendmail']):
+            raise Exception("The path '%s' doesn't exist. Please check the location of sendmail."%params['sendmail'])
+        fp = os.popen(params['sendmail']+" -t", 'w')
+        fp.write(msg.as_string())
+        error = fp.close()
+        if error:
+            raise Exception("Error sending mail: Sendmail Error '%s'."% error)
+    elif params['method'] == 'smtp':
+        if params['blind'] == True:
+            msg['To'] = ''
+        else:
+            msg['To'] = ', '.join(params['to'])
+        # Send the message via our own SMTP server, but don't include the
+        # envelope header.
+        s = smtplib.SMTP()
+        #s.set_debuglevel(100) 
+        s.connect(params['smtp'])
+        if params['user']:
+            s.login(params['user'], params['password'])
+        result = s.sendmail(params['reply'], params['to'], msg.as_string())
+        s.quit()
+        if result:
+            for r in result.keys():
+                error+= "Error sending to"+ str(r)
+                rt = result[r]
+                error+= "Code"+ str(rt[0])+":"+ str(rt[1])
+            raise Exception("Error sending mail: %s"% error)
+
+# Boilerplate Dublin Core and other meta-data
+# @@FIXME: Read values from config
+class DCMeta(object):
+    def __init__(self, **kw):
+        for k, v in kw.iteritems():
+            setattr(self, k, v)
+        self.copyrightyear = self.date.year
+
+# Would be neater if values were set in a .ini file
+def dcmeta(description=u"", 
+            title=u"", 
+            distribution=u"global",
+            creator = u"Graham Higgins <gjh@bel-epa.com>",
+            copyright = u"© No-one in particular",
+            date = datetime.now(),
+            identifier = u"",
+            abstract = u"",
+            issued = datetime.now(),
+            icbm = "51.2876,-2.8214"):
+    return DCMeta(description=description, 
+            title=title, 
+            distribution=distribution,
+            creator = creator,
+            copyright = copyright,
+            date = date,
+            identifier = identifier,
+            abstract = abstract,
+            issued = issued,
+            icbm = icbm)
+

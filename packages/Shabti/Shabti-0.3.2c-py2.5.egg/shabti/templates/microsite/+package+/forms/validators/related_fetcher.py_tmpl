@@ -1,0 +1,32 @@
+from sqlalchemy.orm import class_mapper
+from formencode.validators import FancyValidator
+from pylons.i18n import set_lang, get_lang, _, ungettext, N_
+
+class RelatedFetcher(FancyValidator):
+    messages = {
+        'empty' : _("Please select a value")
+    }
+    not_empty = False
+    def __init__(self, sql_class=None, **kw):
+        self.sql_class = sql_class
+        # assumes the primary key is not composite
+        self.pk_name = class_mapper(sql_class).primary_key[0].name
+        for k,v in kw.iteritems():
+            setattr(self, k, v)
+    def _from_python(self, value, state=None):
+        if hasattr(value, self.pk_name):
+            # deal with the related object
+            return getattr(value, self.pk_name)
+        else:
+            # deal with a the related object's id when
+            # the form is redisplayed due to validation errors
+            return value
+    def _to_python(self, value, state=None):
+        if not hasattr(value, self.pk_name) and value:
+            # assumes mapped class has a 'query' attr. to get a
+            # Query obj bound to the contextual session
+            # ie: classes mapped with Session.mapper
+            value = self.sql_class.query.get(value)
+        if not value and self.not_empty:
+            raise Invalid(self.message('empty', state), value, state)
+        return value

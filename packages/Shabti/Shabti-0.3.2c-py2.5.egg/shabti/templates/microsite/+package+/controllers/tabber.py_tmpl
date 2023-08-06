@@ -1,0 +1,70 @@
+# -*- coding: utf-8 -*-
+import logging
+
+from pylons import url, cache, session, tmpl_context as c
+from pylons.controllers.util import abort, redirect_to
+from pylons.i18n import set_lang, get_lang, _, ungettext, N_
+
+from {{package}}.lib.base import BaseController, render
+
+log = logging.getLogger(__name__)
+
+from {{package}} import model as model
+from {{package}}.lib.helpers import dcmeta, link_to
+from webhelpers.markdown import markdown
+
+class TabberController(BaseController):
+
+    def __before__(self):
+        c.dcmeta = dcmeta(title="Tabber demo")
+    
+    def tabbedindex(self):
+        def author_link(author):
+            try:
+                return link_to(author.name, 
+                                 url(controller="tabber", 
+                                           action='show', 
+                                           id=author.id))
+            except Exception:
+                return _("UNRECORDED")
+        def get_tabberdata():
+            sq = model.Session.query(model.Author)
+            authors = sq.order_by(model.Author.family_name.asc(), 
+                                  model.Author.given_name.asc())
+            ntabs = 7
+            sep = authors.count()/ntabs
+            tabgroups = [dict(title = "%s&nbsp;-&nbsp;%s" % \
+                                    (tgp[0].family_name, tgp[-1].family_name),
+                              group = [author_link(tg) for tg in tgp])
+                            for tgp in [[author 
+                                for author in authors.offset(sep*i).limit(sep)]
+                                    for i in range(0, ntabs)]]
+            sq = model.Session.query(model.Page)
+            rubric = sq.filter_by(slug = u'tabber').one()
+            divstyle = "min-height:%sem;margin-right:4em;" % int(sep / 3)
+            # Insert a front page
+            tabgroups.insert(0, 
+                             dict(title=_("Intro"), 
+                                  group=['''<div style="%s">%s</div>''' % \
+                                    (divstyle,
+                                     markdown(rubric.content, 
+                                         # encoding='utf8', 
+                                         safe_mode = False)), 
+                                         '''<div><!-- Spacerdiv --></div>''',
+                                         '''<div><!-- Spacerdiv --></div>''']))
+            return tabgroups
+        c.pre_js = ""
+        c.title = c.dcmeta.title = _("Tabbed list of items.")
+        c.dcmeta.description = _("Tabbed list of items (exercise).")
+        # Cache the result in memory for an hour, recalculate if expired
+        appcache = cache.get_cache('shabti')
+        if appcache.has_key('authors_tabgroups'):
+            c.tabgroups = appcache.get_value('authors_tabgroups')
+        else:
+            c.tabgroups = appcache.get_value('authors_tabgroups',
+                                             createfunc=get_tabberdata,
+                                             type="memory",
+                                             expiretime=3600)
+        # c.tabgroups = get_tabberdata()
+        return render('widgets/tabindex.mak', 
+                        cache_type='memory', cache_expire=1200)

@@ -1,0 +1,162 @@
+# -*- coding: utf-8 -*-
+import logging
+
+from pylons import url, request, session, tmpl_context as c
+from pylons.controllers.util import abort, redirect_to
+from pylons.i18n import set_lang, get_lang, _, ungettext, N_
+
+from {{package}}.lib.base import BaseController, render, bag_it_and_tag_it
+
+log = logging.getLogger(__name__)
+
+from sqlalchemy import *
+from datetime import datetime
+from {{package}} import model as model
+from {{package}}.lib.helpers import dcmeta, get_object_or_404
+
+from {{package}}.lib.decorators import authorize
+from {{package}}.lib.auth.permissions import SignedIn
+
+from tw.api import WidgetBunch
+from tw.mods.pylonshf import validate
+from {{package}}.forms.identity import *
+
+user_form = UserForm('user_form', 
+                     location = "headbottom")
+new_user_form = NewUserForm('new_user_form', 
+                            location = "headbottom")
+
+# Included here merely to support ``formatted_user`` test
+def xmlit(u):
+    return '<user>\n%s\n</user>' % \
+        '\n'.join(['<%s>%s</%s>' % \
+                (col, getattr(u, str(col).replace('user.','')), col) 
+                    for col in u.table.c if str(col) != 'user.id'])
+    
+
+class UsersController(BaseController):
+    
+    def __before__(self):
+        c.dcmeta = dcmeta(title="User")
+    
+    @authorize(SignedIn())
+    def index(self):
+        sq = model.Session.query(model.User)
+        c.title = c.dcmeta.title = _("User Administration")
+        c.dc_description = _("Content pages")
+        c.users = sq.order_by(model.User.username.asc())
+        return render('dashboard/persons.mak')
+    
+    @authorize(SignedIn())
+    def show(self, id):
+        user = get_object_or_404(model.User, id=id)
+        c.title = c.dcmeta.title + " :: " + user.username
+        c.name = c.user.username
+        c.content = 'Email: %s<br/>Created: %s<br/>Active: %s' % \
+            (c.user.email, c.user.created, c.user.active)
+        format = request.urlvars.get('format', 'html')
+        if format and format == 'xml':
+            return xmlit(c.user)
+        else:
+            return render('show.mak')
+    
+    @authorize(SignedIn())
+    def new(self):
+        """GET /new: Form to create a new item."""
+        c.title = "Add user"
+        c.w = WidgetBunch()
+        c.w.form = new_user_form
+        c.legend = "User ..."
+        c.value = None
+        c.action = url('create_user')
+        return render('dashboard/person_add.mak')
+    
+    @validate(form=new_user_form, error_handler="new")
+    @authorize(SignedIn())
+    def create(self):
+        import hashlib
+        person = model.User()
+        try:
+            for k, v in self.form_result.iteritems():
+                if v and k in ['password', 'password_check']:
+                    setattr(person, k, hashlib.sha1(v).hexdigest())
+                elif v:
+                    setattr(person, k, v)
+            setattr(person, 'created', datetime.utcnow())
+            model.Session.save_or_update(person)
+            bag_it_and_tag_it(person, 'user', u'add')
+            model.Session.commit()
+            # cache.get_cache('{{package}}.user_%s' % person.id).create()
+            session['flash'] = "Successful creation"
+        except Exception and Exception != httpexceptions.HTTPFound, msg:
+            log.debug('User_creation failed: %s' % msg)
+            session['flash'] ="Failed creation"
+        session.save()
+        c.flash = session['flash']
+        return redirect_to(url('users'))
+    
+    @authorize(SignedIn())
+    def edit(self, id):
+        """GET /id;edit: Form to edit an existing item."""
+        c.user = get_object_or_404(model.User, id=id)
+        c.title = _("Editing ") + "&#171;%s&#187;" % c.user.username 
+        c.dc_description = _("Edit a/c ") + " %s" % c.user.username
+        c.w = WidgetBunch()
+        c.w.form = user_form
+        c.legend = "User ..."
+        c.value = c.user
+        c.action = url('save_user', id=id)
+        return render('dashboard/person.mak')
+    
+    @validate(form=user_form, error_handler="edit")
+    @authorize(SignedIn())
+    def update(self, id):
+        """PUT /id: Update an existing item."""
+        import hashlib
+        c.person = get_object_or_404(model.User, id=id)
+        try:
+            self.form_result.pop('_method')
+            for k, v in self.form_result.iteritems():
+                if v and k in ['password', 'password_check']:
+                    hashpass = hashlib.sha1(v).hexdigest()
+                    if getattr(c.person, k) != hashpass:
+                        setattr(c.person, k, hashpass)
+                elif v and getattr(c.person, k) != v:
+                    setattr(c.person, k, v)
+            bag_it_and_tag_it(c.person, 'user', u'edit')
+            model.Session.commit()
+            # Optional -- clear the cache because it'll now be stale
+            # cache.get_cache('{{package}}.user_%s' % c.person.id).clear()
+            session['flash'] = "Successful update."
+        except Exception, msg:
+            log.debug('User_update failed: %s' % msg)
+            session['flash'] = "Failed update."
+        c.flash = session['flash']
+        session.save()
+        return redirect_to(url('edit_user', id=id))
+    
+    @authorize(SignedIn())
+    def delete(self, id):
+        """DELETE /id: Delete an existing item."""
+        person = get_object_or_404(model.User, id=id)
+        try:
+            bag_it_and_tag_it(person, 'user', u'delete')
+            model.Session.delete(person)
+            model.Session.commit()
+            session['flash'] = "Successful deletion."
+        except Exception, msg:
+            log.debug('User_delete failed: %s' % msg)
+            session['flash'] = "Failed deletion"
+        c.flash = session['flash']
+        session.save()
+        return redirect_to(url('users'))
+    
+    def popup(self, id):
+        c.person = get_object_or_404(model.User, id=id)
+        c.title = c.person.username.decode('utf-8')
+        c.content = c.person.username.decode('utf-8') + \
+                                    u' email: ' + c.person.email
+        return render('thickbox.mak')
+    
+
+
