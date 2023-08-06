@@ -1,0 +1,174 @@
+Plonehrm notification tests
+===========================
+
+Some initialization code.
+
+    >>> from zope.component import provideAdapter
+    >>> from zope import interface
+    >>> from zope.annotation.interfaces import IAnnotations
+    >>> from plonehrm.notifications.interfaces import INotified
+    >>> from plonehrm.notifications.adapters import Notified
+    >>> provideAdapter(Notified, adapts=(object,), provides=INotified)
+
+
+Double notification prevention
+------------------------------
+
+If a notification has been done, this should be recorded somehow so that the
+notification is not send twice. Or thrice. Or even a fourth time. An adapter
+handles this by annotating the object. First a check for a notification that
+hasn't yet occurred:
+
+    >>> class MockClass(dict):
+    ...     interface.implements(IAnnotations)
+    >>> something = MockClass()
+    >>> identifier = 'bla bla'
+    >>> target = INotified(something)
+    >>> target.has_notification(identifier)
+    False
+
+Now we say that the notification has occurred:
+
+    >>> target.add_notification(identifier)
+    >>> target.has_notification(identifier)
+    True
+
+We also want to be able to remove notifications:
+
+    >>> target.remove_notification(identifier)
+    >>> target.has_notification(identifier)
+    False
+
+Besides removing a single notification, we also want to be able to
+remove a whole bunch of notifications.
+
+    >>> target.add_notification('bla: eggs')
+    >>> target.add_notification('bla: bacon')
+    >>> target.add_notification('bla: spam')
+    >>> target.add_notification('foo')
+    >>> target.has_notification('bla: spam')
+    True
+    >>> target.has_notification('foo')
+    True
+    >>> target.remove_notification_set('bla:')
+    >>> target.has_notification('bla: spam')
+    False
+    >>> target.has_notification('foo')
+    True
+
+
+Triggering all checks
+---------------------
+
+The notification system works by triggering the HRMCheckEvent from a
+cronjob. This is done by calling a browser view.
+
+    >>> from plonehrm.notifications.browser import CheckView
+    >>> from plonehrm.notifications.events import HRMCheckEvent
+    >>> dummy_request = {}
+    >>> view = CheckView(something, dummy_request)
+    >>> view()
+    u'HRMCheckEvent triggered'
+
+
+Email helper class
+------------------
+
+We'll need to add some mock objects first.
+
+    >>> from plonehrm.notifications.emailer import HRMEmailer
+    >>> class MockMailHost(object):
+    ...     def send(self, mto='', mfrom='', subject='', message=''):
+    ...         print message
+    >>> class MockPropertySheet(object):
+    ...     def getProperty(self, prop, default=None):
+    ...         if hasattr(self, prop):
+    ...             return getattr(self, prop)
+    ...         return default
+    >>> class MockPortal(object):
+    ...     def getProperty(self, prop, default=None):
+    ...         if hasattr(self, prop):
+    ...             return getattr(self, prop)
+    ...         return default
+    ...     def getToolByName(self, tool_name):
+    ...         return getattr(self, tool_name)
+    ...     email_from_name = 'Reinout'
+    ...     email_from_address = 'rein@out'
+    ...     portal_properties = MockPropertySheet() # or whatever
+    ...     portal_properties.site_properties = MockPropertySheet()
+    ...     portal_properties.site_properties.default_language = 'en'
+    ...     MailHost = MockMailHost()
+    >>> class MockUrlTool(object):
+    ...     def getPortalObject(self):
+    ...         return MockPortal()
+    >>> class MockContext(object):
+    ...     portal_url = MockUrlTool()
+    ...     REQUEST = {}
+
+Now we instantiate our emailer.
+
+    >>> context = MockContext()
+    >>> emailer = HRMEmailer(context)
+
+If we try to send an email without defining a template or recipients, an error
+or warning is logged and the send() method returns immediately.
+
+    >>> emailer.send()
+    >>> emailer = HRMEmailer(context, template='just a string will fail')
+    >>> emailer.send()
+    >>> emailer = HRMEmailer(context, template='just a string will fail', recipients=['mau@rits'])
+    >>> emailer.send() # Will fail, template is a string.
+    Traceback (most recent call last):
+    ...
+    TypeError: 'str' object is not callable
+
+That call failed, but that's OK for now, we just used a string as a template
+for testing. In reality, it should be a real page template or at least
+something callable that we can pass options to.
+
+    >>> def mock_template(**kw):
+    ...     lines = []
+    ...     lines.append("Mock template")
+    ...     if not kw:
+    ...         lines.append("No parameters")
+    ...     else:
+    ...         for (key, value) in kw.items():
+    ...             lines.append("%s: %s" % (key, value))
+    ...     return '\n'.join(lines)
+    >>> emailer.template = mock_template
+    >>> print emailer.message
+    Mock template
+    No parameters
+    >>> emailer.options = {'greeting': 'Bye bye!'}
+    >>> print emailer.message
+    Mock template
+    greeting: Bye bye!
+
+We have a good template now, so we can send it.
+
+    >>> emailer.send()
+    MIME-Version: 1.0
+    Content-Type: text/plain; charset="us-ascii"
+    Content-Transfer-Encoding: 7bit
+    From: Reinout <rein@out>
+    To: mau@rits
+    Subject: Notification
+    <BLANKLINE>
+    Mock template
+    greeting: Bye bye!
+
+
+Basic mail exceptions are caught and logged, others cause an error.
+
+    >>> from socket import gaierror
+    >>> def fake_send(message):
+    ...     raise gaierror
+    >>> emailer.portal.MailHost.send = fake_send
+    >>> emailer.send()
+    >>> def fake_send(message):
+    ...     raise ValueError
+    >>> emailer.portal.MailHost.send = fake_send
+    >>> emailer.send()
+    Traceback (most recent call last):
+    ...
+    ValueError
