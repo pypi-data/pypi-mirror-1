@@ -1,0 +1,143 @@
+Metadata-Version: 1.0
+Name: regobj
+Version: 0.1.0
+Summary: Pythonic object-based access to the Windows Registry.
+Home-page: http://www.rfk.id.au/software/
+Author: Ryan Kelly
+Author-email: ryan@rfk.id.au
+License: BSD
+Description: 
+        
+        regobj:  Pythonic object-based access to the Windows Registry
+        
+        This module provides a thin wrapper around the standard _winreg module,
+        allowing easier and more pythonic access to the Windows Registry.
+        
+        All access to the registry is done through Key objects, which (surprise!)
+        represent a specific registry key.  To begin, there are pre-existing Key
+        objects defined for the HKEY_* root keys, using both long and short names:
+        
+        >>> HKEY_CURRENT_USER
+        <regobj Key 'HKEY_CURRENT_USER'>
+        >>> HKLM
+        <regobj Key 'HKEY_LOCAL_MACHINE'>
+        
+        Traversing and creating subkeys is then as simple as ordinary python
+        attribute access:
+        
+        >>> HKCU.Software.Microsoft.Windows
+        <regobj Key 'HKEY_CURRENT_USER\Software\Microsoft\Windows'>
+        >>> HKCU.Software.MyTests
+        Traceback (most recent call last):
+        ...
+        AttributeError: subkey 'MyTests' does not exist
+        >>> HKCU.Software.MyTests = Key
+        >>> HKCU.Software.MyTests
+        <regobj Key 'HKEY_CURRENT_USER\Software\MyTests'>
+        >>> del HKCU.Software.MyTests
+        
+        Of course, for keys that don't happen to be named like python identifiers,
+        there are also methods that can accomplish the same thing.  To help reduce
+        visual clutter, calling a key object is a shorthand for attribute lookup:
+        
+        >>> HKCU.Software.set_subkey("my-funny-key",Key)
+        >>> HKCU.Software.get_subkey("my-funny-key").SubKey = Key
+        >>> HKCU("Software\my-funny-key\SubKey")
+        <regobj Key 'HKEY_CURRENT_USER\Software\my-funny-key\SubKey'>
+        >>> HKCU.Software.del_subkey("my-funny-key")
+        
+        The individual values contained in a key can be accessed using standard
+        item access syntax.  The returned objects will be instances of the Value
+        class, with 'name', 'type' and 'data' attributes:
+        
+        >>> HKCU.Software.Microsoft.Clock["iFormat"]
+        <regobj Value (iFormat,1,REG_SZ)>
+        >>> HKCU.Software.Microsoft.Clock["iFormat"].name
+        'iFormat'
+        >>> HKCU.Software.Microsoft.Clock["iFormat"].data
+        u'1'
+        >>> HKCU.Software.Microsoft.Clock["iFormat"].type
+        1
+        >>> HKCU.Software.Microsoft.Clock["notavalue"]
+        Traceback (most recent call last):
+        ...
+        KeyError: "no such value: 'notavalue'"
+        
+        Iterating over a key generates all the contained values, followed by
+        all the contained subkeys.  There are also methods to seperately iterate
+        over just the values, and just the subkeys:
+        
+        >>> winK = HKCU.Software.Microsoft.Windows
+        >>> winK["testvalue"] = 42
+        >>> for obj in winK:
+        ...   print obj
+        <regobj Value (testvalue,42,REG_DWORD)>
+        <regobj Key 'HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion'>
+        <regobj Key 'HKEY_CURRENT_USER\Software\Microsoft\Windows\Shell'>
+        <regobj Key 'HKEY_CURRENT_USER\Software\Microsoft\Windows\ShellNoRoam'>
+        >>> [k.name for k in winK.subkeys()]
+        ['CurrentVersion', 'Shell', 'ShellNoRoam']
+        >>> [v.data for v in winK.values()]
+        [42]
+        >>> del winK["testvalue"]
+        
+        These iterators also provide efficient implementations of the __contains__
+        and __len__ methods, so they can be used as follows:
+        
+        >>> "Shell" in HKCU.Software.Microsoft.Windows
+        True
+        >>> "Shell" in HKCU.Software.Microsoft.Windows.subkeys()
+        True
+        >>> "Shell" in HKCU.Software.Microsoft.Windows.values()
+        False
+        >>> len(HKCU.Software.Microsoft.Windows)
+        3
+        >>> len(HKCU.Software.Microsoft.Windows.values())
+        0
+        
+        Finally, there is powerful support for specifying key and value structures
+        at creation time.  The simplest case has already been demonstrated, where
+        setting a subkey to the Key class or to None will create it without any data:
+        
+        >>> HKCU.Software.MyTests = None
+        >>> len(HKCU.Software.MyTests)
+        0
+        
+        If a subkey is assigned an existing key object, the data from that key is
+        copied into the subkey:
+        
+        >>> HKCU.Software.MyTests = HKCU.Software.Microsoft.Windows
+        >>> len(HKCU.Software.MyTests)
+        3
+        >>> [k.name for k in HKCU.Software.MyTests]
+        ['CurrentVersion', 'Shell', 'ShellNoRoam']
+        >>> del HKCU.Software.MyTests
+        
+        If a subkey is assigned a dictionary, the structure of that dictionary is
+        copied into the subkey.  Scalar values become key values, while nested
+        dictionaries create subkeys:
+        
+        >>> HKCU.Software.MyTests = {"val1":7, "stuff":{"a":1,"c":2,"e":3}}
+        >>> len(HKCU.Software.MyTests)
+        2
+        >>> [v.name for v in HKCU.Software.MyTests.values()]
+        ['val1']
+        >>> [k.name for k in HKCU.Software.MyTests.subkeys()]
+        ['stuff']
+        >>> len(HKCU.Software.MyTests.stuff)
+        3
+        >>> del HKCU.Software.MyTests
+        
+        Any other value assigned to a subkey will become the default value for
+        that key (i.e. the value with name ""):
+        
+        >>> HKCU.Software.MyTests = "dead parrot"
+        >>> HKCU.Software.MyTests[""].data
+        u'dead parrot'
+        >>> del HKCU.Software.MyTests
+        
+        And that's that - enjoy!
+        
+        
+Keywords: windows registry
+Platform: UNKNOWN
