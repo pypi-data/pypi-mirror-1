@@ -1,0 +1,182 @@
+\section{Parameters}
+
+A parameter is a numerical value that is used to formulate constraints
+and objectives in a model.  Pyomo parameters are managed with the \code{Param} class, which can denote a single, independent value, or an array of values.
+
+
+\subsection{Param Declarations}
+
+
+A simple instance of \code{Param} declares a single numerical value:
+\begin{lstlisting}
+model.Z = Param()
+\end{lstlisting}
+A parameter array can also be specified by providing sets as options
+to the \code{Param} object.  Multi-dimensional parameter arrays can be declared by simply including a list of sets as options to the \code{Param} object:
+\begin{lstlisting}
+model.A = Set()
+model.Y = Param(model.A)
+model.B = Set()
+model.X = Param(model.A, model.B)
+\end{lstlisting}
+
+
+\subsection{Parameter Initialization}
+
+By default, a \code{Param} object refers to one or more abstract parameters in a model.  However,
+a \code{Param} object can be initialized with data by using the \code{initialize} option, which is a function 
+that accepts the parameter indices and model and returns the value of that parameter element:
+\begin{lstlisting}
+def W_init(i,j,model):
+    # Create the value of model.W[i,j]
+    return i*j
+model.W = Param(model.A, model.B, initialize=W_init)
+\end{lstlisting}
+Note that the parameter \code{model.W} is not created when this object is
+constructed.  Instead, \code{W\_init()} is called during the construction of a
+model instance.
+
+The \code{initialize} option can also be used to specify the values in
+a parameter.  These default values may be overriden by later construction
+steps, or by data in an input file:
+\begin{lstlisting}
+V_init={}
+V_init[1]=1
+V_init[2]=2
+V_init[3]=9
+model.V = Param(model.A, initialize=V_init)
+\end{lstlisting}
+Note that parameter \code{V} is initialized with a dictionary, which maps 
+tuples from parameter indices to parameter values.  Simple, unindexed
+parameters can be initialized with a scalar value.
+\begin{lstlisting}
+model.U = Param(initialize=9.9)
+\end{lstlisting}
+
+Pyomo assumes that parameter values are specified in a sparse manner.  For
+example, the instance \code{Param(model.A,model.B)} declares a parameter indexed
+over sets \code{A} and \code{B}.  However, not all of these values are necessarily
+declared in a model.  The default value for all parameters not declared
+is zero. This default can be overriden with the \code{default} option.
+
+The following example illustrates how a parameter can be declared where
+every parameter value is nonzero, but the parameter is stored with a sparse
+representation.
+\begin{lstlisting}
+R_init={}
+R_init[2,2]=1
+R_init[2,4]=1
+R_init[2,6]=1
+R_init[2,8]=1
+model.R = Param(model.A, model.B, default=99.0, initialize=R_init)
+\end{lstlisting}
+Note that the parameter default value can also be specified in an input 
+file.  See \code{data.dat} for an example.
+
+Note that the explicit specification of a zero default changes Pyomo's
+behavior.  For example, consider:
+\begin{lstlisting}
+model.a = Param(model.A, default=0.0)
+model.b = Param(model.A)
+\end{lstlisting}
+When \code{model.a[x]} is accessed and the index has not been explicitly initialized,
+the value zero is returned.  This is true whether or not the parameter has
+been initialized with data.  Thus, the specification of a default value
+makes the parameter seem to be densely initialized.
+
+However, when \code{model.b[x]} is accessed and the
+index has not been initialized, an error occurs (and a Python exception is
+thrown).  Since the user did not explicitly declare a default, Pyomo 
+treats the reference to \code{model.b[x]} as an error.
+
+
+\subsection{Data Validation}
+
+Validation of parameter data is supported in two different ways.  First, 
+the domain of feasible parameter values can be specified with the \code{within}
+option:
+\begin{lstlisting}
+model.T = Param(within=model.B)
+\end{lstlisting}
+Note that the default domain for parameters is \code{Reals}, the set of floating
+point values. Validation of parameter data can also be performed with the \code{validate} option, which is a function that returns \code{True} if a parameter value is valid:
+\begin{lstlisting}
+def S_validate(value,model):
+    return value in model.A
+model.S = Param(validate=S_validate)
+\end{lstlisting}
+
+
+\subsection{Paramter Options}
+
+TBD
+\if 0
+By default, sets are unordered.  That is, the internal representation
+may place the set elements in any order.  In some cases, we need to know
+the order in which set elements are declared.  In such cases, we can declare
+a set to be ordered with an additional constructor option.  
+
+An ordered set can take an 
+initialization function, using the \code{initialize} options, with an additional option 
+that specifies the index into the ordered set.  In this case, the function is 
+called repeatedly to construct each element in the set:
+\begin{lstlisting}
+def U_init(z, model):
+    if z==5:
+       return None
+    if z==0:
+       return 1
+    else:
+       return model.U[z-1]*(z+1)
+model.U = Set(ordered=True, initialize=U_init)
+\end{lstlisting}
+This example can be generalized to array sets.  Note that in this case
+we can use ordered sets to to index the array, thereby guaranteeing that
+data has been filled.  The following example illustrates the use of the
+\code{RangeSet(a,b)} object, which generates an ordered set from \code{a} to \code{b}
+(inclusive).
+\begin{lstlisting}
+def V_init(i, z, model):
+    if z==5:
+       return None
+    if i==1:
+       if z==0:
+          return 1
+       else:
+          return (z+1)
+    return model.V[i-1][z]+z
+model.V = Set(RangeSet(1,4), initialize=V_init, ordered=True)
+\end{lstlisting}
+\fi
+
+\subsection{Class Attributes}
+
+\if 0
+Pyomo set objects have the following attributes:
+
+\begin{itemize}
+
+\item \code{name}\\
+    The set name.
+
+\item validate\\
+    A function that a user can specify to define set membership.
+
+\item ordered\\
+    A boolean value that indicates whether this set is ordered.
+
+\item domain\\
+    A super-set of this set, which is used to define set membership.
+
+\item dimen\\
+    The ''dimension'' of the data in this set.  Each set member is either a singleton, or a tuple with length `dimen`.
+
+\item virtual\\
+    A boolean value that indicates whether this set is virtual.
+
+\item doc\\
+    A string describing this set.
+\end{itemize}
+\fi
+
+

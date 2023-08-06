@@ -1,0 +1,295 @@
+\section{Sets}
+
+A set is any collection of data that relates to a model.  Pyomo set
+objects either contain concrete data, or they are ``virtual'' sets that
+do not contain data, but which support operations like set iteration
+and/or set membership validation.  Several different classes can be used
+to define sets in Pyomo models:
+\begin{itemize}
+
+\item \code{Set}\\
+    A generic set declaration class.
+
+\item \code{RangeSet}\\
+    A set that describe a range of numbers.
+\end{itemize}
+
+
+
+\subsection{Set Declarations}
+
+A simple instance of the \code{Set} object declares an unordered set of arbitrary objects:
+\begin{lstlisting}
+model.A = Set()
+\end{lstlisting}
+A set array can also be specified by providing a set as an option
+to the \code{Set} object, and  multi-dimensional set arrays can be declared by simply including a list of sets as options to the \code{Set} object:
+\begin{lstlisting}
+model.B = Set()
+model.C = Set(model.A)
+model.D = Set(model.A,model.B)
+\end{lstlisting}
+Set declarations can also use standard set operations to declare
+a set in a constructive fashion:
+\begin{lstlisting}
+model.D = model.A | model.B
+model.E = model.B & model.A
+model.F = model.A - model.B
+model.G = model.A ^ model.B
+\end{lstlisting}
+Also, set cross-products can be specified as \code{A*B}
+\begin{lstlisting}
+model.H = model.A * model.B
+\end{lstlisting}
+Note that this is different from the following, which specifies that \code{Hsub}
+is a subset of this cross-product.
+\begin{lstlisting}
+model.Hsub = Set(within=model.A * model.B)
+\end{lstlisting}
+
+
+\subsection{Set Initialization}
+
+By default, a set object refers to an abstract set in a model.  
+However, a set can be explicitly initialized by adding set elements:
+\begin{lstlisting}
+model.J = Set()
+model.J.add(1,4,9)
+\end{lstlisting}
+The \code{initialize} option can also be used to specify the values in
+a set:
+\begin{lstlisting}
+model.K = Set(initialize=[1,4,9])
+model.K_2 = Set(initialize=[(1,4),(9,16)])
+\end{lstlisting}
+The value of the \code{initialize} option can be a Python iterator. 
+Thus, sophisticated list comprehensions and generator expressions can be used:
+\begin{lstlisting}
+model.L = Set(initialize=(i for i in model.K if i%2 == 0))
+\end{lstlisting}
+
+Two types of functions can be used with the \code{initialize} option.  If the
+function accepts a model object, then this function is expected to return
+an iterator containing data for the set:
+\begin{lstlisting}
+def I_init(model):
+    ans=[]
+    for a in model.A:
+      for b in model.B:
+        ans.append( (a,b) )
+    return ans
+model.I = Set(initialize=I_init)
+\end{lstlisting}
+If the function accepts a index and model, then this function is expected to return the set value assocated with that index:
+\begin{lstlisting}
+def M_init(i, model):
+    return 2*i+1
+model.M = Set(initialize=M_init)
+\end{lstlisting}
+
+The \code{initialize} option can be used to specify the values in
+a set array.  These values are defined in a dictionary, which 
+specifies how each array element is initialized:
+\begin{lstlisting}
+R_init={}
+R_init[2] = [1,3,5]
+R_init[3] = [2,4,6]
+R_init[4] = [3,5,7]
+model.R = Set(model.B,initialize=R_init)
+\end{lstlisting}
+Note that a set array {\it cannot} be explicitly constructed by adding set elements to individual arrays.  For example, the following is invalid:
+\begin{lstlisting}
+model.Q = Set(model.B)
+model.Q[2].add(4)
+model.Q[4].add(16)
+\end{lstlisting}
+The reason is that the line
+\begin{lstlisting}
+model.Q = Set(model.B)
+\end{lstlisting}
+declares set \code{Q} with an abstract index set \code{B}.  However, \code{B} is not initialized until this model is instantiated with the \code{model.create()} call. We could, however, execute 
+\begin{lstlisting}
+model.Q[2].add(4)
+model.Q[4].add(16)
+\end{lstlisting}
+after the execution of \code{model.create()}.
+
+The \code{initialize} option can also specify a function that is used to provide values for a set array.  The function accepts the set indices and model and returns the set for that array index:
+\begin{lstlisting}
+def P_init(i, j, model):
+    return range(0,i*j)
+model.P = Set(model.B,model.B)
+model.P.initialize = P_init
+\end{lstlisting}
+
+Note that set data is not created when this set object is constructed.
+Instead, initialization functions like \code{I\_init()} are called during
+the construction of a problem instance.
+Also, note that these values may be overriden by later construction
+steps in a Pyomo model.  For example, data specified in an input file
+will override the data specified by the \code{initialize} options.
+
+
+\subsection{Data Validation}
+
+Validation of set data is supported in two different ways.  First, a
+superset can be specified with the \code{within} option:
+\begin{lstlisting}
+model.L = Set(within=model.A)
+\end{lstlisting}
+Validation of set data can also be performed with the \code{validate} option,
+which is a function that returns \code{True} if a data belongs in this set:
+\begin{lstlisting}
+def M_validate(value,model):
+    return value in model.A
+model.M = Set(validate=M_validate)
+\end{lstlisting}
+Although the \code{within} option is convenient, it can force the creation of
+a temporary set.  For example, consider the declaration
+\begin{lstlisting}
+model.N = Set(within=model.A*model.B)
+\end{lstlisting}
+In this example, the cross-product of sets \code{A} and \code{B} is needed to validate
+the members of set \code{C}.  Pyomo creates this set implicitly and uses
+it for validation.  By contrast, a simple validation function could be used
+in this example, though with a less intuitive syntax:
+\begin{lstlisting}
+def O_validate(value,model):
+  return value[0] in model.A and value[1] in model.B
+model.O = Set(validate=O_validate)
+\end{lstlisting}
+
+Validation of a set array is supported with the \code{within} option.  The
+elements of all sets in the array must be in this set:
+\begin{lstlisting}
+model.S = Set(model.B, within=model.A)
+\end{lstlisting}
+Validation of set arrays can also be performed with the \code{validate} option.
+This is applied to all sets in the array:
+\begin{lstlisting}
+def T_validate(value,model):
+    return value in model.A
+model.T = Set(model.B, validate=M_validate)
+\end{lstlisting}
+
+
+\subsection{Set Options}
+
+By default, sets are unordered.  That is, the internal representation
+may place the set elements in any order.  In some cases, we need to know
+the order in which set elements are declared.  In such cases, we can declare
+a set to be ordered with an additional constructor option.  
+
+An ordered set can take an 
+initialization function, using the \code{initialize} options, with an additional option 
+that specifies the index into the ordered set.  In this case, the function is 
+called repeatedly to construct each element in the set:
+\begin{lstlisting}
+def U_init(z, model):
+    if z==5:
+       return None
+    if z==0:
+       return 1
+    else:
+       return model.U[z-1]*(z+1)
+model.U = Set(ordered=True, initialize=U_init)
+\end{lstlisting}
+This example can be generalized to array sets.  Note that in this case
+we can use ordered sets to to index the array, thereby guaranteeing that
+data has been filled.  The following example illustrates the use of the
+\code{RangeSet(a,b)} object, which generates an ordered set from \code{a} to \code{b}
+(inclusive).
+\begin{lstlisting}
+def V_init(i, z, model):
+    if z==5:
+       return None
+    if i==1:
+       if z==0:
+          return 1
+       else:
+          return (z+1)
+    return model.V[i-1][z]+z
+model.V = Set(RangeSet(1,4), initialize=V_init, ordered=True)
+\end{lstlisting}
+
+
+\subsection{Class Attributes}
+
+Pyomo set objects have the following attributes:
+
+\begin{itemize}
+
+\item \code{name}\\
+    The set name.
+
+\item validate\\
+    A function that a user can specify to define set membership.
+
+\item ordered\\
+    A boolean value that indicates whether this set is ordered.
+
+\item domain\\
+    A super-set of this set, which is used to define set membership.
+
+\item dimen\\
+    The ''dimension'' of the data in this set.  Each set member is either a singleton, or a tuple with length `dimen`.
+
+\item virtual\\
+    A boolean value that indicates whether this set is virtual.
+
+\item doc\\
+    A string describing this set.
+\end{itemize}
+
+
+
+\subsection{Predefined Sets}
+
+A variety of virtual sets are declared in Pyomo, including:
+
+\begin{itemize}
+
+\item Any\\
+    The set of all possible values.
+
+\item Reals\\
+    The set of floating point values.
+
+\item PositiveReals\\
+    The set of strictly positive floating point values.
+
+\item NonPositiveReals\\
+    The set of non-positive floating point values.
+
+\item NegativeReals\\
+    The set of strictly negative floating point values.
+
+\item NonNegativeReals\\
+    The set of non-negative floating point values.
+
+\item PercentFraction\\
+    The set of floating point values in the interval [0,1].
+
+\item Integers\\
+    The set of integer values.
+
+\item PositiveIntegers\\
+    The set of positive integer values.
+
+\item NonPositiveIntegers\\
+    The set of non-positive integer values.
+
+\item NegativeIntegers\\
+    The set of negative integer values.
+
+\item NonNegativeIntegers\\
+    The set of non-negative integer values.
+
+\item Boolean\\
+    The set of boolean values, which can be represented as False/True, 0/1, 'False'/'True' and 'F'/'T'.
+
+\item Binary\\
+    The same as `Boolean`.
+\end{itemize}
+
+
