@@ -1,0 +1,142 @@
+Hakmatak Dev Note
+
+20100128, http://hakmatak.org/dev
+
+This is a tech note for developers.
+
+Please read ./w10n.txt first.
+
+1. Hakmatak Internal
+
+The read and write w10n APIs are implemented separately.
+Please note that the write API is currently experimental.
+
+1.1 Access Interfaces
+
+There are three supported access interfaces:
+(1) Command Line Interface (CLI)
+(2) Web Server Gateway Interface (WSGI)
+(3) Common Gateway Interface (CGI)
+Since the CGI simply wraps WSGI using wsgiref, they are often referenced
+together as WSGI/CGI.
+
+For CLI, there are both read and write handlers:
+cli.read.Handler and cli.write.Handler
+
+For WSGI/CGI, the read and write handlers are
+wsgi.webread.Handler and wsgi.webwrite.Handler
+
+Each of these handlers calls either a read or write worker described
+in 1.2 below for orchestrating the real work.
+
+1.2 Workers
+
+Class worker4r.Worker is the work horse for read API.
+And worker4w.Worker for write API.
+
+Class worker4r.Worker is primarily defined by a w10n type.
+It uses store.ReaderClassFactory to obtain a store Reader class
+for parsing the concerned data store.
+It also uses output.WriterClassFactory to obtain
+an output Writer class for generating the intended output.
+
+Class worker4w.Worker has a similar structure. It employs
+store.WriteClassFactory to obtain a store Writer class.
+
+1.3 Store Readers
+
+There is a store reader for each supported w10n type.
+
+A store reader must subclass class store.Reader, which defines
+methods that the store reader must implement: get_meta() and get_data().
+Both methods return a python dictionary type mirroring corresponding
+w10n response.
+
+To add in read support for a new data store, it is usually sufficient
+to create a reader and make it known to store.ReaderClassFactory.
+
+1.4 Store Writers
+
+There is a store writer for each supported w10n type.
+
+A store writer must subclass class store.Writer, which defines
+methods that the store writer must implement: currently, put_meta().
+
+To add in write support for a new data store, it is usually sufficient
+to create a writer and make it known to store.WriteClassFactory.
+
+1.5 Output Writers
+
+There is an output writer for each supported output format.
+
+An output writer must subclass class output.Writer, which defines
+methods that the output writer must implement: currently, write().
+
+To add in support for a new output format, it is usually sufficient
+to create a writer and make it known to output.WriteClassFactory.
+
+1.6 More Classes
+
+Listed below are classes that provide various important services in Hakmatak.
+
+Class identifier.Identifier defines how to parse w10n identifier.
+
+Class cache.FileCache implements a very simple file based cache mechanism
+that is used by class worker4r.Worker for dev/debug purpose. Experimental.
+
+Class d11n.D11n provides a simple decompression service that helps
+worker4r.Worker handle compressed data files in gzip and bz2 formats.
+Experimental.
+
+Class node.Node implements the conception of a w10n node.
+
+Class leaf.Leaf implements the conception of a w10n leaf.
+
+Class w10n.W10n implements the concept of property "w10n" in JSON response.
+
+2. Extend Hakmatak
+
+Please make sure the intended new capability does not currently exist.
+It is always a good idea to check http://hakmatak.org for a list of
+existing applications before inventing your new wheels.
+
+Hakmatak can be extended for different purposes in various ways.
+For example, it can be extended to support a new store type or
+a new data indexer syntax.
+
+Two ways to extend Hakmatak: (a) modify/add to Hakmatak source tree,
+or (b) create a new package/application that uses Hakmatak as a module.
+Either way, the extension work mostly involves subclassing Hakmatak classes.
+
+To add read support for a new store type, create a store reader
+that subclasses store.Reader. Two methods must be implemented:
+get_meta() and get_data(). Either method takes a mandatory argument "name",
+which is the name portion of a w10n identifier, and returns a python
+dictionary that mirrors corresponding w10n response, depending on
+whether the referred entity is a "node" or "leaf". For a node, the get_meta()
+method may optionally traverse down all sub-nodes. For a leaf, the get_data()
+method may optionally support subset/slice of data array/stream
+using pre-defined indexer syntax.
+
+The new store reader is made available through store.ReaderClassFactory
+by adding a w10n type entry to the factory class or its subclass.
+
+Adding write support for a new store type is similar. Experimental.
+
+To add support for a new output format, create an output writer
+that subclasses output.Writer. One method must be implemented: write().
+This method takes a mandatory argument that is a python dictionary
+created by a store reader and passed through by a worker. It returns
+a tuple with two members, one containing bytes in 
+the intended format and the other specifying its mime type.
+
+The new output writer is made available through output.WriterClassFactory
+by adding an output format entry to the factory class or its subclasses.
+
+If new package/application is to be created, new command line tools
+can be created by instantiating cli.read.Handler with subclasses of
+store.ReaderClassFactory and output.WriterClassFactory.
+
+Similarly, new WSGI/CGI entry point can be created by instantiating
+wsgi.webify.Handler with subclasses of store.ReaderClassFactory and
+output.WriterClassFactory.
