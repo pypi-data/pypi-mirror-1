@@ -1,0 +1,30 @@
+CLVault
+=======
+
+CVault uses Keyring to provide a command-line utility to safely store
+and retrieve passwords.
+
+Make sure you have Keyring installed (using "pip install keyring" or
+"apt-get install python-keyring" under debian)
+
+Then install it using pip or the setup.py script::
+
+    $ python setup.py install
+
+    $ pip install clvault
+
+Once it's installed, you will have two scripts installed in your
+Python scripts folder, you can use to store or retrieve passwords::
+
+    $ set_password.py blog
+    Set your password:
+    Password set.
+    $ get_password.py blog
+    The password has been copied in your clipboard
+
+set_password takes a service name then prompt you for a password,
+get_password copy the password for a given service in your
+clipboard.
+
+Project page: http://bitbucket.org/tarek/clvault
+
