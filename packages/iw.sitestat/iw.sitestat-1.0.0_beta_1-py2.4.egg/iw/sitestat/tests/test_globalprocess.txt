@@ -1,0 +1,126 @@
+Main user story
+===============
+
+.. Copyright (C) 2008 Ingeniweb
+
+.. This program is free software; you can redistribute it and/or modify
+.. it under the terms of the GNU General Public License as published by
+.. the Free Software Foundation; either version 2 of the License, or (at
+.. your option) any later version.
+
+.. This program is distributed in the hope that it will be useful, but
+.. WITHOUT ANY WARRANTY; without even the implied warranty of
+.. MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+.. General Public License for more details.
+
+.. You should have received a copy of the GNU General Public License
+.. along with this program; see the file LICENSE.txt. If not, write to
+.. the Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139,
+.. USA.
+
+.. $Id: test_globalprocess.txt 36 2008-09-07 09:08:55Z glenfant $
+
+Some inits and setups
+---------------------
+
+  >>> import simplejson
+  >>> from zope.component import getAdapter
+  >>> from iw.sitestat.interfaces import IFileLinksFinder
+  >>> from iw.sitestat.interfaces import ISitestatSiteConfigSchema
+  >>> from iw.sitestat.interfaces import IContentOptions
+  >>> from iw.sitestat.browser.jsslot import JSSlotViewlet
+  >>> from iw.sitestat.tests import utils as ns_utils
+  >>> REQUEST = self.app.REQUEST
+  >>> self.loginAsPortalOwner()
+  >>> foo_file = ns_utils.addFile(self.portal, 'foo', 'Foo')
+  >>> foo_file.title_or_id()
+  'Foo'
+  >>> foo_file.manage_edit('Foo', 'text/html',
+  ...    filedata=ns_utils.LOREM_IPSUM_HTML)
+
+
+Our content has a file link
+---------------------------
+
+  >>> foo_file_urls = getAdapter(foo_file, IFileLinksFinder).fileURLs()
+  >>> foo_file_urls
+  ['http://nohost/plone/foo',
+  'http://nohost/plone/foo/at_download/file']
+
+We check our configuration tools
+--------------------------------
+
+  >>> portal_config = getAdapter(self.portal,
+  ...    ISitestatSiteConfigSchema)
+  >>> portal_config
+  <iw.sitestat.browser.controlpanel.SitestatControlPanelAdapter ...>
+  >>> foo_config = getAdapter(foo_file, IContentOptions)
+  >>> foo_config
+  <iw.sitestat.browser.contentoptions.ContentOptionsManager ...>
+
+
+Check default (not activated)
+-----------------------------
+
+  >>> foo_config.locally_enabled
+  False
+  >>> foo_config.raw_keywords
+  set([])
+  >>> portal_config.sitestat_enabled
+  False
+  >>> foo_viewlet = JSSlotViewlet(foo_file, REQUEST, None, None)
+  >>> foo_viewlet.update()
+  >>> foo_viewlet.enabled()
+  False
+
+We activate and configurie sitestat
+----------------------------------
+
+  >>> portal_config.sitestat_enabled = True
+  >>> portal_config.counter_name_mode = 'id'
+
+Our viewlet is enabled
+
+  >>> foo_viewlet.update()
+  >>> foo_viewlet.enabled()
+  True
+
+Our viewlet provides correct file infos
+
+  >>> values = foo_viewlet.getValues()
+  >>> values['pdf_file_urls']
+  []
+  >>> values['file_urls'] == simplejson.dumps(foo_file_urls)
+  True
+
+Our keywords match the path
+
+  >>> keywords = simplejson.loads(values['keywords'])
+  >>> keywords
+  [u'foo']
+
+We change the config to get the titles in keywords
+
+  >>> portal_config.counter_name_mode = 'title'
+  >>> foo_viewlet.update()
+  >>> values = foo_viewlet.getValues()
+  >>> keywords = simplejson.loads(values['keywords'])
+  >>> keywords
+  [u'Foo']
+
+We activate the local config
+----------------------------
+
+And add local keywords
+
+  >>> foo_config.locally_enabled = True
+  >>> foo_config.keywords = 'one\ntwo\nthree'
+
+We check the new keywords
+
+  >>> foo_viewlet.update()
+  >>> values = foo_viewlet.getValues()
+  >>> keywords = simplejson.loads(values['keywords'])
+  >>> keywords.sort()
+  >>> keywords
+  [u'one', u'three', u'two']
