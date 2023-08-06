@@ -1,0 +1,1 @@
+{type:"class",attributes:{"isStatic":"true","name":"Object","packageName":"qx.core","childClasses":"spamfighter.lib.Deferred,spamfighter.model.API,spamfighter.model.Domain,spamfighter.model.Firewall,spamfighter.model.LogEntry,spamfighter.model.Message,spamfighter.model.MessageLog,spamfighter.model.Model,spamfighter.model.Server","fullName":"qx.core.Object"}}

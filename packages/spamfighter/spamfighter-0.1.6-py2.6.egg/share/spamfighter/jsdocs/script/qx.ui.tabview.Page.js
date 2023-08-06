@@ -1,0 +1,1 @@
+{type:"class",attributes:{"isStatic":"true","name":"Page","packageName":"qx.ui.tabview","childClasses":"spamfighter.ui.FirewallPage,spamfighter.ui.LogPage,spamfighter.ui.ModelPage,spamfighter.ui.PropertiesPage","fullName":"qx.ui.tabview.Page"}}
