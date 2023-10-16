@@ -1,0 +1,241 @@
+Metadata-Version: 1.0
+Name: DzenStatus
+Version: 0.1.3
+Summary: A flexible (pkg_resources) plugin-based script for creating dzen2 status bars.
+Home-page: http://bitbucket.org/enimihil/dzenstatus
+Author: Greg S.
+Author-email: enimihil@gmail.com
+License: GPL
+Description: ===========
+        DzenStatus
+        ===========
+        
+        DzenStatus is a configurable python script meant to drive a statusbar program
+        like dzen_, for use with window-managers like xmonad_ or ratpoison_.  It is
+        still in early development, so your mileage may vary. (**Do** email me
+        with bugs or, preferrably, patches if you find breakage.)
+        
+        So without further ado...
+        
+        .. _dzen: http://gotmor.googlepages.com/dzen
+        .. _xmonad: http://xmonad.org
+        .. _ratpoison: http://www.nongnu.org/ratpoison/
+        .. _setuptools: http://peak.telecommunity.com/DevCenter/setuptools
+        .. _easy_install: http://peak.telecommunity.com/DevCenter/EasyInstall
+        .. _ConfigParser: http:///docs.python.org/library/configparser.html
+        
+        .. contents::
+        
+        ChangeLog
+        =========
+        
+        Version 0.1.3
+        - Make simple changes to run on python3 and python2.6 or higher.
+        
+        - Added a simple mpd plugin, requires python-mpd to work. (No dependency
+        has been added, you can safely ignore the plugin entirely without any ill
+        effects, but python-mpd is required to use the plugin.)
+        
+        Version 0.1.2
+        - Fix hardcoded battery and AC adaptor names in the battery plugin.
+        
+        Version 0.1.1
+        - Fixed an issue with trying to be too smart with encodings.
+        
+        Version 0.1.0
+        - Initial release.
+        
+        Installing
+        ==========
+        
+        Installing DzenStatus should be a simple matter of using easy_install_::
+        
+        easy_install DzenStatus
+        
+        If you don't want, or can't, install using easy_install_ then, assuming you
+        have setuptools_ installed (which is *required* for DzenStatus to run, or at
+        least `pkg_resources`_), you can download the egg-file, mark it executable (or
+        eggsecutable, as it were), and run it directly.  This is not recommended.
+        Source distributions are also provided. (``python setup.py install``)
+        
+        .. note::
+        Setuptools_ is *required* for DzenStatus to work, in particular, it uses the
+        pkg_resources entry point tools to discover and load plugins.  There are no
+        other requirements (other than a python installation).
+        
+        After installing with easy_install_ you should have two new commands in your
+        path, ``dzenstatus`` and ``dzenstatus_pipe``.  The ``dzenstatus`` command runs
+        the configured statusbar program (from the `configuration file`_), typically
+        dzen_ and directly pipes it's output to the standard in of that process.
+        
+        ``dzenstatus_pipe`` is available for those who would rather pipe the output of
+        ``dzenstatus`` to its destination manually (helpful if you want to integrate
+        DzenStatus into an existing statusbar script).
+        
+        .. _`configuration file`:
+        
+        Configuration
+        =============
+        
+        DzenStatus is configured by a single configuration file located in
+        ``~/.dzenstatus/config.ini``.  The configuration file uses the standard python
+        ConfigParser_ format.  An `example configuration file`_ is available in the
+        distribution.
+        
+        Full documentation for each plugin is provided in the `source code`_ as
+        docstrings.
+        
+        .. _`example configuration file`: http://bitbucket.org/enimihil/dzenstatus/src/tip/config.example.ini
+        .. _`source code`: http://bitbucket.org/enimihil/dzenstatus/src/tip/dzenstatus.py
+        
+        Running DzenStatus
+        ==================
+        
+        Once you have a configuration you like, you can add it to your ``.xinitrc`` or
+        ``.xsession`` file in several different ways::
+        
+        dzenstatus&
+        
+        This is the simplest way, just invoking DzenStatus, letting it take care of all
+        the statubar startup and not using a plugin that reads from standard input.  If
+        you have a window manager that writes useful information to standard output you
+        may wish to capture it like so (assuming you have a suitable DzenStatus plugin
+        configured to read standard input)::
+        
+        /path/to/my/wm | dzenstatus
+        
+        If you wish to have DzenStatus write it's output directly to standard output,
+        instead of spawning the statusbar program itself, you would use something like::
+        
+        /path/to/my/wm | dzenstatus_pipe | /path/to/my/statusbar_sink
+        
+        It is also possible to use a FIFO (named pipe) to allow you to restart
+        DzenStatus without restarting the window manager yet keeping the ability to read
+        the output.
+        
+        ::
+        
+        mkfifo .status_fifo
+        cat .status_fifo | dzenstatus&
+        /path/to/my/wm > .status_fifo
+        
+        Or you can tell DzenStatus to directly read the FIFO with the ``read_fd``
+        plugin, instead of reading from standard input.
+        
+        ::
+        
+        mkfifo .status_fifo
+        dzenstatus&
+        /path/to/my/wm > .status_fifo
+        
+        
+        Writing DzenStatus Plugins
+        ==========================
+        
+        DzenStatus uses pkg_resources_ to load plugins, so writing a plugin doesn't
+        require you to patch or modify the base DzenStatus installation at all.
+        
+        .. _pkg_resources: http://peak.telecommunity.com/DevCenter/PkgResources
+        
+        Plugin Structure
+        ----------------
+        
+        A plugin will be found by DzenStatus if it declares an entry point for
+        ``dzenstatus.plugins.v1`` (where the ``v1`` is the version number of the plugin
+        interface).  The entry point must be a callable that takes a dictionary mapping
+        strings to strings of configuration data, and returning a tuple of three
+        elements:
+        
+        - The configured name of the *instance* of the plugin (passed in as
+        config['name']).
+        - The *update predicate* of the plugin instance.  This must be a callable
+        taking two arguments, the current seconds since the epoch, and the last
+        time (in seconds since the epoch) an update was checked for.
+        - The *update function* this is a callable that takes no arguments and
+        returns a string that will be included for this instance of the plugin in
+        the output.  It should *not* contain newlines.
+        
+        Example
+        -------
+        
+        As an example, let's reimplement the ``static`` plugin that is already included
+        with DzensStatus.
+        
+        First, since DzenStatus uses entry points, we need a ``setup.py`` file::
+        
+        #!/usr/bin/env python
+        
+        from setuptools import setup
+        
+        setup(
+        name = "ExampleDzenStatusPlugin",
+        
+        version = "0.0 example",
+        packages = find_packages(),
+        
+        entry_points = {
+        'dzenstatus.plugins.v1' : [
+        'example_static = example_dzenstatus:example_plugin_static',
+        ],
+        },
+        
+        description = "A minimal example plugin for DzenStatus",
+        license = "GPL",
+        )
+        
+        The key thing to note is how to declare the entry point for the plugin. All the
+        other parts are standard setuptools_ that you should already be familiar with.
+        
+        Now the implementation of our plugin::
+        
+        # example_dzenstatus.py
+        '''
+        An example DzenStatus plugin.
+        '''
+        from dzenstatus import UPDATE_ONCE
+        
+        def example_plugin_static(config):
+        '''
+        A simple plugin that returns static text.
+        
+        text is the only required config parameter.
+        '''
+        return (config['name'], UPDATE_ONCE(), lambda: config['text'])
+        
+        Now, you can install the plugin using ``easy_install`` or by running the
+        ``setup.py`` file.
+        
+        ::
+        
+        $ python setup.py develop
+        
+        Now, you can place a section into your DzenStatus config file that looks like::
+        
+        [example_static_inst]
+        plugin=example_static
+        text=I'm an example!
+        
+        If you run DzenStatus you will now see that the plugin is loaded and the text is
+        output.
+        
+        The simplest way to distribute your plugin is via an egg that is placed in the
+        plugins directory configured by the config file.  This requires no additional
+        installation and makes the installation as easy as copying a file.
+        
+        See the code_ of DzenStatus for more examples (especially for how to deal with
+        file descriptors and polling for available input).
+        
+        .. _code: http://bitbucket.org/enimihil/dzenstatus/
+        
+        
+Keywords: status dzen dzen2 statusbar
+Platform: UNKNOWN
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: X11 Applications
+Classifier: Intended Audience :: End Users/Desktop
+Classifier: License :: OSI Approved :: GNU General Public License (GPL)
+Classifier: Natural Language :: English
+Classifier: Operating System :: POSIX :: Linux
+Classifier: Topic :: Desktop Environment
+Classifier: Topic :: System :: Monitoring
+Classifier: Topic :: Utilities
